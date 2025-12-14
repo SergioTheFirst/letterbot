@@ -105,7 +105,7 @@ class MessageProcessor:
 
     def _build_body_summary(self, body: str, subject: str, sender: str) -> str:
         fallback = self._fallback_summary(body, subject=subject, sender=sender)
-        if len(body) < 50:
+        if len(body) < 80:
             return fallback
 
         body_summary_raw = self.llm.summarize_email(body)
@@ -120,21 +120,21 @@ class MessageProcessor:
         filename = self._purge_markup_tokens(att.filename or "Вложение") or "Вложение"
         att_text = self._strip_markup(sanitize_text(att.text or "", max_len=4000))
 
-        summary = ""
-        if att_text:
-            if len(att_text) >= 80:
-                summary_raw = self.llm.summarize_attachment(att_text, kind=kind)
-                summary = self._strip_markup(sanitize_text(summary_raw, max_len=600))
-                if not self._is_meaningful(summary, min_len=30):
-                    summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
-            else:
-                summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
-        else:
-            summary = self._attachment_fallback_summary("", subject, filename, kind)
+        if not att_text or len(att_text) < 80:
+            return None
 
+        summary_raw = self.llm.summarize_attachment(att_text, kind=kind)
+        summary = self._strip_markup(sanitize_text(summary_raw, max_len=600))
         summary = self._purge_markup_tokens(
             self._guard_attachment_summary(summary, att_text, subject, filename, kind)
         )
+        if att_text and summary:
+            normalized_overlap = summary.lower().replace("...", "").strip(" .")
+            if normalized_overlap and normalized_overlap in att_text.lower():
+                summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
+        if not self._is_meaningful(summary, min_len=30):
+            summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
+
         summary = self._limit_sentences(self._ensure_sentence(summary), 3)
         if not self._is_meaningful(summary, min_len=20):
             return None
@@ -144,12 +144,13 @@ class MessageProcessor:
         filename = self._purge_markup_tokens(att.filename or "Вложение") or "Вложение"
         kind = self._detect_attachment_kind(att.filename, att.content_type)
         if kind in {"IMAGE", "GENERIC"}:
-            summary = self._attachment_fallback_summary("", subject, filename, kind)
-        else:
-            summary = self._attachment_fallback_summary(
-                self._strip_markup(sanitize_text(att.text or "", max_len=200)), subject, filename, kind
-            )
+            return filename, "Вложение дополняет письмо."
 
+        att_text = self._strip_markup(sanitize_text(att.text or "", max_len=4000))
+        if not att_text or len(att_text) < 80:
+            return filename, "Файл требует просмотра отдельно."
+
+        summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
         summary = self._limit_sentences(self._ensure_sentence(self._purge_markup_tokens(summary)), 3)
         return filename, summary
 
@@ -163,7 +164,7 @@ class MessageProcessor:
             return "CONTRACT"
         if lower.endswith(".pdf") or "pdf" in lower_ct:
             return "PDF"
-        if lower.endswith((".png", ".jpg", ".jpeg", ".gif")) or "image" in lower_ct:
+        if lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")) or "image" in lower_ct:
             return "IMAGE"
         return "GENERIC"
 
@@ -321,7 +322,13 @@ class MessageProcessor:
     ) -> str:
         normalized_summary = re.sub(r"\s+", " ", (summary or "")).strip().lower()
         normalized_source = re.sub(r"\s+", " ", (att_text or "")).strip().lower()
-        if normalized_summary and normalized_source and normalized_summary in normalized_source:
+        if not normalized_summary:
+            return self._attachment_fallback_summary(att_text, subject, filename, kind)
+        if not normalized_source:
+            return summary
+        if normalized_summary == normalized_source:
+            return self._attachment_fallback_summary(att_text, subject, filename, kind)
+        if normalized_summary in normalized_source or normalized_source in normalized_summary:
             return self._attachment_fallback_summary(att_text, subject, filename, kind)
         return summary
 

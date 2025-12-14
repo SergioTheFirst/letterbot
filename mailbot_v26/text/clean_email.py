@@ -48,13 +48,13 @@ def _is_signature_start(line: str) -> bool:
 
 def _looks_like_html(text: str) -> bool:
     lowered = text.lower()
-    if any(tag in lowered for tag in ("<html", "<body", "<style", "<table", "<!doctype")):
+    if any(tag in lowered for tag in ("<html", "<body", "<style", "<table", "<!doctype", "<head")):
         return True
     return bool(re.search(r"<[^>]+>", text))
 
 
 def _strip_html(text: str) -> str:
-    working = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    working = re.sub(r"<(head|script|style)[^>]*>.*?</\1>", " ", text, flags=re.IGNORECASE | re.DOTALL)
     working = re.sub(r"<!--.*?-->", " ", working, flags=re.DOTALL)
     working = re.sub(r"<(br|p|div|tr|td|th|li|ul|ol|h[1-6])[^>]*>", "\n", working, flags=re.IGNORECASE)
     working = re.sub(r"</(p|div|tr|td|th|li|ul|ol|h[1-6])>", "\n", working, flags=re.IGNORECASE)
