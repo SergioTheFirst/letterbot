@@ -110,7 +110,12 @@ class MessageProcessor:
 
         body_summary_raw = self.llm.summarize_email(body)
         body_summary = sanitize_text(body_summary_raw, max_len=1200)
-        if not self._is_meaningful(body_summary, min_len=30) or not self._has_two_sentences(body_summary):
+        if (
+            not self._is_meaningful(body_summary, min_len=30)
+            or not self._has_two_sentences(body_summary)
+            or not self._has_body_terms(body, body_summary)
+            or self._contains_forbidden_templates(body_summary)
+        ):
             body_summary = fallback
         return body_summary
 
@@ -123,6 +128,8 @@ class MessageProcessor:
         if not att_text or len(att_text) < 80:
             return None
 
+        kind = self._refine_attachment_kind(att_text, kind)
+
         summary_raw = self.llm.summarize_attachment(att_text, kind=kind)
         summary = self._strip_markup(sanitize_text(summary_raw, max_len=600))
         summary = self._purge_markup_tokens(
@@ -132,7 +139,7 @@ class MessageProcessor:
             normalized_overlap = summary.lower().replace("...", "").strip(" .")
             if normalized_overlap and normalized_overlap in att_text.lower():
                 summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
-        if not self._is_meaningful(summary, min_len=30):
+        if not self._is_meaningful(summary, min_len=30) or self._contains_forbidden_templates(summary):
             summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
 
         summary = self._limit_sentences(self._ensure_sentence(summary), 3)
@@ -144,11 +151,11 @@ class MessageProcessor:
         filename = self._purge_markup_tokens(att.filename or "Вложение") or "Вложение"
         kind = self._detect_attachment_kind(att.filename, att.content_type)
         if kind in {"IMAGE", "GENERIC"}:
-            return filename, "Вложение дополняет письмо."
+            return filename, "Вложение содержит дополнительную информацию из письма."
 
         att_text = self._strip_markup(sanitize_text(att.text or "", max_len=4000))
         if not att_text or len(att_text) < 80:
-            return filename, "Файл требует просмотра отдельно."
+            return filename, "Файл требует отдельного просмотра из-за малого объема текста."
 
         summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
         summary = self._limit_sentences(self._ensure_sentence(self._purge_markup_tokens(summary)), 3)
@@ -183,35 +190,20 @@ class MessageProcessor:
         stripped = MessageProcessor._strip_greetings_and_signatures(sanitized)
         working = stripped or sanitized
 
-        sentences = re.split(r"(?<=[.!?])\s+", working)
-        meaningful: list[str] = []
-        for sentence in sentences:
-            sentence_clean = sentence.strip()
-            if len(sentence_clean.split()) < 3:
-                continue
-            meaningful.append(sentence_clean)
-            if len(" ".join(meaningful)) >= limit:
-                break
+        deterministic = MessageProcessor._build_deterministic_body_summary(
+            working, subject=subject, sender=sender, limit=limit
+        )
 
-        base = " ".join(meaningful[:3]) if meaningful else ""
-        base = base[: limit - 3] + "..." if base and len(base) > limit else base
+        if not MessageProcessor._has_two_sentences(deterministic):
+            deterministic = MessageProcessor._ensure_two_sentences(deterministic, subject, sender)
 
-        if not base:
-            context_intro = f"Письмо от {sender or 'отправителя'} касается темы \"{subject or 'без темы'}\".".strip()
-            snippet = working[: max(120, min(limit, 260))].strip()
-            detail = f"Основной текст: {snippet}." if snippet else "Автор прислал краткое сообщение без подробностей."
-            base = f"{context_intro} {detail}".strip()
-
-        if not MessageProcessor._has_two_sentences(base):
-            base = MessageProcessor._ensure_two_sentences(base, subject, sender)
-
-        return MessageProcessor._purge_markup_tokens(base)
+        return MessageProcessor._purge_markup_tokens(deterministic)
 
     @staticmethod
     def _ensure_two_sentences(text: str, subject: str, sender: str) -> str:
         sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
         while len(sentences) < 2:
-            hint = f"Письмо связано с темой \"{subject or 'обсуждаемая тема'}\" от {sender or 'неизвестного отправителя'}."
+            hint = f"Письмо связано с темой \"{subject or 'обсуждаемая тема'}\" от {sender or 'неизвестного отправителя'} и содержит уточнения."
             sentences.append(hint)
         return " ".join(sentences[:3])
 
@@ -247,6 +239,9 @@ class MessageProcessor:
         if re.search(r"\b(html|style|table|doctype)\b", lower_message):
             return False
         if any(ext in lower_message for ext in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")):
+            return False
+
+        if self._contains_forbidden_templates(message):
             return False
 
         sections = [part.strip() for part in message.split("\n\n") if part.strip()]
@@ -330,42 +325,141 @@ class MessageProcessor:
             return self._attachment_fallback_summary(att_text, subject, filename, kind)
         if normalized_summary in normalized_source or normalized_source in normalized_summary:
             return self._attachment_fallback_summary(att_text, subject, filename, kind)
+        if not self._attachment_has_keyword(normalized_summary, normalized_source):
+            return self._attachment_fallback_summary(att_text, subject, filename, kind)
         return summary
 
     def _attachment_fallback_summary(self, att_text: str, subject: str, filename: str, kind: str) -> str:
-        topics = []
         lowered = att_text.lower()
-        keywords = {
-            "счет": "финансовые данные",
-            "invoice": "финансовые данные",
-            "договор": "условия договора",
-            "соглашение": "условия соглашения",
-            "отчет": "отчетные сведения",
-            "отчёт": "отчетные сведения",
-            "план": "план работ",
-            "прайс": "прайс-лист",
-            "презента": "презентационные материалы",
-        }
-        for key, label in keywords.items():
-            if key in lowered and label not in topics:
-                topics.append(label)
-            if len(topics) >= 2:
-                break
+        kind = self._refine_attachment_kind(att_text, kind)
+        keyword = self._pick_keyword(lowered)
+        name_for_text = re.sub(r"\.[^.\s]+$", "", filename)
 
-        label = {
-            "EXCEL": "табличные данные",
-            "CONTRACT": "текстовый документ",
-            "PDF": "PDF-документ",
-        }.get(kind, "файл")
+        if kind == "PRICE_LIST":
+            focus = keyword or "цены"
+            core = f"{name_for_text}: прайс-лист с ценами на {focus}."
+            detail = "Указаны позиции и стоимость, пригодны для расчета заказа."
+        elif kind == "INVOICE":
+            focus = keyword or "счет"
+            core = f"{name_for_text}: счет на оплату, упомянут {focus}."
+            detail = "Есть реквизиты и сумма к оплате, по тексту видно платежное назначение."
+        elif kind == "CONTRACT":
+            focus = keyword or "договор"
+            core = f"{name_for_text}: договор или соглашение, обсуждается {focus}."
+            detail = "Текст описывает условия сторон, порядок исполнения и взаимные обязанности."
+        else:
+            focus = keyword or "данные"
+            core = f"{name_for_text}: документ с данными про {focus}."
+            detail = "Выделены ключевые пункты содержания, включая основные термины."
 
-        topic_text = ", ".join(topics) if topics else "основные сведения по теме"
-        first = f"{filename}: {label} по теме \"{subject or 'письмо'}\"."
-        second = f"Внутри кратко изложены {topic_text}, без технических деталей."
-        third = "Документ можно просмотреть при необходимости." if topics else "Файл дополняет информацию из письма."
-        return " ".join([first, second, third])
+        tail = "Нужно изучить вложение для применения информации."
+        return " ".join([core, detail, tail])
 
     @staticmethod
     def _limit_sentences(text: str, max_sentences: int) -> str:
         sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
         limited = " ".join(sentences[:max_sentences])
         return limited
+
+    # --- Semantic enforcement helpers ---
+
+    _VERB_CUES = {
+        "прошу",
+        "направляю",
+        "необходимо",
+        "оплатить",
+        "согласовать",
+        "подписать",
+        "отправить",
+        "пришлите",
+        "требуется",
+        "ожидаем",
+        "обсудить",
+        "предлагаю",
+        "готовим",
+        "поставить",
+        "доставить",
+        "подтвердите",
+        "выслать",
+    }
+
+    _FORBIDDEN_TEMPLATES = (
+        "касается темы",
+        "по теме письма",
+        "автор прислал краткое сообщение",
+        "без подробностей",
+        "без технических деталей",
+        "можно просмотреть при необходимости",
+        "файл дополняет информацию",
+    )
+
+    @classmethod
+    def _contains_forbidden_templates(cls, text: str) -> bool:
+        normalized = (text or "").lower()
+        return any(pattern in normalized for pattern in cls._FORBIDDEN_TEMPLATES)
+
+    @classmethod
+    def _extract_body_terms(cls, text: str) -> tuple[str | None, str | None]:
+        words = re.findall(r"[\w-]{4,}", text.lower())
+        verb = next((w for w in words if w in cls._VERB_CUES or re.search(r"(ть|йте|ите|уем)$", w)), None)
+        noun = next((w for w in words if len(w) >= 5 and w != verb), None)
+        return verb, noun
+
+    @classmethod
+    def _has_body_terms(cls, body: str, summary: str) -> bool:
+        verb, noun = cls._extract_body_terms(body)
+        lowered = summary.lower()
+        verb_ok = not verb or verb in lowered
+        noun_ok = not noun or noun in lowered
+        return verb_ok and noun_ok
+
+    @classmethod
+    def _build_deterministic_body_summary(cls, text: str, subject: str, sender: str, limit: int) -> str:
+        verb, noun = cls._extract_body_terms(text)
+        snippet = cls._select_informative_snippet(text, limit)
+        parts: list[str] = []
+        if verb and noun:
+            parts.append(f"Отправитель {verb} {noun} и уточняет детали: {snippet}.")
+        elif verb:
+            parts.append(f"Сообщение сообщает, что необходимо {verb}: {snippet}.")
+        elif noun:
+            parts.append(f"Основной вопрос касается {noun}: {snippet}.")
+        else:
+            parts.append(f"Текст содержит детали: {snippet}.")
+        parts.append(
+            f"Письмо от {sender or 'отправителя'} связано с темой \"{subject or 'без темы'}\" и включает конкретные сведения."
+        )
+        combined = " ".join(parts)
+        return combined[: limit - 3] + "..." if len(combined) > limit else combined
+
+    @staticmethod
+    def _select_informative_snippet(text: str, limit: int) -> str:
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        for sentence in sentences:
+            clean = sentence.strip()
+            if len(clean.split()) >= 3:
+                return clean[: max(80, min(limit // 2, 200))]
+        fallback = (text or "").strip()
+        return fallback[: max(80, min(limit // 2, 200))]
+
+    @staticmethod
+    def _refine_attachment_kind(att_text: str, kind: str) -> str:
+        lowered = (att_text or "").lower()
+        if any(token in lowered for token in ("прайс", "цена", "стоимост", "прайслист", "ценник")):
+            return "PRICE_LIST"
+        if any(token in lowered for token in ("счет", "счёт", "invoice", "оплата")):
+            return "INVOICE"
+        if any(token in lowered for token in ("договор", "соглашение", "контракт")):
+            return "CONTRACT"
+        return kind
+
+    @staticmethod
+    def _pick_keyword(text: str) -> str | None:
+        candidates = [w for w in re.findall(r"[\w-]{4,}", text) if len(w) > 4]
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def _attachment_has_keyword(summary: str, source: str) -> bool:
+        source_words = set(re.findall(r"[\w-]{4,}", source))
+        return any(word in summary for word in source_words)
+
