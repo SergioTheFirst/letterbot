@@ -10,58 +10,115 @@ class AttachmentLike(Protocol):
 
 
 class DomainClassifier:
-    """Deterministic classification for sender domain."""
+    """Keyword-driven domain classifier with deterministic scoring."""
 
-    BANK_KEYWORDS = {"bank", "sber", "alpha", "alfa", "tinkoff", "vtb"}
-    TAX_KEYWORDS = {"nalog", "fns", "tax"}
-    COURT_KEYWORDS = {"sud", "court", "arbitr"}
-    GOVERNMENT_KEYWORDS = {"gov", "gos", "min"}
-    DOMAIN_REGISTRAR_KEYWORDS = {"reg.ru", "nic.ru", "godaddy", "namecheap"}
-    HR_KEYWORDS = {"hr", "otdelkadrov", "kadry"}
-    IT_KEYWORDS = {"it", "support", "helpdesk", "service"}
-    LOGISTICS_KEYWORDS = {"delivery", "logist", "transport"}
-    FAMILY_SENDERS = {"mom@example.com", "dad@example.com", "spouse@example.com"}
+    _THRESHOLD = 2
+    _CATEGORY_KEYWORDS = {
+        "BANK": {
+            "bank",
+            "payment",
+            "transfer",
+            "account",
+            "card",
+            "loan",
+        },
+        "TAX": {
+            "tax",
+            "vat",
+            "fns",
+            "налог",
+            "ндс",
+        },
+        "LEGAL": {
+            "legal",
+            "court",
+            "lawsuit",
+            "attorney",
+            "subpoena",
+            "иск",
+            "арбитраж",
+        },
+        "CONTRACT": {
+            "contract",
+            "agreement",
+            "подпис",
+            "договор",
+            "соглашение",
+        },
+        "INVOICE": {
+            "invoice",
+            "bill",
+            "billing",
+            "счет",
+            "счёт",
+            "оплат",
+        },
+        "PRICE_LIST": {
+            "price list",
+            "pricelist",
+            "прайс",
+            "цен",
+        },
+        "HR": {
+            "hr",
+            "hiring",
+            "candidate",
+            "vacation",
+            "отпуск",
+            "кадры",
+            "salary",
+            "payroll",
+        },
+        "LOGISTICS": {
+            "delivery",
+            "shipment",
+            "logistics",
+            "transport",
+            "cargo",
+            "tracking",
+            "достав",
+            "груз",
+        },
+        "PERSONAL": {
+            "hello",
+            "привет",
+            "family",
+            "friend",
+            "birthday",
+            "поздрав",
+        },
+        "MARKETING": {
+            "sale",
+            "discount",
+            "offer",
+            "promotion",
+            "promo",
+            "limited",
+        },
+    }
 
     @classmethod
-    def classify(cls, sender_email: str, sender_name: str, subject: str) -> str:
-        email_lower = (sender_email or "").lower()
-        subject_lower = (subject or "").lower()
-        domain = email_lower.split("@")[-1]
+    def classify(cls, sender: str, subject: str, body: str) -> str:
+        text = " ".join(filter(None, [sender, subject, body])).lower()
 
-        if email_lower in cls.FAMILY_SENDERS or "family" in domain:
-            return "FAMILY"
+        best_category = "UNKNOWN"
+        best_score = 0
+        for category, keywords in cls._CATEGORY_KEYWORDS.items():
+            score = cls._score(text, keywords)
+            if score > best_score:
+                best_category = category
+                best_score = score
 
-        if cls._contains_any(domain, cls.BANK_KEYWORDS):
-            return "BANK"
-        if cls._contains_any(domain, cls.TAX_KEYWORDS):
-            return "TAX"
-        if cls._contains_any(domain, cls.COURT_KEYWORDS):
-            return "COURT"
-        if cls._contains_any(domain, cls.GOVERNMENT_KEYWORDS):
-            return "GOVERNMENT"
-        if cls._contains_any(domain, {"client"}):
-            return "CLIENT"
-        if cls._contains_any(domain, {"supplier", "vendor", "postav"}):
-            return "SUPPLIER"
-        if cls._contains_any(domain, cls.HR_KEYWORDS) or cls._contains_any(subject_lower, {"отпуск", "vacation", "кадры", "hr"}):
-            return "HR"
-        if cls._contains_any(domain, cls.IT_KEYWORDS):
-            return "IT"
-        if cls._contains_any(domain, cls.DOMAIN_REGISTRAR_KEYWORDS):
-            return "DOMAIN_REGISTRAR"
-        if cls._contains_any(domain, cls.LOGISTICS_KEYWORDS):
-            return "LOGISTICS"
-
-        local_part = email_lower.split("@")[0]
-        if local_part.startswith(("team", "info", "noreply")):
-            return "INTERNAL"
-
-        return "UNKNOWN"
+        if best_score < cls._THRESHOLD:
+            return "UNKNOWN"
+        return best_category
 
     @staticmethod
-    def _contains_any(text: str, markers: Iterable[str]) -> bool:
-        lowered = text.lower()
-        return any(marker in lowered for marker in markers)
+    def _score(text: str, keywords: Iterable[str]) -> int:
+        score = 0
+        for keyword in keywords:
+            score += text.count(keyword)
+        return score
 
 
 class MailTypeClassifier:
