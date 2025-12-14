@@ -168,15 +168,15 @@ def test_all_non_image_attachments_are_rendered():
     assert result is not None
 
     lines = result.split("\n")
-    assert len(lines) == 2
     assert lines[0].strip()
     assert lines[1].strip()
 
-    combined = "\n".join(lines)
-    assert "contract.doc" not in combined
-    assert "note.docx" not in combined
-    assert "prices.xlsx" not in combined
-    assert "report.xlsx" not in combined
+    blank_index = lines.index("") if "" in lines else len(lines)
+    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
+    assert len(attachment_lines) == 4
+
+    for filename in ["contract.doc", "note.docx", "prices.xlsx", "report.xlsx"]:
+        assert any(line.startswith(filename) for line in attachment_lines)
 
 
 def test_domain_priority_suggestion_does_not_change_priority(caplog):
