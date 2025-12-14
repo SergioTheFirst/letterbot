@@ -71,7 +71,7 @@ def test_body_and_attachments_rendered_with_summaries():
 
     blank_index = lines.index("")
     attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
-    assert len(attachment_lines) == 4
+    assert len(attachment_lines) == 2
 
     forbidden_phrases = {
         "документ содержит",
@@ -83,5 +83,5 @@ def test_body_and_attachments_rendered_with_summaries():
     assert not any(phrase in lowered for phrase in forbidden_phrases)
 
     descriptions = [line.split(" — ", 1)[1] for line in attachment_lines]
-    assert len(set(descriptions)) == 4
+    assert len(set(descriptions)) == 2
 

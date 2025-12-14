@@ -11,6 +11,11 @@ from mailbot_v26.bot_core.action_engine import analyze_action
 from mailbot_v26.domain.domain_classifier import DomainClassifier, MailTypeClassifier
 from mailbot_v26.domain.domain_priority import DOMAIN_PRIORITY_MAP
 from mailbot_v26.domain.domain_policies import DOMAIN_POLICIES
+from mailbot_v26.domain.fact_snippets import (
+    normalize_text,
+    pick_attachment_fact,
+    pick_email_body_fact,
+)
 from mailbot_v26.text import clean_email_body, sanitize_text
 
 
@@ -217,63 +222,8 @@ class MessageProcessor:
         return self._normalize_action_subject(verb, subject, domain, attachments, body)
 
     def _summarize_email_body(self, body_text: str) -> str:
-        if not body_text or len(body_text.strip()) < 10:
-            return ""
-
-        cleaned_body = re.sub(r"(^|\n)>.*", " ", body_text)
-        cleaned_body = re.sub(r"-{2,}.*?\n", " ", cleaned_body)
-        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", cleaned_body) if p.strip()]
-
-        greetings = {"добрый день", "добрый вечер", "здравствуйте", "привет"}
-        signatures = {"с уважением", "best regards", "kind regards"}
-
-        def is_noise(paragraph: str) -> bool:
-            lowered = paragraph.lower()
-            return any(lowered.startswith(greet) for greet in greetings) or any(
-                lowered.startswith(sign) for sign in signatures
-            )
-
-        meaningful = next((p for p in paragraphs if not is_noise(p)), "")
-        if not meaningful:
-            return ""
-
-        meaningful = re.sub(r"(^|\n)>.*", " ", meaningful)
-        meaningful = re.sub(r"\s+", " ", meaningful).strip()
-        tokens = self._filter_tokens(meaningful.split())
-        text = " ".join(tokens)
-
-        if not self._has_primary_signal(text):
-            return ""
-
-        amount = self._find_amount(text)
-        deadline = self._find_deadline(text)
-        action = self._find_action(text)
-        change_marker = self._find_change_marker(text)
-
-        parts: list[str] = []
-        if action:
-            parts.append(action)
-        elif change_marker:
-            parts.append(change_marker)
-        else:
-            parts.append("Ознакомиться")
-
-        if amount:
-            parts.append(amount)
-        if deadline:
-            parts.append(f"до {deadline}")
-
-        if not amount and not deadline and change_marker and change_marker not in parts:
-            parts.append(change_marker)
-
-        fallback_context = " ".join(tokens[:5]) if tokens else "письмо"
-        core_sentence = " ".join(parts)
-        if len(core_sentence.split()) < 4:
-            core_sentence = f"{core_sentence} {fallback_context}".strip()
-
-        limited = " ".join(core_sentence.split()[:15]).strip()
-        ensured = self._ensure_sentence(limited)
-        return ensured
+        snippet = pick_email_body_fact(body_text or "")
+        return snippet or ""
 
     def _select_verb(self, facts, body: str, domain: str, mail_type: str) -> str:
         defaults = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
@@ -324,6 +274,8 @@ class MessageProcessor:
             if kind == "IMAGE":
                 continue
             summary, text_length = self._summarize_attachment(att, subject, kind)
+            if not summary:
+                continue
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
             usable.append(
                 AttachmentSummary(
@@ -355,30 +307,14 @@ class MessageProcessor:
 
     def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> tuple[str, int]:
         filename = self._purge_markup_tokens(att.filename or "Вложение")
-        att_text = self._strip_markup(sanitize_text(att.text or "", max_len=1500))
+        att_text_raw = sanitize_text(att.text or "", max_len=1500)
+        att_text = normalize_text(self._strip_markup(att_text_raw))
         text_length = len(att_text)
 
         doc_type = self._classify_attachment_type(filename, kind, att_text)
-        type_label = {
-            "CONTRACT": "договор",
-            "PRICE": "прайс-лист",
-            "INVOICE": "счет/инвойс",
-            "TABLE": "таблица",
-            "REPORT": "отчет",
-            "OTHER": "документ",
-        }.get(doc_type, "документ")
+        summary = pick_attachment_fact(att_text, filename, doc_type)
 
-        tokens = self._filter_tokens(att_text.split())
-        compact_text = " ".join(tokens)
-
-        if not compact_text:
-            return (f"{type_label}: по названию файла", text_length)
-
-        summary_fact = self._attachment_fact(doc_type, compact_text, filename)
-        summary = summary_fact or f"{type_label}: по названию файла"
-
-        cleaned = summary.strip()
-        return cleaned, text_length
+        return summary or "", text_length
 
     def _compose(
         self, base_lines: List[str], attachments: List[AttachmentSummary], body_summary: str = ""
