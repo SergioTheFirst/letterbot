@@ -70,6 +70,15 @@ def _decode_sender(email_obj: EmailMessage) -> str:
         return raw_from or ""
 
 
+def _decode_header_value(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        return str(make_header(decode_header(value)))
+    except Exception:
+        return value
+
+
 def _decode_date(email_obj: EmailMessage) -> datetime:
     raw_date = email_obj.get("Date", "")
     try:
@@ -131,14 +140,14 @@ def _extract_attachment_text(att: Attachment) -> str:
     content_type = (att.content_type or "").lower()
     try:
         if name_lower.endswith(".pdf"):
-            return sanitize_text(extract_pdf_text(att.content, att.filename), max_length=5000)
+            return sanitize_text(extract_pdf_text(att.content, att.filename), max_len=5000)
         if name_lower.endswith((".doc", ".docx")):
-            return sanitize_text(extract_docx_text(att.content, att.filename), max_length=5000)
+            return sanitize_text(extract_docx_text(att.content, att.filename), max_len=5000)
         if name_lower.endswith((".xls", ".xlsx")):
-            return sanitize_text(extract_excel_text(att.content, att.filename), max_length=5000)
+            return sanitize_text(extract_excel_text(att.content, att.filename), max_len=5000)
         if content_type.startswith("text") or name_lower.endswith((".txt", ".csv", ".log", ".md", ".json")):
             decoded = att.content.decode("utf-8", errors="ignore")
-            return sanitize_text(decoded, max_length=4000)
+            return sanitize_text(decoded, max_len=4000)
         return ""
     except Exception:
         return ""
@@ -149,7 +158,7 @@ def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachmen
     byte_limit = max_mb * 1024 * 1024
     for part in email_obj.walk():
         disposition = part.get_content_disposition()
-        filename = part.get_filename()
+        filename = _decode_header_value(part.get_filename())
         if disposition != "attachment" and not filename:
             continue
         try:

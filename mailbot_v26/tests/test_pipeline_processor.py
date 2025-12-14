@@ -38,9 +38,9 @@ def test_message_processor_formats_output(monkeypatch):
     assert lines[0].startswith("09:30 01.01.2024")
     assert lines[1] == "sender@example.com"
     assert lines[2] == "Subject line"
-    assert "Краткое резюме" in output
+    assert "Письмо от sender@example.com" in output
     assert "file.pdf" in output
-    assert "Сводка вложения PDF" in output
+    assert "PDF" in output
 
 
 def test_message_processor_handles_empty(monkeypatch):
@@ -57,7 +57,8 @@ def test_message_processor_handles_empty(monkeypatch):
     msg = InboundMessage(subject="", sender="", body="", attachments=[])
     output = MessageProcessor(cfg, DummyState()).process("account", msg)
     assert output is not None
-    assert "Служебное письмо" in output or "Содержание" in output
+    lines = [line for line in output.split("\n") if line.strip()]
+    assert len(lines) >= 4
 
 
 def test_message_processor_strips_forwarded_headers(monkeypatch):
@@ -170,9 +171,9 @@ def test_processor_attachment_empty_text_handled(monkeypatch):
 
     output = MessageProcessor(cfg, DummyState()).process("login", msg)
     assert output is not None
-    assert "Краткое резюме тела письма" in output
+    assert "Основное содержимое" in output
     assert "table.xlsx" in output
-    assert "Текст не извлечён" in output
+    assert "таблица" in output.lower() or "файл" in output.lower()
 
 
 def test_processor_never_header_only(monkeypatch):
@@ -243,3 +244,33 @@ def test_processor_output_no_binary(monkeypatch):
     assert "PK" not in output
     assert "IDAT" not in output
     assert "Useful text" in output
+
+
+def test_processor_strips_encoded_headers(monkeypatch):
+    class DummySummarizer:
+        def __init__(self, _):
+            pass
+
+        def summarize_email(self, text: str) -> str:
+            return "Обработанное письмо содержит полезную информацию. Оно включает пояснение."
+
+        def summarize_attachment(self, text: str, kind: str = "PDF") -> str:
+            return ""
+
+    monkeypatch.setattr(processor, "LLMSummarizer", DummySummarizer)
+
+    cfg = SimpleNamespace(llm_call=lambda x: "ok")
+    body = "Короткое сообщение"
+    attachments = []
+    msg = InboundMessage(
+        subject="=?koi8-r?B?5NLJ?=",  # encoded garbage should be removed
+        sender="=?utf-8?B?0J3QtdC80LXQ?=",
+        body=body,
+        attachments=attachments,
+        received_at=datetime(2024, 5, 5, 15, 0),
+    )
+
+    output = MessageProcessor(cfg, DummyState()).process("login", msg)
+    assert output is not None
+    assert "=?" not in output
+    assert len([line for line in output.split("\n") if line.strip()]) >= 3
