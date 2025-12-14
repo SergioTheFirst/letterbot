@@ -81,7 +81,7 @@ def test_domain_classification_logging_does_not_change_output(caplog):
     expected_output = (
         "🟡 ВАЖНО от Billing — Invoice for services (09:30)\n"
         "Оплатить счёт за услуги SERVICES\n"
-        "Please pay invoice 123 by 12.12. Funds appreciated."
+        "Оплатить до 12.12 Please pay invoice 12.12. Funds."
     )
 
     with caplog.at_level("INFO"):
@@ -89,3 +89,54 @@ def test_domain_classification_logging_does_not_change_output(caplog):
 
     assert result == expected_output
     assert "Domain detected: INVOICE" in caplog.text
+
+
+def test_primary_fact_and_attachments_compact_summaries():
+    processor = _processor()
+    attachments = [
+        Attachment(
+            filename="contract_v2.docx",
+            content=b"doc",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            text="Обновленная редакция договора. Требуется согласовать условия ЭДО до 15.03.",
+        ),
+        Attachment(
+            filename="invoice.pdf",
+            content=b"pdf",
+            content_type="application/pdf",
+            text="Счет за услуги связи на 45 000 ₽. Оплатить до 20.04.",
+        ),
+        Attachment(
+            filename="price_list.xlsx",
+            content=b"xls",
+            content_type="application/vnd.ms-excel",
+            text="Прайс-лист: обновлены цены на оборудование и сервис.",
+        ),
+        Attachment(
+            filename="numbers.csv",
+            content=b"csv",
+            content_type="text/csv",
+            text="Перечень объектов и номеров ____ телефонов.",
+        ),
+    ]
+
+    msg = InboundMessage(
+        subject="Новый договор и счета",
+        body="Просим согласовать новый договор до 15.03. Аванс 120 000 ₽.",
+        attachments=attachments,
+    )
+
+    result = processor.process("team@example.com", msg)
+
+    assert result is not None
+    lines = result.split("\n")
+
+    body_lines = [line for line in lines if line.endswith(".") and "—" not in line]
+    assert len(body_lines) == 1
+    assert len(body_lines[0].split()) <= 15
+
+    attachment_lines = [line for line in lines[2:] if "—" in line]
+    assert len(attachment_lines) == 4
+    assert len(set(attachment_lines)) == 4
+    assert "___" not in result
+    assert "№" not in result
