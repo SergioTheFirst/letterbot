@@ -87,3 +87,76 @@ def test_attachment_is_summarized_not_dumped():
     assert unique_phrase not in attachment_section
     assert len(attachment_section.split(".")) >= 2
 
+
+def test_body_summary_contains_action_and_keyword():
+    processor = _processor()
+    body = "Прошу согласовать кооперацию по поставке кабеля и подтвердить сроки отправки."
+    msg = InboundMessage(subject="Cooperation", body=body, sender="team@example.com")
+
+    result = processor.process("user@example.com", msg)
+
+    assert result is not None
+    lower = result.lower()
+    assert "прошу" in lower
+    assert "кооперацию" in lower
+
+
+def test_forbidden_templates_are_blocked():
+    processor = _processor()
+    body = "Краткое уведомление: направляю договор на подпись."
+    msg = InboundMessage(subject="Doc", body=body, sender="user@example.com")
+
+    result = processor.process("user@example.com", msg)
+
+    forbidden = [
+        "касается темы",
+        "по теме письма",
+        "автор прислал краткое сообщение",
+        "без подробностей",
+        "без технических деталей",
+        "можно просмотреть при необходимости",
+        "файл дополняет информацию",
+    ]
+    normalized = result.lower()
+    assert all(pattern not in normalized for pattern in forbidden)
+
+
+def test_excel_attachment_mentions_pricing():
+    processor = _processor()
+    att_text = "Прайс-лист: цены на кабель и крепеж указаны в таблице."
+    att = Attachment(
+        filename="prices.xlsx",
+        content=b"xls",
+        content_type="application/vnd.ms-excel",
+        text=att_text,
+    )
+    msg = InboundMessage(
+        subject="Pricing",
+        body="Отправляю обновленный прайс со стоимостью материалов.",
+        attachments=[att],
+    )
+
+    result = processor.process("user@example.com", msg)
+
+    assert result is not None
+    section = result.split("prices.xlsx")[-1].lower()
+    assert "прайс" in section or "цена" in section
+
+
+def test_contract_attachment_mentions_agreement():
+    processor = _processor()
+    att_text = "Договор поставки между сторонами, включает обязательства и сроки." * 3
+    att = Attachment(
+        filename="agreement.docx",
+        content=b"doc",
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        text=att_text,
+    )
+    msg = InboundMessage(subject="Agreement", body="Прикладываю текст договора.", attachments=[att])
+
+    result = processor.process("user@example.com", msg)
+
+    assert result is not None
+    section = result.split("agreement.docx")[-1].lower()
+    assert "договор" in section or "соглашение" in section
+
