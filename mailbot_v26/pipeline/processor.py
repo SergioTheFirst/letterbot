@@ -140,6 +140,17 @@ class MessageProcessor:
         attachments = self._build_attachment_summaries(message.attachments or [], subject_clean)
         telegram_message = self._compose(base_lines, attachments, body_summary)
 
+        combined_preview = "\n".join(
+            base_lines
+            + ([body_summary] if body_summary else [])
+            + [att.description for att in attachments]
+        )
+        if not self._has_primary_signal(combined_preview):
+            priority = "BLUE"
+            line1 = self._build_line1(priority, sender_clean, subject_clean, message.received_at)
+            base_lines = self._enforce_length([line1, line2])
+            telegram_message = self._compose(base_lines, attachments, body_summary)
+
         if not self._passes_quality_gates(base_lines, priority, verb, domain, mail_type):
             fallback_lines = self._fallback_lines(sender_clean, subject_clean, verb)
             base_lines = self._enforce_length(fallback_lines)
@@ -206,7 +217,7 @@ class MessageProcessor:
         return self._normalize_action_subject(verb, subject, domain, attachments, body)
 
     def _summarize_email_body(self, body_text: str) -> str:
-        if not body_text or len(body_text.strip()) < 40:
+        if not body_text or len(body_text.strip()) < 10:
             return ""
 
         cleaned_body = re.sub(r"(^|\n)>.*", " ", body_text)
@@ -228,9 +239,41 @@ class MessageProcessor:
 
         meaningful = re.sub(r"(^|\n)>.*", " ", meaningful)
         meaningful = re.sub(r"\s+", " ", meaningful).strip()
-        words = meaningful.split()
-        trimmed = " ".join(words[:20])
-        return trimmed
+        tokens = self._filter_tokens(meaningful.split())
+        text = " ".join(tokens)
+
+        if not self._has_primary_signal(text):
+            return ""
+
+        amount = self._find_amount(text)
+        deadline = self._find_deadline(text)
+        action = self._find_action(text)
+        change_marker = self._find_change_marker(text)
+
+        parts: list[str] = []
+        if action:
+            parts.append(action)
+        elif change_marker:
+            parts.append(change_marker)
+        else:
+            parts.append("Ознакомиться")
+
+        if amount:
+            parts.append(amount)
+        if deadline:
+            parts.append(f"до {deadline}")
+
+        if not amount and not deadline and change_marker and change_marker not in parts:
+            parts.append(change_marker)
+
+        fallback_context = " ".join(tokens[:5]) if tokens else "письмо"
+        core_sentence = " ".join(parts)
+        if len(core_sentence.split()) < 4:
+            core_sentence = f"{core_sentence} {fallback_context}".strip()
+
+        limited = " ".join(core_sentence.split()[:15]).strip()
+        ensured = self._ensure_sentence(limited)
+        return ensured
 
     def _select_verb(self, facts, body: str, domain: str, mail_type: str) -> str:
         defaults = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
@@ -321,23 +364,18 @@ class MessageProcessor:
             "PRICE": "прайс-лист",
             "INVOICE": "счет/инвойс",
             "TABLE": "таблица",
+            "REPORT": "отчет",
             "OTHER": "документ",
         }.get(doc_type, "документ")
 
-        if text_length >= 80:
-            subject_phrase = self._attachment_subject(att_text, filename)
-            key_nouns = self._key_nouns(att_text)
-            fact = self._first_fact(att_text)
-            fact_parts = []
-            if key_nouns:
-                fact_parts.append(" ".join(key_nouns))
-            if fact:
-                fact_parts.append(fact)
-            facts = ", ".join(fact_parts)
-            summary_core = f"{type_label}: {subject_phrase}"
-            summary = f"{summary_core}, {facts}" if facts else summary_core
-        else:
-            summary = f"{type_label}: суть по названию файла"
+        tokens = self._filter_tokens(att_text.split())
+        compact_text = " ".join(tokens)
+
+        if not compact_text:
+            return (f"{type_label}: по названию файла", text_length)
+
+        summary_fact = self._attachment_fact(doc_type, compact_text, filename)
+        summary = summary_fact or f"{type_label}: по названию файла"
 
         cleaned = summary.strip()
         return cleaned, text_length
@@ -379,6 +417,8 @@ class MessageProcessor:
             return "INVOICE"
         if any(token in combined for token in {"договор", "контракт", "соглашение"}):
             return "CONTRACT"
+        if any(token in combined for token in {"отчет", "отчёт", "report"}):
+            return "REPORT"
         if kind == "EXCEL":
             return "TABLE"
         if kind == "CONTRACT":
@@ -740,6 +780,140 @@ class MessageProcessor:
     def _pick_keyword(text: str) -> str | None:
         candidates = [w for w in re.findall(r"[\w-]{4,}", text) if len(w) > 4]
         return candidates[0] if candidates else None
+
+    def _filter_tokens(self, tokens: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        placeholder_pattern = re.compile(r"[_№]+")
+        for token in tokens:
+            plain = re.sub(r"[^\w₽€$.,-]", "", token)
+            if not plain or placeholder_pattern.fullmatch(plain):
+                continue
+            if len(plain) < 3:
+                continue
+            lowered = plain.lower()
+            if lowered.isdigit():
+                continue
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            cleaned.append(plain)
+        return cleaned
+
+    @staticmethod
+    def _find_amount(text: str) -> str | None:
+        match = re.search(r"(\d[\d\s.,]*\s?(?:₽|руб|eur|eur\.|€|usd|долл|\$))", text, re.IGNORECASE)
+        if match:
+            return match.group(1).replace(" ", " ").strip()
+        return None
+
+    @staticmethod
+    def _find_deadline(text: str) -> str | None:
+        date_match = re.search(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b", text)
+        if date_match:
+            return date_match.group(0)
+        word_match = re.search(r"\b(сегодня|завтра|послезавтра)\b", text, re.IGNORECASE)
+        if word_match:
+            return word_match.group(1)
+        return None
+
+    def _find_action(self, text: str) -> str | None:
+        actions = {
+            "оплат": "Оплатить",
+            "соглас": "Согласовать",
+            "подпис": "Подписать",
+            "утверд": "Согласовать",
+            "подтверд": "Подтвердить",
+            "предостав": "Предоставить",
+            "отправ": "Отправить",
+            "ожидаем": "Ответить",
+            "треб": "Требуется",
+            "pay": "Оплатить",
+            "approve": "Согласовать",
+            "sign": "Подписать",
+            "confirm": "Подтвердить",
+            "reply": "Ответить",
+        }
+        lowered = text.lower()
+        for marker, verb in actions.items():
+            if marker in lowered:
+                return verb
+        return None
+
+    @staticmethod
+    def _find_change_marker(text: str) -> str | None:
+        lowered = text.lower()
+        markers = {
+            "измен": "изменены условия",
+            "обнов": "обновлены данные",
+            "нов": "новый документ",
+            "дополн": "добавлены требования",
+        }
+        for marker, phrase in markers.items():
+            if marker in lowered:
+                return phrase
+        return None
+
+    def _attachment_fact(self, doc_type: str, text: str, filename: str) -> str:
+        type_label = {
+            "CONTRACT": "договор",
+            "PRICE": "прайс-лист",
+            "INVOICE": "счет/инвойс",
+            "TABLE": "таблица",
+            "REPORT": "отчет",
+            "OTHER": "документ",
+        }.get(doc_type, "документ")
+
+        amount = self._find_amount(text)
+        deadline = self._find_deadline(text)
+        change = self._find_change_marker(text)
+        action = self._find_action(text)
+
+        if doc_type == "INVOICE":
+            if amount and deadline:
+                return f"{type_label}: {amount} до {deadline}"
+            if amount:
+                return f"{type_label}: {amount} к оплате"
+            if deadline:
+                return f"{type_label}: оплатить до {deadline}"
+        if doc_type == "CONTRACT":
+            if change:
+                return f"{type_label}: {change}"
+            if action:
+                return f"{type_label}: {action.lower()}"
+            if "соглас" in text.lower():
+                return f"{type_label}: требуется согласование"
+        if doc_type == "PRICE":
+            if change:
+                return f"{type_label}: {change}"
+            keywords = self._keywords(text)
+            if keywords:
+                return f"{type_label}: цены на {' '.join(keywords[:3])}"
+        if doc_type == "TABLE":
+            keywords = self._keywords(text)
+            if keywords:
+                return f"{type_label}: {' '.join(keywords[:4])}"
+        if doc_type == "REPORT":
+            keywords = self._keywords(text)
+            if keywords:
+                return f"{type_label}: {' '.join(keywords[:4])}"
+        if amount and doc_type != "INVOICE":
+            return f"{type_label}: сумма {amount}"
+
+        name_keywords = self._keywords(filename)
+        if name_keywords:
+            return f"{type_label}: {' '.join(name_keywords[:3])}"
+        return f"{type_label}: по названию файла"
+
+    def _has_primary_signal(self, text: str) -> bool:
+        lowered = text.lower()
+        if self._find_amount(text):
+            return True
+        if self._find_deadline(text):
+            return True
+        if self._find_change_marker(text):
+            return True
+        return any(marker in lowered for marker in ("оплат", "соглас", "подпис", "треб", "измен", "нов"))
 
 
 __all__ = ["Attachment", "AttachmentSummary", "InboundMessage", "MessageProcessor"]
