@@ -246,10 +246,10 @@ class MessageProcessor:
 
         usable.sort(key=lambda item: item[0])
         blocks: List[str] = []
-        for _, filename, summary in usable[:3]:
+        if usable:
             blocks.append("")
-            blocks.append(filename)
-            blocks.append(summary)
+        for _, filename, summary in usable[:3]:
+            blocks.append(f"{filename} — {summary}")
         return blocks
 
     def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> str | None:
@@ -400,23 +400,20 @@ class MessageProcessor:
         lowered = att_text.lower()
         kind = self._refine_attachment_kind(att_text, kind)
         keyword = self._pick_keyword(lowered)
-        name_for_text = re.sub(r"\.[^.\s]+$", "", filename)
-
         if kind == "PRICE_LIST":
-            focus = keyword or "цены"
-            core = f"{name_for_text}: прайс-лист с ценами на {focus}."
+            focus = keyword or "ассортимент"
+            core = f"прайс-лист: цены и ассортимент {focus}."
         elif kind == "INVOICE":
             focus = keyword or "оплату"
-            core = f"{name_for_text}: счет на оплату за {focus}."
+            core = f"счёт: сумма за {focus} и реквизиты."
         elif kind == "CONTRACT":
-            focus = keyword or "договор"
-            core = f"{name_for_text}: договор, обсуждаются условия {focus}."
+            focus = keyword or "соглашения"
+            core = f"договор: условия и предмет {focus}."
         else:
             focus = keyword or "данные"
-            core = f"{name_for_text}: документ с данными про {focus}."
+            core = f"документ: основные данные по {focus}."
 
-        detail = "Нужно изучить вложение для применения информации."
-        return " ".join([core, detail])
+        return core
 
     @staticmethod
     def _limit_sentences(text: str, max_sentences: int) -> str:
