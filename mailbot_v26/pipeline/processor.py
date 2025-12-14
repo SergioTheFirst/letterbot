@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from mailbot_v26.bot_core.action_engine import analyze_action
 from mailbot_v26.domain.domain_classifier import DomainClassifier, MailTypeClassifier
+from mailbot_v26.domain.domain_priority import DOMAIN_PRIORITY_MAP
 from mailbot_v26.domain.domain_policies import DOMAIN_POLICIES
 from mailbot_v26.text import clean_email_body, sanitize_text
 
@@ -112,6 +113,8 @@ class MessageProcessor:
 
         domain = DomainClassifier.classify(message.sender, sender_clean, subject_clean)
         logger.info("Domain detected: %s", domain)
+        priority_suggestion = DOMAIN_PRIORITY_MAP.get(domain, DOMAIN_PRIORITY_MAP["UNKNOWN"])
+        logger.info("Domain priority suggestion: %s", priority_suggestion)
         mail_type = MailTypeClassifier.classify(subject_clean, body_clean, message.attachments or [], domain)
 
         action_facts = analyze_action(" ".join([subject_clean, body_clean]))

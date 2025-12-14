@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -94,3 +95,24 @@ def test_output_has_two_mandatory_lines():
     assert len(mandatory) == 2
     assert mandatory[0].startswith(("🔴", "🟡", "🔵"))
     assert mandatory[1].split()[0] in MessageProcessor._VERB_ORDER
+
+
+def test_domain_priority_suggestion_does_not_change_priority(caplog):
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Hello friend",
+        sender="friend@example.com",
+        body="Hello friend, happy birthday dear friend!",
+        attachments=[],
+        received_at=datetime(2024, 6, 6, 14, 0),
+    )
+
+    with caplog.at_level(logging.INFO, logger="mailbot_v26.pipeline.processor"):
+        result = processor.process("user@example.com", msg)
+
+    assert result is not None
+    first_line = result.split("\n")[0]
+    assert first_line.startswith("🔵 ИНФО")
+    assert any(
+        "Domain priority suggestion: MEDIUM" in record.message for record in caplog.records
+    )
