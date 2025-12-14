@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 from typing import Any
 
@@ -45,11 +46,34 @@ def _is_signature_start(line: str) -> bool:
     return any(lower.startswith(marker) for marker in SIGNATURE_MARKERS)
 
 
+def _looks_like_html(text: str) -> bool:
+    lowered = text.lower()
+    if any(tag in lowered for tag in ("<html", "<body", "<style", "<table", "<!doctype")):
+        return True
+    return bool(re.search(r"<[^>]+>", text))
+
+
+def _strip_html(text: str) -> str:
+    working = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    working = re.sub(r"<!--.*?-->", " ", working, flags=re.DOTALL)
+    working = re.sub(r"<(br|p|div|tr|td|th|li|ul|ol|h[1-6])[^>]*>", "\n", working, flags=re.IGNORECASE)
+    working = re.sub(r"</(p|div|tr|td|th|li|ul|ol|h[1-6])>", "\n", working, flags=re.IGNORECASE)
+    working = re.sub(r"<[^>]+>", " ", working)
+    working = html.unescape(working)
+    working = re.sub(r"[ \t]+", " ", working)
+    working = re.sub(r"(\n\s*){2,}", "\n\n", working)
+    return working.strip()
+
+
 def clean_email_body(text: Any) -> str:
     try:
         normalized = _to_str(text).replace("\r\n", "\n").replace("\r", "\n")
     except Exception:
         return ""
+
+    if _looks_like_html(normalized):
+        normalized = _strip_html(normalized)
+        normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
 
     lines = normalized.split("\n")
     cleaned: list[str] = []

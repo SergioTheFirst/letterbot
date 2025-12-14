@@ -48,18 +48,28 @@ class MessageProcessor:
     def _build(self, account_login: str, message: InboundMessage) -> Optional[str]:
         print("USING NEW PIPELINE")
         timestamp_line = self._format_timestamp(message.received_at)
-        sender_line = sanitize_text((message.sender or "").strip() or account_login, max_len=200)
-        subject_line = sanitize_text((message.subject or "Без темы").strip(), max_len=300) or "Без темы"
+        sender_line = self._purge_markup_tokens(
+            sanitize_text((message.sender or "").strip() or account_login, max_len=200)
+        )
+        subject_line = self._purge_markup_tokens(
+            sanitize_text((message.subject or "Без темы").strip(), max_len=300) or "Без темы"
+        )
 
         body_clean = clean_email_body(message.body or "")
         body_clean = sanitize_text(body_clean, max_len=6000)
 
-        body_summary = self._build_body_summary(body_clean, subject_line, sender_line)
+        body_summary = self._purge_markup_tokens(
+            self._build_body_summary(body_clean, subject_line, sender_line)
+        )
 
         attachment_blocks: List[tuple[str, str]] = []
         for att in message.attachments or []:
-            block = self._summarize_attachment(att, body_clean, subject_line)
-            attachment_blocks.append(block)
+            kind = self._detect_attachment_kind(att.filename, att.content_type)
+            if kind in {"IMAGE", "GENERIC"}:
+                continue
+            block = self._summarize_attachment(att, body_clean, subject_line, kind)
+            if block:
+                attachment_blocks.append(block)
 
         lines: List[str] = [timestamp_line, sender_line, subject_line, "", body_summary]
 
@@ -75,13 +85,21 @@ class MessageProcessor:
         baseline = len("\n".join(lines[:3]))
         if not self._is_valid_output(result, baseline):
             fallback_body = self._fallback_summary(body_clean, subject=subject_line, sender=sender_line)
-            safe_blocks = [self._infer_attachment_block(att, body_clean, subject_line) for att in message.attachments or []]
+            safe_blocks = [
+                self._infer_attachment_block(att, body_clean, subject_line)
+                for att in message.attachments or []
+                if self._detect_attachment_kind(att.filename, att.content_type) in {"PDF", "EXCEL", "CONTRACT"}
+            ]
             safe_lines: List[str] = [timestamp_line, sender_line, subject_line, "", fallback_body]
             for filename, block in safe_blocks:
                 safe_lines.append("")
                 safe_lines.append(filename)
                 safe_lines.append(block)
             result = "\n".join(safe_lines).strip()
+
+        if not self._is_valid_output(result, baseline):
+            minimal_body = self._ensure_sentence(self._fallback_summary("", subject=subject_line, sender=sender_line))
+            result = "\n".join([timestamp_line, sender_line, subject_line, "", minimal_body]).strip()
 
         return result
 
@@ -96,30 +114,44 @@ class MessageProcessor:
             body_summary = fallback
         return body_summary
 
-    def _summarize_attachment(self, att: Attachment, body_context: str, subject: str) -> tuple[str, str]:
-        filename = att.filename or "Вложение"
-        att_text = sanitize_text(att.text or "", max_len=4000)
-        kind = self._detect_attachment_kind(att.filename, att.content_type)
+    def _summarize_attachment(
+        self, att: Attachment, body_context: str, subject: str, kind: str
+    ) -> tuple[str, str] | None:
+        filename = self._purge_markup_tokens(att.filename or "Вложение") or "Вложение"
+        att_text = self._strip_markup(sanitize_text(att.text or "", max_len=4000))
 
         summary = ""
         if att_text:
-            if len(att_text) >= 50:
+            if len(att_text) >= 80:
                 summary_raw = self.llm.summarize_attachment(att_text, kind=kind)
-                summary = sanitize_text(summary_raw, max_len=1200)
-                if not self._is_meaningful(summary, min_len=25):
-                    summary = self._fallback_summary(att_text, limit=600, subject=subject)
+                summary = self._strip_markup(sanitize_text(summary_raw, max_len=600))
+                if not self._is_meaningful(summary, min_len=30):
+                    summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
             else:
-                summary = self._infer_attachment_purpose(filename, kind, body_context, att_text)
+                summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
+        else:
+            summary = self._attachment_fallback_summary("", subject, filename, kind)
 
-        if not summary:
-            summary = self._infer_attachment_purpose(filename, kind, body_context, att_text)
-
-        summary = self._ensure_sentence(summary)
+        summary = self._purge_markup_tokens(
+            self._guard_attachment_summary(summary, att_text, subject, filename, kind)
+        )
+        summary = self._limit_sentences(self._ensure_sentence(summary), 3)
+        if not self._is_meaningful(summary, min_len=20):
+            return None
         return filename, summary
 
     def _infer_attachment_block(self, att: Attachment, body_context: str, subject: str) -> tuple[str, str]:
-        filename = att.filename or "Вложение"
-        return filename, self._infer_attachment_purpose(filename, self._detect_attachment_kind(att.filename, att.content_type), body_context, sanitize_text(att.text or "", max_len=200))
+        filename = self._purge_markup_tokens(att.filename or "Вложение") or "Вложение"
+        kind = self._detect_attachment_kind(att.filename, att.content_type)
+        if kind in {"IMAGE", "GENERIC"}:
+            summary = self._attachment_fallback_summary("", subject, filename, kind)
+        else:
+            summary = self._attachment_fallback_summary(
+                self._strip_markup(sanitize_text(att.text or "", max_len=200)), subject, filename, kind
+            )
+
+        summary = self._limit_sentences(self._ensure_sentence(self._purge_markup_tokens(summary)), 3)
+        return filename, summary
 
     @staticmethod
     def _detect_attachment_kind(filename: str | None, content_type: str = "") -> str:
@@ -172,7 +204,7 @@ class MessageProcessor:
         if not MessageProcessor._has_two_sentences(base):
             base = MessageProcessor._ensure_two_sentences(base, subject, sender)
 
-        return base
+        return MessageProcessor._purge_markup_tokens(base)
 
     @staticmethod
     def _ensure_two_sentences(text: str, subject: str, sender: str) -> str:
@@ -194,41 +226,6 @@ class MessageProcessor:
             cleaned += "."
         return cleaned
 
-    def _infer_attachment_purpose(
-        self, filename: str, kind: str, body_context: str, att_text: str | None
-    ) -> str:
-        base = filename or "Вложение"
-        hints = {
-            "EXCEL": "таблица (Excel)",
-            "CONTRACT": "документ (Word)",
-            "PDF": "PDF-документ",
-            "IMAGE": "изображение",
-        }
-        label = hints.get(kind, "файл")
-
-        context = body_context.lower()
-        guess = ""
-        for keyword, meaning in {
-            "счет": "счёт на оплату",
-            "invoice": "инвойс или счёт",
-            "договор": "проект договора",
-            "соглашение": "дополнительное соглашение",
-            "прайс": "прайс-лист",
-            "коммерчес": "коммерческое предложение",
-            "заявк": "заявка или форма",
-        }.items():
-            if keyword in context or (att_text and keyword in att_text.lower()):
-                guess = meaning
-                break
-
-        description = guess or "дополнительные материалы по теме письма"
-        if att_text:
-            snippet = att_text[:180] + "..." if len(att_text) > 200 else att_text
-            detail = f"Содержит отрывок: {snippet}."
-        else:
-            detail = "Содержимое не извлечено, но файл соответствует обсуждаемой теме."
-        return f"{base}: {label}, вероятно {description}. {detail}"
-
     def _is_valid_output(self, message: str, baseline_len: int) -> bool:
         if len(message or "") <= baseline_len:
             return False
@@ -237,8 +234,25 @@ class MessageProcessor:
         if len(semantic) < 1:
             return False
 
-        banned = ("=?", "PK", "IHDR", "IDAT", "Содержание письма отсутствует")
-        if any(token in message for token in banned):
+        lower_message = (message or "").lower()
+        banned = ("=?", "pk", "ihdr", "idat", "содержание письма отсутствует")
+        if any(token in lower_message for token in banned):
+            return False
+
+        if "<" in message or ">" in message:
+            return False
+        if any(marker in lower_message for marker in ("doctype", "<html", "<style", "<table")):
+            return False
+        if re.search(r"\b(html|style|table|doctype)\b", lower_message):
+            return False
+        if any(ext in lower_message for ext in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")):
+            return False
+
+        sections = [part.strip() for part in message.split("\n\n") if part.strip()]
+        if any(len(section) > 500 for section in sections):
+            return False
+
+        if not any(len(section.split()) > 3 for section in sections[1:]):
             return False
 
         return True
@@ -282,3 +296,69 @@ class MessageProcessor:
         filtered_end.reverse()
 
         return "\n".join(filtered_end).strip()
+
+    @staticmethod
+    def _purge_markup_tokens(text: str) -> str:
+        cleaned = (text or "").replace("<", " ").replace(">", " ")
+        cleaned = re.sub(r"(?i)<!doctype[^>]*", " ", cleaned)
+        cleaned = re.sub(r"(?i)\b(html|style|table|doctype)\b", " ", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        compact = cleaned.strip()
+        if len(compact.strip("._-")) < 2:
+            return "Вложение"
+        return compact
+
+    @staticmethod
+    def _strip_markup(text: str) -> str:
+        cleaned = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(r"<!--.*?-->", " ", cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        return cleaned.strip()
+
+    def _guard_attachment_summary(
+        self, summary: str, att_text: str, subject: str, filename: str, kind: str
+    ) -> str:
+        normalized_summary = re.sub(r"\s+", " ", (summary or "")).strip().lower()
+        normalized_source = re.sub(r"\s+", " ", (att_text or "")).strip().lower()
+        if normalized_summary and normalized_source and normalized_summary in normalized_source:
+            return self._attachment_fallback_summary(att_text, subject, filename, kind)
+        return summary
+
+    def _attachment_fallback_summary(self, att_text: str, subject: str, filename: str, kind: str) -> str:
+        topics = []
+        lowered = att_text.lower()
+        keywords = {
+            "счет": "финансовые данные",
+            "invoice": "финансовые данные",
+            "договор": "условия договора",
+            "соглашение": "условия соглашения",
+            "отчет": "отчетные сведения",
+            "отчёт": "отчетные сведения",
+            "план": "план работ",
+            "прайс": "прайс-лист",
+            "презента": "презентационные материалы",
+        }
+        for key, label in keywords.items():
+            if key in lowered and label not in topics:
+                topics.append(label)
+            if len(topics) >= 2:
+                break
+
+        label = {
+            "EXCEL": "табличные данные",
+            "CONTRACT": "текстовый документ",
+            "PDF": "PDF-документ",
+        }.get(kind, "файл")
+
+        topic_text = ", ".join(topics) if topics else "основные сведения по теме"
+        first = f"{filename}: {label} по теме \"{subject or 'письмо'}\"."
+        second = f"Внутри кратко изложены {topic_text}, без технических деталей."
+        third = "Документ можно просмотреть при необходимости." if topics else "Файл дополняет информацию из письма."
+        return " ".join([first, second, third])
+
+    @staticmethod
+    def _limit_sentences(text: str, max_sentences: int) -> str:
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+        limited = " ".join(sentences[:max_sentences])
+        return limited

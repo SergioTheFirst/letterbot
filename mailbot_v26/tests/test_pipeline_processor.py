@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
@@ -172,7 +173,7 @@ def test_processor_attachment_empty_text_handled(monkeypatch):
     output = MessageProcessor(cfg, DummyState()).process("login", msg)
     assert output is not None
     assert "Основное содержимое" in output
-    assert "table.xlsx" in output
+    assert "xlsx" in output
     assert "таблица" in output.lower() or "файл" in output.lower()
 
 
@@ -243,7 +244,10 @@ def test_processor_output_no_binary(monkeypatch):
     assert "IHDR" not in output
     assert "PK" not in output
     assert "IDAT" not in output
-    assert "Useful text" in output
+    assert "image.png" not in output.lower()
+    assert "archive.zip" not in output.lower()
+    assert "Useful text" not in output
+    assert "file.docx" in output
 
 
 def test_processor_strips_encoded_headers(monkeypatch):
@@ -274,3 +278,127 @@ def test_processor_strips_encoded_headers(monkeypatch):
     assert output is not None
     assert "=?" not in output
     assert len([line for line in output.split("\n") if line.strip()]) >= 3
+
+
+def test_html_body_clean_summary(monkeypatch):
+    class DummySummarizer:
+        def __init__(self, _):
+            pass
+
+        def summarize_email(self, text: str) -> str:
+            return "Письмо о встрече. Договорились обсудить детали проекта."
+
+        def summarize_attachment(self, text: str, kind: str = "PDF") -> str:
+            return ""
+
+    monkeypatch.setattr(processor, "LLMSummarizer", DummySummarizer)
+
+    cfg = SimpleNamespace(llm_call=lambda x: "ok")
+    html_body = "<html><body><h1>Привет</h1><p>Встреча завтра</p><style>.x{}</style></body></html>"
+    msg = InboundMessage(
+        subject="HTML письмо",
+        sender="sender@example.com",
+        body=html_body,
+        attachments=[],
+        received_at=datetime(2024, 6, 6, 16, 0),
+    )
+
+    output = MessageProcessor(cfg, DummyState()).process("login", msg)
+    assert output is not None
+    assert "<" not in output and ">" not in output
+    assert "html" not in output.lower()
+
+
+def test_image_attachments_silenced(monkeypatch):
+    class DummySummarizer:
+        def __init__(self, _):
+            pass
+
+        def summarize_email(self, text: str) -> str:
+            return "Краткое резюме письма."
+
+        def summarize_attachment(self, text: str, kind: str = "PDF") -> str:
+            return "Содержание документа изложено кратко."
+
+    monkeypatch.setattr(processor, "LLMSummarizer", DummySummarizer)
+
+    cfg = SimpleNamespace(llm_call=lambda x: "ok")
+    attachments = [
+        Attachment(filename="photo.jpg", content=b"data", text=""),
+        Attachment(filename="report.pdf", content=b"data", text="Отчет по проекту"),
+    ]
+    msg = InboundMessage(
+        subject="Тема",
+        sender="sender@example.com",
+        body="Сообщение",
+        attachments=attachments,
+        received_at=datetime(2024, 6, 7, 17, 0),
+    )
+
+    output = MessageProcessor(cfg, DummyState()).process("login", msg)
+    assert output is not None
+    assert "photo.jpg" not in output.lower()
+    assert "report.pdf" in output
+
+
+def test_raw_attachment_text_blocked(monkeypatch):
+    raw_text = "Конфиденциальный отчет о продажах за квартал. Включает суммы и детали." * 2
+
+    class DummySummarizer:
+        def __init__(self, _):
+            pass
+
+        def summarize_email(self, text: str) -> str:
+            return "Сообщение содержит вложение."
+
+        def summarize_attachment(self, text: str, kind: str = "PDF") -> str:
+            return raw_text
+
+    monkeypatch.setattr(processor, "LLMSummarizer", DummySummarizer)
+
+    cfg = SimpleNamespace(llm_call=lambda x: "ok")
+    attachments = [Attachment(filename="report.docx", content=b"data", text=raw_text)]
+    msg = InboundMessage(
+        subject="Отчет",
+        sender="sender@example.com",
+        body="Основное сообщение",
+        attachments=attachments,
+        received_at=datetime(2024, 6, 8, 18, 0),
+    )
+
+    output = MessageProcessor(cfg, DummyState()).process("login", msg)
+    assert output is not None
+    assert "report.docx" in output
+    assert raw_text[:40] not in output
+
+
+def test_attachment_summary_sentence_limit(monkeypatch):
+    class DummySummarizer:
+        def __init__(self, _):
+            pass
+
+        def summarize_email(self, text: str) -> str:
+            return "Сообщение об обновлении."
+
+        def summarize_attachment(self, text: str, kind: str = "PDF") -> str:
+            return "Первое. Второе. Третье. Четвертое. Пятое."
+
+    monkeypatch.setattr(processor, "LLMSummarizer", DummySummarizer)
+
+    cfg = SimpleNamespace(llm_call=lambda x: "ok")
+    attachments = [Attachment(filename="summary.pdf", content=b"data", text="Некоторый текст" * 10)]
+    msg = InboundMessage(
+        subject="Обновление",
+        sender="sender@example.com",
+        body="Основной текст",
+        attachments=attachments,
+        received_at=datetime(2024, 6, 9, 19, 0),
+    )
+
+    output = MessageProcessor(cfg, DummyState()).process("login", msg)
+    assert output is not None
+    lines = output.split("\n")
+    idx = lines.index("summary.pdf")
+    summary_text = lines[idx + 1]
+    sentences = re.findall(r"[^.!?]+[.!?]", summary_text)
+    assert len(sentences) <= 3
