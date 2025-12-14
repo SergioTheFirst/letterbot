@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from mailbot_v26.bot_core.action_engine import analyze_action
+from mailbot_v26.domain.domain_classifier import DomainClassifier, MailTypeClassifier
+from mailbot_v26.domain.domain_policies import DOMAIN_POLICIES
 from mailbot_v26.text import clean_email_body, sanitize_text
 
 
@@ -67,9 +69,26 @@ class MessageProcessor:
         "Подтвердить",
         "Проверить",
         "Ответить",
+        "Продлить",
         "Требуется",
         "Ознакомиться",
     ]
+    _MAIL_TYPE_DEFAULTS = {
+        "PAYMENT_REQUEST": {"priority": "RED", "verb": "Оплатить"},
+        "PAYMENT_REMINDER": {"priority": "RED", "verb": "Оплатить"},
+        "CONTRACT_APPROVAL": {"priority": "YELLOW", "verb": "Подписать"},
+        "CONTRACT_UPDATE": {"priority": "YELLOW", "verb": "Согласовать"},
+        "INVOICE": {"priority": "YELLOW", "verb": "Оплатить"},
+        "PRICE_LIST": {"priority": "BLUE", "verb": "Ознакомиться"},
+        "DELIVERY_NOTICE": {"priority": "YELLOW", "verb": "Проверить"},
+        "DEADLINE_REMINDER": {"priority": "YELLOW", "verb": "Требуется"},
+        "ACCOUNT_CHANGE": {"priority": "RED", "verb": "Проверить"},
+        "SECURITY_ALERT": {"priority": "RED", "verb": "Проверить"},
+        "POLICY_UPDATE": {"priority": "BLUE", "verb": "Ознакомиться"},
+        "MEETING_CHANGE": {"priority": "YELLOW", "verb": "Подтвердить"},
+        "INFORMATION_ONLY": {"priority": "BLUE", "verb": "Ознакомиться"},
+        "UNKNOWN": {"priority": "BLUE", "verb": "Ознакомиться"},
+    }
 
     def __init__(self, config, state) -> None:
         self.config = config
@@ -87,87 +106,113 @@ class MessageProcessor:
         subject_clean = sanitize_text((message.subject or "").strip() or "Без темы", max_len=200)
         sender_clean = self._normalize_source(message.sender or account_login)
 
+        domain = DomainClassifier.classify(message.sender, sender_clean, subject_clean)
+        mail_type = MailTypeClassifier.classify(subject_clean, body_clean, message.attachments or [], domain)
+
         action_facts = analyze_action(" ".join([subject_clean, body_clean]))
-        priority = self._resolve_priority(message, body_clean, action_facts)
+        priority = self._resolve_priority(message, body_clean, subject_clean, action_facts, domain, mail_type)
+        verb = self._select_verb(action_facts, body_clean, domain, mail_type)
 
         line1 = self._build_line1(priority, sender_clean, subject_clean, message.received_at)
-        line2 = self._build_line2(action_facts, subject_clean, body_clean)
+        line2 = self._build_line2(verb, subject_clean, body_clean)
 
         base_lines = self._enforce_length([line1, line2])
         attachments = self._build_attachments(message.attachments or [], subject_clean)
         telegram_message = self._compose(base_lines, attachments)
 
-        if not self._passes_quality_gates(base_lines):
-            fallback_lines = self._fallback_lines(sender_clean, subject_clean)
+        if not self._passes_quality_gates(base_lines, priority, verb, domain, mail_type):
+            fallback_lines = self._fallback_lines(sender_clean, subject_clean, verb)
             base_lines = self._enforce_length(fallback_lines)
             telegram_message = self._compose(base_lines, attachments)
 
-        if not self._passes_quality_gates(base_lines):
-            minimal = self._enforce_length(self._fallback_lines(sender_clean, "Сообщение"), hard_trim=True)
+        if not self._passes_quality_gates(base_lines, priority, verb, domain, mail_type):
+            minimal = self._enforce_length(self._fallback_lines(sender_clean, "Сообщение", verb), hard_trim=True)
             telegram_message = self._compose(minimal, [])
 
         return telegram_message
 
-    def _resolve_priority(self, message: InboundMessage, body: str, facts) -> str:
+    def _resolve_priority(self, message: InboundMessage, body: str, subject: str, facts, domain: str, mail_type: str) -> str:
         sender_domain = (message.sender or "").split("@")[-1].lower()
-        subject = (message.subject or "").lower()
-        combined = " ".join([subject, body.lower()])
+        combined = " ".join([(subject or "").lower(), body.lower()])
         today = datetime.now().date()
         tomorrow = today + timedelta(days=1)
 
-        if self._contains_any(combined, {"срочно", "urgent", "asap"}):
-            return "RED"
+        policy_default = DOMAIN_POLICIES.get(domain, {}).get("default_priority", "BLUE")
+        mail_type_default = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
+        priority = mail_type_default.get("priority", policy_default)
 
-        if self._has_deadline(combined, today, tomorrow):
-            return "RED"
+        urgent = self._contains_any(combined, {"срочно", "urgent", "asap"})
+        if urgent:
+            priority = "RED"
 
-        if facts.amount and facts.date:
-            return "RED"
+        if self._has_deadline(combined, today, tomorrow) and domain != "DOMAIN_REGISTRAR":
+            priority = "RED"
+
+        if facts.amount and facts.date and domain != "DOMAIN_REGISTRAR":
+            priority = "RED"
 
         sensitive_domains = {"bank", "nalog", "fns", "court", "gov"}
         if any(dom in sender_domain for dom in sensitive_domains) and facts.action:
-            return "RED"
+            priority = "RED"
 
         attachment_kinds = {
             self._detect_attachment_kind(att.filename, att.content_type)
             for att in message.attachments or []
         }
-        if facts.action:
-            return "YELLOW"
-        if "INVOICE" in attachment_kinds or "CONTRACT" in attachment_kinds:
-            return "YELLOW"
-        if self._is_management_sender(message.sender):
-            return "YELLOW"
+        if not facts.action and not urgent:
+            if "INVOICE" in attachment_kinds or "CONTRACT" in attachment_kinds:
+                priority = self._max_priority(priority, "YELLOW")
+            if self._is_management_sender(message.sender):
+                priority = self._max_priority(priority, "YELLOW")
 
-        return "BLUE"
+        priority = self._max_priority(priority, policy_default)
+
+        if domain in {"BANK", "COURT"} and priority == "BLUE":
+            priority = self._max_priority(priority, "YELLOW")
+
+        if domain == "FAMILY" and priority == "RED" and not urgent:
+            priority = "BLUE"
+
+        return priority
 
     def _build_line1(self, priority: str, source: str, subject: str, received_at: datetime | None) -> str:
         time_part = (received_at or datetime.now()).strftime("%H:%M")
         short_subject = self._shorten_subject(subject)
         return f"{self._PRIORITY_EMOJI[priority]} {self._PRIORITY_LABEL[priority]} от {source} — {short_subject} ({time_part})"
 
-    def _build_line2(self, facts, subject: str, body: str) -> str:
-        verb = self._select_verb(facts, body)
+    def _build_line2(self, verb: str, subject: str, body: str) -> str:
         essence = self._extract_essence(subject, body)
         return f"{verb} {essence}"
 
-    def _select_verb(self, facts, body: str) -> str:
-        lowered_body = body.lower()
-        if facts.action and re.search(r"оплат", facts.action):
-            return "Оплатить"
-        if facts.action and re.search(r"утверд|подпис", facts.action):
-            return "Подписать"
-        if "соглас" in lowered_body:
-            return "Согласовать"
-        if "подтверд" in lowered_body:
-            return "Подтвердить"
-        if "ответ" in lowered_body:
-            return "Ответить"
-        if "провер" in lowered_body:
-            return "Проверить"
-        if "треб" in lowered_body:
-            return "Требуется"
-        return "Ознакомиться"
+    def _select_verb(self, facts, body: str, domain: str, mail_type: str) -> str:
+        defaults = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
+        policy_defaults = DOMAIN_POLICIES.get(domain, {})
+        policy_allowed = policy_defaults.get("allowed_types")
+        if defaults.get("verb") and (policy_allowed is None or mail_type in policy_allowed):
+            verb = defaults.get("verb")
+        else:
+            verb = policy_defaults.get("default_verb")
+
+        if not verb:
+            lowered_body = body.lower()
+            if facts.action and re.search(r"оплат", facts.action):
+                verb = "Оплатить"
+            elif facts.action and re.search(r"утверд|подпис", facts.action):
+                verb = "Подписать"
+            elif "соглас" in lowered_body:
+                verb = "Согласовать"
+            elif "подтверд" in lowered_body:
+                verb = "Подтвердить"
+            elif "ответ" in lowered_body:
+                verb = "Ответить"
+            elif "провер" in lowered_body:
+                verb = "Проверить"
+            elif "треб" in lowered_body:
+                verb = "Требуется"
+            else:
+                verb = "Ознакомиться"
+
+        return verb
 
     def _extract_essence(self, subject: str, body: str, max_words: int = 5) -> str:
         keywords = self._keywords(subject)
@@ -214,7 +259,7 @@ class MessageProcessor:
     def _compose(self, base_lines: List[str], attachments: List[str]) -> str:
         return "\n".join(base_lines + attachments).strip()
 
-    def _passes_quality_gates(self, base_lines: List[str]) -> bool:
+    def _passes_quality_gates(self, base_lines: List[str], priority: str, verb: str, domain: str, mail_type: str) -> bool:
         if len(base_lines) != 2 or any(not ln.strip() for ln in base_lines):
             return False
         if not base_lines[0].startswith(tuple(self._PRIORITY_EMOJI.values())):
@@ -227,12 +272,26 @@ class MessageProcessor:
         lowered = base_message.lower()
         if any(phrase in lowered for phrase in self._FORBIDDEN_PHRASES):
             return False
+        policy_priority = DOMAIN_POLICIES.get(domain, {}).get("default_priority", "BLUE")
+        if self._max_priority(policy_priority, priority) != priority:
+            return False
+        if domain in {"BANK", "COURT"} and priority == "BLUE":
+            return False
+        family_red = domain == "FAMILY" and priority == "RED"
+        if family_red and not self._contains_any(lowered, {"срочно", "urgent", "asap"}):
+            return False
+        policy_allowed = DOMAIN_POLICIES.get(domain, {}).get("allowed_types")
+        expected_verb = self._MAIL_TYPE_DEFAULTS.get(mail_type, {}).get("verb")
+        if expected_verb and (policy_allowed is None or mail_type in policy_allowed):
+            if not base_lines[1].startswith(expected_verb):
+                return False
         return True
 
-    def _fallback_lines(self, source: str, subject: str) -> List[str]:
+    def _fallback_lines(self, source: str, subject: str, verb: str) -> List[str]:
         now_line = self._build_line1("BLUE", source, subject, datetime.now())
         essence = self._extract_essence(subject, subject)
-        return [now_line, f"Ознакомиться {essence}"]
+        safe_verb = verb if verb in self._VERB_ORDER else "Ознакомиться"
+        return [now_line, f"{safe_verb} {essence}"]
 
     def _enforce_length(self, lines: List[str], hard_trim: bool = False) -> List[str]:
         joined = "\n".join(lines)
@@ -265,6 +324,11 @@ class MessageProcessor:
     def _contains_any(text: str, markers: set[str]) -> bool:
         lowered = text.lower()
         return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _max_priority(left: str, right: str) -> str:
+        order = {"BLUE": 0, "YELLOW": 1, "RED": 2}
+        return left if order.get(left, 0) >= order.get(right, 0) else right
 
     @staticmethod
     def _has_deadline(text: str, today, tomorrow) -> bool:
