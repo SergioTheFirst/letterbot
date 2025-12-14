@@ -81,7 +81,7 @@ def test_domain_classification_logging_does_not_change_output(caplog):
     expected_output = (
         "🟡 ВАЖНО от Billing — Invoice for services (09:30)\n"
         "Оплатить счёт за услуги SERVICES\n"
-        "Оплатить до 12.12 Please pay invoice 12.12. Funds."
+        "Please pay invoice 123 by 12.12."
     )
 
     with caplog.at_level("INFO"):
