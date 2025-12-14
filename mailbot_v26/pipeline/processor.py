@@ -30,6 +30,7 @@ class AttachmentSummary:
     description: str
     kind: str
     priority: int
+    text_length: int = 0
 
 
 @dataclass
@@ -59,6 +60,7 @@ class MessageProcessor:
     _PRIORITY_EMOJI = {"RED": "🔴", "YELLOW": "🟡", "BLUE": "🔵"}
     _PRIORITY_LABEL = {"RED": "СРОЧНО", "YELLOW": "ВАЖНО", "BLUE": "ИНФО"}
     _ATTACHMENT_ORDER = {"INVOICE": 0, "CONTRACT": 1, "PDF": 2, "EXCEL": 3, "GENERIC": 4}
+    _MAX_ATTACHMENTS = 10
     _STOPWORDS = {
         "и",
         "в",
@@ -249,9 +251,7 @@ class MessageProcessor:
             kind = self._detect_attachment_kind(att.filename, att.content_type)
             if kind == "IMAGE":
                 continue
-            summary = self._summarize_attachment(att, subject, kind)
-            if not summary:
-                continue
+            summary, text_length = self._summarize_attachment(att, subject, kind)
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
             usable.append(
                 AttachmentSummary(
@@ -259,31 +259,41 @@ class MessageProcessor:
                     description=summary,
                     kind=kind,
                     priority=priority_rank,
+                    text_length=text_length,
                 )
             )
 
         usable.sort(key=lambda item: item.priority)
         deduped: list[AttachmentSummary] = []
-        seen: set[str] = set()
+        index_by_filename: dict[str, int] = {}
         for item in usable:
             filename_key = (item.filename or "").strip().lower()
-            if filename_key in seen:
+            if filename_key in index_by_filename:
+                existing_index = index_by_filename[filename_key]
+                existing = deduped[existing_index]
+                if item.text_length > existing.text_length or (
+                    item.text_length == existing.text_length
+                    and len(item.description) > len(existing.description)
+                ):
+                    deduped[existing_index] = item
                 continue
-            seen.add(filename_key)
+            index_by_filename[filename_key] = len(deduped)
             deduped.append(item)
-        return deduped[:3]
+        return deduped[: self._MAX_ATTACHMENTS]
 
-    def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> str | None:
+    def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> tuple[str, int]:
         filename = self._purge_markup_tokens(att.filename or "Вложение")
         att_text = self._strip_markup(sanitize_text(att.text or "", max_len=1500))
+        text_length = len(att_text)
         if not att_text or len(att_text) < 40:
-            return None
+            summary = self._fallback_short_summary(filename, subject, kind, att_text)
+            return summary, text_length
 
         summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
+        summary = self._remove_subject_terms(summary, subject)
         summary = self._limit_sentences(self._ensure_sentence(summary), 2)
-        if subject.lower() in summary.lower():
-            return None
-        return summary
+        cleaned = summary.strip() or self._fallback_short_summary(filename, subject, kind, att_text)
+        return cleaned, text_length
 
     def _compose(self, base_lines: List[str], attachments: List[AttachmentSummary]) -> str:
         rendered_attachments = self._render_attachments(attachments)
@@ -298,6 +308,53 @@ class MessageProcessor:
             clean_description = " ".join((attachment.description or "").split())
             lines.append(f"{attachment.filename} — {clean_description}")
         return lines
+
+    def _remove_subject_terms(self, summary: str, subject: str) -> str:
+        subject_keywords = {kw.lower() for kw in self._keywords(subject)}
+        cleaned_tokens: List[str] = []
+        for token in summary.split():
+            plain = re.sub(r"[^\w-]", "", token).lower()
+            if plain and plain in subject_keywords:
+                continue
+            cleaned_tokens.append(token)
+        cleaned = " ".join(cleaned_tokens).strip()
+        return cleaned or summary
+
+    def _fallback_short_summary(self, filename: str, subject: str, kind: str, att_text: str) -> str:
+        base_name = filename or "Вложение"
+        combined = " ".join([base_name.lower(), (subject or "").lower(), (att_text or "").lower()])
+
+        def contains(tokens: set[str]) -> bool:
+            return any(token in combined for token in tokens)
+
+        if kind == "EXCEL":
+            if contains({"прайс", "price"}):
+                return "прайс-лист: ключевые позиции"
+            if contains({"invoice", "счет", "счёт", "оплат"}):
+                return "счет/инвойс: суммы и реквизиты"
+            if contains({"реестр", "registry", "реест"}):
+                return "реестр: таблица записей"
+            if contains({"отчет", "отчёт", "report"}):
+                return "отчет: таблица показателей"
+            return "таблица: ключевые данные"
+
+        if kind == "CONTRACT":
+            return "документ: условия/суть по названию"
+
+        if kind == "PDF":
+            if contains({"счет", "счёт", "invoice", "оплат"}):
+                return "pdf: счет/инвойс по названию"
+            if contains({"договор", "contract"}):
+                return "pdf: условия/суть по названию"
+            return "pdf: ключевые детали по названию"
+
+        if kind == "INVOICE":
+            return "счет/инвойс: суммы и реквизиты"
+
+        keywords = self._keywords(base_name)
+        if keywords:
+            return f"файл: {' '.join(keywords[:3])}"
+        return "файл: основное из названия"
 
     def _passes_quality_gates(self, base_lines: List[str], priority: str, verb: str, domain: str, mail_type: str) -> bool:
         if len(base_lines) != 2 or any(not ln.strip() for ln in base_lines):
