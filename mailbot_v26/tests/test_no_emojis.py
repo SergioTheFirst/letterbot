@@ -12,10 +12,14 @@ EMOJI_RANGES = [
     (0x1FA70, 0x1FAFF),
 ]
 
+ALLOWED_EMOJI_CODES = {0x1F534, 0x1F7E1, 0x1F535}
+
 
 def _contains_emoji(text: str) -> bool:
     for char in text:
         code = ord(char)
+        if code in ALLOWED_EMOJI_CODES:
+            continue
         if any(start <= code <= end for start, end in EMOJI_RANGES):
             return True
     return False

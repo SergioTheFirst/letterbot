@@ -1,11 +1,7 @@
-"""Legacy formatter disabled; use mailbot_v26.pipeline.processor instead."""
+"""Formatter entrypoint for driver-first Telegram output."""
 
 from __future__ import annotations
 
+from mailbot_v26.pipeline.processor import MessageProcessor, InboundMessage, Attachment
 
-def format_summary(parts):
-    """Legacy formatter is no longer used."""
-    raise RuntimeError("Legacy formatter disabled; use mailbot_v26.pipeline.processor")
-
-
-__all__ = ["format_summary"]
+__all__ = ["MessageProcessor", "InboundMessage", "Attachment"]
