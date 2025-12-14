@@ -17,12 +17,15 @@ def _processor() -> MessageProcessor:
 
 @pytest.mark.parametrize("include_image", [True, False])
 def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch, include_image):
+    # Force the class to drop items when the cap is applied, so we can assert the fix explicitly.
+    monkeypatch.setattr(MessageProcessor, "_MAX_ATTACHMENTS", 3)
+
     processor = _processor()
 
     outcomes: list[object] = [
         ("", 0),
-        ("Краткая сводка", 5),
-        ("Код, Наименование", 8),
+        ("Короткий текст", 5),
+        ("Код; Наименование", 8),
         Exception("boom"),
     ]
 
@@ -35,21 +38,21 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
     monkeypatch.setattr(MessageProcessor, "_summarize_attachment", fake_summarize)
 
     attachments = [
-        Attachment(filename="report.doc", content=b"1", content_type="application/msword", text=""),
+        Attachment(filename="a.doc", content=b"1", content_type="application/msword", text=""),
         Attachment(
-            filename="note.docx",
+            filename="b.docx",
             content=b"22",
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             text="Небольшая заметка",
         ),
         Attachment(
-            filename="table.xlsx",
+            filename="c.xlsx",
             content=b"333",
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             text="Код; Наименование; Цена",
         ),
         Attachment(
-            filename="table.xlsx",
+            filename="d.xlsx",
             content=b"4444",
             content_type="application/vnd.ms-excel",
             text="Ещё одна таблица",
@@ -74,11 +77,8 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
     attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
 
     assert len(attachment_lines) == 4
-    for name in ["report.doc", "note.docx", "table.xlsx"]:
-        assert sum(line.startswith(name) for line in attachment_lines) >= 1
-
-    table_lines = [line for line in attachment_lines if line.startswith("table.xlsx")]
-    assert len(table_lines) == 2
+    expected = {"a.doc", "b.docx", "c.xlsx", "d.xlsx"}
+    assert expected == {line.split(" — ")[0] for line in attachment_lines}
 
     assert any(line.endswith("по данным файла") for line in attachment_lines)
     assert not any("image.png" in line for line in attachment_lines)

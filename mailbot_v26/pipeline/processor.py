@@ -277,18 +277,24 @@ class MessageProcessor:
     def _build_attachment_summaries(
         self, attachments: List[Attachment], subject: str
     ) -> tuple[List[AttachmentSummary], int]:
-        usable: list[AttachmentSummary] = []
+        non_image_attachments: list[tuple[Attachment, str]] = []
         for att in attachments:
             kind = self._detect_attachment_kind(att.filename, att.content_type)
             if kind == "IMAGE":
                 continue
+            non_image_attachments.append((att, kind))
+
+        usable: list[AttachmentSummary] = []
+        for att, kind in non_image_attachments:
             try:
                 summary, text_length = self._summarize_attachment(att, subject, kind)
             except Exception:
                 logger.warning("Failed to summarize attachment: %s", att.filename, exc_info=True)
                 summary, text_length = "", 0
+
             if not summary:
                 summary = "по данным файла"
+
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
             usable.append(
                 AttachmentSummary(
@@ -302,6 +308,7 @@ class MessageProcessor:
             )
 
         usable.sort(key=lambda item: item.priority)
+
         deduped: list[AttachmentSummary] = []
         index_by_filename_size: dict[tuple[str, int], int] = {}
         for item in usable:
@@ -318,9 +325,8 @@ class MessageProcessor:
                 continue
             index_by_filename_size[dedupe_key] = len(deduped)
             deduped.append(item)
-        more_count = max(len(deduped) - self._MAX_ATTACHMENTS, 0)
-        capped = deduped[: self._MAX_ATTACHMENTS]
-        return capped, more_count
+
+        return deduped, 0
 
     def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> tuple[str, int]:
         filename = self._purge_markup_tokens(att.filename or "Вложение")
