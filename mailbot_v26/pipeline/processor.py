@@ -122,7 +122,7 @@ class MessageProcessor:
         verb = self._select_verb(action_facts, body_clean, domain, mail_type)
 
         line1 = self._build_line1(priority, sender_clean, subject_clean, message.received_at)
-        line2 = self._build_line2(verb, subject_clean, body_clean)
+        line2 = self._build_line2(verb, subject_clean, body_clean, domain, message.attachments or [])
 
         base_lines = self._enforce_length([line1, line2])
         attachments = self._build_attachments(message.attachments or [], subject_clean)
@@ -188,9 +188,10 @@ class MessageProcessor:
         short_subject = self._shorten_subject(subject)
         return f"{self._PRIORITY_EMOJI[priority]} {self._PRIORITY_LABEL[priority]} от {source} — {short_subject} ({time_part})"
 
-    def _build_line2(self, verb: str, subject: str, body: str) -> str:
-        essence = self._extract_essence(subject, body)
-        return f"{verb} {essence}"
+    def _build_line2(
+        self, verb: str, subject: str, body: str, domain: str, attachments: List[Attachment]
+    ) -> str:
+        return self._normalize_action_subject(verb, subject, domain, attachments, body)
 
     def _select_verb(self, facts, body: str, domain: str, mail_type: str) -> str:
         defaults = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
@@ -337,6 +338,115 @@ class MessageProcessor:
     def _max_priority(left: str, right: str) -> str:
         order = {"BLUE": 0, "YELLOW": 1, "RED": 2}
         return left if order.get(left, 0) >= order.get(right, 0) else right
+
+    def _normalize_action_subject(
+        self, verb: str, subject: str, domain: str, attachments: List[Attachment], body: str
+    ) -> str:
+        essence = self._extract_essence(subject, body)
+        normalized_object = self._refine_action_object(subject, attachments, essence)
+        return f"{verb} {normalized_object}".strip()
+
+    def _refine_action_object(self, subject: str, attachments: List[Attachment], fallback: str) -> str:
+        lowered = subject.lower()
+        tokens = re.findall(r"[\w-]{2,}", subject)
+        token_pairs = [(t.lower(), t) for t in tokens]
+        attachment_kinds = {
+            self._detect_attachment_kind(att.filename, att.content_type)
+            for att in attachments
+        }
+
+        core_stopwords = {
+            "уведомление",
+            "сообщение",
+            "письмо",
+            "тема",
+            "по",
+            "о",
+            "об",
+            "from",
+            "for",
+            "новый",
+            "новое",
+            "новом",
+        } | self._STOPWORDS
+        payment_tokens = {"счет", "счёт", "invoice", "оплата", "оплат", "bill", "жку"}
+        cooperation_tokens = {"сотрудничество", "договор", "контракт", "соглашение"}
+
+        def pick_company() -> str:
+            for low, original in token_pairs:
+                if low in core_stopwords or low in payment_tokens or low in cooperation_tokens:
+                    continue
+                if len(low) < 3:
+                    continue
+                return original.upper()
+            return ""
+
+        def format_word(word: str) -> str:
+            clean = re.sub(r"[^\w-]", "", word)
+            if clean.lower() in {"с", "к", "в", "по", "об", "от", "за", "для", "без"}:
+                return clean.lower()
+            if clean.lower() in {"услуги", "сотрудничество", "счёт", "счет", "прайс", "прайсом", "договор", "контракт"}:
+                return clean.lower()
+            if len(clean) <= 3:
+                return clean.upper()
+            if clean.isupper():
+                return clean
+            return clean.capitalize()
+
+        def build_phrase(parts: List[str]) -> str:
+            words: List[str] = []
+            for part in parts:
+                if not part:
+                    continue
+                for token in part.split():
+                    cleaned = token.strip()
+                    if cleaned:
+                        words.append(format_word(cleaned))
+            if not words:
+                return fallback
+            if len(words) > 5:
+                words = words[:5]
+            if words and not words[0].isupper() and len(words[0]) > 3:
+                words[0] = words[0].lower()
+            phrase = " ".join(words).strip()
+            return phrase if phrase else fallback
+
+        company = pick_company()
+        has_price = "PRICE_LIST" in attachment_kinds or "прайс" in lowered
+        has_invoice = "INVOICE" in attachment_kinds or self._contains_any(lowered, payment_tokens)
+        cooperation = next((low for low in lowered.split() if low in cooperation_tokens), None)
+
+        if has_price:
+            return build_phrase(["с", "прайсом", company or fallback])
+
+        if has_invoice:
+            descriptors = [orig for low, orig in token_pairs if low not in payment_tokens and low not in core_stopwords]
+            mapped = []
+            for desc in descriptors:
+                lower_desc = desc.lower()
+                if lower_desc.startswith("услуг") or "service" in lower_desc:
+                    mapped.append("за услуги")
+                else:
+                    mapped.append(desc)
+            parts: List[str] = ["счёт"]
+            parts.extend(mapped[:2])
+            if company and company not in parts:
+                parts.append(company)
+            return build_phrase(parts)
+
+        if cooperation:
+            parts = [cooperation]
+            if company:
+                parts.extend(["с", company])
+            return build_phrase(parts)
+
+        essence_keywords = self._keywords(subject)
+        if company and company.lower() not in {w.lower() for w in essence_keywords}:
+            essence_keywords.append(company)
+        if essence_keywords:
+            return build_phrase(essence_keywords)
+
+        return fallback
 
     @staticmethod
     def _has_deadline(text: str, today, tomorrow) -> bool:

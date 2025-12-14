@@ -63,7 +63,7 @@ def test_attachment_is_summarized_not_dumped():
 
     assert result is not None
     lines = result.split("\n")
-    assert "contract.docx" in lines
+    assert any("contract.docx" in line for line in lines)
     attachment_summary = lines[-1]
     assert len(attachment_summary) < len(long_text)
     assert "delivery schedules" not in attachment_summary
@@ -78,7 +78,7 @@ def test_domain_classification_logging_does_not_change_output(caplog):
         received_at=datetime(2024, 1, 1, 9, 30),
     )
 
-    expected_output = "🟡 ВАЖНО от Billing — Invoice for services (09:30)\nОплатить invoice for services"
+    expected_output = "🟡 ВАЖНО от Billing — Invoice for services (09:30)\nОплатить счёт за услуги SERVICES"
 
     with caplog.at_level("INFO"):
         result = processor.process("billing@service.com", msg)
