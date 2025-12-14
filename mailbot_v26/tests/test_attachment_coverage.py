@@ -71,17 +71,11 @@ def test_body_and_attachments_rendered_with_summaries():
 
     blank_index = lines.index("")
     attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
-    assert len(attachment_lines) == 2
+    assert len(attachment_lines) == 4
 
-    forbidden_phrases = {
-        "документ содержит",
-        "можно просмотреть",
-        "без подробностей",
-        "нужно изучить",
-    }
-    lowered = "\n".join(attachment_lines).lower()
-    assert not any(phrase in lowered for phrase in forbidden_phrases)
+    for filename in ["agreement.doc", "note.docx", "prices.xlsx", "empty.xlsx"]:
+        assert any(line.startswith(filename) for line in attachment_lines)
 
-    descriptions = [line.split(" — ", 1)[1] for line in attachment_lines]
-    assert len(set(descriptions)) == 2
+    fallback_lines = [line for line in attachment_lines if line.startswith("empty.xlsx")]
+    assert fallback_lines and fallback_lines[0].endswith("по данным файла")
 

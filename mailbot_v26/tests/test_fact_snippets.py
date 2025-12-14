@@ -59,21 +59,20 @@ def test_no_generic_filler_produced():
     assert "новый документ" not in combined.lower()
 
 
-def test_attachments_without_snippet_are_not_rendered():
+def test_attachments_without_snippet_use_fallback():
     processor = _processor()
     msg = InboundMessage(
         subject="Пустое вложение",
         sender="user@example.com",
         body="Сообщение без фактов",
-        attachments=[Attachment(filename="blank.pdf", content=b"", content_type="application/pdf", text="")],
+        attachments=[Attachment(filename="blank.pdf", content=b"data", content_type="application/pdf", text="")],
         received_at=datetime(2024, 1, 1, 9, 0),
     )
 
     result = processor.process("user@example.com", msg)
 
     assert result is not None
-    assert "blank.pdf" not in result
-    assert "новый документ" not in result.lower()
+    assert "blank.pdf — по данным файла" in result
 
 
 __all__ = []

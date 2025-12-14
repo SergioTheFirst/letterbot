@@ -16,6 +16,10 @@ from mailbot_v26.domain.fact_snippets import (
     pick_attachment_fact,
     pick_email_body_fact,
 )
+from mailbot_v26.domain.signal_compressor import (
+    compress_attachment_fact,
+    compress_body_fact,
+)
 from mailbot_v26.text import clean_email_body, sanitize_text
 
 
@@ -37,6 +41,7 @@ class AttachmentSummary:
     kind: str
     priority: int
     text_length: int = 0
+    size_bytes: int = 0
 
 
 @dataclass
@@ -142,28 +147,31 @@ class MessageProcessor:
         line2 = self._build_line2(verb, subject_clean, body_clean, domain, message.attachments or [])
 
         base_lines = self._enforce_length([line1, line2])
-        attachments = self._build_attachment_summaries(message.attachments or [], subject_clean)
-        telegram_message = self._compose(base_lines, attachments, body_summary)
+        attachments, extra_attachments = self._build_attachment_summaries(
+            message.attachments or [], subject_clean
+        )
+        telegram_message = self._compose(base_lines, attachments, body_summary, extra_attachments)
 
         combined_preview = "\n".join(
             base_lines
             + ([body_summary] if body_summary else [])
             + [att.description for att in attachments]
+            + ([f"ещё {extra_attachments} вложений"] if extra_attachments else [])
         )
         if not self._has_primary_signal(combined_preview):
             priority = "BLUE"
             line1 = self._build_line1(priority, sender_clean, subject_clean, message.received_at)
             base_lines = self._enforce_length([line1, line2])
-            telegram_message = self._compose(base_lines, attachments, body_summary)
+            telegram_message = self._compose(base_lines, attachments, body_summary, extra_attachments)
 
         if not self._passes_quality_gates(base_lines, priority, verb, domain, mail_type):
             fallback_lines = self._fallback_lines(sender_clean, subject_clean, verb)
             base_lines = self._enforce_length(fallback_lines)
-            telegram_message = self._compose(base_lines, attachments, body_summary)
+            telegram_message = self._compose(base_lines, attachments, body_summary, extra_attachments)
 
         if not self._passes_quality_gates(base_lines, priority, verb, domain, mail_type):
             minimal = self._enforce_length(self._fallback_lines(sender_clean, "Сообщение", verb), hard_trim=True)
-            telegram_message = self._compose(minimal, [], body_summary)
+            telegram_message = self._compose(minimal, [], body_summary, 0)
 
         return telegram_message
 
@@ -223,6 +231,7 @@ class MessageProcessor:
 
     def _summarize_email_body(self, body_text: str) -> str:
         snippet = pick_email_body_fact(body_text or "")
+        snippet = compress_body_fact(snippet or "")
         return snippet or ""
 
     def _select_verb(self, facts, body: str, domain: str, mail_type: str) -> str:
@@ -267,15 +276,19 @@ class MessageProcessor:
 
     def _build_attachment_summaries(
         self, attachments: List[Attachment], subject: str
-    ) -> List[AttachmentSummary]:
+    ) -> tuple[List[AttachmentSummary], int]:
         usable: list[AttachmentSummary] = []
         for att in attachments:
             kind = self._detect_attachment_kind(att.filename, att.content_type)
             if kind == "IMAGE":
                 continue
-            summary, text_length = self._summarize_attachment(att, subject, kind)
+            try:
+                summary, text_length = self._summarize_attachment(att, subject, kind)
+            except Exception:
+                logger.warning("Failed to summarize attachment: %s", att.filename, exc_info=True)
+                summary, text_length = "", 0
             if not summary:
-                continue
+                summary = "по данным файла"
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
             usable.append(
                 AttachmentSummary(
@@ -284,16 +297,18 @@ class MessageProcessor:
                     kind=kind,
                     priority=priority_rank,
                     text_length=text_length,
+                    size_bytes=len(att.content or b""),
                 )
             )
 
         usable.sort(key=lambda item: item.priority)
         deduped: list[AttachmentSummary] = []
-        index_by_filename: dict[str, int] = {}
+        index_by_filename_size: dict[tuple[str, int], int] = {}
         for item in usable:
             filename_key = (item.filename or "").strip().lower()
-            if filename_key in index_by_filename:
-                existing_index = index_by_filename[filename_key]
+            dedupe_key = (filename_key, item.size_bytes)
+            if dedupe_key in index_by_filename_size:
+                existing_index = index_by_filename_size[dedupe_key]
                 existing = deduped[existing_index]
                 if item.text_length > existing.text_length or (
                     item.text_length == existing.text_length
@@ -301,9 +316,11 @@ class MessageProcessor:
                 ):
                     deduped[existing_index] = item
                 continue
-            index_by_filename[filename_key] = len(deduped)
+            index_by_filename_size[dedupe_key] = len(deduped)
             deduped.append(item)
-        return deduped[: self._MAX_ATTACHMENTS]
+        more_count = max(len(deduped) - self._MAX_ATTACHMENTS, 0)
+        capped = deduped[: self._MAX_ATTACHMENTS]
+        return capped, more_count
 
     def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> tuple[str, int]:
         filename = self._purge_markup_tokens(att.filename or "Вложение")
@@ -314,24 +331,34 @@ class MessageProcessor:
         doc_type = self._classify_attachment_type(filename, kind, att_text)
         summary = pick_attachment_fact(att_text, filename, doc_type)
 
+        summary = compress_attachment_fact(summary or "", doc_type)
+
         return summary or "", text_length
 
     def _compose(
-        self, base_lines: List[str], attachments: List[AttachmentSummary], body_summary: str = ""
+        self,
+        base_lines: List[str],
+        attachments: List[AttachmentSummary],
+        body_summary: str = "",
+        extra_attachments: int = 0,
     ) -> str:
-        rendered_attachments = self._render_attachments(attachments)
+        rendered_attachments = self._render_attachments(attachments, extra_attachments)
         summary_lines = [body_summary.strip()] if body_summary.strip() else []
         parts = base_lines + summary_lines + rendered_attachments
         return "\n".join(parts).strip()
 
-    def _render_attachments(self, attachments: List[AttachmentSummary]) -> List[str]:
+    def _render_attachments(
+        self, attachments: List[AttachmentSummary], extra_attachments: int = 0
+    ) -> List[str]:
         if not attachments:
-            return []
+            return [] if not extra_attachments else ["", f"ещё {extra_attachments} вложений"]
 
         lines: List[str] = [""]
         for attachment in attachments:
             clean_description = " ".join((attachment.description or "").split())
             lines.append(f"{attachment.filename} — {clean_description}")
+        if extra_attachments:
+            lines.append(f"ещё {extra_attachments} вложений")
         return lines
 
     def _remove_subject_terms(self, summary: str, subject: str) -> str:
