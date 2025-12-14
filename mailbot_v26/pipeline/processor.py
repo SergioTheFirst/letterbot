@@ -25,6 +25,14 @@ class Attachment:
 
 
 @dataclass
+class AttachmentSummary:
+    filename: str
+    description: str
+    kind: str
+    priority: int
+
+
+@dataclass
 class InboundMessage:
     subject: str
     body: str
@@ -125,7 +133,7 @@ class MessageProcessor:
         line2 = self._build_line2(verb, subject_clean, body_clean, domain, message.attachments or [])
 
         base_lines = self._enforce_length([line1, line2])
-        attachments = self._build_attachments(message.attachments or [], subject_clean)
+        attachments = self._build_attachment_summaries(message.attachments or [], subject_clean)
         telegram_message = self._compose(base_lines, attachments)
 
         if not self._passes_quality_gates(base_lines, priority, verb, domain, mail_type):
@@ -233,8 +241,10 @@ class MessageProcessor:
         essence_words = filtered[: max(2, min(max_words, len(filtered)))]
         return " ".join(essence_words)
 
-    def _build_attachments(self, attachments: List[Attachment], subject: str) -> List[str]:
-        usable: list[tuple[int, str, str]] = []
+    def _build_attachment_summaries(
+        self, attachments: List[Attachment], subject: str
+    ) -> List[AttachmentSummary]:
+        usable: list[AttachmentSummary] = []
         for att in attachments:
             kind = self._detect_attachment_kind(att.filename, att.content_type)
             if kind == "IMAGE":
@@ -243,15 +253,25 @@ class MessageProcessor:
             if not summary:
                 continue
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
-            usable.append((priority_rank, att.filename or "Вложение", summary))
+            usable.append(
+                AttachmentSummary(
+                    filename=att.filename or "Вложение",
+                    description=summary,
+                    kind=kind,
+                    priority=priority_rank,
+                )
+            )
 
-        usable.sort(key=lambda item: item[0])
-        blocks: List[str] = []
-        if usable:
-            blocks.append("")
-        for _, filename, summary in usable[:3]:
-            blocks.append(f"{filename} — {summary}")
-        return blocks
+        usable.sort(key=lambda item: item.priority)
+        deduped: list[AttachmentSummary] = []
+        seen: set[str] = set()
+        for item in usable:
+            filename_key = (item.filename or "").strip().lower()
+            if filename_key in seen:
+                continue
+            seen.add(filename_key)
+            deduped.append(item)
+        return deduped[:3]
 
     def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> str | None:
         filename = self._purge_markup_tokens(att.filename or "Вложение")
@@ -265,8 +285,19 @@ class MessageProcessor:
             return None
         return summary
 
-    def _compose(self, base_lines: List[str], attachments: List[str]) -> str:
-        return "\n".join(base_lines + attachments).strip()
+    def _compose(self, base_lines: List[str], attachments: List[AttachmentSummary]) -> str:
+        rendered_attachments = self._render_attachments(attachments)
+        return "\n".join(base_lines + rendered_attachments).strip()
+
+    def _render_attachments(self, attachments: List[AttachmentSummary]) -> List[str]:
+        if not attachments:
+            return []
+
+        lines: List[str] = [""]
+        for attachment in attachments:
+            clean_description = " ".join((attachment.description or "").split())
+            lines.append(f"{attachment.filename} — {clean_description}")
+        return lines
 
     def _passes_quality_gates(self, base_lines: List[str], priority: str, verb: str, domain: str, mail_type: str) -> bool:
         if len(base_lines) != 2 or any(not ln.strip() for ln in base_lines):
@@ -555,4 +586,4 @@ class MessageProcessor:
         return candidates[0] if candidates else None
 
 
-__all__ = ["Attachment", "InboundMessage", "MessageProcessor"]
+__all__ = ["Attachment", "AttachmentSummary", "InboundMessage", "MessageProcessor"]

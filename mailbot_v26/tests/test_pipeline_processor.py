@@ -97,6 +97,59 @@ def test_output_has_two_mandatory_lines():
     assert mandatory[1].split()[0] in MessageProcessor._VERB_ORDER
 
 
+def test_no_duplicate_attachment_names():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Отчеты и договор",
+        sender="ops@example.com",
+        body=(
+            "Проверьте отчеты во вложении и обновленную версию договора, "
+            "нужно подтвердить изменения."
+        ),
+        attachments=[
+            Attachment(
+                filename="report.pdf",
+                content=b"",
+                content_type="application/pdf",
+                text="""
+                Отчет по продажам за месяц включает показатели по регионам,
+                динамику и ключевые выводы менеджмента для анализа.
+                """,
+            ),
+            Attachment(
+                filename="report.pdf",
+                content=b"",
+                content_type="application/pdf",
+                text="""
+                Дублирующий отчет с корректировками, содержит уточненные числа
+                и обновленные итоговые данные по продажам.
+                """,
+            ),
+            Attachment(
+                filename="contract.docx",
+                content=b"",
+                content_type="application/msword",
+                text="""
+                Договор на поставку оборудования с описанием обязательств,
+                сроков поставки и условий оплаты по контракту.
+                """,
+            ),
+        ],
+        received_at=datetime(2024, 7, 7, 15, 0),
+    )
+
+    result = processor.process("user@example.com", msg)
+    assert result is not None
+    lines = [line for line in result.split("\n") if line.strip()]
+    attachment_lines = lines[2:]
+
+    assert len(attachment_lines) == 2
+    assert all(" — " in line for line in attachment_lines)
+
+    filenames = [line.split(" — ")[0] for line in attachment_lines]
+    assert len(filenames) == len(set(filenames))
+
+
 def test_domain_priority_suggestion_does_not_change_priority(caplog):
     processor = _processor()
     msg = InboundMessage(
