@@ -150,6 +150,46 @@ def test_no_duplicate_attachment_names():
     assert len(filenames) == len(set(filenames))
 
 
+def test_all_non_image_attachments_are_rendered():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Пакет документов и таблиц",
+        sender="ops@example.com",
+        body="Высылаем комплект файлов",
+        attachments=[
+            Attachment(filename="contract.doc", content=b"", content_type="application/msword", text=""),
+            Attachment(filename="note.docx", content=b"", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", text="Короткая заметка"),
+            Attachment(filename="prices.xlsx", content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text=""),
+            Attachment(filename="report.xlsx", content=b"", content_type="application/vnd.ms-excel", text=""),
+        ],
+        received_at=datetime(2024, 8, 8, 16, 0),
+    )
+
+    result = processor.process("user@example.com", msg)
+    assert result is not None
+
+    lines = result.split("\n")
+    assert len(lines) >= 6
+    assert lines[0].strip()
+    assert lines[1].strip()
+    assert lines[2] == ""
+
+    attachment_lines = lines[3:7]
+    assert len([ln for ln in attachment_lines if ln.strip()]) == 4
+
+    filenames = [line.split(" — ")[0] for line in attachment_lines]
+    assert len(filenames) == len(set(filenames))
+
+    forbidden_phrases = [
+        "нужно изучить",
+        "можно просмотреть",
+        "содержит информацию",
+        "без подробностей",
+    ]
+    lowered = "\n".join(attachment_lines).lower()
+    assert not any(phrase in lowered for phrase in forbidden_phrases)
+
+
 def test_domain_priority_suggestion_does_not_change_priority(caplog):
     processor = _processor()
     msg = InboundMessage(
