@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -9,6 +10,9 @@ from mailbot_v26.bot_core.action_engine import analyze_action
 from mailbot_v26.domain.domain_classifier import DomainClassifier, MailTypeClassifier
 from mailbot_v26.domain.domain_policies import DOMAIN_POLICIES
 from mailbot_v26.text import clean_email_body, sanitize_text
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -107,6 +111,7 @@ class MessageProcessor:
         sender_clean = self._normalize_source(message.sender or account_login)
 
         domain = DomainClassifier.classify(message.sender, sender_clean, subject_clean)
+        logger.info("Domain detected: %s", domain)
         mail_type = MailTypeClassifier.classify(subject_clean, body_clean, message.attachments or [], domain)
 
         action_facts = analyze_action(" ".join([subject_clean, body_clean]))

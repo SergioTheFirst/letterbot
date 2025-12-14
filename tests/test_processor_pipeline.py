@@ -1,3 +1,4 @@
+from datetime import datetime
 from types import SimpleNamespace
 
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
@@ -66,3 +67,21 @@ def test_attachment_is_summarized_not_dumped():
     attachment_summary = lines[-1]
     assert len(attachment_summary) < len(long_text)
     assert "delivery schedules" not in attachment_summary
+
+
+def test_domain_classification_logging_does_not_change_output(caplog):
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Invoice for services",
+        body="Please pay invoice 123 by 12.12. Funds appreciated.",
+        sender="billing@service.com",
+        received_at=datetime(2024, 1, 1, 9, 30),
+    )
+
+    expected_output = "🟡 ВАЖНО от Billing — Invoice for services (09:30)\nОплатить invoice for services"
+
+    with caplog.at_level("INFO"):
+        result = processor.process("billing@service.com", msg)
+
+    assert result == expected_output
+    assert "Domain detected: INVOICE" in caplog.text
