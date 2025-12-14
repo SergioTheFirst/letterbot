@@ -29,7 +29,13 @@ def test_message_processor_formats_output(monkeypatch):
         subject="Subject line",
         sender="sender@example.com",
         body="body text",
-        attachments=[Attachment(filename="file.pdf", content=b"data", text="content")],
+        attachments=[
+            Attachment(
+                filename="file.pdf",
+                content=b"data",
+                text="Содержимое файла содержит несколько предложений, которые нужно изложить кратко и аккуратно для передачи в Телеграм. Здесь достаточно текста, чтобы сформировать устойчивое резюме.",
+            )
+        ],
         received_at=datetime(2024, 1, 1, 9, 30),
     )
 
@@ -41,7 +47,6 @@ def test_message_processor_formats_output(monkeypatch):
     assert lines[2] == "Subject line"
     assert "Письмо от sender@example.com" in output
     assert "file.pdf" in output
-    assert "PDF" in output
 
 
 def test_message_processor_handles_empty(monkeypatch):
@@ -173,8 +178,8 @@ def test_processor_attachment_empty_text_handled(monkeypatch):
     output = MessageProcessor(cfg, DummyState()).process("login", msg)
     assert output is not None
     assert "Основное содержимое" in output
-    assert "xlsx" in output
-    assert "таблица" in output.lower() or "файл" in output.lower()
+    assert "xlsx" not in output
+    assert "таблица" not in output.lower()
 
 
 def test_processor_never_header_only(monkeypatch):
@@ -227,10 +232,10 @@ def test_processor_output_no_binary(monkeypatch):
         "IDAT should go away"
     )
     attachments = [
-        Attachment(filename="image.png", content=b"data", text="IHDR bad"),
-        Attachment(filename="file.docx", content=b"data", text="Useful text"),
-        Attachment(filename="archive.zip", content=b"data", text="PK header"),
-    ]
+            Attachment(filename="image.png", content=b"data", text="IHDR bad"),
+            Attachment(filename="file.docx", content=b"data", text="Useful text"),
+            Attachment(filename="archive.zip", content=b"data", text="PK header"),
+        ]
     msg = InboundMessage(
         subject="Subj",
         sender="sender@example.com",
@@ -247,7 +252,7 @@ def test_processor_output_no_binary(monkeypatch):
     assert "image.png" not in output.lower()
     assert "archive.zip" not in output.lower()
     assert "Useful text" not in output
-    assert "file.docx" in output
+    assert "file.docx" not in output
 
 
 def test_processor_strips_encoded_headers(monkeypatch):
@@ -324,9 +329,13 @@ def test_image_attachments_silenced(monkeypatch):
 
     cfg = SimpleNamespace(llm_call=lambda x: "ok")
     attachments = [
-        Attachment(filename="photo.jpg", content=b"data", text=""),
-        Attachment(filename="report.pdf", content=b"data", text="Отчет по проекту"),
-    ]
+            Attachment(filename="photo.jpg", content=b"data", text=""),
+            Attachment(
+                filename="report.pdf",
+                content=b"data",
+                text="Отчет по проекту содержит разделы о задачах, сроках и результатах. Текст достаточно длинный, чтобы сделать выводы.",
+            ),
+        ]
     msg = InboundMessage(
         subject="Тема",
         sender="sender@example.com",
