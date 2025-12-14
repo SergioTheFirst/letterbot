@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import io
+import logging
 import zipfile
 from xml.etree import ElementTree as ET
 
 
+logger = logging.getLogger(__name__)
 XL_MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
 
@@ -12,6 +14,11 @@ def _safe_text(value: str | None) -> str:
     if not value:
         return ""
     return " ".join(value.split())
+
+
+def _normalize_text(value: str) -> str:
+    normalized = (value or "").encode("utf-8", "ignore").decode("utf-8", "ignore")
+    return normalized.strip()
 
 
 def _load_pandas():
@@ -81,18 +88,20 @@ def _extract_cells(zf: zipfile.ZipFile, shared_strings: list[str]) -> list[str]:
     return rows
 
 
-def _extract_via_zip(file_bytes: bytes) -> str:
+def _extract_via_zip(file_bytes: bytes) -> list[str]:
     try:
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
             shared_strings = _extract_shared_strings(zf)
             rows = _extract_cells(zf, shared_strings)
     except Exception:
-        return ""
+        return []
 
-    if not rows:
-        return ""
+    return rows
 
-    return "\n".join(rows)
+
+def _limit_rows(rows: list[str], max_rows: int = 10) -> list[str]:
+    preview = [row for row in rows if row and row.strip()]
+    return preview[:max_rows]
 
 
 def extract_excel(file_bytes: bytes, filename: str) -> str:
@@ -101,19 +110,31 @@ def extract_excel(file_bytes: bytes, filename: str) -> str:
     if not name.endswith((".xls", ".xlsx")):
         return ""
 
-    zip_text = _extract_via_zip(file_bytes)
-    if zip_text.strip():
-        return zip_text
+    zip_rows = _extract_via_zip(file_bytes)
+    limited_rows = _limit_rows(zip_rows)
+    if limited_rows:
+        text = _normalize_text("\n".join(limited_rows))
+        logger.debug("Extracted %d chars from %s", len(text), filename)
+        return text
 
     pandas = _load_pandas()
     if pandas is None:
+        logger.debug("Extracted 0 chars from %s", filename)
         return ""
 
     try:
         df = pandas.read_excel(io.BytesIO(file_bytes), engine="openpyxl")
-        return df.to_string(index=False, header=True)
+        df = df.dropna(how="all")
+        preview = df.head(10)
+        if preview.empty:
+            logger.debug("Extracted 0 chars from %s", filename)
+            return ""
+        text = _normalize_text(preview.to_string(index=False, header=True))
+        logger.debug("Extracted %d chars from %s", len(text), filename)
+        return text
     except Exception:
+        logger.debug("Extracted 0 chars from %s", filename)
         return ""
 
-
+    
 extract_excel_text = extract_excel

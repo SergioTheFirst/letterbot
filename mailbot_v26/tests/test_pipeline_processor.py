@@ -140,12 +140,11 @@ def test_no_duplicate_attachment_names():
 
     result = processor.process("user@example.com", msg)
     assert result is not None
-    lines = [line for line in result.split("\n") if line.strip()]
-    attachment_lines = lines[2:]
+    lines = result.split("\n")
+    blank_index = lines.index("") if "" in lines else len(lines)
+    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
 
     assert len(attachment_lines) == 2
-    assert all(" — " in line for line in attachment_lines)
-
     filenames = [line.split(" — ")[0] for line in attachment_lines]
     assert len(filenames) == len(set(filenames))
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -120,6 +121,7 @@ class MessageProcessor:
         body_clean = sanitize_text(body_clean, max_len=6000)
         subject_clean = sanitize_text((message.subject or "").strip() or "Без темы", max_len=200)
         sender_clean = self._normalize_source(message.sender or account_login)
+        body_summary = self._summarize_email_body(body_clean)
 
         domain = DomainClassifier.classify(message.sender, sender_clean, subject_clean)
         logger.info("Domain detected: %s", domain)
@@ -136,16 +138,16 @@ class MessageProcessor:
 
         base_lines = self._enforce_length([line1, line2])
         attachments = self._build_attachment_summaries(message.attachments or [], subject_clean)
-        telegram_message = self._compose(base_lines, attachments)
+        telegram_message = self._compose(base_lines, attachments, body_summary)
 
         if not self._passes_quality_gates(base_lines, priority, verb, domain, mail_type):
             fallback_lines = self._fallback_lines(sender_clean, subject_clean, verb)
             base_lines = self._enforce_length(fallback_lines)
-            telegram_message = self._compose(base_lines, attachments)
+            telegram_message = self._compose(base_lines, attachments, body_summary)
 
         if not self._passes_quality_gates(base_lines, priority, verb, domain, mail_type):
             minimal = self._enforce_length(self._fallback_lines(sender_clean, "Сообщение", verb), hard_trim=True)
-            telegram_message = self._compose(minimal, [])
+            telegram_message = self._compose(minimal, [], body_summary)
 
         return telegram_message
 
@@ -202,6 +204,33 @@ class MessageProcessor:
         self, verb: str, subject: str, body: str, domain: str, attachments: List[Attachment]
     ) -> str:
         return self._normalize_action_subject(verb, subject, domain, attachments, body)
+
+    def _summarize_email_body(self, body_text: str) -> str:
+        if not body_text or len(body_text.strip()) < 40:
+            return ""
+
+        cleaned_body = re.sub(r"(^|\n)>.*", " ", body_text)
+        cleaned_body = re.sub(r"-{2,}.*?\n", " ", cleaned_body)
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", cleaned_body) if p.strip()]
+
+        greetings = {"добрый день", "добрый вечер", "здравствуйте", "привет"}
+        signatures = {"с уважением", "best regards", "kind regards"}
+
+        def is_noise(paragraph: str) -> bool:
+            lowered = paragraph.lower()
+            return any(lowered.startswith(greet) for greet in greetings) or any(
+                lowered.startswith(sign) for sign in signatures
+            )
+
+        meaningful = next((p for p in paragraphs if not is_noise(p)), "")
+        if not meaningful:
+            return ""
+
+        meaningful = re.sub(r"(^|\n)>.*", " ", meaningful)
+        meaningful = re.sub(r"\s+", " ", meaningful).strip()
+        words = meaningful.split()
+        trimmed = " ".join(words[:20])
+        return trimmed
 
     def _select_verb(self, facts, body: str, domain: str, mail_type: str) -> str:
         defaults = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
@@ -285,19 +314,41 @@ class MessageProcessor:
         filename = self._purge_markup_tokens(att.filename or "Вложение")
         att_text = self._strip_markup(sanitize_text(att.text or "", max_len=1500))
         text_length = len(att_text)
-        if not att_text or len(att_text) < 40:
-            summary = self._fallback_short_summary(filename, subject, kind, att_text)
-            return summary, text_length
 
-        summary = self._attachment_fallback_summary(att_text, subject, filename, kind)
-        summary = self._remove_subject_terms(summary, subject)
-        summary = self._limit_sentences(self._ensure_sentence(summary), 2)
-        cleaned = summary.strip() or self._fallback_short_summary(filename, subject, kind, att_text)
+        doc_type = self._classify_attachment_type(filename, kind, att_text)
+        type_label = {
+            "CONTRACT": "договор",
+            "PRICE": "прайс-лист",
+            "INVOICE": "счет/инвойс",
+            "TABLE": "таблица",
+            "OTHER": "документ",
+        }.get(doc_type, "документ")
+
+        if text_length >= 80:
+            subject_phrase = self._attachment_subject(att_text, filename)
+            key_nouns = self._key_nouns(att_text)
+            fact = self._first_fact(att_text)
+            fact_parts = []
+            if key_nouns:
+                fact_parts.append(" ".join(key_nouns))
+            if fact:
+                fact_parts.append(fact)
+            facts = ", ".join(fact_parts)
+            summary_core = f"{type_label}: {subject_phrase}"
+            summary = f"{summary_core}, {facts}" if facts else summary_core
+        else:
+            summary = f"{type_label}: суть по названию файла"
+
+        cleaned = summary.strip()
         return cleaned, text_length
 
-    def _compose(self, base_lines: List[str], attachments: List[AttachmentSummary]) -> str:
+    def _compose(
+        self, base_lines: List[str], attachments: List[AttachmentSummary], body_summary: str = ""
+    ) -> str:
         rendered_attachments = self._render_attachments(attachments)
-        return "\n".join(base_lines + rendered_attachments).strip()
+        summary_lines = [body_summary.strip()] if body_summary.strip() else []
+        parts = base_lines + summary_lines + rendered_attachments
+        return "\n".join(parts).strip()
 
     def _render_attachments(self, attachments: List[AttachmentSummary]) -> List[str]:
         if not attachments:
@@ -319,6 +370,54 @@ class MessageProcessor:
             cleaned_tokens.append(token)
         cleaned = " ".join(cleaned_tokens).strip()
         return cleaned or summary
+
+    def _classify_attachment_type(self, filename: str, kind: str, att_text: str) -> str:
+        combined = f"{filename} {att_text}".lower()
+        if any(token in combined for token in {"прайс", "прайс-лист", "price"}):
+            return "PRICE"
+        if any(token in combined for token in {"счет", "счёт", "invoice", "оплат"}):
+            return "INVOICE"
+        if any(token in combined for token in {"договор", "контракт", "соглашение"}):
+            return "CONTRACT"
+        if kind == "EXCEL":
+            return "TABLE"
+        if kind == "CONTRACT":
+            return "CONTRACT"
+        return "OTHER"
+
+    def _attachment_subject(self, att_text: str, filename: str) -> str:
+        key_terms = self._key_nouns(att_text)
+        if key_terms:
+            return " ".join(key_terms[:3])
+        sentences = [s.strip() for s in re.split(r"[.!?]\s+", att_text) if s.strip()]
+        first_sentence = sentences[0] if sentences else ""
+        if not first_sentence:
+            keywords = self._keywords(filename)
+            return " ".join(keywords[:3]) or "основные данные"
+        words = first_sentence.split()
+        trimmed = " ".join(words[:8]).strip()
+        return trimmed or "основные данные"
+
+    def _key_nouns(self, att_text: str) -> list[str]:
+        words = re.findall(r"[\w-]{4,}", att_text.lower())
+        filtered = [w for w in words if w not in self._STOPWORDS and not w.isdigit()]
+        counts = Counter(filtered)
+        ordered: list[str] = []
+        for word in filtered:
+            if word in ordered:
+                continue
+            ordered.append(word)
+        ordered.sort(key=lambda w: (-counts[w], filtered.index(w)))
+        return ordered[:5]
+
+    def _first_fact(self, att_text: str) -> str:
+        date_match = re.search(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b", att_text)
+        if date_match:
+            return date_match.group(0)
+        number_match = re.search(r"\b\d+[\d.,]*\b", att_text)
+        if number_match:
+            return number_match.group(0)
+        return ""
 
     def _fallback_short_summary(self, filename: str, subject: str, kind: str, att_text: str) -> str:
         base_name = filename or "Вложение"
