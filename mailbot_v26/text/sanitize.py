@@ -10,12 +10,15 @@ BINARY_MARKERS = (
     "pk",
     "content_types",
     "=?koi8",
+    "=?utf-",
+    "=?windows-",
     "base64",
     "image/png",
     "zip",
 )
 
 BASE64_RUN = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
+ENCODED_HEADER = re.compile(r"=\?.+\?[bqBQ]\?.+\?=")
 
 
 def _to_str(text: Any) -> str:
@@ -44,7 +47,7 @@ def is_binaryish(text: str) -> bool:
     if any(marker in lowered for marker in BINARY_MARKERS):
         return True
 
-    if BASE64_RUN.search(data):
+    if BASE64_RUN.search(data) or ENCODED_HEADER.search(data):
         return True
 
     non_printable = sum(1 for ch in data if not (ch.isprintable() or ch in "\n\r\t"))
