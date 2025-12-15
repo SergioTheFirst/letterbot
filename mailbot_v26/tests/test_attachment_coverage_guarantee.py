@@ -23,10 +23,9 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
     processor = _processor()
 
     outcomes: list[object] = [
+        Exception("boom"),
         ("", 0),
         ("Короткий текст", 5),
-        ("Код; Наименование", 8),
-        Exception("boom"),
     ]
 
     def fake_summarize(self, att, subject, kind):
@@ -76,9 +75,13 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
     blank_index = lines.index("") if "" in lines else len(lines)
     attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
 
-    assert len(attachment_lines) == 4
+    attachment_entries = [line for line in attachment_lines if not line.startswith("ещё ")]
+    total_non_image = 4
+    expected_count = min(total_non_image, processor._MAX_ATTACHMENTS)
+
+    assert len(attachment_entries) == expected_count
     expected = {"a.doc", "b.docx", "c.xlsx"}
-    rendered_files = {line.split(" — ")[0] for line in attachment_lines if " — " in line}
+    rendered_files = {line.split(" — ")[0] for line in attachment_entries if " — " in line}
     assert expected == rendered_files
 
     assert attachment_lines[-1] == "ещё 1 вложений"
