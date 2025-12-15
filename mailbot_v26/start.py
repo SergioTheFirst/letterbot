@@ -10,17 +10,21 @@ from email.message import Message as EmailMessage
 from pathlib import Path
 from typing import List
 
-from mailbot_v26.bot_core.extractors.doc import extract_docx_text
-from mailbot_v26.bot_core.extractors.excel import extract_excel_text
-from mailbot_v26.bot_core.extractors.pdf import extract_pdf_text
-from mailbot_v26.config_loader import BotConfig, load_config
-from mailbot_v26.imap_client import ResilientIMAP
-from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
-from mailbot_v26.state_manager import StateManager
-from mailbot_v26.text.sanitize import sanitize_text
-from mailbot_v26.worker.telegram_sender import send_telegram
-
 CURRENT_DIR = Path(__file__).resolve().parent
+# Добавляем родительскую папку в путь для импортов
+sys.path.insert(0, str(CURRENT_DIR))
+sys.path.insert(0, str(CURRENT_DIR.parent))
+
+from bot_core.extractors.doc import extract_docx_text
+from bot_core.extractors.excel import extract_excel_text
+from bot_core.extractors.pdf import extract_pdf_text
+from config_loader import BotConfig, load_config
+from imap_client import ResilientIMAP
+from pipeline.processor import Attachment, InboundMessage, MessageProcessor
+from state_manager import StateManager
+from text.sanitize import sanitize_text
+from worker.telegram_sender import send_telegram
+
 LOG_PATH = CURRENT_DIR / "mailbot.log"
 
 
@@ -44,9 +48,6 @@ def _configure_logging() -> None:
 
 _configure_logging()
 logger = logging.getLogger("mailbot")
-
-# Добавляем родительскую папку в путь для импортов
-sys.path.insert(0, str(CURRENT_DIR.parent))
 
 
 def _decode_subject(email_obj: EmailMessage) -> str:
