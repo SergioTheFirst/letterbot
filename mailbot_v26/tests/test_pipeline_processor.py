@@ -28,7 +28,7 @@ def test_bank_invoice_marked_red():
     result = processor.process("robot@example.com", msg)
     assert result is not None
     first_line = result.split("\n")[0]
-    assert first_line.startswith("🔴 СРОЧНО")
+    assert first_line.startswith("🔴 от")
 
 
 def test_contract_approval_marked_yellow():
@@ -44,7 +44,7 @@ def test_contract_approval_marked_yellow():
     result = processor.process("user@example.com", msg)
     assert result is not None
     first_line = result.split("\n")[0]
-    assert first_line.startswith("🟡 ВАЖНО")
+    assert first_line.startswith("🟡 от")
 
 
 def test_hr_policy_info_blue():
@@ -60,7 +60,7 @@ def test_hr_policy_info_blue():
     result = processor.process("user@example.com", msg)
     assert result is not None
     first_line = result.split("\n")[0]
-    assert first_line.startswith("🔵 ИНФО")
+    assert first_line.startswith("🔵 от")
 
 
 def test_image_only_email_has_no_attachments():
@@ -194,7 +194,7 @@ def test_domain_priority_suggestion_does_not_change_priority(caplog):
 
     assert result is not None
     first_line = result.split("\n")[0]
-    assert first_line.startswith("🔵 ИНФО")
+    assert first_line.startswith("🔵 от")
     assert any(
         "Domain priority suggestion: MEDIUM" in record.message for record in caplog.records
     )

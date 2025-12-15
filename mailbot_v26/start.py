@@ -1,11 +1,13 @@
 """MailBot Premium v26 - Runtime orchestrator"""
 from __future__ import annotations
 
+import html
 import logging
+import re
 import sys
 import time
+import unicodedata
 from email import message_from_bytes
-from email.header import decode_header, make_header
 from email.message import Message as EmailMessage
 from pathlib import Path
 from typing import List
@@ -22,6 +24,7 @@ from config_loader import BotConfig, load_config
 from imap_client import ResilientIMAP
 from pipeline.processor import Attachment, InboundMessage, MessageProcessor
 from state_manager import StateManager
+from text.mime_utils import decode_bytes, decode_mime_header
 from text.sanitize import sanitize_text
 from worker.telegram_sender import send_telegram
 
@@ -50,35 +53,88 @@ _configure_logging()
 logger = logging.getLogger("mailbot")
 
 
+def _strip_html_content(text: str) -> str:
+    working = re.sub(
+        r"<(head|script|style)[^>]*>.*?</\1>", " ", text, flags=re.IGNORECASE | re.DOTALL
+    )
+    working = re.sub(r"<!--.*?-->", " ", working, flags=re.DOTALL)
+    working = re.sub(
+        r"<(br|p|div|tr|td|th|li|ul|ol|h[1-6])[^>]*>",
+        "\n",
+        working,
+        flags=re.IGNORECASE,
+    )
+    working = re.sub(r"</(p|div|tr|td|th|li|ul|ol|h[1-6])>", "\n", working, flags=re.IGNORECASE)
+    working = re.sub(r"<[^>]+>", " ", working)
+    working = html.unescape(working)
+    working = re.sub(r"[ \t]+", " ", working)
+    working = re.sub(r"(\n\s*){2,}", "\n\n", working)
+    return working.strip()
+
+
+def _normalize_text_content(text: str) -> str:
+    normalized = unicodedata.normalize("NFC", text or "")
+    cleaned = re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]", "", normalized)
+    return cleaned.strip()
+
+
 def _decode_subject(email_obj: EmailMessage) -> str:
     raw_subject = email_obj.get("Subject", "")
-    try:
-        return str(make_header(decode_header(raw_subject)))
-    except Exception:
-        return raw_subject or ""
+    return decode_mime_header(raw_subject)
+
+
+def _decode_from(email_obj: EmailMessage) -> str:
+    raw_from = email_obj.get("From", "")
+    return decode_mime_header(raw_from)
+
+
+def _decode_part_payload(part: EmailMessage) -> str:
+    payload = part.get_payload(decode=True) or b""
+    charset = part.get_content_charset()
+    text = decode_bytes(payload, charset)
+    return _normalize_text_content(text)
 
 
 def _extract_body(email_obj: EmailMessage) -> str:
+    plain_text: str | None = None
+    html_text: str | None = None
+
     if email_obj.is_multipart():
-        parts = []
         for part in email_obj.walk():
             if part.get_content_maintype() == "multipart":
                 continue
             if part.get_content_disposition() == "attachment":
                 continue
-            try:
-                payload = part.get_payload(decode=True) or b""
-                charset = part.get_content_charset() or "utf-8"
-                text = payload.decode(charset, errors="ignore")
-                if text.strip():
-                    parts.append(text.strip())
-            except Exception:
-                continue
-        return "\n".join(parts)
+
+            content_type = (part.get_content_type() or "").lower()
+            if content_type.startswith("text/plain") and plain_text is None:
+                try:
+                    decoded = _decode_part_payload(part)
+                    if decoded:
+                        plain_text = decoded
+                except Exception:
+                    continue
+            elif content_type.startswith("text/html") and html_text is None:
+                try:
+                    decoded = _decode_part_payload(part)
+                    if decoded:
+                        html_text = _strip_html_content(decoded)
+                        html_text = _normalize_text_content(html_text)
+                except Exception:
+                    continue
+
+        if plain_text:
+            return plain_text
+        if html_text:
+            return html_text
+        return ""
+
     try:
-        payload = email_obj.get_payload(decode=True) or b""
-        charset = email_obj.get_content_charset() or "utf-8"
-        return payload.decode(charset, errors="ignore").strip()
+        content_type = (email_obj.get_content_type() or "").lower()
+        decoded = _decode_part_payload(email_obj)
+        if content_type.startswith("text/html"):
+            decoded = _strip_html_content(decoded)
+        return _normalize_text_content(decoded)
     except Exception:
         return ""
 
@@ -135,7 +191,8 @@ def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachmen
     byte_limit = max_mb * 1024 * 1024
     for part in email_obj.walk():
         disposition = part.get_content_disposition()
-        filename = part.get_filename()
+        raw_filename = part.get_filename()
+        filename = decode_mime_header(raw_filename or "") or "attachment.bin"
         if disposition != "attachment" and not filename:
             continue
         try:
@@ -143,7 +200,7 @@ def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachmen
             if byte_limit > 0 and len(payload) > byte_limit:
                 continue
             attachment = Attachment(
-                filename=filename or "attachment.bin",
+                filename=filename,
                 content=payload,
                 content_type=part.get_content_type() or "",
                 text="",
@@ -158,9 +215,12 @@ def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachmen
 def _parse_raw_email(raw_bytes: bytes, config: BotConfig) -> InboundMessage:
     email_obj = message_from_bytes(raw_bytes)
     subject = _decode_subject(email_obj)
+    sender = _decode_from(email_obj)
     body = _extract_body(email_obj)
     attachments = _extract_attachments(email_obj, config.general.max_attachment_mb)
-    return InboundMessage(subject=subject, body=body, attachments=attachments)
+    return InboundMessage(
+        subject=subject, body=body, sender=sender, attachments=attachments
+    )
 
 
 def main(config_dir: Path | None = None) -> None:
@@ -175,16 +235,16 @@ def main(config_dir: Path | None = None) -> None:
         base_config_dir = config_dir or CURRENT_DIR / "config"
         config = load_config(base_config_dir)
         logger.info("Configuration loaded: %d accounts", len(config.accounts))
-        print(f"✅ Loaded {len(config.accounts)} accounts")
+        print(f"[OK] Loaded {len(config.accounts)} accounts")
     except Exception as exc:
         logger.exception("Failed to load configuration")
-        print(f"❌ Configuration error: {exc}")
+        print(f"[ERROR] Configuration error: {exc}")
         time.sleep(10)
         return
 
     state = StateManager(CURRENT_DIR / "state.json")
     processor = MessageProcessor(config=config, state=state)
-    print("✅ Ready to work\n")
+    print("[OK] Ready to work\n")
 
     cycle = 0
     try:
@@ -197,7 +257,7 @@ def main(config_dir: Path | None = None) -> None:
 
             for account in config.accounts:
                 login = account.login or "no_login"
-                print(f"\n📧 Checking: {login}")
+                print(f"\n[MAIL] Checking: {login}")
 
                 try:
                     imap = ResilientIMAP(account, state)
@@ -224,32 +284,32 @@ def main(config_dir: Path | None = None) -> None:
                                     account.telegram_chat_id,
                                     final_text.strip(),
                                 )
-                                status = "✅ sent" if ok else "❌ failed"
+                                status = "[OK] sent" if ok else "[FAIL] failed"
                                 print(f"      │  Telegram: {status}")
                                 logger.info("UID %s: Telegram %s", uid, "OK" if ok else "FAIL")
                             else:
                                 print(f"      │  Result: empty")
 
                         except Exception as e:
-                            print(f"      └─ ❌ ERROR: {e}")
+                            print(f"      └─ [ERROR] {e}")
                             logger.exception("Processing error for UID %s", uid)
 
                     state.save()
 
                 except Exception as e:
-                    print(f"   └─ ❌ IMAP ERROR: {e}")
+                    print(f"   └─ [IMAP ERROR] {e}")
                     logger.exception("IMAP error for %s", login)
 
             state.save()
             delay = max(120, config.general.check_interval)
-            print(f"\n⏳ Sleeping {delay} seconds...")
+            print(f"\n[WAIT] Sleeping {delay} seconds...")
             time.sleep(delay)
 
     except KeyboardInterrupt:
-        print("\n\n🛑 Stopped by user")
+        print("\n\n[STOP] Stopped by user")
         logger.info("Stopped by user")
     except Exception as e:
-        print(f"\n\n💥 CRITICAL ERROR: {e}")
+        print(f"\n\n[CRITICAL] {e}")
         logger.exception("Fatal error")
         time.sleep(10)
 
