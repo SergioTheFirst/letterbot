@@ -283,7 +283,7 @@ class MessageProcessor:
                 continue
             non_image_attachments.append((att, kind))
 
-        usable: list[AttachmentSummary] = []
+        attachments_out: list[AttachmentSummary] = []
         for att, kind in non_image_attachments:
             att_text_raw = sanitize_text(att.text or "", max_len=1500)
             att_text_plain = normalize_text(self._strip_markup(att_text_raw))
@@ -305,7 +305,7 @@ class MessageProcessor:
             description = "" if text_length < 40 else summary
 
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
-            usable.append(
+            attachments_out.append(
                 AttachmentSummary(
                     filename=att.filename or "Вложение",
                     description=description,
@@ -316,26 +316,9 @@ class MessageProcessor:
                 )
             )
 
-        usable.sort(key=lambda item: item.priority)
+        attachments_out.sort(key=lambda item: item.priority)
 
-        deduped: list[AttachmentSummary] = []
-        index_by_filename_size: dict[tuple[str, int], int] = {}
-        for item in usable:
-            filename_key = (item.filename or "").strip().lower()
-            dedupe_key = (filename_key, item.size_bytes)
-            if dedupe_key in index_by_filename_size:
-                existing_index = index_by_filename_size[dedupe_key]
-                existing = deduped[existing_index]
-                if item.text_length > existing.text_length or (
-                    item.text_length == existing.text_length
-                    and len(item.description) > len(existing.description)
-                ):
-                    deduped[existing_index] = item
-                continue
-            index_by_filename_size[dedupe_key] = len(deduped)
-            deduped.append(item)
-
-        return deduped, 0
+        return attachments_out, 0
 
     def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> tuple[str, int]:
         filename = self._purge_markup_tokens(att.filename or "Вложение")
