@@ -1,23 +1,12 @@
-# MailBot Premium v26 Dependencies
-# DLL-free, без внешних .exe, согласовано с Конституцией
+# Существующие
+imapclient
+pypdf
+pikepdf
+requests
 
-# IMAP
-imapclient==2.3.1
-
-# HTTP & LLM
-requests==2.31.0
-python-dateutil==2.8.2
-
-# System Monitoring
-psutil==5.9.6
-
-# Document Extraction (чистый Python, без EXE)
-pypdf==4.0.0          # PDF (текстовые)
-pikepdf==9.0.0        # PDF (сложные/защищённые, без внешних DLL)
-python-docx==1.1.0    # DOCX
-docx2txt==0.8         # DOC (старые)
-pandas==2.0.3         # Excel
-openpyxl==3.1.2       # Движок Excel (read-only)
-
-# OCR (опционально, если хочешь сканы; тянет torch как зависимость, сам torch НЕ импортируем)
-easyocr==1.7.0
+# Добавьте эти для лучшей работы:
+python-docx>=0.8.11
+docx2txt>=0.8
+pandas>=1.5.0
+openpyxl>=3.0.0
+xlrd>=2.0.0
