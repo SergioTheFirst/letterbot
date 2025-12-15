@@ -78,3 +78,51 @@ def test_body_and_attachments_rendered_with_summaries():
 
     assert not any(line.startswith("empty.xlsx") for line in attachment_lines)
 
+
+def test_multiple_attachments_all_processed():
+    processor = _processor()
+
+    attachments = [
+        Attachment(
+            filename="report.doc",
+            content=b"doc",
+            content_type="application/msword",
+            text="Отчет по проекту с ключевыми выводами и дедлайнами.",
+        ),
+        Attachment(
+            filename="plan.docx",
+            content=b"docx",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            text="План работ и согласованные этапы выполнения.",
+        ),
+        Attachment(
+            filename="sales.xlsx",
+            content=b"xlsx",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            text="Месяц | Продажи | Маржа\nЯнварь | 120 | 40\nФевраль | 150 | 50",
+        ),
+        Attachment(
+            filename="legacy.xls",
+            content=b"xls",
+            content_type="application/vnd.ms-excel",
+            text="Старый формат таблицы с итогами квартала.",
+        ),
+    ]
+
+    msg = InboundMessage(
+        subject="Комплект документов",
+        sender="ops@example.com",
+        body="Смотрите все вложения",
+        attachments=attachments,
+    )
+
+    result = processor.process("user@example.com", msg)
+    assert result is not None
+
+    lines = result.split("\n")
+    blank_index = lines.index("") if "" in lines else len(lines)
+    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
+
+    expected = {"report.doc", "plan.docx", "sales.xlsx", "legacy.xls"}
+    assert expected == {line.split(" — ")[0] for line in attachment_lines}
+

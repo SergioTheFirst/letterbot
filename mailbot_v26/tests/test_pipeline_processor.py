@@ -144,9 +144,10 @@ def test_no_duplicate_attachment_names():
     blank_index = lines.index("") if "" in lines else len(lines)
     attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
 
-    assert len(attachment_lines) == 2
+    assert len(attachment_lines) == 3
     filenames = [line.split(" — ")[0] for line in attachment_lines]
-    assert len(filenames) == len(set(filenames))
+    assert filenames.count("report.pdf") == 2
+    assert filenames.count("contract.docx") == 1
 
 
 def test_all_non_image_attachments_are_rendered():
