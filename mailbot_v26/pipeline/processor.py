@@ -283,13 +283,14 @@ class MessageProcessor:
             if content_type.startswith("font/"):
                 continue
 
+            has_meaningful_extension = lower_filename.endswith(
+                (".doc", ".docx", ".xls", ".xlsx", ".pdf")
+            )
             if (
-                not lower_filename
-                or lower_filename == "attachment.bin"
-                or lower_filename.endswith(".bin")
-            ) and (
-                any(token in content_type for token in ("text/html", "text/css", "application/octet-stream"))
-                or not lower_filename.endswith((".doc", ".docx", ".xls", ".xlsx", ".pdf"))
+                (not lower_filename or lower_filename == "attachment.bin")
+                and content_type
+                in {"text/html", "text/css", "application/octet-stream"}
+                and not has_meaningful_extension
             ):
                 continue
 
@@ -311,14 +312,14 @@ class MessageProcessor:
                     )
                     summary = ""
 
-                summary = summary.strip()
-                if not summary:
-                    head_line = att_text_plain.splitlines()[0] if att_text_plain else ""
-                    summary = head_line[:120].strip()
+                summary = (summary or "").strip()
 
             if not summary:
                 summary = self._fallback_short_summary(
-                    att.filename or "Вложение", subject, kind, att_text_plain
+                    filename=att.filename or "Вложение",
+                    subject=subject,
+                    kind=kind,
+                    att_text="",
                 )
             if not summary:
                 keywords = self._keywords(att.filename or "")
