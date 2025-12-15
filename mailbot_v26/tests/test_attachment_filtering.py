@@ -75,7 +75,8 @@ def test_no_placeholder_po_dannym_faila():
 
     assert result is not None
     assert "по данным файла" not in result
-    assert "empty.docx" not in _attachment_lines(result)
+    lines = _attachment_lines(result)
+    assert any(line.startswith("empty.docx") for line in lines)
 
 
 def test_ignores_images_and_fonts():

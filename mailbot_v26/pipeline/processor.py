@@ -278,6 +278,21 @@ class MessageProcessor:
     ) -> tuple[List[AttachmentSummary], int]:
         attachments_out: list[AttachmentSummary] = []
         for att in attachments:
+            lower_filename = (att.filename or "").lower()
+            content_type = (att.content_type or "").lower()
+            if content_type.startswith("font/"):
+                continue
+
+            if (
+                not lower_filename
+                or lower_filename == "attachment.bin"
+                or lower_filename.endswith(".bin")
+            ) and (
+                any(token in content_type for token in ("text/html", "text/css", "application/octet-stream"))
+                or not lower_filename.endswith((".doc", ".docx", ".xls", ".xlsx", ".pdf"))
+            ):
+                continue
+
             kind = self._detect_attachment_kind(att.filename, att.content_type)
             if kind == "IMAGE":
                 continue
@@ -285,26 +300,31 @@ class MessageProcessor:
             att_text_raw = sanitize_text(att.text or "", max_len=1500)
             att_text_plain = normalize_text(self._strip_markup(att_text_raw))
             text_length = len(att_text_plain)
-            if text_length == 0:
-                continue
 
-            try:
-                summary, _ = self._summarize_attachment(att, subject, kind)
-            except Exception:
-                logger.warning(
-                    "Failed to summarize attachment: %s", att.filename, exc_info=True
+            summary = ""
+            if text_length > 0:
+                try:
+                    summary, _ = self._summarize_attachment(att, subject, kind)
+                except Exception:
+                    logger.warning(
+                        "Failed to summarize attachment: %s", att.filename, exc_info=True
+                    )
+                    summary = ""
+
+                summary = summary.strip()
+                if not summary:
+                    head_line = att_text_plain.splitlines()[0] if att_text_plain else ""
+                    summary = head_line[:120].strip()
+
+            if not summary:
+                summary = self._fallback_short_summary(
+                    att.filename or "Вложение", subject, kind, att_text_plain
                 )
-                summary = ""
-
-            summary = summary.strip()
             if not summary:
-                head_line = att_text_plain.splitlines()[0] if att_text_plain else ""
-                summary = head_line[:120].strip()
+                keywords = self._keywords(att.filename or "")
+                summary = f"файл: {' '.join(keywords[:3])}" if keywords else (att.filename or "Вложение")
 
-            if not summary:
-                continue
-
-            description = "" if text_length < 40 else summary
+            description = summary.strip()
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
 
             attachments_out.append(
@@ -320,7 +340,12 @@ class MessageProcessor:
 
         attachments_out.sort(key=lambda item: item.priority)
 
-        return attachments_out, 0
+        extra_attachments = 0
+        if len(attachments_out) > self._MAX_ATTACHMENTS:
+            extra_attachments = len(attachments_out) - self._MAX_ATTACHMENTS
+            attachments_out = attachments_out[: self._MAX_ATTACHMENTS]
+
+        return attachments_out, extra_attachments
 
     def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> tuple[str, int]:
         filename = self._purge_markup_tokens(att.filename or "Вложение")

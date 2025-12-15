@@ -71,12 +71,10 @@ def test_body_and_attachments_rendered_with_summaries():
 
     blank_index = lines.index("")
     attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
-    assert len(attachment_lines) == 3
+    assert len(attachment_lines) == 4
 
-    for filename in ["agreement.doc", "note.docx", "prices.xlsx"]:
+    for filename in ["agreement.doc", "note.docx", "prices.xlsx", "empty.xlsx"]:
         assert any(line.startswith(filename) for line in attachment_lines)
-
-    assert not any(line.startswith("empty.xlsx") for line in attachment_lines)
 
 
 def test_multiple_attachments_all_processed():
