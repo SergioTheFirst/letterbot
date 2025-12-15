@@ -71,11 +71,10 @@ def test_body_and_attachments_rendered_with_summaries():
 
     blank_index = lines.index("")
     attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
-    assert len(attachment_lines) == 4
+    assert len(attachment_lines) == 3
 
-    for filename in ["agreement.doc", "note.docx", "prices.xlsx", "empty.xlsx"]:
+    for filename in ["agreement.doc", "note.docx", "prices.xlsx"]:
         assert any(line.startswith(filename) for line in attachment_lines)
 
-    fallback_lines = [line for line in attachment_lines if line.startswith("empty.xlsx")]
-    assert fallback_lines and fallback_lines[0].endswith("по данным файла")
+    assert not any(line.startswith("empty.xlsx") for line in attachment_lines)
 

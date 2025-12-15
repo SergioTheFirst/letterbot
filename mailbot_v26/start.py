@@ -95,6 +95,47 @@ def _decode_part_payload(part: EmailMessage) -> str:
     return _normalize_text_content(text)
 
 
+def _is_real_attachment(part: EmailMessage, filename: str, payload: bytes) -> bool:
+    if part.is_multipart():
+        return False
+
+    disposition = (part.get_content_disposition() or "").lower()
+    content_type = (part.get_content_type() or "").lower()
+    lower_name = (filename or "").strip().lower()
+    extension = Path(filename or "").suffix.lower()
+
+    if disposition == "inline":
+        return False
+
+    if not filename:
+        small_payload = len(payload or b"") <= 2048
+        if disposition != "attachment" or small_payload:
+            return False
+        if content_type in {"text/html", "text/css"}:
+            return False
+
+    if lower_name in {"attachment.bin", "noname", "unnamed", "part.bin"}:
+        return False
+
+    if content_type in {"text/html", "text/css", "application/xhtml+xml"}:
+        return False
+    if content_type.startswith("image/"):
+        return False
+    if content_type in {
+        "application/font-woff",
+        "font/woff",
+        "font/woff2",
+        "application/x-font-ttf",
+        "application/vnd.ms-fontobject",
+    }:
+        return False
+
+    if extension in {".css", ".woff", ".woff2", ".ttf", ".otf", ".svg"}:
+        return False
+
+    return True
+
+
 def _extract_body(email_obj: EmailMessage) -> str:
     plain_text: str | None = None
     html_text: str | None = None
@@ -190,17 +231,16 @@ def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachmen
     attachments: List[Attachment] = []
     byte_limit = max_mb * 1024 * 1024
     for part in email_obj.walk():
-        disposition = part.get_content_disposition()
         raw_filename = part.get_filename()
-        filename = decode_mime_header(raw_filename or "") or "attachment.bin"
-        if disposition != "attachment" and not filename:
-            continue
+        filename = decode_mime_header(raw_filename or "")
         try:
             payload = part.get_payload(decode=True) or b""
+            if not _is_real_attachment(part, filename, payload):
+                continue
             if byte_limit > 0 and len(payload) > byte_limit:
                 continue
             attachment = Attachment(
-                filename=filename,
+                filename=filename or "attachment.bin",
                 content=payload,
                 content_type=part.get_content_type() or "",
                 text="",
