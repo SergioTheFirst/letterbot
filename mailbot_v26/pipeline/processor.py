@@ -276,35 +276,37 @@ class MessageProcessor:
     def _build_attachment_summaries(
         self, attachments: List[Attachment], subject: str
     ) -> tuple[List[AttachmentSummary], int]:
-        non_image_attachments: list[tuple[Attachment, str]] = []
+        attachments_out: list[AttachmentSummary] = []
         for att in attachments:
             kind = self._detect_attachment_kind(att.filename, att.content_type)
             if kind == "IMAGE":
                 continue
-            non_image_attachments.append((att, kind))
 
-        attachments_out: list[AttachmentSummary] = []
-        for att, kind in non_image_attachments:
             att_text_raw = sanitize_text(att.text or "", max_len=1500)
             att_text_plain = normalize_text(self._strip_markup(att_text_raw))
             text_length = len(att_text_plain)
             if text_length == 0:
                 continue
+
             try:
                 summary, _ = self._summarize_attachment(att, subject, kind)
             except Exception:
-                logger.warning("Failed to summarize attachment: %s", att.filename, exc_info=True)
+                logger.warning(
+                    "Failed to summarize attachment: %s", att.filename, exc_info=True
+                )
                 summary = ""
 
             summary = summary.strip()
-
             if not summary:
                 head_line = att_text_plain.splitlines()[0] if att_text_plain else ""
                 summary = head_line[:120].strip()
 
-            description = "" if text_length < 40 else summary
+            if not summary:
+                continue
 
+            description = "" if text_length < 40 else summary
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
+
             attachments_out.append(
                 AttachmentSummary(
                     filename=att.filename or "Вложение",
