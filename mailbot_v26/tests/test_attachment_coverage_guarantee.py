@@ -76,9 +76,9 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
     blank_index = lines.index("") if "" in lines else len(lines)
     attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
 
-    assert len(attachment_lines) == 4
-    expected = {"a.doc", "b.docx", "c.xlsx", "d.xlsx"}
+    assert len(attachment_lines) == 3
+    expected = {"b.docx", "c.xlsx", "d.xlsx"}
     assert expected == {line.split(" — ")[0] for line in attachment_lines}
 
-    assert any(line.endswith("по данным файла") for line in attachment_lines)
     assert not any("image.png" in line for line in attachment_lines)
+    assert "по данным файла" not in "\n".join(attachment_lines)

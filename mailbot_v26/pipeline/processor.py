@@ -285,20 +285,30 @@ class MessageProcessor:
 
         usable: list[AttachmentSummary] = []
         for att, kind in non_image_attachments:
+            att_text_raw = sanitize_text(att.text or "", max_len=1500)
+            att_text_plain = normalize_text(self._strip_markup(att_text_raw))
+            text_length = len(att_text_plain)
+            if text_length == 0:
+                continue
             try:
-                summary, text_length = self._summarize_attachment(att, subject, kind)
+                summary, _ = self._summarize_attachment(att, subject, kind)
             except Exception:
                 logger.warning("Failed to summarize attachment: %s", att.filename, exc_info=True)
-                summary, text_length = "", 0
+                summary = ""
+
+            summary = summary.strip()
 
             if not summary:
-                summary = "по данным файла"
+                head_line = att_text_plain.splitlines()[0] if att_text_plain else ""
+                summary = head_line[:120].strip()
+
+            description = "" if text_length < 40 else summary
 
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
             usable.append(
                 AttachmentSummary(
                     filename=att.filename or "Вложение",
-                    description=summary,
+                    description=description,
                     kind=kind,
                     priority=priority_rank,
                     text_length=text_length,
@@ -361,7 +371,10 @@ class MessageProcessor:
         lines: List[str] = [""]
         for attachment in attachments:
             clean_description = " ".join((attachment.description or "").split())
-            lines.append(f"{attachment.filename} — {clean_description}")
+            if clean_description:
+                lines.append(f"{attachment.filename} — {clean_description}")
+            else:
+                lines.append(f"{attachment.filename}")
         if extra_attachments:
             lines.append(f"ещё {extra_attachments} вложений")
         return lines

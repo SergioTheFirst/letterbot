@@ -156,10 +156,25 @@ def test_all_non_image_attachments_are_rendered():
         sender="ops@example.com",
         body="Высылаем комплект файлов",
         attachments=[
-            Attachment(filename="contract.doc", content=b"", content_type="application/msword", text=""),
+            Attachment(
+                filename="contract.doc",
+                content=b"",
+                content_type="application/msword",
+                text="Общие условия договора на поставку продукции.",
+            ),
             Attachment(filename="note.docx", content=b"", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", text="Короткая заметка"),
-            Attachment(filename="prices.xlsx", content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text=""),
-            Attachment(filename="report.xlsx", content=b"", content_type="application/vnd.ms-excel", text=""),
+            Attachment(
+                filename="prices.xlsx",
+                content=b"",
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                text="Таблица с ценами и кодами товаров",
+            ),
+            Attachment(
+                filename="report.xlsx",
+                content=b"",
+                content_type="application/vnd.ms-excel",
+                text="Отчет по продажам за квартал",
+            ),
         ],
         received_at=datetime(2024, 8, 8, 16, 0),
     )

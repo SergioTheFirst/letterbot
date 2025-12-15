@@ -72,7 +72,8 @@ def test_attachments_without_snippet_use_fallback():
     result = processor.process("user@example.com", msg)
 
     assert result is not None
-    assert "blank.pdf — по данным файла" in result
+    assert "по данным файла" not in result
+    assert "blank.pdf" not in result.split("\n")[2:]
 
 
 __all__ = []

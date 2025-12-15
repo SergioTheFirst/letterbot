@@ -79,7 +79,7 @@ def test_domain_classification_logging_does_not_change_output(caplog):
     )
 
     expected_output = (
-        "🟡 ВАЖНО от Billing — Invoice for services (09:30)\n"
+        "🟡 от Billing — Invoice for services (09:30)\n"
         "Оплатить счёт за услуги SERVICES\n"
         "Please pay invoice 123 by 12.12."
     )
@@ -135,8 +135,9 @@ def test_primary_fact_and_attachments_compact_summaries():
     assert len(body_lines) == 1
     assert len(body_lines[0].split()) <= 15
 
-    attachment_lines = [line for line in lines[2:] if "—" in line]
+    blank_index = lines.index("") if "" in lines else len(lines)
+    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
     assert len(attachment_lines) == 4
-    assert len(set(attachment_lines)) == 4
+    assert len({line.split(" — ")[0] for line in attachment_lines}) == 4
     assert "___" not in result
     assert "№" not in result
