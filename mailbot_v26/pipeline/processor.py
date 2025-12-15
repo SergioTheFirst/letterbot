@@ -69,7 +69,6 @@ class MessageProcessor:
     }
 
     _PRIORITY_EMOJI = {"RED": "🔴", "YELLOW": "🟡", "BLUE": "🔵"}
-    _PRIORITY_LABEL = {"RED": "СРОЧНО", "YELLOW": "ВАЖНО", "BLUE": "ИНФО"}
     _ATTACHMENT_ORDER = {"INVOICE": 0, "CONTRACT": 1, "PDF": 2, "EXCEL": 3, "GENERIC": 4}
     _MAX_ATTACHMENTS = 10
     _STOPWORDS = {
@@ -222,7 +221,7 @@ class MessageProcessor:
     def _build_line1(self, priority: str, source: str, subject: str, received_at: datetime | None) -> str:
         time_part = (received_at or datetime.now()).strftime("%H:%M")
         short_subject = self._shorten_subject(subject)
-        return f"{self._PRIORITY_EMOJI[priority]} {self._PRIORITY_LABEL[priority]} от {source} — {short_subject} ({time_part})"
+        return f"{self._PRIORITY_EMOJI[priority]} от {source} — {short_subject} ({time_part})"
 
     def _build_line2(
         self, verb: str, subject: str, body: str, domain: str, attachments: List[Attachment]
