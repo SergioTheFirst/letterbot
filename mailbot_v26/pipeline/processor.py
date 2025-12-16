@@ -9,9 +9,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from mailbot_v26.bot_core.action_engine import analyze_action
-from mailbot_v26.domain.domain_classifier import DomainClassifier, MailTypeClassifier
-from mailbot_v26.domain.domain_priority import DOMAIN_PRIORITY_MAP
-from mailbot_v26.domain.domain_policies import DOMAIN_POLICIES
+from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
 from mailbot_v26.domain.fact_snippets import (
     normalize_text,
     pick_attachment_fact,
@@ -170,20 +168,16 @@ class MessageProcessor:
         body_summary = self._summarize_email_body(body_clean)
         attachments = self._filter_attachments(message.attachments or [])
 
-        domain = DomainClassifier.classify(message.sender, sender_clean, subject_clean)
-        logger.info("Domain detected: %s", domain)
-        priority_suggestion = DOMAIN_PRIORITY_MAP.get(domain, DOMAIN_PRIORITY_MAP["UNKNOWN"])
-        logger.info("Domain priority suggestion: %s", priority_suggestion)
-        mail_type = MailTypeClassifier.classify(subject_clean, body_clean, attachments, domain)
+        mail_type = MailTypeClassifier.classify(subject_clean, body_clean, attachments)
 
         action_facts = analyze_action(" ".join([subject_clean, body_clean]))
         priority = self._resolve_priority(
-            message, body_clean, subject_clean, action_facts, domain, mail_type, attachments
+            message, body_clean, subject_clean, action_facts, mail_type, attachments
         )
-        verb = self._select_verb(action_facts, body_clean, domain, mail_type)
+        verb = self._select_verb(action_facts, body_clean, mail_type)
 
         line1 = self._build_line1(priority, sender_clean, subject_clean, message.received_at)
-        line2 = self._build_line2(verb, subject_clean, body_clean, domain, attachments)
+        line2 = self._build_line2(verb, subject_clean, body_clean, attachments)
 
         base_lines = self._enforce_length([line1, line2])
         attachments, extra_attachments = self._build_attachment_summaries(attachments, subject_clean)
@@ -201,12 +195,12 @@ class MessageProcessor:
             base_lines = self._enforce_length([line1, line2])
             telegram_message = self._compose(base_lines, attachments, body_summary, extra_attachments)
 
-        if not self._passes_quality_gates(base_lines, priority, verb, domain, mail_type):
+        if not self._passes_quality_gates(base_lines, priority, verb, mail_type):
             fallback_lines = self._fallback_lines(sender_clean, subject_clean, verb)
             base_lines = self._enforce_length(fallback_lines)
             telegram_message = self._compose(base_lines, attachments, body_summary, extra_attachments)
 
-        if not self._passes_quality_gates(base_lines, priority, verb, domain, mail_type):
+        if not self._passes_quality_gates(base_lines, priority, verb, mail_type):
             minimal = self._enforce_length(self._fallback_lines(sender_clean, "Сообщение", verb), hard_trim=True)
             telegram_message = self._compose(minimal, [], body_summary, 0)
 
@@ -218,7 +212,6 @@ class MessageProcessor:
         body: str,
         subject: str,
         facts,
-        domain: str,
         mail_type: str,
         attachments: List[Attachment],
     ) -> str:
@@ -227,18 +220,17 @@ class MessageProcessor:
         today = datetime.now().date()
         tomorrow = today + timedelta(days=1)
 
-        policy_default = DOMAIN_POLICIES.get(domain, {}).get("default_priority", "BLUE")
         mail_type_default = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
-        priority = mail_type_default.get("priority", policy_default)
+        priority = mail_type_default.get("priority", "BLUE")
 
         urgent = self._contains_any(combined, {"срочно", "urgent", "asap"})
         if urgent:
             priority = "RED"
 
-        if self._has_deadline(combined, today, tomorrow) and domain != "DOMAIN_REGISTRAR":
+        if self._has_deadline(combined, today, tomorrow):
             priority = "RED"
 
-        if facts.amount and facts.date and domain != "DOMAIN_REGISTRAR":
+        if facts.amount and facts.date:
             priority = "RED"
 
         sensitive_domains = {"bank", "nalog", "fns", "court", "gov"}
@@ -255,13 +247,7 @@ class MessageProcessor:
             if self._is_management_sender(message.sender):
                 priority = self._max_priority(priority, "YELLOW")
 
-        priority = self._max_priority(priority, policy_default)
-
-        if domain in {"BANK", "COURT"} and priority == "BLUE":
-            priority = self._max_priority(priority, "YELLOW")
-
-        if domain == "FAMILY" and priority == "RED" and not urgent:
-            priority = "BLUE"
+        priority = self._max_priority(priority, "BLUE")
 
         return priority
 
@@ -271,10 +257,10 @@ class MessageProcessor:
         return f"{self._PRIORITY_EMOJI[priority]} от {source} — {short_subject} ({time_part})"
 
     def _build_line2(
-        self, verb: str, subject: str, body: str, domain: str, attachments: List[Attachment]
+        self, verb: str, subject: str, body: str, attachments: List[Attachment]
     ) -> str:
         normalized_verb = self._normalize_verb_choice(verb)
-        return self._normalize_action_subject(normalized_verb, subject, domain, attachments, body)
+        return self._normalize_action_subject(normalized_verb, subject, attachments, body)
 
     def _summarize_email_body(self, body_text: str) -> str:
         cleaned = self._normalize_body_text(body_text)
@@ -290,14 +276,12 @@ class MessageProcessor:
         summary = self._render_body_summary(tokens)
         return summary
 
-    def _select_verb(self, facts, body: str, domain: str, mail_type: str) -> str:
+    def _select_verb(self, facts, body: str, mail_type: str) -> str:
         defaults = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
-        policy_defaults = DOMAIN_POLICIES.get(domain, {})
-        policy_allowed = policy_defaults.get("allowed_types")
-        if defaults.get("verb") and (policy_allowed is None or mail_type in policy_allowed):
+        if defaults.get("verb"):
             verb = defaults.get("verb")
         else:
-            verb = policy_defaults.get("default_verb")
+            verb = None
 
         if not verb:
             lowered_body = body.lower()
@@ -796,7 +780,7 @@ class MessageProcessor:
             return " ".join(keywords[:3])
         return "основное из названия"
 
-    def _passes_quality_gates(self, base_lines: List[str], priority: str, verb: str, domain: str, mail_type: str) -> bool:
+    def _passes_quality_gates(self, base_lines: List[str], priority: str, verb: str, mail_type: str) -> bool:
         if len(base_lines) != 2 or any(not ln.strip() for ln in base_lines):
             return False
         if not base_lines[0].startswith(tuple(self._PRIORITY_EMOJI.values())):
@@ -809,17 +793,8 @@ class MessageProcessor:
         lowered = base_message.lower()
         if any(phrase in lowered for phrase in self._FORBIDDEN_PHRASES):
             return False
-        policy_priority = DOMAIN_POLICIES.get(domain, {}).get("default_priority", "BLUE")
-        if self._max_priority(policy_priority, priority) != priority:
-            return False
-        if domain in {"BANK", "COURT"} and priority == "BLUE":
-            return False
-        family_red = domain == "FAMILY" and priority == "RED"
-        if family_red and not self._contains_any(lowered, {"срочно", "urgent", "asap"}):
-            return False
-        policy_allowed = DOMAIN_POLICIES.get(domain, {}).get("allowed_types")
         expected_verb = self._MAIL_TYPE_DEFAULTS.get(mail_type, {}).get("verb")
-        if expected_verb and (policy_allowed is None or mail_type in policy_allowed):
+        if expected_verb:
             if not base_lines[1].startswith(expected_verb):
                 return False
         return True
@@ -891,7 +866,7 @@ class MessageProcessor:
         return "Ознакомиться"
 
     def _normalize_action_subject(
-        self, verb: str, subject: str, domain: str, attachments: List[Attachment], body: str
+        self, verb: str, subject: str, attachments: List[Attachment], body: str
     ) -> str:
         essence = self._extract_essence(subject, body)
         normalized_object = self._refine_action_object(subject, attachments, essence)

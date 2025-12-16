@@ -9,120 +9,8 @@ class AttachmentLike(Protocol):
     content_type: str
 
 
-class DomainClassifier:
-    """Keyword-driven domain classifier with deterministic scoring."""
-
-    _THRESHOLD = 2
-    _CATEGORY_KEYWORDS = {
-        "BANK": {
-            "bank",
-            "payment",
-            "transfer",
-            "account",
-            "card",
-            "loan",
-        },
-        "TAX": {
-            "tax",
-            "vat",
-            "fns",
-            "налог",
-            "ндс",
-        },
-        "LEGAL": {
-            "legal",
-            "court",
-            "lawsuit",
-            "attorney",
-            "subpoena",
-            "иск",
-            "арбитраж",
-        },
-        "CONTRACT": {
-            "contract",
-            "agreement",
-            "подпис",
-            "договор",
-            "соглашение",
-        },
-        "INVOICE": {
-            "invoice",
-            "bill",
-            "billing",
-            "счет",
-            "счёт",
-            "оплат",
-        },
-        "PRICE_LIST": {
-            "price list",
-            "pricelist",
-            "прайс",
-            "цен",
-        },
-        "HR": {
-            "hr",
-            "hiring",
-            "candidate",
-            "vacation",
-            "отпуск",
-            "кадры",
-            "salary",
-            "payroll",
-        },
-        "LOGISTICS": {
-            "delivery",
-            "shipment",
-            "logistics",
-            "transport",
-            "cargo",
-            "tracking",
-            "достав",
-            "груз",
-        },
-        "PERSONAL": {
-            "hello",
-            "привет",
-            "family",
-            "friend",
-            "birthday",
-            "поздрав",
-        },
-        "MARKETING": {
-            "sale",
-            "discount",
-            "offer",
-            "promotion",
-            "promo",
-            "limited",
-        },
-    }
-
-    @classmethod
-    def classify(cls, sender: str, subject: str, body: str) -> str:
-        text = " ".join(filter(None, [sender, subject, body])).lower()
-
-        best_category = "UNKNOWN"
-        best_score = 0
-        for category, keywords in cls._CATEGORY_KEYWORDS.items():
-            score = cls._score(text, keywords)
-            if score > best_score:
-                best_category = category
-                best_score = score
-
-        if best_score < cls._THRESHOLD:
-            return "UNKNOWN"
-        return best_category
-
-    @staticmethod
-    def _score(text: str, keywords: Iterable[str]) -> int:
-        score = 0
-        for keyword in keywords:
-            score += text.count(keyword)
-        return score
-
-
 class MailTypeClassifier:
-    """Deterministic mail type classifier."""
+    """Deterministic mail type classifier based on message content."""
 
     INVOICE_KEYWORDS = {"счет", "счёт", "invoice", "bill", "оплат"}
     PAYMENT_REMINDER_KEYWORDS = {"напомин", "просроч", "долг", "ожидаем"}
@@ -141,32 +29,24 @@ class MailTypeClassifier:
         subject: str,
         body: str,
         attachments: Sequence[AttachmentLike] | None,
-        domain: str,
     ) -> str:
         subject_lower = (subject or "").lower()
         body_lower = (body or "").lower()
         combined = f"{subject_lower} {body_lower}".strip()
         attachments = attachments or []
 
-        has_amount = bool(re.search(r"\b\d{3,}(?:\s?руб|\s?rur|\s?usd|\s?eur)?\b", combined))
+        has_amount = bool(
+            re.search(r"\b\d{3,}(?:\s?руб|\s?rur|\s?usd|\s?eur)?\b", combined)
+        )
         has_date = bool(re.search(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b", combined))
 
         kinds = {cls._detect_attachment_kind(att.filename, att.content_type) for att in attachments}
         has_contract_att = "CONTRACT" in kinds
         has_invoice_att = "INVOICE" in kinds
 
-        if domain == "DOMAIN_REGISTRAR":
-            if cls._contains_any(combined, {"истекает", "expire", "expirat"}):
-                return "DEADLINE_REMINDER"
-            return "INFORMATION_ONLY"
-
-        if domain == "FAMILY":
-            return "INFORMATION_ONLY"
-
-        if domain == "BANK" and (has_invoice_att or cls._contains_any(combined, cls.INVOICE_KEYWORDS) or (has_amount and has_date)):
-            return "PAYMENT_REQUEST"
-
-        if cls._contains_any(combined, cls.CONTRACT_KEYWORDS) and cls._contains_any(combined, {"подпис", "утверд", "approve"}):
+        if cls._contains_any(combined, cls.CONTRACT_KEYWORDS) and cls._contains_any(
+            combined, {"подпис", "утверд", "approve"}
+        ):
             return "CONTRACT_APPROVAL"
         if has_contract_att:
             return "CONTRACT_APPROVAL" if cls._contains_any(combined, {"подпис", "approve"}) else "CONTRACT_UPDATE"
@@ -186,7 +66,7 @@ class MailTypeClassifier:
         if cls._contains_any(combined, cls.SECURITY_KEYWORDS):
             return "SECURITY_ALERT"
 
-        if cls._contains_any(combined, cls.POLICY_KEYWORDS) and domain == "HR":
+        if cls._contains_any(combined, cls.POLICY_KEYWORDS):
             return "POLICY_UPDATE"
 
         if cls._contains_any(combined, cls.MEETING_KEYWORDS):
