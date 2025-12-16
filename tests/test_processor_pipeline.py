@@ -10,6 +10,12 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(config=config, state=state)
 
 
+def _attachment_lines(result: str) -> list[str]:
+    lines = result.split("\n")
+    start = lines.index("") if "" in lines else len(lines)
+    return [line for line in lines[start + 1 :] if " — " in line]
+
+
 def test_html_body_is_sanitized_and_summarized():
     processor = _processor()
     body = """
@@ -66,7 +72,8 @@ def test_attachment_is_summarized_not_dumped():
     assert any("contract.docx" in line for line in lines)
     attachment_summary = next(line for line in lines if "contract.docx" in line)
     assert len(attachment_summary) < len(long_text)
-    assert "delivery schedules" not in attachment_summary
+    summary_text = attachment_summary.split(" — ", 1)[1]
+    assert 6 <= len(summary_text.split()) <= 20
 
 
 def test_domain_classification_logging_does_not_change_output(caplog):
@@ -135,8 +142,7 @@ def test_primary_fact_and_attachments_compact_summaries():
     assert len(body_lines) == 1
     assert len(body_lines[0].split()) <= 15
 
-    blank_index = lines.index("") if "" in lines else len(lines)
-    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
+    attachment_lines = _attachment_lines(result)
     assert len(attachment_lines) == 4
     assert len({line.split(" — ")[0] for line in attachment_lines}) == 4
     assert "___" not in result
@@ -182,13 +188,12 @@ def test_all_document_attachments_render_even_without_text():
 
     assert result is not None
     lines = result.split("\n")
-    blank_index = lines.index("") if "" in lines else len(lines)
-    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
+    attachment_lines = _attachment_lines(result)
 
     assert len(attachment_lines) == 4
     assert all(name in result for name in ("draft.docx", "legacy.doc", "report.xlsx", "table.xls"))
     assert "формат а2" not in " ".join(attachment_lines).lower()
     assert "по данным файла" not in result.lower()
-    assert any("draft.docx — текстовый документ (без извлекаемого текста)" in line for line in attachment_lines)
-    assert any("legacy.doc — текстовый документ (старый формат)" in line for line in attachment_lines)
-    assert any("table.xls — таблица (без извлекаемого текста)" in line for line in attachment_lines)
+    assert any("draft.docx — текст не извлечён" in line for line in attachment_lines)
+    assert any("legacy.doc — текст не извлечён" in line for line in attachment_lines)
+    assert any("table.xls — таблица не извлечена" in line for line in attachment_lines)

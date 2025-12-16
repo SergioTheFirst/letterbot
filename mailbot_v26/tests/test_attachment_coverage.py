@@ -13,6 +13,12 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
+def _attachment_lines(result: str) -> list[str]:
+    lines = result.split("\n")
+    start = lines.index("") if "" in lines else len(lines)
+    return [line for line in lines[start + 1 :] if " — " in line]
+
+
 def test_body_and_attachments_rendered_with_summaries():
     processor = _processor()
     body = (
@@ -69,8 +75,7 @@ def test_body_and_attachments_rendered_with_summaries():
     lines = result.split("\n")
     assert lines[2].strip()
 
-    blank_index = lines.index("")
-    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
+    attachment_lines = _attachment_lines(result)
     assert len(attachment_lines) == 4
 
     for filename in ["agreement.doc", "note.docx", "prices.xlsx", "empty.xlsx"]:
@@ -118,8 +123,7 @@ def test_multiple_attachments_all_processed():
     assert result is not None
 
     lines = result.split("\n")
-    blank_index = lines.index("") if "" in lines else len(lines)
-    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
+    attachment_lines = _attachment_lines(result)
 
     expected = {"report.doc", "plan.docx", "sales.xlsx", "legacy.xls"}
     assert expected == {line.split(" — ")[0] for line in attachment_lines}
