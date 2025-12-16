@@ -276,16 +276,23 @@ class MessageProcessor:
     def _build_attachment_summaries(
         self, attachments: List[Attachment], subject: str
     ) -> tuple[List[AttachmentSummary], int]:
+        # Почтовые клиенты вытягивают все файлы, но на этапе агрегации часть
+        # вложений исчезала: мы отбрасывали "attachment.bin"/inline-чunks и
+        # обрезали список после _MAX_ATTACHMENTS, поэтому файлы с пустым текстом
+        # или низким приоритетом не доходили до Telegram.
         attachments_out: list[AttachmentSummary] = []
         for att in attachments:
-            lower_filename = (att.filename or "").lower()
+            filename = att.filename or "Вложение"
+            lower_filename = filename.lower()
             content_type = (att.content_type or "").lower()
+            ext = ""
+            if "." in lower_filename:
+                ext = lower_filename[lower_filename.rfind(".") :]
+
             if self._is_inline_attachment(lower_filename, content_type):
-                continue
+                logger.debug("Keeping inline-like attachment for rendering: %s", filename)
 
             kind = self._detect_attachment_kind(att.filename, att.content_type)
-            if kind == "IMAGE":
-                continue
 
             att_text_raw = sanitize_text(att.text or "", max_len=1500)
             att_text_plain = normalize_text(self._strip_markup(att_text_raw))
@@ -307,19 +314,22 @@ class MessageProcessor:
                 if not summary:
                     summary_failed = True
 
-            if not summary:
-                summary = self._safe_attachment_fallback(
-                    att.filename, kind, text_length=text_length, summary_failed=summary_failed
+            description = self.describe_attachment(
+                filename=filename,
+                ext=ext,
+                extracted_text=summary or att_text_plain,
+            )
+
+            if not description:
+                description = self._safe_attachment_fallback(
+                    filename, kind, text_length=text_length, summary_failed=summary_failed
                 )
 
-            description = summary.strip() or self._safe_attachment_fallback(
-                att.filename, kind, text_length=text_length, summary_failed=summary_failed
-            )
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
 
             attachments_out.append(
                 AttachmentSummary(
-                    filename=att.filename or "Вложение",
+                    filename=filename,
                     description=description,
                     kind=kind,
                     priority=priority_rank,
@@ -328,10 +338,33 @@ class MessageProcessor:
                 )
             )
 
+        if len(attachments_out) != len(attachments):
+            logger.warning(
+                "Attachment coverage mismatch: expected %d, got %d",
+                len(attachments),
+                len(attachments_out),
+            )
+            while len(attachments_out) < len(attachments):
+                att = attachments[len(attachments_out)]
+                filler_name = att.filename or "Вложение"
+                attachments_out.append(
+                    AttachmentSummary(
+                        filename=filler_name,
+                        description=self.describe_attachment(
+                            filename=filler_name,
+                            ext="",
+                            extracted_text=normalize_text(att.text or ""),
+                        ),
+                        kind=self._detect_attachment_kind(att.filename, att.content_type),
+                        priority=self._ATTACHMENT_ORDER.get(
+                            self._detect_attachment_kind(att.filename, att.content_type), 5
+                        ),
+                        text_length=len(normalize_text(att.text or "")),
+                        size_bytes=len(att.content or b""),
+                    )
+                )
+
         extra_attachments = 0
-        if len(attachments_out) > self._MAX_ATTACHMENTS:
-            extra_attachments = len(attachments_out) - self._MAX_ATTACHMENTS
-            attachments_out = attachments_out[: self._MAX_ATTACHMENTS]
 
         return attachments_out, extra_attachments
 
@@ -374,6 +407,36 @@ class MessageProcessor:
 
         reason = ", ".join(reason_parts)
         return f"{category}{f' ({reason})' if reason else ''}"
+
+    def describe_attachment(
+        self, filename: str, ext: str, extracted_text: str | None
+    ) -> str:
+        clean_text = normalize_text(self._strip_markup(extracted_text or "")).strip()
+
+        if clean_text:
+            sentences = [
+                part.strip()
+                for part in re.split(r"[\r\n]+|(?<=[.!?])\s+", clean_text)
+                if part.strip()
+            ]
+            preview = "; ".join(sentences[:2]) or clean_text
+            return preview.strip()
+
+        lowered_ext = (ext or "").lower()
+        if lowered_ext == ".doc":
+            return "файл Word (старый формат), текст не извлечён"
+        if lowered_ext == ".docx":
+            return "файл Word, текст не извлечён"
+        if lowered_ext == ".xls":
+            return "Excel (старый формат), таблица не прочитана"
+        if lowered_ext == ".xlsx":
+            return "таблица Excel, текст не извлечена"
+        if lowered_ext == ".pdf":
+            return "PDF, текст не извлечён"
+        if lowered_ext:
+            return f"файл {lowered_ext.lstrip('.').upper()} без извлекаемого текста"
+
+        return "файл без извлекаемого текста (формат/скан/старый DOC)"
 
     def _fallback_category(self, lowered_filename: str, kind: str) -> str:
         ext = ""
