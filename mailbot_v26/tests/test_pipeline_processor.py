@@ -82,7 +82,9 @@ def test_image_only_email_has_no_attachments():
     result = processor.process("user@example.com", msg)
     assert result is not None
     lines = result.split("\n")
-    assert len(lines) == 2
+    assert len(lines) == 3
+    summary = lines[2]
+    assert 8 <= len(summary.split()) <= 12
 
 
 def test_output_has_two_mandatory_lines():

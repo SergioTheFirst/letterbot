@@ -280,9 +280,18 @@ class MessageProcessor:
         return self._normalize_action_subject(verb, subject, domain, attachments, body)
 
     def _summarize_email_body(self, body_text: str) -> str:
-        snippet = pick_email_body_fact(body_text or "")
-        snippet = compress_body_fact(snippet or "")
-        return snippet or ""
+        cleaned = self._normalize_body_text(body_text)
+        if not cleaned:
+            return self._fallback_body_summary(empty=True)
+
+        primary_sentence = self._pick_body_sentence(cleaned)
+        tokens = self._prepare_body_tokens(primary_sentence or cleaned)
+
+        if len(tokens) < 5:
+            tokens = self._prepare_body_tokens(cleaned)
+
+        summary = self._render_body_summary(tokens)
+        return summary or self._fallback_body_summary(empty=False)
 
     def _select_verb(self, facts, body: str, domain: str, mail_type: str) -> str:
         defaults = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
@@ -845,6 +854,118 @@ class MessageProcessor:
         essence = self._extract_essence(subject, body)
         normalized_object = self._refine_action_object(subject, attachments, essence)
         return f"{verb} {normalized_object}".strip()
+
+    def _normalize_body_text(self, body_text: str) -> str:
+        raw = self._strip_markup(body_text or "")
+        normalized = normalize_text(raw)
+        if not normalized:
+            return ""
+
+        greetings = (
+            "добрый день",
+            "доброе утро",
+            "добрый вечер",
+            "здравствуйте",
+            "привет",
+            "hello",
+            "hi",
+        )
+        signatures = (
+            "с уважением",
+            "best regards",
+            "kind regards",
+            "regards",
+            "спасибо",
+        )
+        attachment_markers = (
+            "в приложении",
+            "во вложении",
+            "прикреп",
+            "см. вложение",
+            "см. приложение",
+            "attachment",
+        )
+
+        filtered: list[str] = []
+        for raw_line in normalized.split("\n"):
+            line = raw_line.strip()
+            lowered = line.lower()
+            if not line:
+                continue
+            for greet in greetings:
+                if lowered.startswith(greet):
+                    line = line[len(greet) :].strip(" ,.-")
+                    lowered = line.lower()
+                    break
+            if not line:
+                continue
+            for marker in attachment_markers:
+                if marker in lowered:
+                    line = re.sub(marker, "", line, flags=re.IGNORECASE)
+                    lowered = line.lower()
+            line = line.strip()
+            if not line:
+                continue
+            if any(lowered.startswith(sig) for sig in signatures):
+                continue
+            if self._looks_like_contact(line):
+                continue
+            filtered.append(line)
+
+        return " ".join(filtered).strip()
+
+    @staticmethod
+    def _looks_like_contact(line: str) -> bool:
+        if "@" in line or "www." in line:
+            return True
+        phone_like = re.search(r"\+?\d[\d\s().-]{6,}\d", line)
+        return bool(phone_like)
+
+    def _pick_body_sentence(self, text: str) -> str:
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n", text) if s.strip()]
+        for sentence in sentences:
+            if len(sentence.split()) >= 4:
+                return sentence
+        return sentences[0] if sentences else ""
+
+    def _prepare_body_tokens(self, text: str) -> list[str]:
+        tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{2,}", text)
+        cleaned = self._filter_tokens(tokens)
+        return cleaned
+
+    def _render_body_summary(self, tokens: list[str]) -> str:
+        if not tokens:
+            return self._fallback_body_summary(empty=True)
+
+        action = self._find_action(" ".join(tokens)) or "Сообщается"
+        summary_tokens: list[str] = [action] + tokens
+        summary_tokens = summary_tokens[:12]
+
+        if len(summary_tokens) < 8:
+            fillers = ["дополнительных", "данных", "не", "предоставлено"]
+            for filler in fillers:
+                if len(summary_tokens) >= 8:
+                    break
+                summary_tokens.append(filler)
+
+        summary_tokens = summary_tokens[:12]
+
+        summary = " ".join(summary_tokens)
+        while len(summary) > 120 and len(summary_tokens) > 8:
+            summary_tokens.pop()
+            summary = " ".join(summary_tokens)
+
+        word_count = len(summary.split())
+        if word_count < 8:
+            return self._fallback_body_summary(empty=False)
+
+        return summary.strip()
+
+    @staticmethod
+    def _fallback_body_summary(empty: bool) -> str:
+        if empty:
+            return "Тело письма отсутствует, полезная информация не обнаружена совсем"
+        return "Сообщение без существенного текста, полезных сведений не предоставлено"
 
     def _refine_action_object(self, subject: str, attachments: List[Attachment], fallback: str) -> str:
         lowered = subject.lower()
