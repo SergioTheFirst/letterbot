@@ -141,3 +141,50 @@ def test_primary_fact_and_attachments_compact_summaries():
     assert len({line.split(" — ")[0] for line in attachment_lines}) == 4
     assert "___" not in result
     assert "№" not in result
+
+
+def test_all_document_attachments_render_even_without_text():
+    processor = _processor()
+    attachments = [
+        Attachment(
+            filename="draft.docx",
+            content=b"docx",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            text="",
+        ),
+        Attachment(
+            filename="legacy.doc",
+            content=b"doc",
+            content_type="application/msword",
+            text=None,
+        ),
+        Attachment(
+            filename="report.xlsx",
+            content=b"xlsx",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            text="Итоги квартала",
+        ),
+        Attachment(
+            filename="table.xls",
+            content=b"xls",
+            content_type="application/vnd.ms-excel",
+            text="",
+        ),
+    ]
+
+    msg = InboundMessage(
+        subject="Multiple docs",
+        body="Набор вложений без текста",
+        attachments=attachments,
+    )
+
+    result = processor.process("user@example.com", msg)
+
+    assert result is not None
+    lines = result.split("\n")
+    blank_index = lines.index("") if "" in lines else len(lines)
+    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
+
+    assert len(attachment_lines) == 4
+    assert all(name in result for name in ("draft.docx", "legacy.doc", "report.xlsx", "table.xls"))
+    assert "по данным файла" not in result.lower()
