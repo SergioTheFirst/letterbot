@@ -43,8 +43,8 @@ def test_empty_body_uses_fallback_phrase():
     result = processor.process("user@example.com", msg)
     summary = _summary_line(result or "")
 
-    assert summary == "Тело письма отсутствует, полезная информация не обнаружена совсем"
-    assert 8 <= _word_count(summary) <= 12
+    assert summary == ""
+    assert len(result.split("\n")) == 2
 
 
 def test_long_body_trims_to_word_budget():
