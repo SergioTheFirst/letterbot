@@ -292,6 +292,7 @@ class MessageProcessor:
             text_length = len(att_text_plain)
 
             summary = ""
+            summary_failed = False
             if text_length > 0:
                 try:
                     summary, _ = self._summarize_attachment(att, subject, kind)
@@ -300,13 +301,20 @@ class MessageProcessor:
                         "Failed to summarize attachment: %s", att.filename, exc_info=True
                     )
                     summary = ""
+                    summary_failed = True
 
                 summary = (summary or "").strip()
+                if not summary:
+                    summary_failed = True
 
             if not summary:
-                summary = self._safe_attachment_fallback(att.filename, kind)
+                summary = self._safe_attachment_fallback(
+                    att.filename, kind, text_length=text_length, summary_failed=summary_failed
+                )
 
-            description = summary.strip() or self._safe_attachment_fallback(att.filename, kind)
+            description = summary.strip() or self._safe_attachment_fallback(
+                att.filename, kind, text_length=text_length, summary_failed=summary_failed
+            )
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
 
             attachments_out.append(
@@ -342,18 +350,51 @@ class MessageProcessor:
             and not has_meaningful_extension
         )
 
-    def _safe_attachment_fallback(self, filename: str | None, kind: str) -> str:
+    def _safe_attachment_fallback(
+        self, filename: str | None, kind: str, text_length: int = 0, summary_failed: bool = False
+    ) -> str:
         base_name = filename or "Вложение"
         lowered = base_name.lower()
+        ext = ""
+        if "." in lowered:
+            ext = lowered[lowered.rfind(".") :]
 
-        if "прайс" in lowered or "price" in lowered:
-            label = "прайс-лист"
-        elif kind == "EXCEL":
-            label = "таблица"
+        category = self._fallback_category(lowered, kind)
+        reason_parts: list[str] = []
+
+        if ext == ".doc":
+            reason_parts.append("старый формат")
         else:
-            label = "документ"
+            if kind == "EXCEL" and category != "таблица":
+                reason_parts.append("таблица")
+            if text_length == 0:
+                reason_parts.append("без извлекаемого текста")
+            elif summary_failed:
+                reason_parts.append("краткое описание недоступно")
 
-        return f"{label}: {base_name}"
+        reason = ", ".join(reason_parts)
+        return f"{category}{f' ({reason})' if reason else ''}"
+
+    def _fallback_category(self, lowered_filename: str, kind: str) -> str:
+        ext = ""
+        if "." in lowered_filename:
+            ext = lowered_filename[lowered_filename.rfind(".") :]
+
+        if ext in {".doc", ".docx"}:
+            if any(token in lowered_filename for token in {"догов", "contract"}):
+                return "договор"
+            return "текстовый документ"
+        if ext in {".xls", ".xlsx"}:
+            if any(token in lowered_filename for token in {"прайс", "price"}):
+                return "прайс-лист"
+            return "таблица"
+        if ext == ".pdf":
+            return "документ"
+        if kind == "EXCEL":
+            return "таблица"
+        if kind == "CONTRACT":
+            return "договор"
+        return "файл"
 
     def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> tuple[str, int]:
         filename = self._purge_markup_tokens(att.filename or "Вложение")

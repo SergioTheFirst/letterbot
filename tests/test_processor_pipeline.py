@@ -174,7 +174,7 @@ def test_all_document_attachments_render_even_without_text():
 
     msg = InboundMessage(
         subject="Multiple docs",
-        body="Набор вложений без текста",
+        body="Формат А2 Формат А1 Формат А0 — это тело письма",
         attachments=attachments,
     )
 
@@ -187,4 +187,8 @@ def test_all_document_attachments_render_even_without_text():
 
     assert len(attachment_lines) == 4
     assert all(name in result for name in ("draft.docx", "legacy.doc", "report.xlsx", "table.xls"))
+    assert "формат а2" not in " ".join(attachment_lines).lower()
     assert "по данным файла" not in result.lower()
+    assert any("draft.docx — текстовый документ (без извлекаемого текста)" in line for line in attachment_lines)
+    assert any("legacy.doc — текстовый документ (старый формат)" in line for line in attachment_lines)
+    assert any("table.xls — таблица (без извлекаемого текста)" in line for line in attachment_lines)
