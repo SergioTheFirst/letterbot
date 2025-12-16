@@ -1,4 +1,3 @@
-import logging
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -202,7 +201,7 @@ def test_all_non_image_attachments_are_rendered():
         assert any(line.startswith(filename) for line in attachment_lines)
 
 
-def test_domain_priority_suggestion_does_not_change_priority(caplog):
+def test_informational_email_remains_blue():
     processor = _processor()
     msg = InboundMessage(
         subject="Hello friend",
@@ -212,15 +211,11 @@ def test_domain_priority_suggestion_does_not_change_priority(caplog):
         received_at=datetime(2024, 6, 6, 14, 0),
     )
 
-    with caplog.at_level(logging.INFO, logger="mailbot_v26.pipeline.processor"):
-        result = processor.process("user@example.com", msg)
+    result = processor.process("user@example.com", msg)
 
     assert result is not None
     first_line = result.split("\n")[0]
     assert first_line.startswith("🔵 от")
-    assert any(
-        "Domain priority suggestion: MEDIUM" in record.message for record in caplog.records
-    )
 
 
 def test_attachment_lines_drop_prefixes_and_counts():
@@ -274,11 +269,11 @@ def test_body_placeholder_is_silent_when_empty():
 def test_normalize_action_subject_deduplicates_tokens():
     processor = _processor()
     action_one = processor._normalize_action_subject(
-        "Проверить", "Прайс лист", "PRICE", [], ""
+        "Проверить", "Прайс лист", [], ""
     )
     assert action_one == "Проверить цены"
 
     action_two = processor._normalize_action_subject(
-        "Проверить", "Проверка с документами", "OTHER", [], ""
+        "Проверить", "Проверка с документами", [], ""
     )
     assert action_two == "Проверить документы"
