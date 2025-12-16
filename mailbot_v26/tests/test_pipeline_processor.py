@@ -15,6 +15,12 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
+def _attachment_lines(result: str) -> list[str]:
+    lines = result.split("\n")
+    start = lines.index("") if "" in lines else len(lines)
+    return [line for line in lines[start + 1 :] if " — " in line]
+
+
 def test_bank_invoice_marked_red():
     processor = _processor()
     msg = InboundMessage(
@@ -140,9 +146,7 @@ def test_no_duplicate_attachment_names():
 
     result = processor.process("user@example.com", msg)
     assert result is not None
-    lines = result.split("\n")
-    blank_index = lines.index("") if "" in lines else len(lines)
-    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
+    attachment_lines = _attachment_lines(result)
 
     assert len(attachment_lines) == 3
     filenames = [line.split(" — ")[0] for line in attachment_lines]
@@ -187,8 +191,7 @@ def test_all_non_image_attachments_are_rendered():
     assert lines[0].strip()
     assert lines[1].strip()
 
-    blank_index = lines.index("") if "" in lines else len(lines)
-    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
+    attachment_lines = _attachment_lines(result)
     assert len(attachment_lines) == 4
 
     for filename in ["contract.doc", "note.docx", "prices.xlsx", "report.xlsx"]:

@@ -15,6 +15,12 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
+def _attachment_lines(result: str) -> list[str]:
+    lines = result.split("\n")
+    start = lines.index("") if "" in lines else len(lines)
+    return [line for line in lines[start + 1 :] if " — " in line]
+
+
 @pytest.mark.parametrize("include_image", [True, False])
 def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch, include_image):
     # Force the class to drop items when the cap is applied, so we can assert the fix explicitly.
@@ -71,10 +77,7 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
     result = processor.process("user@example.com", msg)
     assert result is not None
 
-    lines = result.split("\n")
-    blank_index = lines.index("") if "" in lines else len(lines)
-    attachment_lines = [line for line in lines[blank_index + 1 :] if line.strip()]
-
+    attachment_lines = _attachment_lines(result)
     attachment_entries = [line for line in attachment_lines if not line.startswith("ещё ")]
     total_non_image = 4
     expected_count = total_non_image

@@ -12,7 +12,7 @@ EMOJI_RANGES = [
     (0x1FA70, 0x1FAFF),
 ]
 
-ALLOWED_EMOJI_CODES = {0x1F534, 0x1F7E1, 0x1F535}
+ALLOWED_EMOJI_CODES = {0x1F534, 0x1F7E1, 0x1F535, 0x1F4CE, 0x1F4C2}
 
 
 def _contains_emoji(text: str) -> bool:

@@ -54,6 +54,7 @@ class AttachmentSummary:
     priority: int
     text_length: int = 0
     size_bytes: int = 0
+    doc_type: str = "OTHER"
 
 
 @dataclass
@@ -83,6 +84,16 @@ class MessageProcessor:
     _PRIORITY_EMOJI = {"RED": "🔴", "YELLOW": "🟡", "BLUE": "🔵"}
     _ATTACHMENT_ORDER = {"INVOICE": 0, "CONTRACT": 1, "PDF": 2, "EXCEL": 3, "GENERIC": 4}
     _MAX_ATTACHMENTS = 10
+    _DOC_TYPE_PRIORITY = {
+        "CONTRACT": 0,
+        "AGREEMENT": 0,
+        "INVOICE": 1,
+        "PRICE": 2,
+        "PRICE_LIST": 2,
+        "TABLE": 3,
+        "REPORT": 3,
+        "OTHER": 4,
+    }
     _STOPWORDS = {
         "и",
         "в",
@@ -316,9 +327,6 @@ class MessageProcessor:
             filename = att.filename or "Вложение"
             lower_filename = filename.lower()
             content_type = (att.content_type or "").lower()
-            ext = ""
-            if "." in lower_filename:
-                ext = lower_filename[lower_filename.rfind(".") :]
 
             if self._is_inline_attachment(lower_filename, content_type):
                 logger.debug("Keeping inline-like attachment for rendering: %s", filename)
@@ -328,44 +336,18 @@ class MessageProcessor:
             att_text_raw = sanitize_text(att.text or "", max_len=1500)
             att_text_plain = normalize_text(self._strip_markup(att_text_raw))
             text_length = len(att_text_plain)
-
-            summary = ""
-            summary_failed = False
-            if text_length > 0:
-                try:
-                    summary, _ = self._summarize_attachment(att, subject, kind)
-                except Exception:
-                    logger.warning(
-                        "Failed to summarize attachment: %s", att.filename, exc_info=True
-                    )
-                    summary = ""
-                    summary_failed = True
-
-                summary = (summary or "").strip()
-                if not summary:
-                    summary_failed = True
-
-            description = self.describe_attachment(
-                filename=filename,
-                ext=ext,
-                extracted_text=summary or att_text_plain,
-            )
-
-            if not description:
-                description = self._safe_attachment_fallback(
-                    filename, kind, text_length=text_length, summary_failed=summary_failed
-                )
-
+            doc_type = self._classify_attachment_type(filename, kind, att_text_plain)
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
 
             attachments_out.append(
                 AttachmentSummary(
                     filename=filename,
-                    description=description,
+                    description=att_text_plain,
                     kind=kind,
                     priority=priority_rank,
                     text_length=text_length,
                     size_bytes=len(att.content or b""),
+                    doc_type=doc_type,
                 )
             )
 
@@ -378,20 +360,22 @@ class MessageProcessor:
             while len(attachments_out) < len(attachments):
                 att = attachments[len(attachments_out)]
                 filler_name = att.filename or "Вложение"
+                doc_type = self._classify_attachment_type(
+                    filler_name,
+                    self._detect_attachment_kind(att.filename, att.content_type),
+                    normalize_text(att.text or ""),
+                )
                 attachments_out.append(
                     AttachmentSummary(
                         filename=filler_name,
-                        description=self.describe_attachment(
-                            filename=filler_name,
-                            ext="",
-                            extracted_text=normalize_text(att.text or ""),
-                        ),
+                        description=normalize_text(att.text or ""),
                         kind=self._detect_attachment_kind(att.filename, att.content_type),
                         priority=self._ATTACHMENT_ORDER.get(
                             self._detect_attachment_kind(att.filename, att.content_type), 5
                         ),
                         text_length=len(normalize_text(att.text or "")),
                         size_bytes=len(att.content or b""),
+                        doc_type=doc_type,
                     )
                 )
 
@@ -521,16 +505,130 @@ class MessageProcessor:
         if not attachments:
             return [] if not extra_attachments else ["", f"ещё {extra_attachments} вложений"]
 
-        lines: List[str] = [""]
-        for attachment in attachments:
-            clean_description = " ".join((attachment.description or "").split())
-            if clean_description:
-                lines.append(f"{attachment.filename} — {clean_description}")
-            else:
-                lines.append(f"{attachment.filename}")
+        if len(attachments) == 1:
+            line = self.format_attachment_line(
+                attachments[0].filename, attachments[0].description, attachments[0].kind
+            )
+            lines: List[str] = ["", line]
+            if extra_attachments:
+                lines.append(f"ещё {extra_attachments} вложений")
+            return lines
+
+        main, others = self._select_main_attachment(attachments)
+
+        lines = ["", "📎 Главное вложение:", self.format_attachment_line(main.filename, main.description, main.kind)]
+
+        if others:
+            lines.append(f"📂 Остальные вложения ({len(others)}):")
+            for attachment in others:
+                lines.append(
+                    self.format_attachment_line(
+                        attachment.filename, attachment.description, attachment.kind
+                    )
+                )
+
         if extra_attachments:
             lines.append(f"ещё {extra_attachments} вложений")
+
         return lines
+
+    def _select_main_attachment(
+        self, attachments: List[AttachmentSummary]
+    ) -> tuple[AttachmentSummary, List[AttachmentSummary]]:
+        scored = [
+            (
+                idx,
+                self._attachment_priority_score(att),
+            )
+            for idx, att in enumerate(attachments)
+        ]
+        main_index = min(scored, key=lambda item: (item[1], item[0]))[0]
+        main = attachments[main_index]
+        others = attachments[:main_index] + attachments[main_index + 1 :]
+        return main, others
+
+    def _attachment_priority_score(self, attachment: AttachmentSummary) -> int:
+        doc_priority = self._DOC_TYPE_PRIORITY.get(
+            attachment.doc_type, self._DOC_TYPE_PRIORITY["OTHER"]
+        )
+        kind_priority = self._DOC_TYPE_PRIORITY.get(
+            attachment.kind, self._DOC_TYPE_PRIORITY["OTHER"]
+        )
+
+        if attachment.kind == "EXCEL":
+            kind_priority = min(kind_priority, self._DOC_TYPE_PRIORITY["TABLE"])
+        if attachment.kind == "CONTRACT":
+            kind_priority = min(kind_priority, self._DOC_TYPE_PRIORITY["CONTRACT"])
+        if attachment.kind == "INVOICE":
+            kind_priority = min(kind_priority, self._DOC_TYPE_PRIORITY["INVOICE"])
+
+        return min(doc_priority, kind_priority)
+
+    @staticmethod
+    def format_attachment_line(filename: str, extracted_text: str, kind_hint: str) -> str:
+        clean_name = " ".join((filename or "Вложение").split()) or "Вложение"
+        snippet = MessageProcessor._build_attachment_snippet(extracted_text or "")
+        if snippet:
+            return f"{clean_name} — {snippet}"
+
+        empty_phrase = MessageProcessor._empty_attachment_phrase(clean_name, kind_hint)
+        return f"{clean_name} — {empty_phrase}"
+
+    @staticmethod
+    def _build_attachment_snippet(extracted_text: str) -> str:
+        cleaned = normalize_text(MessageProcessor._strip_markup(extracted_text or ""))
+        tokens = [tok for tok in cleaned.split() if "=?" not in tok and "attachment.bin" not in tok]
+        cleaned = " ".join(tokens).strip()
+        if not cleaned:
+            return ""
+
+        first_line = [part for part in re.split(r"[\r\n]+", cleaned) if part.strip()]
+        base = first_line[0] if first_line else cleaned
+        segments = [seg.strip() for seg in re.split(r"(?<=[.!?])\s+|;\s+", base) if seg.strip()]
+        text_segment = segments[0] if segments else base
+        words = [w for w in text_segment.split() if w]
+        if not words:
+            return ""
+
+        snippet_words = words[:14]
+        if len(snippet_words) < 6 and len(words) >= 6:
+            snippet_words = words[:6]
+
+        snippet = " ".join(snippet_words).strip()
+        if len(snippet) > 120:
+            trimmed = snippet[:120]
+            snippet = trimmed.rsplit(" ", 1)[0].strip() or trimmed.strip()
+
+        banned_fragments = (
+            "старый формат",
+            "формат",
+            "кодировка",
+            "утилита",
+            "не поддерживается",
+            "по данным файла",
+        )
+        if any(fragment in snippet.lower() for fragment in banned_fragments):
+            filtered = [
+                w
+                for w in snippet.split()
+                if all(
+                    block not in w.lower()
+                    for block in ("формат", "кодиров", "утилит", "поддерж", "данным", "файла")
+                )
+            ]
+            snippet = " ".join(filtered[:14]).strip()
+
+        if not snippet:
+            return ""
+
+        return snippet
+
+    @staticmethod
+    def _empty_attachment_phrase(filename: str, kind_hint: str) -> str:
+        lower_ext = Path(filename or "").suffix.lower()
+        if lower_ext in {".xls", ".xlsx"} or kind_hint == "EXCEL":
+            return "таблица не извлечена"
+        return "текст не извлечён"
 
     def _remove_subject_terms(self, summary: str, subject: str) -> str:
         subject_keywords = {kw.lower() for kw in self._keywords(subject)}
