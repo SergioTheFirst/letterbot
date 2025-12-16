@@ -562,7 +562,20 @@ class MessageProcessor:
         summary = (extracted_text or "").strip()
         if not summary:
             summary = MessageProcessor._empty_attachment_phrase(clean_name, kind_hint)
-        return f"{clean_name} — {summary}"
+
+        line = f"{clean_name} — {summary}"
+        if len(line) <= 120:
+            return line
+
+        max_summary = max(10, 120 - len(clean_name) - len(" — "))
+        trimmed_summary = MessageProcessor._trim_text(summary, max_summary)
+        line = f"{clean_name} — {trimmed_summary}"
+        if len(line) <= 120:
+            return line
+
+        max_name = max(10, 120 - len(trimmed_summary) - len(" — "))
+        trimmed_name = MessageProcessor._trim_text(clean_name, max_name)
+        return f"{trimmed_name} — {trimmed_summary}"
 
     def _attachment_description(self, filename: str, kind_hint: str, att_text: str) -> str:
         lower_name = (filename or "").lower()
@@ -570,19 +583,17 @@ class MessageProcessor:
 
         if ext == ".doc":
             return "документ Word (текст недоступен)"
-        if ext == ".xls":
-            return "таблица Excel (данные недоступны)"
 
         cleaned = normalize_text(self._strip_markup(att_text or ""))
         cleaned = self._strip_forbidden_tokens(cleaned)
 
         if ext == ".docx":
-            snippet = self._docx_snippet(cleaned)
+            snippet = self._docx_summary(cleaned)
             return snippet or "текст не извлечён"
 
-        if ext == ".xlsx" or kind_hint == "EXCEL":
-            snippet = self._excel_headers(cleaned)
-            return snippet or "таблица не извлечена"
+        if ext in {".xls", ".xlsx"} or kind_hint == "EXCEL":
+            summary = self._excel_summary(filename, cleaned)
+            return summary or "таблица не извлечена"
 
         snippet = self._generic_attachment_snippet(cleaned)
         if snippet:
@@ -590,27 +601,41 @@ class MessageProcessor:
 
         return self._empty_attachment_phrase(filename, kind_hint)
 
-    def _docx_snippet(self, att_text: str) -> str:
-        tokens = [tok for tok in att_text.split() if tok]
+    def _docx_summary(self, att_text: str) -> str:
+        tokens = [tok.strip('"\'\'«»') for tok in att_text.split() if tok]
         tokens = self._filter_forbidden_tokens(tokens)
         if not tokens:
             return ""
 
-        desired = min(14, len(tokens))
-        if desired < 8 and len(tokens) >= 8:
-            desired = 8
-
-        snippet = " ".join(tokens[:desired]).strip()
+        snippet = " ".join(tokens[:12]).strip()
         return snippet
 
-    def _excel_headers(self, att_text: str) -> str:
-        for line in att_text.splitlines():
-            candidate = " ".join(line.split())
-            if candidate:
-                cleaned = self._strip_forbidden_tokens(candidate)
-                if cleaned:
-                    return cleaned
-        return ""
+    def _excel_summary(self, filename: str, att_text: str) -> str:
+        stem = Path(filename or "таблица").stem
+        name_keywords = self._keywords(stem)
+        topic_candidates = name_keywords + self._key_nouns(att_text)
+
+        seen: set[str] = set()
+        topic_tokens: list[str] = []
+        for token in topic_candidates:
+            if token in seen:
+                continue
+            seen.add(token)
+            topic_tokens.append(token)
+            if len(topic_tokens) >= 5:
+                break
+
+        topic = " ".join(topic_tokens).strip() or "данные"
+
+        lines = [ln for ln in att_text.split("\n") if ln.strip()]
+        row_like = 0
+        for line in lines:
+            parts = [p for p in re.split(r"[|;,\t]", line) if p.strip()]
+            if len(parts) >= 2:
+                row_like += 1
+
+        count_part = f" (≈{row_like} записей)" if row_like else ""
+        return f"таблица: {topic}{count_part}"
 
     def _generic_attachment_snippet(self, att_text: str) -> str:
         cleaned = " ".join(att_text.split())
@@ -624,6 +649,16 @@ class MessageProcessor:
     def _filter_forbidden_tokens(self, tokens: list[str]) -> list[str]:
         blocked = self._FORBIDDEN_ATTACHMENT_TOKENS
         return [tok for tok in tokens if all(bad not in tok.lower() for bad in blocked)]
+
+    @staticmethod
+    def _trim_text(text: str, limit: int) -> str:
+        if limit <= 0:
+            return ""
+        if len(text) <= limit:
+            return text
+        if limit <= 1:
+            return text[:limit]
+        return text[: limit - 1].rstrip() + "…"
 
     def _strip_forbidden_tokens(self, text: str) -> str:
         tokens = text.split()
