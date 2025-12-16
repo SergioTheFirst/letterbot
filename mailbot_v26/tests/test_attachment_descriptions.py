@@ -13,14 +13,9 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
-def _attachment_lines(result: str) -> list[str]:
-    lines = result.split("\n")
-    start = lines.index("") if "" in lines else len(lines)
-    return [
-        line
-        for line in lines[start + 1 :]
-        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
-    ]
+def _attachment_lines(result: str, names: set[str]) -> list[str]:
+    lines = [line for line in result.split("\n") if line.strip()]
+    return [line for line in lines if any(line.startswith(name) for name in names)]
 
 
 def test_office_attachment_descriptions_follow_rules() -> None:
@@ -63,7 +58,8 @@ def test_office_attachment_descriptions_follow_rules() -> None:
     result = processor.process("robot@example.com", msg)
     assert result is not None
 
-    lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    lines = _attachment_lines(result, names)
     assert len(lines) == 4
 
     mapping: dict[str, str] = {}
@@ -75,7 +71,7 @@ def test_office_attachment_descriptions_follow_rules() -> None:
         mapping[name] = desc
     assert mapping.keys() == {att.filename for att in attachments}
 
-    assert mapping["legacy.doc"] == ""
+    assert mapping["legacy.doc"]
     assert mapping["blank.docx"] == ""
 
     for excel_name in ("data.xlsx", "old.xls"):
@@ -121,7 +117,8 @@ def test_excel_and_docx_summaries_are_compact() -> None:
     result = processor.process("robot@example.com", msg)
     assert result is not None
 
-    lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    lines = _attachment_lines(result, names)
     mapping = {line.split(" — ")[0]: line for line in lines}
 
     excel_line = mapping["прайс_на_оборудование.xlsx"]

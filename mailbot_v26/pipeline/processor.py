@@ -263,18 +263,7 @@ class MessageProcessor:
         return self._normalize_action_subject(normalized_verb, subject, attachments, body)
 
     def _summarize_email_body(self, body_text: str) -> str:
-        cleaned = self._normalize_body_text(body_text)
-        if not cleaned:
-            return ""
-
-        primary_sentence = self._pick_body_sentence(cleaned)
-        tokens = self._prepare_body_tokens(primary_sentence or cleaned)
-
-        if len(tokens) < 5:
-            tokens = self._prepare_body_tokens(cleaned)
-
-        summary = self._render_body_summary(tokens)
-        return summary
+        return self._normalize_body_one_liner(body_text)
 
     def _select_verb(self, facts, body: str, mail_type: str) -> str:
         defaults = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
@@ -472,84 +461,27 @@ class MessageProcessor:
         self, attachments: List[AttachmentSummary], extra_attachments: int = 0
     ) -> List[str]:
         if not attachments:
-            return [] if not extra_attachments else ["", f"ещё {extra_attachments} вложений"]
+            return [f"ещё {extra_attachments} файлов"] if extra_attachments else []
 
-        if len(attachments) == 1:
-            line = self.format_attachment_line(
-                attachments[0].filename,
-                attachments[0].description,
-                attachments[0].kind,
-                max_meaning=60,
-                text_length=attachments[0].text_length,
-            )
-            lines: List[str] = ["", line]
-            if extra_attachments:
-                lines.append(f"ещё {extra_attachments} вложений")
-            return lines
+        limited = attachments[:6]
+        lines: List[str] = []
 
-        main, others = self._select_main_attachment(attachments)
-
-        lines = [
-            "",
-            "📎 Главное вложение:",
-            self.format_attachment_line(
-                main.filename,
-                main.description,
-                main.kind,
-                max_meaning=60,
-                text_length=main.text_length,
-            ),
-        ]
-
-        if others:
-            lines.append(f"📂 Остальные вложения ({len(others)}):")
-            for attachment in others:
-                lines.append(
-                    self.format_attachment_line(
-                        attachment.filename,
-                        attachment.description,
-                        attachment.kind,
-                        max_meaning=40,
-                        text_length=attachment.text_length,
-                    )
+        for attachment in limited:
+            lines.append(
+                self.format_attachment_line(
+                    attachment.filename,
+                    attachment.description,
+                    attachment.kind,
+                    max_meaning=60,
+                    text_length=attachment.text_length,
                 )
+            )
 
-        if extra_attachments:
-            lines.append(f"ещё {extra_attachments} вложений")
+        remaining = max(extra_attachments, 0) + max(0, len(attachments) - 6)
+        if remaining:
+            lines.append(f"ещё {remaining} файлов")
 
         return lines
-
-    def _select_main_attachment(
-        self, attachments: List[AttachmentSummary]
-    ) -> tuple[AttachmentSummary, List[AttachmentSummary]]:
-        scored = [
-            (
-                idx,
-                self._attachment_priority_score(att),
-            )
-            for idx, att in enumerate(attachments)
-        ]
-        main_index = min(scored, key=lambda item: (item[1], item[0]))[0]
-        main = attachments[main_index]
-        others = attachments[:main_index] + attachments[main_index + 1 :]
-        return main, others
-
-    def _attachment_priority_score(self, attachment: AttachmentSummary) -> int:
-        doc_priority = self._DOC_TYPE_PRIORITY.get(
-            attachment.doc_type, self._DOC_TYPE_PRIORITY["OTHER"]
-        )
-        kind_priority = self._DOC_TYPE_PRIORITY.get(
-            attachment.kind, self._DOC_TYPE_PRIORITY["OTHER"]
-        )
-
-        if attachment.kind == "EXCEL":
-            kind_priority = min(kind_priority, self._DOC_TYPE_PRIORITY["TABLE"])
-        if attachment.kind == "CONTRACT":
-            kind_priority = min(kind_priority, self._DOC_TYPE_PRIORITY["CONTRACT"])
-        if attachment.kind == "INVOICE":
-            kind_priority = min(kind_priority, self._DOC_TYPE_PRIORITY["INVOICE"])
-
-        return min(doc_priority, kind_priority)
 
     @staticmethod
     def format_attachment_line(
@@ -564,7 +496,7 @@ class MessageProcessor:
         summary = (extracted_text or "").strip()
 
         if text_length == 0 or not summary:
-            return clean_name
+            return MessageProcessor._trim_text(clean_name, 80)
 
         cleaned_summary = MessageProcessor._trim_text(summary, max_meaning)
         name_tokens = {token.lower() for token in re.findall(r"[\w-]{2,}", clean_name)}
@@ -580,83 +512,101 @@ class MessageProcessor:
 
         summary_text = " ".join(summary_tokens)
         line = f"{clean_name} — {summary_text}"
-        if len(line) <= 120:
+        if len(line) <= 80:
             return line
 
-        max_summary = max(10, min(max_meaning, 120 - len(clean_name) - len(" — ")))
+        max_summary = max(8, min(max_meaning, 80 - len(clean_name) - len(" — ")))
         trimmed_summary = MessageProcessor._trim_text(summary_text, max_summary)
         line = f"{clean_name} — {trimmed_summary}"
-        if len(line) <= 120:
+        if len(line) <= 80:
             return line
 
-        max_name = max(10, 120 - len(trimmed_summary) - len(" — "))
+        max_name = max(8, 80 - len(trimmed_summary) - len(" — "))
         trimmed_name = MessageProcessor._trim_text(clean_name, max_name)
         return f"{trimmed_name} — {trimmed_summary}"
 
     def _attachment_description(self, filename: str, kind_hint: str, att_text: str) -> str:
-        lower_name = (filename or "").lower()
-        ext = Path(lower_name).suffix
-
-        if ext == ".doc":
+        stem_tokens = {t.lower() for t in self._keywords(Path(filename or "Вложение").stem)}
+        cleaned = normalize_text(self._strip_markup(att_text or "")).strip()
+        if not cleaned:
             return ""
 
-        cleaned = normalize_text(self._strip_markup(att_text or ""))
-        cleaned = self._strip_forbidden_tokens(cleaned)
-
-        if ext == ".docx":
-            snippet = self._docx_summary(cleaned)
-            return snippet
-
+        ext = Path((filename or "")).suffix.lower()
         if ext in {".xls", ".xlsx"} or kind_hint == "EXCEL":
-            summary = self._excel_summary(filename, cleaned)
-            return summary
+            return self._excel_essence(cleaned, stem_tokens)
 
-        snippet = self._generic_attachment_snippet(cleaned)
-        return snippet
+        return self._document_essence(cleaned, stem_tokens)
 
-    def _docx_summary(self, att_text: str) -> str:
-        tokens = [tok.strip('"\'\'«»') for tok in att_text.split() if tok]
-        tokens = self._filter_forbidden_tokens(tokens)
-        if not tokens:
+    def _excel_essence(self, att_text: str, name_tokens: set[str]) -> str:
+        header_stopwords = {
+            "номер",
+            "наименование",
+            "адрес",
+            "учреждения",
+            "учреждение",
+            "адреса",
+            "дата",
+            "период",
+            "телефон",
+            "почта",
+            "email",
+            "количество",
+            "итого",
+            "сумма",
+        }
+        words = re.findall(r"[A-Za-zА-Яа-яЁё]{4,}", att_text.lower())
+        filtered = [
+            w
+            for w in words
+            if w not in header_stopwords
+            and w not in self._STOPWORDS
+            and w not in name_tokens
+        ]
+        if not filtered:
             return ""
 
-        snippet = " ".join(tokens[:12]).strip()
-        return snippet
+        counts = Counter(filtered)
+        first_pos: dict[str, int] = {}
+        for idx, word in enumerate(filtered):
+            first_pos.setdefault(word, idx)
 
-    def _excel_summary(self, filename: str, att_text: str) -> str:
-        stem = Path(filename or "таблица").stem
-        name_keywords = self._keywords(stem)
-        topic_candidates = name_keywords + self._key_nouns(att_text)
+        ranked = sorted(first_pos.keys(), key=lambda w: (-counts[w], first_pos[w]))
+        essence_tokens = ranked[:4]
+        return " ".join(essence_tokens)
 
-        seen: set[str] = set()
-        topic_tokens: list[str] = []
-        for token in topic_candidates:
-            if token in seen:
-                continue
-            seen.add(token)
-            topic_tokens.append(token)
-            if len(topic_tokens) >= 5:
+    def _document_essence(self, att_text: str, name_tokens: set[str]) -> str:
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n", att_text) if s.strip()]
+        picked = ""
+        for sentence in sentences:
+            if len(sentence.split()) >= 6:
+                picked = sentence
                 break
+        if not picked and sentences:
+            picked = sentences[0]
 
-        topic = " ".join(topic_tokens).strip() or "данные"
-
-        lines = [ln for ln in att_text.split("\n") if ln.strip()]
-        row_like = 0
-        for line in lines:
-            parts = [p for p in re.split(r"[|;,\t]", line) if p.strip()]
-            if len(parts) >= 2:
-                row_like += 1
-
-        return topic
-
-    def _generic_attachment_snippet(self, att_text: str) -> str:
-        cleaned = " ".join(att_text.split())
-        tokens = self._filter_forbidden_tokens(cleaned.split())
-        if not tokens:
+        if not picked:
             return ""
-        limit = min(14, len(tokens))
-        snippet = " ".join(tokens[:limit]).strip()
-        return snippet
+
+        raw_tokens = [re.sub(r"^[^\w]+|[^\w]+$", "", tok) for tok in picked.split() if tok.strip()]
+        filtered = [t for t in raw_tokens if t and t.lower() not in name_tokens]
+        nouns = [
+            t
+            for t in filtered
+            if len(t) >= 4 and t.lower() not in self._STOPWORDS and not t.isdigit()
+        ]
+
+        if nouns:
+            essence_tokens = nouns[:4]
+        else:
+            essence_tokens = filtered[:10]
+
+        if len(essence_tokens) < 2:
+            return ""
+
+        if len(essence_tokens) > 4:
+            essence_tokens = essence_tokens[:4]
+
+        return " ".join(essence_tokens)
 
     def _filter_forbidden_tokens(self, tokens: list[str]) -> list[str]:
         blocked = self._FORBIDDEN_ATTACHMENT_TOKENS
@@ -895,6 +845,122 @@ class MessageProcessor:
             return verb
 
         return f"{verb} {object_phrase}".strip()
+
+    def _normalize_body_one_liner(self, body_text: str) -> str:
+        raw = self._strip_markup(body_text or "")
+        if not raw:
+            return ""
+
+        greetings = (
+            "здравствуйте",
+            "добрый день",
+            "доброе утро",
+            "добрый вечер",
+            "привет",
+            "hello",
+            "hi",
+        )
+        signature_markers = (
+            "--",
+            "с уважением",
+            "best regards",
+            "kind regards",
+            "regards",
+        )
+        filtered_lines: list[str] = []
+        for raw_line in raw.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            if lowered.startswith(("from:", "sent:", "to:", "subject:", "от:", "дата:")):
+                continue
+            if line.startswith(">"):
+                continue
+            if any(lowered.startswith(marker) for marker in signature_markers):
+                break
+            if self._looks_like_contact(line):
+                continue
+            for greet in greetings:
+                if lowered.startswith(greet):
+                    line = line[len(greet) :].strip(" ,.-")
+                    lowered = line.lower()
+                    break
+            if not line:
+                continue
+            filtered_lines.append(line)
+
+        compact = " ".join(filtered_lines).strip()
+        if not compact:
+            return ""
+
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n", compact) if s.strip()]
+        if not sentences:
+            return ""
+
+        verbs = {
+            "оплатить",
+            "согласовать",
+            "подтвердить",
+            "проверить",
+            "выслать",
+            "прислать",
+            "нужно",
+            "требуется",
+        }
+
+        def pick_sentence() -> str:
+            for sentence in sentences:
+                lowered = sentence.lower()
+                if any(v in lowered for v in verbs):
+                    return sentence
+            for sentence in sentences:
+                lowered = sentence.lower()
+                if self._find_amount(sentence) or self._find_deadline(sentence) or "номер" in lowered:
+                    return sentence
+            for sentence in sentences:
+                if len(sentence.split()) >= 5:
+                    return sentence
+            return sentences[0]
+
+        primary = pick_sentence()
+        tokens = re.findall(r"[\w-]{2,}", primary)
+        filler = {
+            "здравствуйте",
+            "добрый",
+            "день",
+            "доброе",
+            "утро",
+            "вечер",
+            "сообщается",
+            "сообщаем",
+            "на",
+            "рассмотрение",
+            "пожалуйста",
+        }
+        cleaned_tokens: list[str] = []
+        for token in tokens:
+            lowered = token.lower()
+            if lowered in filler:
+                continue
+            cleaned_tokens.append(token)
+
+        if len(cleaned_tokens) < 8:
+            extra_tokens = [t for t in re.findall(r"[\w-]{2,}", compact) if t]
+            for token in extra_tokens:
+                lowered = token.lower()
+                if lowered in filler:
+                    continue
+                cleaned_tokens.append(token)
+                if len(cleaned_tokens) >= 8:
+                    break
+
+        if len(cleaned_tokens) < 8:
+            return ""
+
+        cleaned_tokens = cleaned_tokens[:12]
+        summary = " ".join(cleaned_tokens)
+        return summary.strip()
 
     def _normalize_body_text(self, body_text: str) -> str:
         raw = self._strip_markup(body_text or "")

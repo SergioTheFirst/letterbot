@@ -14,14 +14,9 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
-def _attachment_lines(result: str) -> list[str]:
-    lines = result.split("\n")
-    start = lines.index("") if "" in lines else len(lines)
-    return [
-        line
-        for line in lines[start + 1 :]
-        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
-    ]
+def _attachment_lines(result: str, names: set[str]) -> list[str]:
+    lines = [line for line in result.split("\n") if line.strip()]
+    return [line for line in lines if any(line.startswith(name) for name in names)]
 
 
 def test_bank_invoice_marked_red():
@@ -108,6 +103,36 @@ def test_output_has_two_mandatory_lines():
 
 def test_no_duplicate_attachment_names():
     processor = _processor()
+    attachments = [
+        Attachment(
+            filename="report.pdf",
+            content=b"",
+            content_type="application/pdf",
+            text="""
+            Отчет по продажам за месяц включает показатели по регионам,
+            динамику и ключевые выводы менеджмента для анализа.
+            """,
+        ),
+        Attachment(
+            filename="report.pdf",
+            content=b"",
+            content_type="application/pdf",
+            text="""
+            Дублирующий отчет с корректировками, содержит уточненные числа
+            и обновленные итоговые данные по продажам.
+            """,
+        ),
+        Attachment(
+            filename="contract.docx",
+            content=b"",
+            content_type="application/msword",
+            text="""
+            Договор на поставку оборудования с описанием обязательств,
+            сроков поставки и условий оплаты по контракту.
+            """,
+        ),
+    ]
+
     msg = InboundMessage(
         subject="Отчеты и договор",
         sender="ops@example.com",
@@ -115,41 +140,14 @@ def test_no_duplicate_attachment_names():
             "Проверьте отчеты во вложении и обновленную версию договора, "
             "нужно подтвердить изменения."
         ),
-        attachments=[
-            Attachment(
-                filename="report.pdf",
-                content=b"",
-                content_type="application/pdf",
-                text="""
-                Отчет по продажам за месяц включает показатели по регионам,
-                динамику и ключевые выводы менеджмента для анализа.
-                """,
-            ),
-            Attachment(
-                filename="report.pdf",
-                content=b"",
-                content_type="application/pdf",
-                text="""
-                Дублирующий отчет с корректировками, содержит уточненные числа
-                и обновленные итоговые данные по продажам.
-                """,
-            ),
-            Attachment(
-                filename="contract.docx",
-                content=b"",
-                content_type="application/msword",
-                text="""
-                Договор на поставку оборудования с описанием обязательств,
-                сроков поставки и условий оплаты по контракту.
-                """,
-            ),
-        ],
+        attachments=attachments,
         received_at=datetime(2024, 7, 7, 15, 0),
     )
 
     result = processor.process("user@example.com", msg)
     assert result is not None
-    attachment_lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    attachment_lines = _attachment_lines(result, names)
 
     assert len(attachment_lines) == 3
     filenames = [line.split(" — ")[0] for line in attachment_lines]
@@ -159,31 +157,38 @@ def test_no_duplicate_attachment_names():
 
 def test_all_non_image_attachments_are_rendered():
     processor = _processor()
+    attachments = [
+        Attachment(
+            filename="contract.doc",
+            content=b"",
+            content_type="application/msword",
+            text="Общие условия договора на поставку продукции.",
+        ),
+        Attachment(
+            filename="note.docx",
+            content=b"",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            text="Короткая заметка",
+        ),
+        Attachment(
+            filename="prices.xlsx",
+            content=b"",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            text="Таблица с ценами и кодами товаров",
+        ),
+        Attachment(
+            filename="report.xlsx",
+            content=b"",
+            content_type="application/vnd.ms-excel",
+            text="Отчет по продажам за квартал",
+        ),
+    ]
+
     msg = InboundMessage(
         subject="Пакет документов и таблиц",
         sender="ops@example.com",
         body="Высылаем комплект файлов",
-        attachments=[
-            Attachment(
-                filename="contract.doc",
-                content=b"",
-                content_type="application/msword",
-                text="Общие условия договора на поставку продукции.",
-            ),
-            Attachment(filename="note.docx", content=b"", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", text="Короткая заметка"),
-            Attachment(
-                filename="prices.xlsx",
-                content=b"",
-                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                text="Таблица с ценами и кодами товаров",
-            ),
-            Attachment(
-                filename="report.xlsx",
-                content=b"",
-                content_type="application/vnd.ms-excel",
-                text="Отчет по продажам за квартал",
-            ),
-        ],
+        attachments=attachments,
         received_at=datetime(2024, 8, 8, 16, 0),
     )
 
@@ -194,7 +199,8 @@ def test_all_non_image_attachments_are_rendered():
     assert lines[0].strip()
     assert lines[1].strip()
 
-    attachment_lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    attachment_lines = _attachment_lines(result, names)
     assert len(attachment_lines) == 4
 
     for filename in ["contract.doc", "note.docx", "prices.xlsx", "report.xlsx"]:
@@ -220,28 +226,31 @@ def test_informational_email_remains_blue():
 
 def test_attachment_lines_drop_prefixes_and_counts():
     processor = _processor()
+    attachments = [
+        Attachment(
+            filename="stats.xlsx",
+            content=b"",
+            content_type="application/vnd.ms-excel",
+            text="Код;Цена;Сумма\n1;10;10\n2;20;40",
+        ),
+        Attachment(
+            filename="notes.docx",
+            content=b"",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            text="Проверка с документами",
+        ),
+    ]
+
     msg = InboundMessage(
         subject="Таблицы и документы",
         sender="ops@example.com",
         body="",
-        attachments=[
-            Attachment(
-                filename="stats.xlsx",
-                content=b"",
-                content_type="application/vnd.ms-excel",
-                text="Код;Цена;Сумма\n1;10;10\n2;20;40",
-            ),
-            Attachment(
-                filename="notes.docx",
-                content=b"",
-                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                text="Проверка с документами",
-            ),
-        ],
+        attachments=attachments,
     )
 
     result = processor.process("robot@example.com", msg)
-    attachment_lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    attachment_lines = _attachment_lines(result, names)
 
     assert len(attachment_lines) == 2
     for line in attachment_lines:
@@ -263,7 +272,7 @@ def test_body_placeholder_is_silent_when_empty():
     lines = result.split("\n")
     assert len(lines) >= 3
     assert "тело" not in result.lower()
-    assert any(line.startswith("info.pdf") for line in _attachment_lines(result))
+    assert any(line.startswith("info.pdf") for line in _attachment_lines(result, {"info.pdf"}))
 
 
 def test_normalize_action_subject_deduplicates_tokens():

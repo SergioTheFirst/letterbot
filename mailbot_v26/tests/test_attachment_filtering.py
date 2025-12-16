@@ -15,14 +15,11 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
-def _attachment_lines(result: str) -> list[str]:
-    lines = result.split("\n")
-    start = lines.index("") if "" in lines else len(lines)
-    return [
-        line
-        for line in lines[start + 1 :]
-        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
-    ]
+def _attachment_lines(result: str, names: set[str] | None = None) -> list[str]:
+    lines = [line for line in result.split("\n") if line.strip()]
+    if names:
+        return [line for line in lines if any(line.startswith(name) for name in names)]
+    return [line for line in lines if " — " in line or "." in line.split()[0]]
 
 
 def test_no_attachment_bin_from_inline_parts():
@@ -79,7 +76,8 @@ def test_no_placeholder_po_dannym_faila():
 
     assert result is not None
     assert "по данным файла" not in result
-    lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    lines = _attachment_lines(result, names)
     assert any(line.startswith("empty.docx") for line in lines)
 
 
@@ -106,7 +104,7 @@ def test_ignores_images_and_fonts():
     result = processor.process("user@example.com", msg)
     assert result is not None
 
-    attachment_lines = _attachment_lines(result)
+    attachment_lines = _attachment_lines(result, {"report.docx", "photo.png", "font.woff"})
     assert any(line.startswith("report.docx") for line in attachment_lines)
     assert not any("photo.png" in line for line in attachment_lines)
     assert any("font.woff" in line for line in attachment_lines)
@@ -143,7 +141,7 @@ def test_keeps_real_office_attachments():
     result = processor.process("user@example.com", msg)
     assert result is not None
 
-    attachment_lines = _attachment_lines(result)
+    attachment_lines = _attachment_lines(result, {"terms.docx", "schedule.xlsx"})
     assert len(attachment_lines) == 2
     assert any(line.startswith("terms.docx") for line in attachment_lines)
     assert any(line.startswith("schedule.xlsx") for line in attachment_lines)

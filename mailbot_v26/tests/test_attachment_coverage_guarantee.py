@@ -15,14 +15,9 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
-def _attachment_lines(result: str) -> list[str]:
-    lines = result.split("\n")
-    start = lines.index("") if "" in lines else len(lines)
-    return [
-        line
-        for line in lines[start + 1 :]
-        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
-    ]
+def _attachment_lines(result: str, names: set[str]) -> list[str]:
+    lines = [line for line in result.split("\n") if line.strip()]
+    return [line for line in lines if any(line.startswith(name) for name in names)]
 
 
 @pytest.mark.parametrize("include_image", [True, False])
@@ -81,7 +76,8 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
     result = processor.process("user@example.com", msg)
     assert result is not None
 
-    attachment_lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    attachment_lines = _attachment_lines(result, names)
     attachment_entries = [line for line in attachment_lines if not line.startswith("ещё ")]
     total_non_image = 4
     expected_count = total_non_image
