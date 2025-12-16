@@ -280,18 +280,7 @@ class MessageProcessor:
         for att in attachments:
             lower_filename = (att.filename or "").lower()
             content_type = (att.content_type or "").lower()
-            if content_type.startswith("font/"):
-                continue
-
-            has_meaningful_extension = lower_filename.endswith(
-                (".doc", ".docx", ".xls", ".xlsx", ".pdf")
-            )
-            if (
-                (not lower_filename or lower_filename == "attachment.bin")
-                and content_type
-                in {"text/html", "text/css", "application/octet-stream"}
-                and not has_meaningful_extension
-            ):
+            if self._is_inline_attachment(lower_filename, content_type):
                 continue
 
             kind = self._detect_attachment_kind(att.filename, att.content_type)
@@ -315,17 +304,9 @@ class MessageProcessor:
                 summary = (summary or "").strip()
 
             if not summary:
-                summary = self._fallback_short_summary(
-                    filename=att.filename or "Вложение",
-                    subject=subject,
-                    kind=kind,
-                    att_text="",
-                )
-            if not summary:
-                keywords = self._keywords(att.filename or "")
-                summary = f"файл: {' '.join(keywords[:3])}" if keywords else (att.filename or "Вложение")
+                summary = self._safe_attachment_fallback(att.filename, kind)
 
-            description = summary.strip()
+            description = summary.strip() or self._safe_attachment_fallback(att.filename, kind)
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
 
             attachments_out.append(
@@ -339,14 +320,40 @@ class MessageProcessor:
                 )
             )
 
-        attachments_out.sort(key=lambda item: item.priority)
-
         extra_attachments = 0
         if len(attachments_out) > self._MAX_ATTACHMENTS:
             extra_attachments = len(attachments_out) - self._MAX_ATTACHMENTS
             attachments_out = attachments_out[: self._MAX_ATTACHMENTS]
 
         return attachments_out, extra_attachments
+
+    @staticmethod
+    def _is_inline_attachment(lower_filename: str, content_type: str) -> bool:
+        inline_types = {"text/html", "text/css", "application/octet-stream"}
+        if content_type.startswith("font/"):
+            return True
+
+        has_meaningful_extension = lower_filename.endswith(
+            (".doc", ".docx", ".xls", ".xlsx", ".pdf")
+        )
+        return (
+            (not lower_filename or lower_filename == "attachment.bin")
+            and content_type in inline_types
+            and not has_meaningful_extension
+        )
+
+    def _safe_attachment_fallback(self, filename: str | None, kind: str) -> str:
+        base_name = filename or "Вложение"
+        lowered = base_name.lower()
+
+        if "прайс" in lowered or "price" in lowered:
+            label = "прайс-лист"
+        elif kind == "EXCEL":
+            label = "таблица"
+        else:
+            label = "документ"
+
+        return f"{label}: {base_name}"
 
     def _summarize_attachment(self, att: Attachment, subject: str, kind: str) -> tuple[str, int]:
         filename = self._purge_markup_tokens(att.filename or "Вложение")
