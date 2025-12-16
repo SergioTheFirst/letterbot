@@ -15,7 +15,7 @@ def _processor() -> MessageProcessor:
 
 
 def _attachment_lines(result: str, names: set[str]) -> list[str]:
-    lines = [line for line in result.split("\n") if line.strip()]
+    lines = [line.strip("*") for line in result.split("\n") if line.strip()]
     return [line for line in lines if any(line.startswith(name) for name in names)]
 
 
@@ -95,10 +95,11 @@ def test_output_has_two_mandatory_lines():
 
     result = processor.process("user@example.com", msg)
     assert result is not None
-    mandatory = [line for line in result.split("\n") if line.strip()][0:2]
-    assert len(mandatory) == 2
+    mandatory = [line for line in result.split("\n") if line.strip()][0:3]
+    assert len(mandatory) >= 2
     assert mandatory[0].startswith(("🔴", "🟡", "🔵"))
-    assert mandatory[1].split()[0] in MessageProcessor._VERB_ORDER
+    assert mandatory[1].startswith("**")
+    assert mandatory[2].split()[0] in MessageProcessor._VERB_ORDER
 
 
 def test_no_duplicate_attachment_names():

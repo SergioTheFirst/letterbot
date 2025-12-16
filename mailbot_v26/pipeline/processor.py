@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+from email.utils import parseaddr
+
 from mailbot_v26.bot_core.action_engine import analyze_action
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
 from mailbot_v26.domain.fact_snippets import (
@@ -181,7 +183,9 @@ class MessageProcessor:
 
         base_lines = self._enforce_length([line1, line2])
         attachments, extra_attachments = self._build_attachment_summaries(attachments, subject_clean)
-        telegram_message = self._compose(base_lines, attachments, body_summary, extra_attachments)
+        telegram_message = self._compose(
+            base_lines, attachments, body_summary, extra_attachments, subject_clean
+        )
 
         combined_preview = "\n".join(
             base_lines
@@ -193,16 +197,20 @@ class MessageProcessor:
             priority = "BLUE"
             line1 = self._build_line1(priority, sender_clean, subject_clean, message.received_at)
             base_lines = self._enforce_length([line1, line2])
-            telegram_message = self._compose(base_lines, attachments, body_summary, extra_attachments)
+            telegram_message = self._compose(
+                base_lines, attachments, body_summary, extra_attachments, subject_clean
+            )
 
         if not self._passes_quality_gates(base_lines, priority, verb, mail_type):
             fallback_lines = self._fallback_lines(sender_clean, subject_clean, verb)
             base_lines = self._enforce_length(fallback_lines)
-            telegram_message = self._compose(base_lines, attachments, body_summary, extra_attachments)
+            telegram_message = self._compose(
+                base_lines, attachments, body_summary, extra_attachments, subject_clean
+            )
 
         if not self._passes_quality_gates(base_lines, priority, verb, mail_type):
             minimal = self._enforce_length(self._fallback_lines(sender_clean, "Сообщение", verb), hard_trim=True)
-            telegram_message = self._compose(minimal, [], body_summary, 0)
+            telegram_message = self._compose(minimal, [], body_summary, 0, subject_clean)
 
         return telegram_message
 
@@ -252,9 +260,7 @@ class MessageProcessor:
         return priority
 
     def _build_line1(self, priority: str, source: str, subject: str, received_at: datetime | None) -> str:
-        time_part = (received_at or datetime.now()).strftime("%H:%M")
-        short_subject = self._shorten_subject(subject)
-        return f"{self._PRIORITY_EMOJI[priority]} от {source} — {short_subject} ({time_part})"
+        return f"{self._PRIORITY_EMOJI[priority]} от {source}"
 
     def _build_line2(
         self, verb: str, subject: str, body: str, attachments: List[Attachment]
@@ -451,35 +457,55 @@ class MessageProcessor:
         attachments: List[AttachmentSummary],
         body_summary: str = "",
         extra_attachments: int = 0,
+        subject: str = "",
     ) -> str:
         rendered_attachments = self._render_attachments(attachments, extra_attachments)
-        summary_lines = [body_summary.strip()] if body_summary.strip() else []
-        parts = base_lines + summary_lines + rendered_attachments
-        return "\n".join(parts).strip()
+        body_line = f"*{body_summary.strip()}*" if body_summary.strip() else ""
+        attachment_block = "\n".join(rendered_attachments) if rendered_attachments else ""
+        header_block = base_lines[0]
+        if subject:
+            header_block = f"{header_block}\n**{subject.strip()}**"
+
+        parts = [header_block]
+
+        if len(base_lines) > 1 and base_lines[1].strip():
+            parts.append(base_lines[1].strip())
+
+        attachment_count = len(attachments) + max(extra_attachments, 0)
+        if attachment_count:
+            parts.append(f"📎 Вложений: {attachment_count}")
+
+        if body_line:
+            parts.append(body_line)
+
+        if attachment_block:
+            parts.append(attachment_block)
+
+        return "\n\n".join(part for part in parts if part).strip()
 
     def _render_attachments(
         self, attachments: List[AttachmentSummary], extra_attachments: int = 0
     ) -> List[str]:
         if not attachments:
-            return [f"ещё {extra_attachments} файлов"] if extra_attachments else []
+            return [f"*ещё {extra_attachments} файлов*"] if extra_attachments else []
 
         limited = attachments[:6]
         lines: List[str] = []
 
         for attachment in limited:
-            lines.append(
-                self.format_attachment_line(
-                    attachment.filename,
-                    attachment.description,
-                    attachment.kind,
-                    max_meaning=60,
-                    text_length=attachment.text_length,
-                )
+            line = self.format_attachment_line(
+                attachment.filename,
+                attachment.description,
+                attachment.kind,
+                max_meaning=60,
+                text_length=attachment.text_length,
             )
+            if line:
+                lines.append(f"*{line}*")
 
         remaining = max(extra_attachments, 0) + max(0, len(attachments) - 6)
         if remaining:
-            lines.append(f"ещё {remaining} файлов")
+            lines.append(f"*ещё {remaining} файлов*")
 
         return lines
 
@@ -510,7 +536,7 @@ class MessageProcessor:
         if not summary_tokens:
             return clean_name
 
-        summary_text = " ".join(summary_tokens)
+        summary_text = " ".join(summary_tokens[:6])
         line = f"{clean_name} — {summary_text}"
         if len(line) <= 80:
             return line
@@ -775,12 +801,23 @@ class MessageProcessor:
     def _normalize_source(sender: str) -> str:
         if not sender:
             return "Отправитель"
-        if "@" in sender:
-            name_part = sender.split("<")[-1].split("@")[0]
-            readable = re.sub(r"[._]", " ", name_part).strip()
-            readable = readable or sender.split("@")[0]
-            return readable.title()[:60]
-        return sender.strip()[:60]
+
+        name, email = parseaddr(sender)
+        name = name.strip()
+        email = email.strip()
+
+        if not name:
+            base = email.split("@")[0] if email else sender
+            base = re.sub(r"[._]", " ", base).strip()
+            name = base.title() if base else "Отправитель"
+
+        readable_name = re.sub(r"\s{2,}", " ", name).strip() or "Отправитель"
+        readable_name = readable_name[:60]
+
+        if email:
+            return f"{readable_name} <{email}>"
+
+        return readable_name
 
     @staticmethod
     def _contains_any(text: str, markers: set[str]) -> bool:
