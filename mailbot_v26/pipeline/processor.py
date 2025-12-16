@@ -110,6 +110,15 @@ class MessageProcessor:
         "with",
         "from",
     }
+    _FORBIDDEN_ATTACHMENT_TOKENS = {
+        "старый",
+        "формат",
+        "кодировка",
+        "утилита",
+        "поддерживается",
+        "данным",
+        "файла",
+    }
     _VERB_ORDER = [
         "Оплатить",
         "Подписать",
@@ -337,12 +346,13 @@ class MessageProcessor:
             att_text_plain = normalize_text(self._strip_markup(att_text_raw))
             text_length = len(att_text_plain)
             doc_type = self._classify_attachment_type(filename, kind, att_text_plain)
+            description = self._attachment_description(filename, kind, att_text_plain)
             priority_rank = self._ATTACHMENT_ORDER.get(kind, 5)
 
             attachments_out.append(
                 AttachmentSummary(
                     filename=filename,
-                    description=att_text_plain,
+                    description=description,
                     kind=kind,
                     priority=priority_rank,
                     text_length=text_length,
@@ -368,7 +378,11 @@ class MessageProcessor:
                 attachments_out.append(
                     AttachmentSummary(
                         filename=filler_name,
-                        description=normalize_text(att.text or ""),
+                        description=self._attachment_description(
+                            filler_name,
+                            self._detect_attachment_kind(att.filename, att.content_type),
+                            normalize_text(att.text or ""),
+                        ),
                         kind=self._detect_attachment_kind(att.filename, att.content_type),
                         priority=self._ATTACHMENT_ORDER.get(
                             self._detect_attachment_kind(att.filename, att.content_type), 5
@@ -427,31 +441,9 @@ class MessageProcessor:
         self, filename: str, ext: str, extracted_text: str | None
     ) -> str:
         clean_text = normalize_text(self._strip_markup(extracted_text or "")).strip()
-
-        if clean_text:
-            sentences = [
-                part.strip()
-                for part in re.split(r"[\r\n]+|(?<=[.!?])\s+", clean_text)
-                if part.strip()
-            ]
-            preview = "; ".join(sentences[:2]) or clean_text
-            return preview.strip()
-
-        lowered_ext = (ext or "").lower()
-        if lowered_ext == ".doc":
-            return "файл Word (старый формат), текст не извлечён"
-        if lowered_ext == ".docx":
-            return "файл Word, текст не извлечён"
-        if lowered_ext == ".xls":
-            return "Excel (старый формат), таблица не прочитана"
-        if lowered_ext == ".xlsx":
-            return "таблица Excel, текст не извлечена"
-        if lowered_ext == ".pdf":
-            return "PDF, текст не извлечён"
-        if lowered_ext:
-            return f"файл {lowered_ext.lstrip('.').upper()} без извлекаемого текста"
-
-        return "файл без извлекаемого текста (формат/скан/старый DOC)"
+        kind_hint = "EXCEL" if (ext or "").lower() in {".xls", ".xlsx"} else ""
+        fallback_name = filename or (f"Вложение{ext}" if ext else "Вложение")
+        return self._attachment_description(fallback_name, kind_hint, clean_text)
 
     def _fallback_category(self, lowered_filename: str, kind: str) -> str:
         ext = ""
@@ -567,61 +559,75 @@ class MessageProcessor:
     @staticmethod
     def format_attachment_line(filename: str, extracted_text: str, kind_hint: str) -> str:
         clean_name = " ".join((filename or "Вложение").split()) or "Вложение"
-        snippet = MessageProcessor._build_attachment_snippet(extracted_text or "")
+        summary = (extracted_text or "").strip()
+        if not summary:
+            summary = MessageProcessor._empty_attachment_phrase(clean_name, kind_hint)
+        return f"{clean_name} — {summary}"
+
+    def _attachment_description(self, filename: str, kind_hint: str, att_text: str) -> str:
+        lower_name = (filename or "").lower()
+        ext = Path(lower_name).suffix
+
+        if ext == ".doc":
+            return "документ Word (текст недоступен)"
+        if ext == ".xls":
+            return "таблица Excel (данные недоступны)"
+
+        cleaned = normalize_text(self._strip_markup(att_text or ""))
+        cleaned = self._strip_forbidden_tokens(cleaned)
+
+        if ext == ".docx":
+            snippet = self._docx_snippet(cleaned)
+            return snippet or "текст не извлечён"
+
+        if ext == ".xlsx" or kind_hint == "EXCEL":
+            snippet = self._excel_headers(cleaned)
+            return snippet or "таблица не извлечена"
+
+        snippet = self._generic_attachment_snippet(cleaned)
         if snippet:
-            return f"{clean_name} — {snippet}"
+            return snippet
 
-        empty_phrase = MessageProcessor._empty_attachment_phrase(clean_name, kind_hint)
-        return f"{clean_name} — {empty_phrase}"
+        return self._empty_attachment_phrase(filename, kind_hint)
 
-    @staticmethod
-    def _build_attachment_snippet(extracted_text: str) -> str:
-        cleaned = normalize_text(MessageProcessor._strip_markup(extracted_text or ""))
-        tokens = [tok for tok in cleaned.split() if "=?" not in tok and "attachment.bin" not in tok]
-        cleaned = " ".join(tokens).strip()
-        if not cleaned:
+    def _docx_snippet(self, att_text: str) -> str:
+        tokens = [tok for tok in att_text.split() if tok]
+        tokens = self._filter_forbidden_tokens(tokens)
+        if not tokens:
             return ""
 
-        first_line = [part for part in re.split(r"[\r\n]+", cleaned) if part.strip()]
-        base = first_line[0] if first_line else cleaned
-        segments = [seg.strip() for seg in re.split(r"(?<=[.!?])\s+|;\s+", base) if seg.strip()]
-        text_segment = segments[0] if segments else base
-        words = [w for w in text_segment.split() if w]
-        if not words:
-            return ""
+        desired = min(14, len(tokens))
+        if desired < 8 and len(tokens) >= 8:
+            desired = 8
 
-        snippet_words = words[:14]
-        if len(snippet_words) < 6 and len(words) >= 6:
-            snippet_words = words[:6]
-
-        snippet = " ".join(snippet_words).strip()
-        if len(snippet) > 120:
-            trimmed = snippet[:120]
-            snippet = trimmed.rsplit(" ", 1)[0].strip() or trimmed.strip()
-
-        banned_fragments = (
-            "старый формат",
-            "формат",
-            "кодировка",
-            "утилита",
-            "не поддерживается",
-            "по данным файла",
-        )
-        if any(fragment in snippet.lower() for fragment in banned_fragments):
-            filtered = [
-                w
-                for w in snippet.split()
-                if all(
-                    block not in w.lower()
-                    for block in ("формат", "кодиров", "утилит", "поддерж", "данным", "файла")
-                )
-            ]
-            snippet = " ".join(filtered[:14]).strip()
-
-        if not snippet:
-            return ""
-
+        snippet = " ".join(tokens[:desired]).strip()
         return snippet
+
+    def _excel_headers(self, att_text: str) -> str:
+        for line in att_text.splitlines():
+            candidate = " ".join(line.split())
+            if candidate:
+                cleaned = self._strip_forbidden_tokens(candidate)
+                if cleaned:
+                    return cleaned
+        return ""
+
+    def _generic_attachment_snippet(self, att_text: str) -> str:
+        cleaned = " ".join(att_text.split())
+        tokens = self._filter_forbidden_tokens(cleaned.split())
+        if not tokens:
+            return ""
+        limit = min(14, len(tokens))
+        snippet = " ".join(tokens[:limit]).strip()
+        return snippet
+
+    def _filter_forbidden_tokens(self, tokens: list[str]) -> list[str]:
+        blocked = self._FORBIDDEN_ATTACHMENT_TOKENS
+        return [tok for tok in tokens if all(bad not in tok.lower() for bad in blocked)]
+
+    def _strip_forbidden_tokens(self, text: str) -> str:
+        tokens = text.split()
+        return " ".join(self._filter_forbidden_tokens(tokens))
 
     @staticmethod
     def _empty_attachment_phrase(filename: str, kind_hint: str) -> str:

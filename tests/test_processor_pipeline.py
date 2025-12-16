@@ -195,5 +195,9 @@ def test_all_document_attachments_render_even_without_text():
     assert "формат а2" not in " ".join(attachment_lines).lower()
     assert "по данным файла" not in result.lower()
     assert any("draft.docx — текст не извлечён" in line for line in attachment_lines)
-    assert any("legacy.doc — текст не извлечён" in line for line in attachment_lines)
-    assert any("table.xls — таблица не извлечена" in line for line in attachment_lines)
+    assert any(
+        "legacy.doc — документ Word (текст недоступен)" in line for line in attachment_lines
+    )
+    assert any(
+        "table.xls — таблица Excel (данные недоступны)" in line for line in attachment_lines
+    )
