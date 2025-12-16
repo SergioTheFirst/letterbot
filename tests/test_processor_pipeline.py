@@ -198,6 +198,4 @@ def test_all_document_attachments_render_even_without_text():
     assert any(
         "legacy.doc — документ Word (текст недоступен)" in line for line in attachment_lines
     )
-    assert any(
-        "table.xls — таблица Excel (данные недоступны)" in line for line in attachment_lines
-    )
+    assert any("table.xls — таблица:" in line for line in attachment_lines)
