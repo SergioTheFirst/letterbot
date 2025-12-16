@@ -77,12 +77,10 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
 
     attachment_entries = [line for line in attachment_lines if not line.startswith("ещё ")]
     total_non_image = 4
-    expected_count = total_non_image + (1 if include_image else 0)
+    expected_count = total_non_image
 
     assert len(attachment_entries) == expected_count
     expected = {"a.doc", "b.docx", "c.xlsx", "d.xlsx"}
-    if include_image:
-        expected.add("image.png")
     rendered_files = {line.split(" — ")[0] for line in attachment_entries if " — " in line}
     assert expected == rendered_files
 

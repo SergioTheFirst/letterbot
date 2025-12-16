@@ -104,7 +104,7 @@ def test_ignores_images_and_fonts():
 
     attachment_lines = _attachment_lines(result)
     assert any(line.startswith("report.docx") for line in attachment_lines)
-    assert any("photo.png" in line for line in attachment_lines)
+    assert not any("photo.png" in line for line in attachment_lines)
     assert any("font.woff" in line for line in attachment_lines)
 
 
