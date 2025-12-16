@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -24,6 +25,17 @@ from mailbot_v26.text import clean_email_body, sanitize_text
 
 
 logger = logging.getLogger(__name__)
+
+IGNORED_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".tiff",
+    ".svg",
+}
 
 
 @dataclass
@@ -119,6 +131,15 @@ class MessageProcessor:
         self.config = config
         self.state = state
 
+    def _filter_attachments(self, attachments: List[Attachment]) -> List[Attachment]:
+        filtered: List[Attachment] = []
+        for att in attachments:
+            ext = Path(att.filename or "").suffix.lower()
+            if ext in IGNORED_EXTENSIONS:
+                continue
+            filtered.append(att)
+        return filtered
+
     def process(self, account_login: str, message: InboundMessage) -> Optional[str]:
         try:
             return self._build(account_login, message)
@@ -131,24 +152,25 @@ class MessageProcessor:
         subject_clean = sanitize_text((message.subject or "").strip() or "Без темы", max_len=200)
         sender_clean = self._normalize_source(message.sender or account_login)
         body_summary = self._summarize_email_body(body_clean)
+        attachments = self._filter_attachments(message.attachments or [])
 
         domain = DomainClassifier.classify(message.sender, sender_clean, subject_clean)
         logger.info("Domain detected: %s", domain)
         priority_suggestion = DOMAIN_PRIORITY_MAP.get(domain, DOMAIN_PRIORITY_MAP["UNKNOWN"])
         logger.info("Domain priority suggestion: %s", priority_suggestion)
-        mail_type = MailTypeClassifier.classify(subject_clean, body_clean, message.attachments or [], domain)
+        mail_type = MailTypeClassifier.classify(subject_clean, body_clean, attachments, domain)
 
         action_facts = analyze_action(" ".join([subject_clean, body_clean]))
-        priority = self._resolve_priority(message, body_clean, subject_clean, action_facts, domain, mail_type)
+        priority = self._resolve_priority(
+            message, body_clean, subject_clean, action_facts, domain, mail_type, attachments
+        )
         verb = self._select_verb(action_facts, body_clean, domain, mail_type)
 
         line1 = self._build_line1(priority, sender_clean, subject_clean, message.received_at)
-        line2 = self._build_line2(verb, subject_clean, body_clean, domain, message.attachments or [])
+        line2 = self._build_line2(verb, subject_clean, body_clean, domain, attachments)
 
         base_lines = self._enforce_length([line1, line2])
-        attachments, extra_attachments = self._build_attachment_summaries(
-            message.attachments or [], subject_clean
-        )
+        attachments, extra_attachments = self._build_attachment_summaries(attachments, subject_clean)
         telegram_message = self._compose(base_lines, attachments, body_summary, extra_attachments)
 
         combined_preview = "\n".join(
@@ -174,7 +196,16 @@ class MessageProcessor:
 
         return telegram_message
 
-    def _resolve_priority(self, message: InboundMessage, body: str, subject: str, facts, domain: str, mail_type: str) -> str:
+    def _resolve_priority(
+        self,
+        message: InboundMessage,
+        body: str,
+        subject: str,
+        facts,
+        domain: str,
+        mail_type: str,
+        attachments: List[Attachment],
+    ) -> str:
         sender_domain = (message.sender or "").split("@")[-1].lower()
         combined = " ".join([(subject or "").lower(), body.lower()])
         today = datetime.now().date()
@@ -200,7 +231,7 @@ class MessageProcessor:
 
         attachment_kinds = {
             self._detect_attachment_kind(att.filename, att.content_type)
-            for att in message.attachments or []
+            for att in attachments
         }
         if not facts.action and not urgent:
             if "INVOICE" in attachment_kinds or "CONTRACT" in attachment_kinds:
