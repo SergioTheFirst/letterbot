@@ -76,3 +76,19 @@ def test_telegram_preview_stays_compact():
     assert 8 <= _word_count(summary) <= 12
     assert len(summary) <= 120
     assert len(lines) <= 6
+
+
+def test_greeting_only_body_skipped():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Приветствие",
+        sender="hello@example.com",
+        body="Здравствуйте,\n\n--\nС уважением",
+    )
+
+    result = processor.process("user@example.com", msg)
+    assert result is not None
+
+    lines = result.split("\n")
+    assert len(lines) == 2
+    assert all("здравствуйте" not in line.lower() for line in lines)

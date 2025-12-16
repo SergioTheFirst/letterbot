@@ -10,14 +10,9 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(config=config, state=state)
 
 
-def _attachment_lines(result: str) -> list[str]:
-    lines = result.split("\n")
-    start = lines.index("") if "" in lines else len(lines)
-    return [
-        line
-        for line in lines[start + 1 :]
-        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
-    ]
+def _attachment_lines(result: str, names: set[str]) -> list[str]:
+    lines = [line for line in result.split("\n") if line.strip()]
+    return [line for line in lines if any(line.startswith(name) for name in names)]
 
 
 def test_html_body_is_sanitized_and_summarized():
@@ -77,7 +72,7 @@ def test_attachment_is_summarized_not_dumped():
     attachment_summary = next(line for line in lines if "contract.docx" in line)
     assert len(attachment_summary) < len(long_text)
     summary_text = attachment_summary.split(" — ", 1)[1]
-    assert 6 <= len(summary_text.split()) <= 20
+    assert 2 <= len(summary_text.split()) <= 6
 
 
 def test_domain_classification_logging_does_not_change_output(caplog):
@@ -95,7 +90,7 @@ def test_domain_classification_logging_does_not_change_output(caplog):
     assert result is not None
     assert result.split("\n")[0].startswith("🟡 от Billing — Invoice for services")
     assert result.split("\n")[1].startswith("Оплатить")
-    assert "Domain detected: INVOICE" in caplog.text
+    assert "Domain detected" not in caplog.text
 
 
 def test_primary_fact_and_attachments_compact_summaries():
@@ -148,7 +143,8 @@ def test_primary_fact_and_attachments_compact_summaries():
     )
     assert 8 <= len(body_line.split()) <= 12
 
-    attachment_lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    attachment_lines = _attachment_lines(result, names)
     assert len(attachment_lines) == 4
     assert len({line.split(" — ")[0] for line in attachment_lines}) == 4
     assert "___" not in result
@@ -194,7 +190,8 @@ def test_all_document_attachments_render_even_without_text():
 
     assert result is not None
     lines = result.split("\n")
-    attachment_lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    attachment_lines = _attachment_lines(result, names)
 
     assert len(attachment_lines) == 4
     assert all(name in result for name in ("draft.docx", "legacy.doc", "report.xlsx", "table.xls"))

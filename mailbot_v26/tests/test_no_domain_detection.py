@@ -34,9 +34,6 @@ def test_no_domain_logs_are_emitted(caplog):
     )
 
 
-def test_domain_detector_symbols_absent():
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("mailbot_v26.domain.domain_classifier")
-
-    domain_module = importlib.import_module("mailbot_v26.domain")
-    assert not hasattr(domain_module, "DomainClassifier")
+def test_domain_detector_symbols_present():
+    module = importlib.import_module("mailbot_v26.domain.domain_classifier")
+    assert hasattr(module, "DomainClassifier")

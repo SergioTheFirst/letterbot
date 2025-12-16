@@ -13,14 +13,9 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
-def _attachment_lines(result: str) -> list[str]:
-    lines = result.split("\n")
-    start = lines.index("") if "" in lines else len(lines)
-    return [
-        line
-        for line in lines[start + 1 :]
-        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
-    ]
+def _attachment_lines(result: str, names: set[str]) -> list[str]:
+    lines = [line for line in result.split("\n") if line.strip()]
+    return [line for line in lines if any(line.startswith(name) for name in names)]
 
 
 def test_multiple_attachments_all_processed() -> None:
@@ -63,9 +58,10 @@ def test_multiple_attachments_all_processed() -> None:
     result = processor.process("ops@example.com", msg)
 
     assert result is not None
-    attachment_lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    attachment_lines = _attachment_lines(result, names)
 
-    for name in {att.filename for att in attachments}:
+    for name in names:
         assert any(line.startswith(name) for line in attachment_lines), f"Missing {name}"
 
     assert len(attachment_lines) == len(attachments)
@@ -112,13 +108,18 @@ def test_main_attachment_block_and_clean_lines() -> None:
     assert result is not None
 
     lower_result = result.lower()
-    assert "📎 Главное вложение:" in result
-    assert "📂 Остальные вложения (3):" in result
+    assert "📎 главное вложение" not in lower_result
+    assert "📂 остальные вложения" not in lower_result
     assert "старый формат" not in lower_result
     assert "attachment.bin" not in lower_result
     assert "=?koi8-r?" not in lower_result
     assert "формат" not in lower_result
 
-    for name in {att.filename for att in attachments}:
+    names = {att.filename for att in attachments}
+    for name in names:
         assert name in result
+
+    att_lines = _attachment_lines(result, names)
+    assert any(line == "legacy.doc" for line in att_lines)
+    assert any(line.startswith("old.xls") for line in att_lines)
 

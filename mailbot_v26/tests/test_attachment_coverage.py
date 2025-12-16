@@ -13,14 +13,9 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
-def _attachment_lines(result: str) -> list[str]:
-    lines = result.split("\n")
-    start = lines.index("") if "" in lines else len(lines)
-    return [
-        line
-        for line in lines[start + 1 :]
-        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
-    ]
+def _attachment_lines(result: str, names: set[str]) -> list[str]:
+    lines = [line for line in result.split("\n") if line.strip()]
+    return [line for line in lines if any(line.startswith(name) for name in names)]
 
 
 def test_body_and_attachments_rendered_with_summaries():
@@ -79,7 +74,8 @@ def test_body_and_attachments_rendered_with_summaries():
     lines = result.split("\n")
     assert lines[2].strip()
 
-    attachment_lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    attachment_lines = _attachment_lines(result, names)
     assert len(attachment_lines) == 4
 
     for filename in ["agreement.doc", "note.docx", "prices.xlsx", "empty.xlsx"]:
@@ -127,7 +123,8 @@ def test_multiple_attachments_all_processed():
     assert result is not None
 
     lines = result.split("\n")
-    attachment_lines = _attachment_lines(result)
+    names = {att.filename for att in attachments}
+    attachment_lines = _attachment_lines(result, names)
 
     expected = {"report.doc", "plan.docx", "sales.xlsx", "legacy.xls"}
     rendered = {line.split(" — ")[0] if " — " in line else line for line in attachment_lines}
