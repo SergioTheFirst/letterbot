@@ -119,16 +119,6 @@ def _is_real_attachment(part: EmailMessage, filename: str, payload: bytes) -> bo
 
     if content_type in {"text/html", "text/css", "application/xhtml+xml"}:
         return False
-    if content_type.startswith("image/"):
-        return False
-    if content_type in {
-        "application/font-woff",
-        "font/woff",
-        "font/woff2",
-        "application/x-font-ttf",
-        "application/vnd.ms-fontobject",
-    }:
-        return False
 
     if extension in {".css", ".woff", ".woff2", ".ttf", ".otf", ".svg"}:
         return False
@@ -233,14 +223,25 @@ def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachmen
     for part in email_obj.walk():
         raw_filename = part.get_filename()
         filename = decode_mime_header(raw_filename or "")
+        if not filename:
+            alt_name = part.get_param("name") or ""
+            filename = decode_mime_header(alt_name)
+
+        if filename.lower().startswith("attachment.bin"):
+            fallback_name = decode_mime_header(part.get_param("name") or "")
+            filename = fallback_name or ""
+
         try:
             payload = part.get_payload(decode=True) or b""
             if not _is_real_attachment(part, filename, payload):
                 continue
             if byte_limit > 0 and len(payload) > byte_limit:
                 continue
+            if not filename or filename.lower().startswith("attachment.bin"):
+                continue
+
             attachment = Attachment(
-                filename=filename or "attachment.bin",
+                filename=filename,
                 content=payload,
                 content_type=part.get_content_type() or "",
                 text="",
