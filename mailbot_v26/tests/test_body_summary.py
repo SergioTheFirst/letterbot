@@ -1,0 +1,78 @@
+from types import SimpleNamespace
+
+from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
+
+
+def _processor() -> MessageProcessor:
+    cfg = SimpleNamespace(llm_call=None)
+    return MessageProcessor(cfg, SimpleNamespace(save=lambda: None))
+
+
+def _summary_line(result: str) -> str:
+    lines = result.split("\n")
+    return lines[2] if len(lines) >= 3 else ""
+
+
+def _word_count(text: str) -> int:
+    return len([word for word in text.split() if word.strip()])
+
+
+def test_html_body_becomes_neutral_summary():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Отчет", 
+        sender="team@example.com",
+        body=(
+            "<html><body><p>Здравствуйте!</p><div>Прикрепляем отчет за май." 
+            "</div><div>Срок сдачи до 10.06. </div><div>С уважением, Иван</div></body></html>"
+        ),
+    )
+
+    result = processor.process("user@example.com", msg)
+    summary = _summary_line(result or "")
+
+    assert "<" not in summary
+    assert 8 <= _word_count(summary) <= 12
+    assert "отчет" in summary.lower()
+
+
+def test_empty_body_uses_fallback_phrase():
+    processor = _processor()
+    msg = InboundMessage(subject="Без тела", sender="noreply@example.com", body="")
+
+    result = processor.process("user@example.com", msg)
+    summary = _summary_line(result or "")
+
+    assert summary == "Тело письма отсутствует, полезная информация не обнаружена совсем"
+    assert 8 <= _word_count(summary) <= 12
+
+
+def test_long_body_trims_to_word_budget():
+    processor = _processor()
+    long_body = " ".join(["Подробно" for _ in range(50)])
+    msg = InboundMessage(subject="Длинное письмо", sender="ops@example.com", body=long_body)
+
+    result = processor.process("user@example.com", msg)
+    summary = _summary_line(result or "")
+
+    assert 8 <= _word_count(summary) <= 12
+    assert len(summary) <= 120
+
+
+def test_telegram_preview_stays_compact():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Информация",
+        sender="info@example.com",
+        body="Сообщаем об изменении расписания, просьба проверить детали.",
+        attachments=[Attachment(filename="note.txt", content=b"", text="")],
+    )
+
+    result = processor.process("user@example.com", msg)
+    assert result is not None
+    lines = result.split("\n")
+
+    summary = _summary_line(result)
+    assert 8 <= _word_count(summary) <= 12
+    assert len(summary) <= 120
+    assert len(lines) <= 6

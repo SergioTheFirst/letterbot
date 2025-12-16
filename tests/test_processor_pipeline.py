@@ -88,7 +88,7 @@ def test_domain_classification_logging_does_not_change_output(caplog):
     expected_output = (
         "🟡 от Billing — Invoice for services (09:30)\n"
         "Оплатить счёт за услуги SERVICES\n"
-        "Please pay invoice 123 by 12.12."
+        "Оплатить Please pay invoice Funds appreciated дополнительных данных"
     )
 
     with caplog.at_level("INFO"):
@@ -138,9 +138,15 @@ def test_primary_fact_and_attachments_compact_summaries():
     assert result is not None
     lines = result.split("\n")
 
-    body_lines = [line for line in lines if line.endswith(".") and "—" not in line]
-    assert len(body_lines) == 1
-    assert len(body_lines[0].split()) <= 15
+    body_line = next(
+        (
+            line
+            for line in lines[2:]
+            if line.strip() and "—" not in line and not line.startswith(("📎", "📂"))
+        ),
+        "",
+    )
+    assert 8 <= len(body_line.split()) <= 12
 
     attachment_lines = _attachment_lines(result)
     assert len(attachment_lines) == 4
