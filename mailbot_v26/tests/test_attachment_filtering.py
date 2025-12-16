@@ -18,7 +18,11 @@ def _processor() -> MessageProcessor:
 def _attachment_lines(result: str) -> list[str]:
     lines = result.split("\n")
     start = lines.index("") if "" in lines else len(lines)
-    return [line for line in lines[start + 1 :] if " — " in line]
+    return [
+        line
+        for line in lines[start + 1 :]
+        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
+    ]
 
 
 def test_no_attachment_bin_from_inline_parts():

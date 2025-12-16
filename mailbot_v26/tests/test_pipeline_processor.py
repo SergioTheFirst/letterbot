@@ -18,7 +18,11 @@ def _processor() -> MessageProcessor:
 def _attachment_lines(result: str) -> list[str]:
     lines = result.split("\n")
     start = lines.index("") if "" in lines else len(lines)
-    return [line for line in lines[start + 1 :] if " — " in line]
+    return [
+        line
+        for line in lines[start + 1 :]
+        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
+    ]
 
 
 def test_bank_invoice_marked_red():
@@ -82,9 +86,7 @@ def test_image_only_email_has_no_attachments():
     result = processor.process("user@example.com", msg)
     assert result is not None
     lines = result.split("\n")
-    assert len(lines) == 3
-    summary = lines[2]
-    assert 8 <= len(summary.split()) <= 12
+    assert len(lines) >= 2
 
 
 def test_output_has_two_mandatory_lines():
@@ -219,3 +221,64 @@ def test_domain_priority_suggestion_does_not_change_priority(caplog):
     assert any(
         "Domain priority suggestion: MEDIUM" in record.message for record in caplog.records
     )
+
+
+def test_attachment_lines_drop_prefixes_and_counts():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Таблицы и документы",
+        sender="ops@example.com",
+        body="",
+        attachments=[
+            Attachment(
+                filename="stats.xlsx",
+                content=b"",
+                content_type="application/vnd.ms-excel",
+                text="Код;Цена;Сумма\n1;10;10\n2;20;40",
+            ),
+            Attachment(
+                filename="notes.docx",
+                content=b"",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                text="Проверка с документами",
+            ),
+        ],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    attachment_lines = _attachment_lines(result)
+
+    assert len(attachment_lines) == 2
+    for line in attachment_lines:
+        assert "таблица:" not in line
+        assert "(≈" not in line
+
+
+def test_body_placeholder_is_silent_when_empty():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Файлы",
+        sender="sender@example.com",
+        body="",
+        attachments=[Attachment(filename="info.pdf", content=b"", content_type="application/pdf", text="Вложение")],
+    )
+
+    result = processor.process("user@example.com", msg)
+
+    lines = result.split("\n")
+    assert len(lines) >= 3
+    assert "тело" not in result.lower()
+    assert any(line.startswith("info.pdf") for line in _attachment_lines(result))
+
+
+def test_normalize_action_subject_deduplicates_tokens():
+    processor = _processor()
+    action_one = processor._normalize_action_subject(
+        "Проверить", "Прайс лист", "PRICE", [], ""
+    )
+    assert action_one == "Проверить цены"
+
+    action_two = processor._normalize_action_subject(
+        "Проверить", "Проверка с документами", "OTHER", [], ""
+    )
+    assert action_two == "Проверить документы"

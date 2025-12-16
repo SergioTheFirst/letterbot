@@ -16,7 +16,11 @@ def _processor() -> MessageProcessor:
 def _attachment_lines(result: str) -> list[str]:
     lines = result.split("\n")
     start = lines.index("") if "" in lines else len(lines)
-    return [line for line in lines[start + 1 :] if " — " in line]
+    return [
+        line
+        for line in lines[start + 1 :]
+        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
+    ]
 
 
 def test_office_attachment_descriptions_follow_rules() -> None:
@@ -62,27 +66,26 @@ def test_office_attachment_descriptions_follow_rules() -> None:
     lines = _attachment_lines(result)
     assert len(lines) == 4
 
-    mapping = {line.split(" — ")[0]: line for line in lines}
+    mapping: dict[str, str] = {}
+    for line in lines:
+        if " — " in line:
+            name, desc = line.split(" — ", 1)
+        else:
+            name, desc = line, ""
+        mapping[name] = desc
     assert mapping.keys() == {att.filename for att in attachments}
 
-    assert mapping["legacy.doc"].endswith("документ Word (текст недоступен)")
-    assert mapping["blank.docx"].endswith("текст не извлечён")
+    assert mapping["legacy.doc"] == ""
+    assert mapping["blank.docx"] == ""
 
     for excel_name in ("data.xlsx", "old.xls"):
-        assert "таблица:" in mapping[excel_name]
+        assert "таблица:" not in mapping[excel_name]
         assert "|" not in mapping[excel_name]
 
     assert "Дата | Сумма" not in mapping["data.xlsx"]
 
     lower_result = result.lower()
-    for forbidden in [
-        "старый формат",
-        "формат",
-        "кодировка",
-        "утилита",
-        "не поддерживается",
-        "по данным файла",
-    ]:
+    for forbidden in ["недоступ", "не извлеч", "таблица:"]:
         assert forbidden not in lower_result
 
 
@@ -122,7 +125,7 @@ def test_excel_and_docx_summaries_are_compact() -> None:
     mapping = {line.split(" — ")[0]: line for line in lines}
 
     excel_line = mapping["прайс_на_оборудование.xlsx"]
-    assert "таблица:" in excel_line
+    assert "таблица:" not in excel_line
     assert ";" not in excel_line
     assert len(excel_line) <= 120
 

@@ -18,7 +18,11 @@ def _processor() -> MessageProcessor:
 def _attachment_lines(result: str) -> list[str]:
     lines = result.split("\n")
     start = lines.index("") if "" in lines else len(lines)
-    return [line for line in lines[start + 1 :] if " — " in line]
+    return [
+        line
+        for line in lines[start + 1 :]
+        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
+    ]
 
 
 @pytest.mark.parametrize("include_image", [True, False])
@@ -84,7 +88,7 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
 
     assert len(attachment_entries) == expected_count
     expected = {"a.doc", "b.docx", "c.xlsx", "d.xlsx"}
-    rendered_files = {line.split(" — ")[0] for line in attachment_entries if " — " in line}
+    rendered_files = {line.split(" — ")[0] if " — " in line else line for line in attachment_entries}
     assert expected == rendered_files
 
     assert "ещё" not in "\n".join(attachment_lines)

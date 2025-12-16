@@ -120,29 +120,25 @@ class MessageProcessor:
         "файла",
     }
     _VERB_ORDER = [
-        "Оплатить",
-        "Подписать",
-        "Согласовать",
-        "Подтвердить",
         "Проверить",
+        "Оплатить",
+        "Согласовать",
         "Ответить",
-        "Продлить",
-        "Требуется",
         "Ознакомиться",
     ]
     _MAIL_TYPE_DEFAULTS = {
         "PAYMENT_REQUEST": {"priority": "RED", "verb": "Оплатить"},
         "PAYMENT_REMINDER": {"priority": "RED", "verb": "Оплатить"},
-        "CONTRACT_APPROVAL": {"priority": "YELLOW", "verb": "Подписать"},
+        "CONTRACT_APPROVAL": {"priority": "YELLOW", "verb": "Согласовать"},
         "CONTRACT_UPDATE": {"priority": "YELLOW", "verb": "Согласовать"},
         "INVOICE": {"priority": "YELLOW", "verb": "Оплатить"},
         "PRICE_LIST": {"priority": "BLUE", "verb": "Ознакомиться"},
         "DELIVERY_NOTICE": {"priority": "YELLOW", "verb": "Проверить"},
-        "DEADLINE_REMINDER": {"priority": "YELLOW", "verb": "Требуется"},
+        "DEADLINE_REMINDER": {"priority": "YELLOW", "verb": "Проверить"},
         "ACCOUNT_CHANGE": {"priority": "RED", "verb": "Проверить"},
         "SECURITY_ALERT": {"priority": "RED", "verb": "Проверить"},
         "POLICY_UPDATE": {"priority": "BLUE", "verb": "Ознакомиться"},
-        "MEETING_CHANGE": {"priority": "YELLOW", "verb": "Подтвердить"},
+        "MEETING_CHANGE": {"priority": "YELLOW", "verb": "Ответить"},
         "INFORMATION_ONLY": {"priority": "BLUE", "verb": "Ознакомиться"},
         "UNKNOWN": {"priority": "BLUE", "verb": "Ознакомиться"},
     }
@@ -277,12 +273,13 @@ class MessageProcessor:
     def _build_line2(
         self, verb: str, subject: str, body: str, domain: str, attachments: List[Attachment]
     ) -> str:
-        return self._normalize_action_subject(verb, subject, domain, attachments, body)
+        normalized_verb = self._normalize_verb_choice(verb)
+        return self._normalize_action_subject(normalized_verb, subject, domain, attachments, body)
 
     def _summarize_email_body(self, body_text: str) -> str:
         cleaned = self._normalize_body_text(body_text)
         if not cleaned:
-            return self._fallback_body_summary(empty=True)
+            return ""
 
         primary_sentence = self._pick_body_sentence(cleaned)
         tokens = self._prepare_body_tokens(primary_sentence or cleaned)
@@ -291,7 +288,7 @@ class MessageProcessor:
             tokens = self._prepare_body_tokens(cleaned)
 
         summary = self._render_body_summary(tokens)
-        return summary or self._fallback_body_summary(empty=False)
+        return summary
 
     def _select_verb(self, facts, body: str, domain: str, mail_type: str) -> str:
         defaults = self._MAIL_TYPE_DEFAULTS.get(mail_type, {})
@@ -307,21 +304,21 @@ class MessageProcessor:
             if facts.action and re.search(r"оплат", facts.action):
                 verb = "Оплатить"
             elif facts.action and re.search(r"утверд|подпис", facts.action):
-                verb = "Подписать"
+                verb = "Согласовать"
             elif "соглас" in lowered_body:
                 verb = "Согласовать"
             elif "подтверд" in lowered_body:
-                verb = "Подтвердить"
+                verb = "Ответить"
             elif "ответ" in lowered_body:
                 verb = "Ответить"
             elif "провер" in lowered_body:
                 verb = "Проверить"
             elif "треб" in lowered_body:
-                verb = "Требуется"
+                verb = "Проверить"
             else:
                 verb = "Ознакомиться"
 
-        return verb
+        return self._normalize_verb_choice(verb)
 
     def _extract_essence(self, subject: str, body: str, max_words: int = 5) -> str:
         keywords = self._keywords(subject)
@@ -431,20 +428,7 @@ class MessageProcessor:
             ext = lowered[lowered.rfind(".") :]
 
         category = self._fallback_category(lowered, kind)
-        reason_parts: list[str] = []
-
-        if ext == ".doc":
-            reason_parts.append("старый формат")
-        else:
-            if kind == "EXCEL" and category != "таблица":
-                reason_parts.append("таблица")
-            if text_length == 0:
-                reason_parts.append("без извлекаемого текста")
-            elif summary_failed:
-                reason_parts.append("краткое описание недоступно")
-
-        reason = ", ".join(reason_parts)
-        return f"{category}{f' ({reason})' if reason else ''}"
+        return category
 
     def describe_attachment(
         self, filename: str, ext: str, extracted_text: str | None
@@ -508,7 +492,11 @@ class MessageProcessor:
 
         if len(attachments) == 1:
             line = self.format_attachment_line(
-                attachments[0].filename, attachments[0].description, attachments[0].kind
+                attachments[0].filename,
+                attachments[0].description,
+                attachments[0].kind,
+                max_meaning=60,
+                text_length=attachments[0].text_length,
             )
             lines: List[str] = ["", line]
             if extra_attachments:
@@ -517,14 +505,28 @@ class MessageProcessor:
 
         main, others = self._select_main_attachment(attachments)
 
-        lines = ["", "📎 Главное вложение:", self.format_attachment_line(main.filename, main.description, main.kind)]
+        lines = [
+            "",
+            "📎 Главное вложение:",
+            self.format_attachment_line(
+                main.filename,
+                main.description,
+                main.kind,
+                max_meaning=60,
+                text_length=main.text_length,
+            ),
+        ]
 
         if others:
             lines.append(f"📂 Остальные вложения ({len(others)}):")
             for attachment in others:
                 lines.append(
                     self.format_attachment_line(
-                        attachment.filename, attachment.description, attachment.kind
+                        attachment.filename,
+                        attachment.description,
+                        attachment.kind,
+                        max_meaning=40,
+                        text_length=attachment.text_length,
                     )
                 )
 
@@ -566,18 +568,39 @@ class MessageProcessor:
         return min(doc_priority, kind_priority)
 
     @staticmethod
-    def format_attachment_line(filename: str, extracted_text: str, kind_hint: str) -> str:
+    def format_attachment_line(
+        filename: str,
+        extracted_text: str,
+        kind_hint: str,
+        *,
+        max_meaning: int = 60,
+        text_length: int = 0,
+    ) -> str:
         clean_name = " ".join((filename or "Вложение").split()) or "Вложение"
         summary = (extracted_text or "").strip()
-        if not summary:
-            summary = MessageProcessor._empty_attachment_phrase(clean_name, kind_hint)
 
-        line = f"{clean_name} — {summary}"
+        if text_length == 0 or not summary:
+            return clean_name
+
+        cleaned_summary = MessageProcessor._trim_text(summary, max_meaning)
+        name_tokens = {token.lower() for token in re.findall(r"[\w-]{2,}", clean_name)}
+        summary_tokens: list[str] = []
+        for token in cleaned_summary.split():
+            plain = re.sub(r"[^\w-]", "", token).lower()
+            if plain and plain in name_tokens:
+                continue
+            summary_tokens.append(token)
+
+        if not summary_tokens:
+            return clean_name
+
+        summary_text = " ".join(summary_tokens)
+        line = f"{clean_name} — {summary_text}"
         if len(line) <= 120:
             return line
 
-        max_summary = max(10, 120 - len(clean_name) - len(" — "))
-        trimmed_summary = MessageProcessor._trim_text(summary, max_summary)
+        max_summary = max(10, min(max_meaning, 120 - len(clean_name) - len(" — ")))
+        trimmed_summary = MessageProcessor._trim_text(summary_text, max_summary)
         line = f"{clean_name} — {trimmed_summary}"
         if len(line) <= 120:
             return line
@@ -591,24 +614,21 @@ class MessageProcessor:
         ext = Path(lower_name).suffix
 
         if ext == ".doc":
-            return "документ Word (текст недоступен)"
+            return ""
 
         cleaned = normalize_text(self._strip_markup(att_text or ""))
         cleaned = self._strip_forbidden_tokens(cleaned)
 
         if ext == ".docx":
             snippet = self._docx_summary(cleaned)
-            return snippet or "текст не извлечён"
+            return snippet
 
         if ext in {".xls", ".xlsx"} or kind_hint == "EXCEL":
             summary = self._excel_summary(filename, cleaned)
-            return summary or "таблица не извлечена"
+            return summary
 
         snippet = self._generic_attachment_snippet(cleaned)
-        if snippet:
-            return snippet
-
-        return self._empty_attachment_phrase(filename, kind_hint)
+        return snippet
 
     def _docx_summary(self, att_text: str) -> str:
         tokens = [tok.strip('"\'\'«»') for tok in att_text.split() if tok]
@@ -643,8 +663,7 @@ class MessageProcessor:
             if len(parts) >= 2:
                 row_like += 1
 
-        count_part = f" (≈{row_like} записей)" if row_like else ""
-        return f"таблица: {topic}{count_part}"
+        return topic
 
     def _generic_attachment_snippet(self, att_text: str) -> str:
         cleaned = " ".join(att_text.split())
@@ -677,8 +696,8 @@ class MessageProcessor:
     def _empty_attachment_phrase(filename: str, kind_hint: str) -> str:
         lower_ext = Path(filename or "").suffix.lower()
         if lower_ext in {".xls", ".xlsx"} or kind_hint == "EXCEL":
-            return "таблица не извлечена"
-        return "текст не извлечён"
+            return "табличный файл"
+        return "вложение"
 
     def _remove_subject_terms(self, summary: str, subject: str) -> str:
         subject_keywords = {kw.lower() for kw in self._keywords(subject)}
@@ -750,32 +769,32 @@ class MessageProcessor:
 
         if kind == "EXCEL":
             if contains({"прайс", "price"}):
-                return "прайс-лист: ключевые позиции"
+                return "ключевые цены"
             if contains({"invoice", "счет", "счёт", "оплат"}):
-                return "счет/инвойс: суммы и реквизиты"
+                return "суммы и реквизиты"
             if contains({"реестр", "registry", "реест"}):
-                return "реестр: таблица записей"
+                return "реестр записей"
             if contains({"отчет", "отчёт", "report"}):
-                return "отчет: таблица показателей"
-            return "таблица: ключевые данные"
+                return "показатели отчета"
+            return "ключевые данные"
 
         if kind == "CONTRACT":
-            return "документ: условия/суть по названию"
+            return "условия договора"
 
         if kind == "PDF":
             if contains({"счет", "счёт", "invoice", "оплат"}):
-                return "pdf: счет/инвойс по названию"
+                return "счет в pdf"
             if contains({"договор", "contract"}):
-                return "pdf: условия/суть по названию"
-            return "pdf: ключевые детали по названию"
+                return "договор в pdf"
+            return "ключевые детали"
 
         if kind == "INVOICE":
-            return "счет/инвойс: суммы и реквизиты"
+            return "суммы и реквизиты"
 
         keywords = self._keywords(base_name)
         if keywords:
-            return f"файл: {' '.join(keywords[:3])}"
-        return "файл: основное из названия"
+            return " ".join(keywords[:3])
+        return "основное из названия"
 
     def _passes_quality_gates(self, base_lines: List[str], priority: str, verb: str, domain: str, mail_type: str) -> bool:
         if len(base_lines) != 2 or any(not ln.strip() for ln in base_lines):
@@ -848,12 +867,59 @@ class MessageProcessor:
         order = {"BLUE": 0, "YELLOW": 1, "RED": 2}
         return left if order.get(left, 0) >= order.get(right, 0) else right
 
+    def _normalize_verb_choice(self, verb: str) -> str:
+        normalized = {
+            "оплатить": "Оплатить",
+            "оплата": "Оплатить",
+            "согласовать": "Согласовать",
+            "подписать": "Согласовать",
+            "подтвердить": "Ответить",
+            "продлить": "Проверить",
+            "требуется": "Проверить",
+            "проверить": "Проверить",
+            "ответить": "Ответить",
+            "ознакомиться": "Ознакомиться",
+        }.get(verb.lower())
+
+        if normalized:
+            return normalized
+
+        for allowed in self._VERB_ORDER:
+            if verb.lower().startswith(allowed.lower()[:5]):
+                return allowed
+
+        return "Ознакомиться"
+
     def _normalize_action_subject(
         self, verb: str, subject: str, domain: str, attachments: List[Attachment], body: str
     ) -> str:
         essence = self._extract_essence(subject, body)
         normalized_object = self._refine_action_object(subject, attachments, essence)
-        return f"{verb} {normalized_object}".strip()
+
+        subject_tokens = {tok.lower() for tok in self._keywords(subject)}
+        cleaned_object_parts: list[str] = []
+        for token in normalized_object.split():
+            plain = re.sub(r"[^\w-]", "", token).lower()
+            if plain and any(
+                plain == base or plain.startswith(base) or base.startswith(plain)
+                for base in subject_tokens
+            ):
+                continue
+            cleaned_object_parts.append(token)
+
+        cleaned_object = " ".join(cleaned_object_parts).strip()
+        if not cleaned_object:
+            fallback_tokens = self._keywords(subject) or self._keywords(body)
+            cleaned_object = " ".join(fallback_tokens[:2]).strip()
+
+        tokens = [tok for tok in cleaned_object.split() if tok]
+        tokens = tokens[:3]
+        object_phrase = " ".join(tokens)
+
+        if not object_phrase:
+            return verb
+
+        return f"{verb} {object_phrase}".strip()
 
     def _normalize_body_text(self, body_text: str) -> str:
         raw = self._strip_markup(body_text or "")
@@ -930,23 +996,21 @@ class MessageProcessor:
 
     def _prepare_body_tokens(self, text: str) -> list[str]:
         tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{2,}", text)
-        cleaned = self._filter_tokens(tokens)
+        cleaned: list[str] = []
+        for token in tokens:
+            plain = re.sub(r"[^\w₽€$.,-]", "", token)
+            if not plain:
+                continue
+            cleaned.append(plain)
         return cleaned
 
     def _render_body_summary(self, tokens: list[str]) -> str:
         if not tokens:
-            return self._fallback_body_summary(empty=True)
+            return ""
 
         action = self._find_action(" ".join(tokens)) or "Сообщается"
         summary_tokens: list[str] = [action] + tokens
         summary_tokens = summary_tokens[:12]
-
-        if len(summary_tokens) < 8:
-            fillers = ["дополнительных", "данных", "не", "предоставлено"]
-            for filler in fillers:
-                if len(summary_tokens) >= 8:
-                    break
-                summary_tokens.append(filler)
 
         summary_tokens = summary_tokens[:12]
 
@@ -957,15 +1021,9 @@ class MessageProcessor:
 
         word_count = len(summary.split())
         if word_count < 8:
-            return self._fallback_body_summary(empty=False)
+            return ""
 
         return summary.strip()
-
-    @staticmethod
-    def _fallback_body_summary(empty: bool) -> str:
-        if empty:
-            return "Тело письма отсутствует, полезная информация не обнаружена совсем"
-        return "Сообщение без существенного текста, полезных сведений не предоставлено"
 
     def _refine_action_object(self, subject: str, attachments: List[Attachment], fallback: str) -> str:
         lowered = subject.lower()
@@ -999,38 +1057,8 @@ class MessageProcessor:
                     continue
                 if len(low) < 3:
                     continue
-                return original.upper()
+                return original.capitalize()
             return ""
-
-        def format_word(word: str) -> str:
-            clean = re.sub(r"[^\w-]", "", word)
-            if clean.lower() in {"с", "к", "в", "по", "об", "от", "за", "для", "без"}:
-                return clean.lower()
-            if clean.lower() in {"услуги", "сотрудничество", "счёт", "счет", "прайс", "прайсом", "договор", "контракт"}:
-                return clean.lower()
-            if len(clean) <= 3:
-                return clean.upper()
-            if clean.isupper():
-                return clean
-            return clean.capitalize()
-
-        def build_phrase(parts: List[str]) -> str:
-            words: List[str] = []
-            for part in parts:
-                if not part:
-                    continue
-                for token in part.split():
-                    cleaned = token.strip()
-                    if cleaned:
-                        words.append(format_word(cleaned))
-            if not words:
-                return fallback
-            if len(words) > 5:
-                words = words[:5]
-            if words and not words[0].isupper() and len(words[0]) > 3:
-                words[0] = words[0].lower()
-            phrase = " ".join(words).strip()
-            return phrase if phrase else fallback
 
         company = pick_company()
         has_price = "PRICE_LIST" in attachment_kinds or "прайс" in lowered
@@ -1038,34 +1066,29 @@ class MessageProcessor:
         cooperation = next((low for low in lowered.split() if low in cooperation_tokens), None)
 
         if has_price:
-            return build_phrase(["с", "прайсом", company or fallback])
+            return "цены прайса"
 
         if has_invoice:
-            descriptors = [orig for low, orig in token_pairs if low not in payment_tokens and low not in core_stopwords]
-            mapped = []
-            for desc in descriptors:
-                lower_desc = desc.lower()
-                if lower_desc.startswith("услуг") or "service" in lower_desc:
-                    mapped.append("за услуги")
-                else:
-                    mapped.append(desc)
-            parts: List[str] = ["счёт"]
-            parts.extend(mapped[:2])
-            if company and company not in parts:
-                parts.append(company)
-            return build_phrase(parts)
+            return "счёт" + (f" {company}" if company else "")
 
         if cooperation:
-            parts = [cooperation]
             if company:
-                parts.extend(["с", company])
-            return build_phrase(parts)
+                return f"документы {company}"
+            return "документы"
 
-        essence_keywords = self._keywords(subject)
+        if "проверка" in lowered or "document" in lowered:
+            if company:
+                return f"документы {company}"
+            return "документы"
+
+        if "table" in lowered or "таблиц" in lowered or "отчет" in lowered or "отчёт" in lowered:
+            return "данные"
+
+        essence_keywords = self._keywords(subject) or self._keywords(fallback)
         if company and company.lower() not in {w.lower() for w in essence_keywords}:
-            essence_keywords.append(company)
+            essence_keywords.insert(0, company)
         if essence_keywords:
-            return build_phrase(essence_keywords)
+            return " ".join(essence_keywords[:3])
 
         return fallback
 

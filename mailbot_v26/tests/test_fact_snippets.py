@@ -73,7 +73,12 @@ def test_attachments_without_snippet_use_fallback():
 
     assert result is not None
     assert "по данным файла" not in result
-    assert "blank.pdf" not in result.split("\n")[2:]
+    attachment_lines = [
+        line
+        for line in result.split("\n")[2:]
+        if line.strip() and not line.startswith(("📎", "📂"))
+    ]
+    assert any(line.startswith("blank.pdf") for line in attachment_lines)
 
 
 __all__ = []

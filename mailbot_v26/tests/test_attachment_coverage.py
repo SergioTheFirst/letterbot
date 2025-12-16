@@ -16,7 +16,11 @@ def _processor() -> MessageProcessor:
 def _attachment_lines(result: str) -> list[str]:
     lines = result.split("\n")
     start = lines.index("") if "" in lines else len(lines)
-    return [line for line in lines[start + 1 :] if " — " in line]
+    return [
+        line
+        for line in lines[start + 1 :]
+        if line.strip() and not line.startswith("📎") and not line.startswith("📂") and not line.startswith("ещё ")
+    ]
 
 
 def test_body_and_attachments_rendered_with_summaries():
@@ -126,5 +130,6 @@ def test_multiple_attachments_all_processed():
     attachment_lines = _attachment_lines(result)
 
     expected = {"report.doc", "plan.docx", "sales.xlsx", "legacy.xls"}
-    assert expected == {line.split(" — ")[0] for line in attachment_lines}
+    rendered = {line.split(" — ")[0] if " — " in line else line for line in attachment_lines}
+    assert expected == rendered
 
