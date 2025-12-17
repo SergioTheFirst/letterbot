@@ -85,6 +85,9 @@ class MessageProcessor:
     _PRIORITY_EMOJI = {"RED": "🔴", "YELLOW": "🟡", "BLUE": "🔵"}
     _ATTACHMENT_ORDER = {"INVOICE": 0, "CONTRACT": 1, "PDF": 2, "EXCEL": 3, "GENERIC": 4}
     _MAX_ATTACHMENTS = 10
+    _ATTACHMENT_SNIPPET_LIMIT = 120
+    _ATTACHMENT_LINE_LENGTH = 160
+    _ATTACHMENT_TOKEN_LIMIT = 12
     _DOC_TYPE_PRIORITY = {
         "CONTRACT": 0,
         "AGREEMENT": 0,
@@ -503,7 +506,8 @@ class MessageProcessor:
                 attachment.filename,
                 attachment.description,
                 attachment.kind,
-                max_meaning=60,
+                max_meaning=self._ATTACHMENT_SNIPPET_LIMIT,
+                max_line_length=self._ATTACHMENT_LINE_LENGTH,
                 text_length=attachment.text_length,
             )
             if line:
@@ -522,16 +526,19 @@ class MessageProcessor:
         extracted_text: str,
         kind_hint: str,
         *,
-        max_meaning: int = 60,
+        max_meaning: int | None = None,
         text_length: int = 0,
+        max_line_length: int | None = None,
     ) -> str:
+        meaning_limit = max_meaning or MessageProcessor._ATTACHMENT_SNIPPET_LIMIT
+        line_limit = max_line_length or MessageProcessor._ATTACHMENT_LINE_LENGTH
         clean_name = " ".join((filename or "Вложение").split()) or "Вложение"
         summary = (extracted_text or "").strip()
 
         if text_length == 0 or not summary:
-            return MessageProcessor._trim_text(clean_name, 80)
+            return MessageProcessor._trim_text(clean_name, line_limit)
 
-        cleaned_summary = MessageProcessor._trim_text(summary, max_meaning)
+        cleaned_summary = MessageProcessor._trim_attachment_snippet(summary, meaning_limit)
         name_tokens = {token.lower() for token in re.findall(r"[\w-]{2,}", clean_name)}
         summary_tokens: list[str] = []
         for token in cleaned_summary.split():
@@ -543,18 +550,18 @@ class MessageProcessor:
         if not summary_tokens:
             return clean_name
 
-        summary_text = " ".join(summary_tokens[:6])
+        summary_text = " ".join(summary_tokens[: MessageProcessor._ATTACHMENT_TOKEN_LIMIT])
         line = f"{clean_name} — {summary_text}"
-        if len(line) <= 80:
+        if len(line) <= line_limit:
             return line
 
-        max_summary = max(8, min(max_meaning, 80 - len(clean_name) - len(" — ")))
+        max_summary = max(8, min(meaning_limit, line_limit - len(clean_name) - len(" — ")))
         trimmed_summary = MessageProcessor._trim_text(summary_text, max_summary)
         line = f"{clean_name} — {trimmed_summary}"
-        if len(line) <= 80:
+        if len(line) <= line_limit:
             return line
 
-        max_name = max(8, 80 - len(trimmed_summary) - len(" — "))
+        max_name = max(8, line_limit - len(trimmed_summary) - len(" — "))
         trimmed_name = MessageProcessor._trim_text(clean_name, max_name)
         return f"{trimmed_name} — {trimmed_summary}"
 
@@ -658,6 +665,11 @@ class MessageProcessor:
     def _strip_forbidden_tokens(self, text: str) -> str:
         tokens = text.split()
         return " ".join(self._filter_forbidden_tokens(tokens))
+
+    @classmethod
+    def _trim_attachment_snippet(cls, text: str, limit: int | None = None) -> str:
+        applied_limit = limit or cls._ATTACHMENT_SNIPPET_LIMIT
+        return cls._trim_text(text, applied_limit)
 
     @staticmethod
     def _empty_attachment_phrase(filename: str, kind_hint: str) -> str:
