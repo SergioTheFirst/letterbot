@@ -21,4 +21,4 @@ def test_footer_contains_account_login_at_the_end():
 
     assert result is not None
     lines = [line for line in result.split("\n") if line.strip()]
-    assert lines[-1] == "<sub>Получено на: user@example.com</sub>"
+    assert lines[-1] == "<sub>to: user@example.com</sub>"

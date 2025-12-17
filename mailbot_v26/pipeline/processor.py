@@ -464,7 +464,7 @@ class MessageProcessor:
         attachment_block = "\n".join(rendered_attachments) if rendered_attachments else ""
         header_block = base_lines[0]
         if subject:
-            header_block = f"{header_block}\n**{subject.strip()}**"
+            header_block = f"{header_block}\n<b>{subject.strip()}</b>"
 
         parts = [header_block]
 
@@ -485,7 +485,7 @@ class MessageProcessor:
 
     @staticmethod
     def _append_account_line(message: str, account_login: str) -> str:
-        footer = f"<sub>Получено на: {(account_login or '').strip()}</sub>"
+        footer = f"<sub>to: {(account_login or '').strip()}</sub>"
         return f"{message}\n{footer}" if message else footer
 
     def _render_attachments(
