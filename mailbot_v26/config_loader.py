@@ -54,7 +54,15 @@ class BotConfig:
     general: GeneralConfig
     accounts: List[AccountConfig]
     keys: KeysConfig
+    storage: "StorageConfig"
     llm_call: Optional[Callable[[str], str]] = None
+
+
+@dataclass
+class StorageConfig:
+    """Database connection settings."""
+
+    db_path: Path
 
 
 class ConfigError(Exception):
@@ -128,6 +136,17 @@ def load_keys_config(base_dir: Path = CONFIG_DIR) -> KeysConfig:
         raise ConfigError(f"Missing key in keys.ini: {exc!s}") from exc
 
 
+def load_storage_config(base_dir: Path = CONFIG_DIR) -> StorageConfig:
+    parser = _read_config_file(base_dir / "config.ini")
+    default_path = Path(__file__).resolve().parents[1] / "data" / "mailbot.sqlite"
+    db_path_raw = parser.get("storage", "db_path", fallback=str(default_path))
+    db_path = Path(db_path_raw)
+    if not db_path.is_absolute():
+        project_root = Path(__file__).resolve().parents[1]
+        db_path = (project_root / db_path).resolve()
+    return StorageConfig(db_path=db_path)
+
+
 def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
     """Load and validate all configuration files.
 
@@ -140,7 +159,8 @@ def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
     general = load_general_config(base_dir)
     accounts = load_accounts_config(base_dir)
     keys = load_keys_config(base_dir)
-    return BotConfig(general=general, accounts=accounts, keys=keys)
+    storage = load_storage_config(base_dir)
+    return BotConfig(general=general, accounts=accounts, keys=keys, storage=storage)
 
 
 __all__ = [
@@ -149,8 +169,10 @@ __all__ = [
     "ConfigError",
     "GeneralConfig",
     "KeysConfig",
+    "StorageConfig",
     "load_config",
     "load_accounts_config",
     "load_general_config",
     "load_keys_config",
+    "load_storage_config",
 ]

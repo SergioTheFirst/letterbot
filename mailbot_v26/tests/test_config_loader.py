@@ -9,6 +9,7 @@ from mailbot_v26.config_loader import (
     load_config,
     load_general_config,
     load_keys_config,
+    load_storage_config,
 )
 
 
@@ -25,6 +26,9 @@ def build_sample_config(tmpdir: Path) -> None:
 check_interval = 400
 max_attachment_mb = 20
 admin_chat_id = 111
+
+[storage]
+db_path = data/custom.sqlite
 """,
     )
     write_file(
@@ -59,6 +63,8 @@ def test_load_full_config(tmp_path: Path) -> None:
     assert cfg.general.check_interval == 400
     assert cfg.accounts[0].login == "sample@example.com"
     assert cfg.keys.telegram_bot_token == "token"
+    storage_cfg = load_storage_config(tmp_path)
+    assert cfg.storage.db_path == storage_cfg.db_path
 
 
 def test_missing_files_raise() -> None:
