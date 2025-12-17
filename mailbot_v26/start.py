@@ -7,6 +7,7 @@ import re
 import sys
 import time
 import unicodedata
+from datetime import datetime
 from email import message_from_bytes
 from email.message import Message as EmailMessage
 from pathlib import Path
@@ -271,6 +272,7 @@ def main(config_dir: Path | None = None) -> None:
     print(f"Log file: {LOG_PATH}\n")
 
     logger.info("=== MailBot v26 started ===")
+    program_start = datetime.now()
 
     try:
         base_config_dir = config_dir or CURRENT_DIR / "config"
@@ -301,7 +303,7 @@ def main(config_dir: Path | None = None) -> None:
                 print(f"\n[MAIL] Checking: {login}")
 
                 try:
-                    imap = ResilientIMAP(account, state)
+                    imap = ResilientIMAP(account, state, program_start)
                     new_messages = imap.fetch_new_messages()
 
                     if not new_messages:
