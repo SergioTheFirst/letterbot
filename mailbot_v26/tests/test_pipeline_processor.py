@@ -98,7 +98,7 @@ def test_output_has_two_mandatory_lines():
     mandatory = [line for line in result.split("\n") if line.strip()][0:3]
     assert len(mandatory) >= 2
     assert mandatory[0].startswith(("🔴", "🟡", "🔵"))
-    assert mandatory[1].startswith("**")
+    assert mandatory[1].startswith("<b>")
     assert mandatory[2].split()[0] in MessageProcessor._VERB_ORDER
 
 
