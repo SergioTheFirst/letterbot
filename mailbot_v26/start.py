@@ -1,34 +1,39 @@
 """MailBot Premium v26 - Runtime orchestrator"""
 from __future__ import annotations
 
-import html
 import logging
-import re
 import sys
 import time
-import unicodedata
 from datetime import datetime
 from email import message_from_bytes
-from email.message import Message as EmailMessage
 from email.utils import parseaddr
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 CURRENT_DIR = Path(__file__).resolve().parent
 # Добавляем родительскую папку в путь для импортов
 sys.path.insert(0, str(CURRENT_DIR))
 sys.path.insert(0, str(CURRENT_DIR.parent))
 
-from bot_core.extractors.doc import extract_docx_text
-from bot_core.extractors.excel import extract_excel_text
-from bot_core.extractors.pdf import extract_pdf_text
+from bot_core.pipeline import (
+    PIPELINE_CACHE,
+    PIPELINE_INBOUND_CACHE,
+    PIPELINE_RAW_CACHE,
+    PipelineContext,
+    configure_pipeline,
+    parse_raw_email,
+    remember_raw_email,
+    stage_llm,
+    stage_parse,
+    stage_tg,
+    store_inbound,
+)
 from bot_core.storage import Storage
-from config_loader import BotConfig, load_config
+from config_loader import AccountConfig, BotConfig, load_config
 from imap_client import ResilientIMAP
-from pipeline.processor import Attachment, InboundMessage, MessageProcessor
+from pipeline.processor import InboundMessage, MessageProcessor
 from state_manager import StateManager
-from text.mime_utils import decode_bytes, decode_mime_header
-from text.sanitize import sanitize_text
+from text.mime_utils import decode_mime_header
 from worker.telegram_sender import send_telegram
 
 LOG_PATH = CURRENT_DIR / "mailbot.log"
@@ -56,232 +61,100 @@ _configure_logging()
 logger = logging.getLogger("mailbot")
 
 
-def _strip_html_content(text: str) -> str:
-    working = re.sub(
-        r"<(head|script|style)[^>]*>.*?</\1>", " ", text, flags=re.IGNORECASE | re.DOTALL
-    )
-    working = re.sub(r"<!--.*?-->", " ", working, flags=re.DOTALL)
-    working = re.sub(
-        r"<(br|p|div|tr|td|th|li|ul|ol|h[1-6])[^>]*>",
-        "\n",
-        working,
-        flags=re.IGNORECASE,
-    )
-    working = re.sub(r"</(p|div|tr|td|th|li|ul|ol|h[1-6])>", "\n", working, flags=re.IGNORECASE)
-    working = re.sub(r"<[^>]+>", " ", working)
-    working = html.unescape(working)
-    working = re.sub(r"[ \t]+", " ", working)
-    working = re.sub(r"(\n\s*){2,}", "\n\n", working)
-    return working.strip()
+def _get_account_by_login(config: BotConfig, login: str) -> Optional["AccountConfig"]:
+    for acc in config.accounts:
+        if acc.login == login:
+            return acc
+    return None
 
 
-def _normalize_text_content(text: str) -> str:
-    normalized = unicodedata.normalize("NFC", text or "")
-    cleaned = re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]", "", normalized)
-    return cleaned.strip()
+def _fail_open_process(
+    config: BotConfig, processor: MessageProcessor, ctx: Optional[PipelineContext]
+) -> None:
+    if ctx is None:
+        logger.error("Fail-open skipped: missing context")
+        return
 
+    inbound = PIPELINE_INBOUND_CACHE.get(ctx.email_id)
+    if inbound is None:
+        raw_email = PIPELINE_RAW_CACHE.get(ctx.email_id)
+        if raw_email is not None:
+            try:
+                inbound = parse_raw_email(raw_email, config)
+            except Exception as exc:
+                logger.error("Fail-open parse failed for email %s: %s", ctx.email_id, exc)
 
-def _decode_subject(email_obj: EmailMessage) -> str:
-    raw_subject = email_obj.get("Subject", "")
-    return decode_mime_header(raw_subject)
-
-
-def _decode_from(email_obj: EmailMessage) -> str:
-    raw_from = email_obj.get("From", "")
-    return decode_mime_header(raw_from)
-
-
-def _decode_part_payload(part: EmailMessage) -> str:
-    payload = part.get_payload(decode=True) or b""
-    charset = part.get_content_charset()
-    text = decode_bytes(payload, charset)
-    return _normalize_text_content(text)
-
-
-def _is_real_attachment(part: EmailMessage, filename: str, payload: bytes) -> bool:
-    if part.is_multipart():
-        return False
-
-    disposition = (part.get_content_disposition() or "").lower()
-    content_type = (part.get_content_type() or "").lower()
-    lower_name = (filename or "").strip().lower()
-    extension = Path(filename or "").suffix.lower()
-
-    if disposition == "inline":
-        return False
-
-    if not filename:
-        small_payload = len(payload or b"") <= 2048
-        if disposition != "attachment" or small_payload:
-            return False
-        if content_type in {"text/html", "text/css"}:
-            return False
-
-    if lower_name in {"attachment.bin", "noname", "unnamed", "part.bin"}:
-        return False
-
-    if content_type in {"text/html", "text/css", "application/xhtml+xml"}:
-        return False
-
-    if extension in {".css", ".woff", ".woff2", ".ttf", ".otf", ".svg"}:
-        return False
-
-    return True
-
-
-def _extract_body(email_obj: EmailMessage) -> str:
-    plain_text: str | None = None
-    html_text: str | None = None
-
-    if email_obj.is_multipart():
-        for part in email_obj.walk():
-            if part.get_content_maintype() == "multipart":
-                continue
-            if part.get_content_disposition() == "attachment":
-                continue
-
-            content_type = (part.get_content_type() or "").lower()
-            if content_type.startswith("text/plain") and plain_text is None:
-                try:
-                    decoded = _decode_part_payload(part)
-                    if decoded:
-                        plain_text = decoded
-                except Exception:
-                    continue
-            elif content_type.startswith("text/html") and html_text is None:
-                try:
-                    decoded = _decode_part_payload(part)
-                    if decoded:
-                        html_text = _strip_html_content(decoded)
-                        html_text = _normalize_text_content(html_text)
-                except Exception:
-                    continue
-
-        if plain_text:
-            return plain_text
-        if html_text:
-            return html_text
-        return ""
+    if inbound is None:
+        logger.error("Fail-open skipped for email %s: no email content", ctx.email_id)
+        return
 
     try:
-        content_type = (email_obj.get_content_type() or "").lower()
-        decoded = _decode_part_payload(email_obj)
-        if content_type.startswith("text/html"):
-            decoded = _strip_html_content(decoded)
-        return _normalize_text_content(decoded)
+        final_text = processor.process(ctx.account_email, inbound)
     except Exception:
-        return ""
+        logger.exception("Fail-open processor failure for email %s", ctx.email_id)
+        return
 
+    if not (final_text and final_text.strip()):
+        logger.error("Fail-open produced empty output for email %s", ctx.email_id)
+        return
 
-def _extract_attachment_text(att: Attachment) -> str:
-    name_lower = (att.filename or "").lower()
-    content_type = (att.content_type or "").lower()
+    account = _get_account_by_login(config, ctx.account_email)
+    if not account:
+        logger.error("Fail-open missing account for %s", ctx.account_email)
+        return
 
-    logger.debug(
-        "Extracting from %s (type: %s, size: %d bytes)",
-        att.filename,
-        content_type,
-        att.size_bytes or len(att.content),
+    ok = send_telegram(
+        config.keys.telegram_bot_token,
+        account.telegram_chat_id,
+        final_text.strip(),
     )
-
-    try:
-        if name_lower.endswith(".pdf"):
-            text = sanitize_text(
-                extract_pdf_text(att.content, att.filename), max_len=5000
-            )
-            logger.info("PDF extraction: %d chars from %s", len(text), att.filename)
-            return text
-
-        if name_lower.endswith((".doc", ".docx")):
-            text = sanitize_text(
-                extract_docx_text(att.content, att.filename), max_len=5000
-            )
-            logger.info("DOC extraction: %d chars from %s", len(text), att.filename)
-            return text
-
-        if name_lower.endswith((".xls", ".xlsx")):
-            text = sanitize_text(
-                extract_excel_text(att.content, att.filename), max_len=5000
-            )
-            logger.info("Excel extraction: %d chars from %s", len(text), att.filename)
-            return text
-
-        if content_type.startswith("text") or name_lower.endswith(
-            (".txt", ".csv", ".log", ".md", ".json")
-        ):
-            decoded = att.content.decode("utf-8", errors="ignore")
-            text = sanitize_text(decoded, max_len=4000)
-            logger.info("Text extraction: %d chars from %s", len(text), att.filename)
-            return text
-
-    except Exception as e:
-        logger.error("Extraction failed for %s: %s", att.filename, e, exc_info=True)
-
-    return ""
+    status = "OK" if ok else "FAIL"
+    logger.error("Fail-open Telegram send status for email %s: %s", ctx.email_id, status)
 
 
-def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachment]:
-    attachments: List[Attachment] = []
-    byte_limit = max_mb * 1024 * 1024
-    for part in email_obj.walk():
-        raw_filename = part.get_filename()
-        filename = decode_mime_header(raw_filename or "")
-        if not filename:
-            alt_name = part.get_param("name") or ""
-            filename = decode_mime_header(alt_name)
+def _process_queue(storage: Storage, config: BotConfig, processor: MessageProcessor) -> None:
+    while True:
+        item = storage.claim_next(["PARSE", "LLM", "TG"])
+        if not item:
+            break
 
-        if filename.lower().startswith("attachment.bin"):
-            fallback_name = decode_mime_header(part.get_param("name") or "")
-            filename = fallback_name or ""
+        queue_id = item["queue_id"]
+        email_id = item["email_id"]
+        stage = item["stage"]
+        attempts = item["attempts"]
+        ctx = PIPELINE_CACHE.get(email_id)
+        if ctx:
+            ctx.attempts = attempts  # type: ignore[attr-defined]
 
         try:
-            payload = part.get_payload(decode=True) or b""
-            payload_size = len(payload)
-            if not _is_real_attachment(part, filename, payload):
-                payload = b""
-                continue
-            if byte_limit > 0 and payload_size > byte_limit:
-                payload = b""
-                continue
-            if not filename or filename.lower().startswith("attachment.bin"):
-                payload = b""
-                continue
-
-            temp_attachment = Attachment(
-                filename=filename,
-                content=payload,
-                content_type=part.get_content_type() or "",
-                text="",
-                size_bytes=payload_size,
+            print(
+                f"[QUEUE] Claimed {stage} for email_id={email_id} attempt={attempts}"
             )
-            extracted_text = _extract_attachment_text(temp_attachment)
-            temp_attachment.content = b""
-            del temp_attachment
-            payload = b""
-            del payload
+            if ctx is None:
+                raise RuntimeError(f"No pipeline context for email {email_id}")
 
-            attachment = Attachment(
-                filename=filename,
-                content=b"",
-                content_type=part.get_content_type() or "",
-                text=extracted_text,
-                size_bytes=payload_size,
-            )
-            attachments.append(attachment)
-        except Exception:
-            continue
-    return attachments
-
-
-def _parse_raw_email(raw_bytes: bytes, config: BotConfig) -> InboundMessage:
-    email_obj = message_from_bytes(raw_bytes)
-    subject = _decode_subject(email_obj)
-    sender = _decode_from(email_obj)
-    body = _extract_body(email_obj)
-    attachments = _extract_attachments(email_obj, config.general.max_attachment_mb)
-    return InboundMessage(
-        subject=subject, body=body, sender=sender, attachments=attachments
-    )
+            if stage == "PARSE":
+                stage_parse(ctx)
+                storage.mark_done(queue_id)
+                storage.enqueue_stage(email_id, "LLM")
+            elif stage == "LLM":
+                stage_llm(ctx)
+                storage.mark_done(queue_id)
+                storage.enqueue_stage(email_id, "TG")
+            elif stage == "TG":
+                stage_tg(ctx)
+                storage.mark_done(queue_id)
+            else:
+                storage.mark_done(queue_id)
+                logger.warning("Unknown stage %s for email %s", stage, email_id)
+        except Exception as queue_exc:
+            logger.exception("Queue handling error for email %s", email_id)
+            backoff = min(600, 10 * (2 ** attempts))
+            try:
+                storage.mark_error(queue_id, str(queue_exc), backoff)
+            except Exception:
+                logger.exception("Failed to mark error for queue_id %s", queue_id)
+            _fail_open_process(config, processor, ctx)
 
 
 def main(config_dir: Path | None = None) -> None:
@@ -317,6 +190,7 @@ def main(config_dir: Path | None = None) -> None:
 
         state = StateManager(CURRENT_DIR / "state.json")
         processor = MessageProcessor(config=config, state=state)
+        configure_pipeline(config, processor)
         print("[OK] Ready to work\n")
 
         cycle = 0
@@ -345,7 +219,7 @@ def main(config_dir: Path | None = None) -> None:
                         for uid, raw in new_messages:
                             print(f"      ├─ UID {uid}")
                             try:
-                                inbound = _parse_raw_email(raw, config)
+                                inbound = parse_raw_email(raw, config)
                                 subject = inbound.subject[:60] if inbound.subject else "(no subject)"
                                 print(f"      │  Subject: {subject}")
 
@@ -367,21 +241,29 @@ def main(config_dir: Path | None = None) -> None:
                                         received_at=received_at or None,
                                         attachments_count=attachments_count,
                                     )
-                                    storage.enqueue_stage(email_id, "PARSE")
-
-                                final_text = processor.process(login, inbound)
-
-                                if final_text and final_text.strip():
-                                    ok = send_telegram(
-                                        config.keys.telegram_bot_token,
-                                        account.telegram_chat_id,
-                                        final_text.strip(),
+                                    ctx = PipelineContext(
+                                        email_id=email_id,
+                                        account_email=account.login,
+                                        uid=uid,
                                     )
-                                    status = "[OK] sent" if ok else "[FAIL] failed"
-                                    print(f"      │  Telegram: {status}")
-                                    logger.info("UID %s: Telegram %s", uid, "OK" if ok else "FAIL")
+                                    PIPELINE_CACHE[email_id] = ctx
+                                    remember_raw_email(email_id, raw)
+                                    store_inbound(email_id, inbound)
+                                    storage.enqueue_stage(email_id, "PARSE")
+                                    print(f"      │  Enqueued PARSE for email_id={email_id}")
                                 else:
-                                    print(f"      │  Result: empty")
+                                    final_text = processor.process(login, inbound)
+                                    if final_text and final_text.strip():
+                                        ok = send_telegram(
+                                            config.keys.telegram_bot_token,
+                                            account.telegram_chat_id,
+                                            final_text.strip(),
+                                        )
+                                        status = "[OK] sent" if ok else "[FAIL] failed"
+                                        print(f"      │  Telegram: {status}")
+                                        logger.info("UID %s: Telegram %s", uid, "OK" if ok else "FAIL")
+                                    else:
+                                        print(f"      │  Result: empty")
 
                             except Exception as e:
                                 print(f"      └─ [ERROR] {e}")
@@ -395,20 +277,11 @@ def main(config_dir: Path | None = None) -> None:
 
                 if storage:
                     try:
-                        item = storage.claim_next(["PARSE", "LLM", "TG"])
-                        if item:
-                            try:
-                                print(
-                                    f"[QUEUE] Claimed {item['stage']} for email_id={item['email_id']} attempt={item['attempts']}"
-                                )
-                                storage.mark_done(item["queue_id"])
-                            except Exception as queue_exc:
-                                backoff = min(600, 5 * (2 ** item["attempts"]))
-                                storage.mark_error(item["queue_id"], str(queue_exc), backoff)
-                                storage.set_email_error(item["email_id"], str(queue_exc))
-                                logger.exception("Queue handling error for email %s", item["email_id"])
+                        _process_queue(storage, config, processor)
                     except Exception:
                         logger.exception("Queue dispatcher failure")
+                        for ctx in list(PIPELINE_CACHE.values()):
+                            _fail_open_process(config, processor, ctx)
 
                 state.save()
                 delay = max(120, config.general.check_interval)
