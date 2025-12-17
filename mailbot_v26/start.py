@@ -179,7 +179,7 @@ def _extract_attachment_text(att: Attachment) -> str:
         "Extracting from %s (type: %s, size: %d bytes)",
         att.filename,
         content_type,
-        len(att.content),
+        att.size_bytes or len(att.content),
     )
 
     try:
@@ -234,20 +234,37 @@ def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachmen
 
         try:
             payload = part.get_payload(decode=True) or b""
+            payload_size = len(payload)
             if not _is_real_attachment(part, filename, payload):
+                payload = b""
                 continue
-            if byte_limit > 0 and len(payload) > byte_limit:
+            if byte_limit > 0 and payload_size > byte_limit:
+                payload = b""
                 continue
             if not filename or filename.lower().startswith("attachment.bin"):
+                payload = b""
                 continue
 
-            attachment = Attachment(
+            temp_attachment = Attachment(
                 filename=filename,
                 content=payload,
                 content_type=part.get_content_type() or "",
                 text="",
+                size_bytes=payload_size,
             )
-            attachment.text = _extract_attachment_text(attachment)
+            extracted_text = _extract_attachment_text(temp_attachment)
+            temp_attachment.content = b""
+            del temp_attachment
+            payload = b""
+            del payload
+
+            attachment = Attachment(
+                filename=filename,
+                content=b"",
+                content_type=part.get_content_type() or "",
+                text=extracted_text,
+                size_bytes=payload_size,
+            )
             attachments.append(attachment)
         except Exception:
             continue

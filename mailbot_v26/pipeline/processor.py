@@ -45,6 +45,7 @@ class Attachment:
     content: bytes
     content_type: str = ""
     text: str | None = None
+    size_bytes: int = 0
 
 
 @dataclass
@@ -345,7 +346,7 @@ class MessageProcessor:
                     kind=kind,
                     priority=priority_rank,
                     text_length=text_length,
-                    size_bytes=len(att.content or b""),
+                    size_bytes=att.size_bytes or len(att.content or b""),
                     doc_type=doc_type,
                 )
             )
@@ -377,7 +378,7 @@ class MessageProcessor:
                             self._detect_attachment_kind(att.filename, att.content_type), 5
                         ),
                         text_length=len(normalize_text(att.text or "")),
-                        size_bytes=len(att.content or b""),
+                        size_bytes=att.size_bytes or len(att.content or b""),
                         doc_type=doc_type,
                     )
                 )
