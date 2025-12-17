@@ -10,6 +10,7 @@ import unicodedata
 from datetime import datetime
 from email import message_from_bytes
 from email.message import Message as EmailMessage
+from email.utils import parseaddr
 from pathlib import Path
 from typing import List
 
@@ -21,6 +22,7 @@ sys.path.insert(0, str(CURRENT_DIR.parent))
 from bot_core.extractors.doc import extract_docx_text
 from bot_core.extractors.excel import extract_excel_text
 from bot_core.extractors.pdf import extract_pdf_text
+from bot_core.storage import Storage
 from config_loader import BotConfig, load_config
 from imap_client import ResilientIMAP
 from pipeline.processor import Attachment, InboundMessage, MessageProcessor
@@ -291,87 +293,138 @@ def main(config_dir: Path | None = None) -> None:
     logger.info("=== MailBot v26 started ===")
     program_start = datetime.now()
 
+    storage: Storage | None = None
     try:
-        base_config_dir = config_dir or CURRENT_DIR / "config"
-        config = load_config(base_config_dir)
-        logger.info("Configuration loaded: %d accounts", len(config.accounts))
-        print(f"[OK] Loaded {len(config.accounts)} accounts")
-    except Exception as exc:
-        logger.exception("Failed to load configuration")
-        print(f"[ERROR] Configuration error: {exc}")
-        time.sleep(10)
-        return
+        try:
+            base_config_dir = config_dir or CURRENT_DIR / "config"
+            config = load_config(base_config_dir)
+            logger.info("Configuration loaded: %d accounts", len(config.accounts))
+            print(f"[OK] Loaded {len(config.accounts)} accounts")
+        except Exception as exc:
+            logger.exception("Failed to load configuration")
+            print(f"[ERROR] Configuration error: {exc}")
+            time.sleep(10)
+            return
 
-    state = StateManager(CURRENT_DIR / "state.json")
-    processor = MessageProcessor(config=config, state=state)
-    print("[OK] Ready to work\n")
+        try:
+            storage = Storage(config.storage.db_path)
+            logger.info("Storage initialized at %s", config.storage.db_path)
+        except Exception as exc:
+            logger.exception("Failed to initialize storage")
+            print(f"[ERROR] Storage initialization error: {exc}")
+            time.sleep(10)
+            return
 
-    cycle = 0
-    try:
-        while True:
-            cycle += 1
-            print(f"\n{'=' * 60}")
-            print(f"CYCLE #{cycle} - {time.strftime('%H:%M:%S')}")
-            print(f"{'=' * 60}")
-            logger.info("Cycle %d started", cycle)
+        state = StateManager(CURRENT_DIR / "state.json")
+        processor = MessageProcessor(config=config, state=state)
+        print("[OK] Ready to work\n")
 
-            for account in config.accounts:
-                login = account.login or "no_login"
-                print(f"\n[MAIL] Checking: {login}")
+        cycle = 0
+        try:
+            while True:
+                cycle += 1
+                print(f"\n{'=' * 60}")
+                print(f"CYCLE #{cycle} - {time.strftime('%H:%M:%S')}")
+                print(f"{'=' * 60}")
+                logger.info("Cycle %d started", cycle)
 
-                try:
-                    imap = ResilientIMAP(account, state, program_start)
-                    new_messages = imap.fetch_new_messages()
+                for account in config.accounts:
+                    login = account.login or "no_login"
+                    print(f"\n[MAIL] Checking: {login}")
 
-                    if not new_messages:
-                        print("   └─ no new messages")
-                        continue
+                    try:
+                        imap = ResilientIMAP(account, state, program_start)
+                        new_messages = imap.fetch_new_messages()
 
-                    print(f"   └─ received {len(new_messages)} new messages")
+                        if not new_messages:
+                            print("   └─ no new messages")
+                            continue
 
-                    for uid, raw in new_messages:
-                        print(f"      ├─ UID {uid}")
-                        try:
-                            inbound = _parse_raw_email(raw, config)
-                            subject = inbound.subject[:60] if inbound.subject else "(no subject)"
-                            print(f"      │  Subject: {subject}")
+                        print(f"   └─ received {len(new_messages)} new messages")
 
-                            final_text = processor.process(login, inbound)
+                        for uid, raw in new_messages:
+                            print(f"      ├─ UID {uid}")
+                            try:
+                                inbound = _parse_raw_email(raw, config)
+                                subject = inbound.subject[:60] if inbound.subject else "(no subject)"
+                                print(f"      │  Subject: {subject}")
 
-                            if final_text and final_text.strip():
-                                ok = send_telegram(
-                                    config.keys.telegram_bot_token,
-                                    account.telegram_chat_id,
-                                    final_text.strip(),
+                                message_obj = message_from_bytes(raw)
+                                message_id = message_obj.get("Message-ID") if message_obj else None
+                                from_header = decode_mime_header(message_obj.get("From", "")) if message_obj else ""
+                                from_name, from_email = parseaddr(from_header or inbound.sender)
+                                received_at = decode_mime_header(message_obj.get("Date", "")) if message_obj else None
+                                attachments_count = len(inbound.attachments or [])
+
+                                if storage:
+                                    email_id = storage.upsert_email(
+                                        account_email=account.login,
+                                        uid=uid,
+                                        message_id=message_id,
+                                        from_email=from_email or None,
+                                        from_name=from_name or None,
+                                        subject=inbound.subject,
+                                        received_at=received_at or None,
+                                        attachments_count=attachments_count,
+                                    )
+                                    storage.enqueue_stage(email_id, "PARSE")
+
+                                final_text = processor.process(login, inbound)
+
+                                if final_text and final_text.strip():
+                                    ok = send_telegram(
+                                        config.keys.telegram_bot_token,
+                                        account.telegram_chat_id,
+                                        final_text.strip(),
+                                    )
+                                    status = "[OK] sent" if ok else "[FAIL] failed"
+                                    print(f"      │  Telegram: {status}")
+                                    logger.info("UID %s: Telegram %s", uid, "OK" if ok else "FAIL")
+                                else:
+                                    print(f"      │  Result: empty")
+
+                            except Exception as e:
+                                print(f"      └─ [ERROR] {e}")
+                                logger.exception("Processing error for UID %s", uid)
+
+                        state.save()
+
+                    except Exception as e:
+                        print(f"   └─ [IMAP ERROR] {e}")
+                        logger.exception("IMAP error for %s", login)
+
+                if storage:
+                    try:
+                        item = storage.claim_next(["PARSE", "LLM", "TG"])
+                        if item:
+                            try:
+                                print(
+                                    f"[QUEUE] Claimed {item['stage']} for email_id={item['email_id']} attempt={item['attempts']}"
                                 )
-                                status = "[OK] sent" if ok else "[FAIL] failed"
-                                print(f"      │  Telegram: {status}")
-                                logger.info("UID %s: Telegram %s", uid, "OK" if ok else "FAIL")
-                            else:
-                                print(f"      │  Result: empty")
+                                storage.mark_done(item["queue_id"])
+                            except Exception as queue_exc:
+                                backoff = min(600, 5 * (2 ** item["attempts"]))
+                                storage.mark_error(item["queue_id"], str(queue_exc), backoff)
+                                storage.set_email_error(item["email_id"], str(queue_exc))
+                                logger.exception("Queue handling error for email %s", item["email_id"])
+                    except Exception:
+                        logger.exception("Queue dispatcher failure")
 
-                        except Exception as e:
-                            print(f"      └─ [ERROR] {e}")
-                            logger.exception("Processing error for UID %s", uid)
+                state.save()
+                delay = max(120, config.general.check_interval)
+                print(f"\n[WAIT] Sleeping {delay} seconds...")
+                time.sleep(delay)
 
-                    state.save()
-
-                except Exception as e:
-                    print(f"   └─ [IMAP ERROR] {e}")
-                    logger.exception("IMAP error for %s", login)
-
-            state.save()
-            delay = max(120, config.general.check_interval)
-            print(f"\n[WAIT] Sleeping {delay} seconds...")
-            time.sleep(delay)
-
-    except KeyboardInterrupt:
-        print("\n\n[STOP] Stopped by user")
-        logger.info("Stopped by user")
-    except Exception as e:
-        print(f"\n\n[CRITICAL] {e}")
-        logger.exception("Fatal error")
-        time.sleep(10)
+        except KeyboardInterrupt:
+            print("\n\n[STOP] Stopped by user")
+            logger.info("Stopped by user")
+        except Exception as e:
+            print(f"\n\n[CRITICAL] {e}")
+            logger.exception("Fatal error")
+            time.sleep(10)
+    finally:
+        if storage:
+            storage.close()
 
 
 if __name__ == "__main__":
