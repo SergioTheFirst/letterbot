@@ -212,7 +212,7 @@ class MessageProcessor:
             minimal = self._enforce_length(self._fallback_lines(sender_clean, "Сообщение", verb), hard_trim=True)
             telegram_message = self._compose(minimal, [], body_summary, 0, subject_clean)
 
-        return telegram_message
+        return self._append_account_line(telegram_message, account_login)
 
     def _resolve_priority(
         self,
@@ -482,6 +482,11 @@ class MessageProcessor:
             parts.append(attachment_block)
 
         return "\n\n".join(part for part in parts if part).strip()
+
+    @staticmethod
+    def _append_account_line(message: str, account_login: str) -> str:
+        footer = f"<sub>Получено на: {(account_login or '').strip()}</sub>"
+        return f"{message}\n{footer}" if message else footer
 
     def _render_attachments(
         self, attachments: List[AttachmentSummary], extra_attachments: int = 0
