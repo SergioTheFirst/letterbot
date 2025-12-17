@@ -12,7 +12,14 @@ def send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool:
     if not bot_token or not chat_id or not text:
         return False
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = urllib.parse.urlencode({"chat_id": chat_id, "text": text})
+    payload = urllib.parse.urlencode(
+        {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+    )
     request = urllib.request.Request(url, data=payload.encode("utf-8"), method="POST")
     request.add_header("Content-Type", "application/x-www-form-urlencoded")
     try:

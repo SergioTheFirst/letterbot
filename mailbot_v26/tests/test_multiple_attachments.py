@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import re
 
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
 
@@ -13,8 +14,12 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
+def _strip_html(line: str) -> str:
+    return re.sub(r"</?[^>]+>", "", line)
+
+
 def _attachment_lines(result: str, names: set[str]) -> list[str]:
-    lines = [line for line in result.split("\n") if line.strip()]
+    lines = [_strip_html(line) for line in result.split("\n") if line.strip()]
     return [line for line in lines if any(line.startswith(name) for name in names)]
 
 
@@ -122,4 +127,3 @@ def test_main_attachment_block_and_clean_lines() -> None:
     att_lines = _attachment_lines(result, names)
     assert any(line == "legacy.doc" for line in att_lines)
     assert any(line.startswith("old.xls") for line in att_lines)
-

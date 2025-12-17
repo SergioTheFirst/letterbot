@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 import re
 from pathlib import Path
@@ -460,16 +461,16 @@ class MessageProcessor:
         subject: str = "",
     ) -> str:
         rendered_attachments = self._render_attachments(attachments, extra_attachments)
-        body_line = f"*{body_summary.strip()}*" if body_summary.strip() else ""
+        body_line = f"<i>{self._escape_html(body_summary.strip())}</i>" if body_summary.strip() else ""
         attachment_block = "\n".join(rendered_attachments) if rendered_attachments else ""
-        header_block = base_lines[0]
+        header_block = self._escape_html(base_lines[0])
         if subject:
-            header_block = f"{header_block}\n<b>{subject.strip()}</b>"
+            header_block = f"{header_block}\n<b>{self._escape_html(subject.strip())}</b>"
 
         parts = [header_block]
 
         if len(base_lines) > 1 and base_lines[1].strip():
-            parts.append(base_lines[1].strip())
+            parts.append(self._escape_html(base_lines[1].strip()))
 
         attachment_count = len(attachments) + max(extra_attachments, 0)
         if attachment_count:
@@ -485,14 +486,14 @@ class MessageProcessor:
 
     @staticmethod
     def _append_account_line(message: str, account_login: str) -> str:
-        footer = f"<sub>to: {(account_login or '').strip()}</sub>"
+        footer = f"<i>to: {html.escape((account_login or '').strip())}</i>"
         return f"{message}\n{footer}" if message else footer
 
     def _render_attachments(
         self, attachments: List[AttachmentSummary], extra_attachments: int = 0
     ) -> List[str]:
         if not attachments:
-            return [f"*ещё {extra_attachments} файлов*"] if extra_attachments else []
+            return [f"<i>ещё {extra_attachments} файлов</i>"] if extra_attachments else []
 
         limited = attachments[:6]
         lines: List[str] = []
@@ -506,11 +507,12 @@ class MessageProcessor:
                 text_length=attachment.text_length,
             )
             if line:
-                lines.append(f"*{line}*")
+                escaped_line = self._escape_html(line)
+                lines.append(f"<i>{escaped_line}</i>")
 
         remaining = max(extra_attachments, 0) + max(0, len(attachments) - 6)
         if remaining:
-            lines.append(f"*ещё {remaining} файлов*")
+            lines.append(f"<i>ещё {remaining} файлов</i>")
 
         return lines
 
@@ -1232,6 +1234,10 @@ class MessageProcessor:
         cleaned = re.sub(r"<[^>]+>", " ", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned)
         return cleaned.strip()
+
+    @staticmethod
+    def _escape_html(text: str) -> str:
+        return html.escape(text or "", quote=False)
 
     def _attachment_fallback_summary(self, att_text: str, subject: str, filename: str, kind: str) -> str:
         lowered = att_text.lower()

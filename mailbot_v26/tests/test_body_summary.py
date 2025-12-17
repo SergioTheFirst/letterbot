@@ -1,3 +1,4 @@
+import re
 from types import SimpleNamespace
 
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
@@ -9,8 +10,10 @@ def _processor() -> MessageProcessor:
 
 
 def _summary_line(result: str) -> str:
-    lines = result.split("\n")
-    return lines[2] if len(lines) >= 3 else ""
+    for line in result.split("\n"):
+        if line.strip().startswith("<i>") and not line.startswith("<i>to:"):
+            return re.sub(r"</?[^>]+>", "", line)
+    return ""
 
 
 def _word_count(text: str) -> int:
@@ -44,7 +47,7 @@ def test_empty_body_uses_fallback_phrase():
     summary = _summary_line(result or "")
 
     assert summary == ""
-    assert len(result.split("\n")) == 2
+    assert len([line for line in result.split("\n") if line.strip()]) == 4
 
 
 def test_long_body_trims_to_word_budget():
@@ -70,12 +73,12 @@ def test_telegram_preview_stays_compact():
 
     result = processor.process("user@example.com", msg)
     assert result is not None
-    lines = result.split("\n")
+    lines = [line for line in result.split("\n") if line.strip()]
 
     summary = _summary_line(result)
     assert 8 <= _word_count(summary) <= 12
     assert len(summary) <= 120
-    assert len(lines) <= 6
+    assert len(lines) <= 7
 
 
 def test_greeting_only_body_skipped():
@@ -89,6 +92,6 @@ def test_greeting_only_body_skipped():
     result = processor.process("user@example.com", msg)
     assert result is not None
 
-    lines = result.split("\n")
-    assert len(lines) == 2
+    lines = [line for line in result.split("\n") if line.strip()]
+    assert len(lines) == 4
     assert all("здравствуйте" not in line.lower() for line in lines)

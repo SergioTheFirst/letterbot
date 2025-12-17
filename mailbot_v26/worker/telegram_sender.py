@@ -14,12 +14,12 @@ def send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
     НИЧЕГО не форматирует.
     НИКОГДА не бросает исключения.
     """
-    if not requests:
-        log.error("Telegram send failed: requests module not available")
-        return False
-
     if not bot_token or not chat_id or not text:
         log.error("Telegram send failed: empty token, chat_id or text")
+        return False
+
+    if not requests:
+        log.error("Telegram send failed: requests module not available")
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -30,6 +30,7 @@ def send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
             json={
                 "chat_id": chat_id,
                 "text": text,
+                "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             },
             timeout=15,
