@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from datetime import datetime
 
@@ -74,7 +75,7 @@ def test_attachments_without_snippet_use_fallback():
     assert result is not None
     assert "по данным файла" not in result
     attachment_lines = [
-        line
+        re.sub(r"</?[^>]+>", "", line)
         for line in result.split("\n")[2:]
         if line.strip() and not line.startswith(("📎", "📂"))
     ]

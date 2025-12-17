@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import re
 
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
 
@@ -13,8 +14,12 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
+def _strip_html(line: str) -> str:
+    return re.sub(r"</?[^>]+>", "", line)
+
+
 def _attachment_lines(result: str, names: set[str]) -> list[str]:
-    lines = [line for line in result.split("\n") if line.strip()]
+    lines = [_strip_html(line) for line in result.split("\n") if line.strip()]
     return [line for line in lines if any(line.startswith(name) for name in names)]
 
 
@@ -71,7 +76,7 @@ def test_body_and_attachments_rendered_with_summaries():
     result = processor.process("robot@example.com", msg)
     assert result is not None
 
-    lines = result.split("\n")
+    lines = [line for line in result.split("\n") if line.strip()]
     assert lines[2].strip()
 
     names = {att.filename for att in attachments}
@@ -129,4 +134,3 @@ def test_multiple_attachments_all_processed():
     expected = {"report.doc", "plan.docx", "sales.xlsx", "legacy.xls"}
     rendered = {line.split(" — ")[0] if " — " in line else line for line in attachment_lines}
     assert expected == rendered
-

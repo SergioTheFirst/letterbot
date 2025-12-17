@@ -1,5 +1,6 @@
 from email import message_from_bytes
 from types import SimpleNamespace
+import re
 
 import mailbot_v26.start as start
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
@@ -15,8 +16,12 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
+def _strip_html(line: str) -> str:
+    return re.sub(r"</?[^>]+>", "", line)
+
+
 def _attachment_lines(result: str, names: set[str] | None = None) -> list[str]:
-    lines = [line for line in result.split("\n") if line.strip()]
+    lines = [_strip_html(line) for line in result.split("\n") if line.strip()]
     if names:
         return [line for line in lines if any(line.startswith(name) for name in names)]
     return [line for line in lines if " — " in line or "." in line.split()[0]]
@@ -145,4 +150,3 @@ def test_keeps_real_office_attachments():
     assert len(attachment_lines) == 2
     assert any(line.startswith("terms.docx") for line in attachment_lines)
     assert any(line.startswith("schedule.xlsx") for line in attachment_lines)
-

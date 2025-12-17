@@ -32,6 +32,7 @@ def test_send_telegram_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert telegram_sender.send_telegram("token", "123", "hello") is True
     assert called["json"]["text"] == "hello"
     assert called["json"]["chat_id"] == "123"
+    assert called["json"]["parse_mode"] == "HTML"
     assert called["json"]["disable_web_page_preview"] is True
 
 
