@@ -109,6 +109,13 @@ class StateManager:
             account.last_error = error
             self._mark_dirty()
 
+    def get_accounts_snapshot(self) -> Dict[str, AccountState]:
+        with self._lock:
+            return {
+                login: AccountState(**account.__dict__)
+                for login, account in self._state.accounts.items()
+            }
+
     def add_tokens(self, count: int) -> None:
         with self._lock:
             today = datetime.now().strftime("%Y-%m-%d")

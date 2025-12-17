@@ -1,22 +1,29 @@
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from email.header import decode_header
 from typing import Iterable
 
 
+logger = logging.getLogger(__name__)
+
+
 def _decode_bytes(data: bytes, encodings: Iterable[str | None]) -> str:
-    tried: set[str | None] = set()
+    tried: list[str] = []
     for encoding in encodings:
         if not encoding or encoding in tried:
             continue
-        tried.add(encoding)
+        tried.append(encoding)
         try:
-            return data.decode(encoding)
-        except Exception:
+            return data.decode(encoding, errors="strict")
+        except (UnicodeDecodeError, LookupError):
             continue
-    return data.decode("utf-8", errors="ignore")
+
+    decoded = data.decode("utf-8", errors="ignore")
+    logger.warning("Decoding used utf-8 with errors='ignore' after attempts: %s", ", ".join(tried))
+    return decoded
 
 
 def decode_bytes(data: bytes, charset_hint: str | None) -> str:
@@ -25,7 +32,16 @@ def decode_bytes(data: bytes, charset_hint: str | None) -> str:
     The fallback order matches ``decode_mime_header`` expectations.
     """
 
-    return _decode_bytes(data, (charset_hint, "utf-8", "koi8-r", "cp1251"))
+    return _decode_bytes(
+        data,
+        (
+            charset_hint,
+            "utf-8",
+            "cp1251",
+            "koi8-r",
+            "latin1",
+        ),
+    )
 
 
 def _strip_control(text: str) -> str:
