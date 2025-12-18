@@ -56,7 +56,7 @@ def process_message(
     attachment_summaries = llm_result.attachment_summaries
 
     # ---------- Stage 1.3: PASSIVE PRIORITY ADJUSTMENT ----------
-    priority = priority_engine.adjust_priority(
+    priority, priority_reason = priority_engine.adjust_priority(
         llm_priority=priority,
         from_email=from_email,
         received_at=received_at,
@@ -70,6 +70,7 @@ def process_message(
             subject=subject,
             received_at=received_at.isoformat(),
             priority=priority,
+            priority_reason=priority_reason,
             action_line=action_line,
             body_summary=body_summary,
             raw_body=body_text,

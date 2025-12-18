@@ -18,7 +18,7 @@ class PriorityEngine:
         llm_priority: str,
         from_email: str,
         received_at: datetime,
-    ) -> str:
+    ) -> tuple[str, str | None]:
         """
         Passive, read-only priority adjustment based on recent history.
 
@@ -30,11 +30,11 @@ class PriorityEngine:
         Fallback: on any DB issue returns the original llm_priority.
         """
 
-        if llm_priority == "🔴":
-            return llm_priority
+        final_priority = llm_priority
+        priority_reason: str | None = None
 
-        if not from_email:
-            return llm_priority
+        if llm_priority == "🔴" or not from_email:
+            return final_priority, priority_reason
 
         try:
             with sqlite3.connect(
@@ -42,20 +42,26 @@ class PriorityEngine:
             ) as conn:
                 if llm_priority == "🟡":
                     if self._count_red_recent(conn, from_email, received_at) >= 3:
-                        return "🔴"
+                        final_priority = "🔴"
+                        priority_reason = (
+                            "Повышен до 🔴: 3+ писем с 🔴 от отправителя за 30 дней"
+                        )
 
                 if llm_priority == "🔵":
                     if (
                         self._count_hot_recent(conn, from_email, received_at) >= 2
                     ):
-                        return "🟡"
+                        final_priority = "🟡"
+                        priority_reason = (
+                            "Повышен до 🟡: 2+ писем с 🟡/🔴 от отправителя за 14 дней"
+                        )
 
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error(
                 "PriorityEngine failed to read history: %s", exc, exc_info=True
             )
 
-        return llm_priority
+        return final_priority, priority_reason
 
     def _count_red_recent(
         self, conn: sqlite3.Connection, from_email: str, received_at: datetime
