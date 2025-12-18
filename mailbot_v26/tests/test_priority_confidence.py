@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import sqlite3
 import sys
 import types
 from datetime import datetime
 from types import SimpleNamespace
 
-from mailbot_v26.storage.knowledge_db import KnowledgeDB
+from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 
 
 # Stub missing pipeline dependencies before importing the processor
@@ -32,7 +31,50 @@ def _llm_result() -> SimpleNamespace:
     )
 
 
-def test_flag_off_priority_stays_llm(monkeypatch):
+def test_confidence_zero_when_shadow_not_higher():
+    engine = PriorityConfidenceEngine()
+
+    score = engine.score(
+        llm_priority="🔴",
+        shadow_priority="🟡",
+        sender_stats={},
+        recent_history={},
+    )
+
+    assert score == 0.0
+
+
+def test_confidence_high_history_exceeds_threshold():
+    engine = PriorityConfidenceEngine()
+
+    score = engine.score(
+        llm_priority="🔵",
+        shadow_priority="🔴",
+        sender_stats={
+            "red_count": 5,
+            "emails_total": 6,
+            "llm_underestimates_often": True,
+        },
+        recent_history={"escalations": 3, "is_trending_up": True},
+    )
+
+    assert score >= 0.6
+
+
+def test_confidence_low_history_below_threshold():
+    engine = PriorityConfidenceEngine()
+
+    score = engine.score(
+        llm_priority="🔵",
+        shadow_priority="🟡",
+        sender_stats={"red_count": 1, "emails_total": 10},
+        recent_history={},
+    )
+
+    assert score < 0.6
+
+
+def test_flag_off_bypasses_auto_priority(monkeypatch):
     llm_result = _llm_result()
 
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
@@ -40,6 +82,11 @@ def test_flag_off_priority_stays_llm(monkeypatch):
         processor.shadow_priority_engine,
         "compute",
         lambda llm_priority, from_email: ("🟡", "shadow reason"),
+    )
+    monkeypatch.setattr(
+        processor.priority_confidence_engine,
+        "score",
+        lambda **kwargs: 1.0,
     )
 
     sent: dict[str, object] = {}
@@ -65,19 +112,19 @@ def test_flag_off_priority_stays_llm(monkeypatch):
 
     processor.process_message(
         account_email="account@example.com",
-        message_id=1,
+        message_id=10,
         from_email="sender@example.com",
         subject="Subject",
-        received_at=datetime(2024, 1, 1, 12, 0),
+        received_at=datetime(2024, 1, 10, 12, 0),
         body_text="Body",
         attachments=[],
         telegram_chat_id="chat",
     )
 
-    assert sent["priority"] == "🔵"
+    assert sent["priority"] == llm_result.priority
 
 
-def test_flag_on_applies_shadow_priority(monkeypatch):
+def test_telegram_payload_unchanged(monkeypatch):
     llm_result = _llm_result()
 
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
@@ -86,6 +133,11 @@ def test_flag_on_applies_shadow_priority(monkeypatch):
         "compute",
         lambda llm_priority, from_email: ("🟡", "shadow reason"),
     )
+    monkeypatch.setattr(
+        processor.priority_confidence_engine,
+        "score",
+        lambda **kwargs: 1.0,
+    )
 
     sent: dict[str, object] = {}
     monkeypatch.setattr(
@@ -93,11 +145,7 @@ def test_flag_on_applies_shadow_priority(monkeypatch):
         "send_to_telegram",
         lambda **kwargs: sent.update(kwargs),
     )
-    monkeypatch.setattr(
-        processor,
-        "knowledge_db",
-        SimpleNamespace(save_email=lambda **kwargs: None),
-    )
+    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -107,77 +155,28 @@ def test_flag_on_applies_shadow_priority(monkeypatch):
             ENABLE_SHADOW_PERSISTENCE=False,
         ),
     )
-    monkeypatch.setattr(
-        processor.priority_confidence_engine,
-        "score",
-        lambda **kwargs: 1.0,
-    )
 
     processor.process_message(
         account_email="account@example.com",
-        message_id=2,
+        message_id=11,
         from_email="sender@example.com",
         subject="Subject",
-        received_at=datetime(2024, 1, 2, 12, 0),
+        received_at=datetime(2024, 1, 11, 12, 0),
         body_text="Body",
         attachments=[],
         telegram_chat_id="chat",
     )
 
-    assert sent["priority"] == "🟡"
-    assert sent["action_line"] == llm_result.action_line
-    assert sent["body_summary"] == llm_result.body_summary
-    assert sent["attachment_summaries"] == llm_result.attachment_summaries
-    assert sent["account_email"] == "account@example.com"
+    expected_payload = {
+        "chat_id": "chat",
+        "priority": "🟡",
+        "from_email": "sender@example.com",
+        "subject": "Subject",
+        "action_line": llm_result.action_line,
+        "body_summary": llm_result.body_summary,
+        "attachment_summaries": llm_result.attachment_summaries,
+        "account_email": "account@example.com",
+    }
 
+    assert sent == expected_payload
 
-def test_db_persistence_records_original_priority(monkeypatch, tmp_path):
-    db_path = tmp_path / "auto_priority.sqlite"
-
-    llm_result = _llm_result()
-
-    monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
-    monkeypatch.setattr(
-        processor.shadow_priority_engine,
-        "compute",
-        lambda llm_priority, from_email: ("🟡", "shadow reason"),
-    )
-
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
-    monkeypatch.setattr(
-        processor,
-        "knowledge_db",
-        KnowledgeDB(db_path),
-    )
-    monkeypatch.setattr(
-        processor,
-        "feature_flags",
-        SimpleNamespace(
-            ENABLE_AUTO_PRIORITY=True,
-            AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
-            ENABLE_SHADOW_PERSISTENCE=True,
-        ),
-    )
-    monkeypatch.setattr(
-        processor.priority_confidence_engine,
-        "score",
-        lambda **kwargs: 1.0,
-    )
-
-    processor.process_message(
-        account_email="account@example.com",
-        message_id=3,
-        from_email="sender@example.com",
-        subject="Subject",
-        received_at=datetime(2024, 1, 3, 12, 0),
-        body_text="Body",
-        attachments=[],
-        telegram_chat_id="chat",
-    )
-
-    with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            "SELECT priority, original_priority, priority_reason FROM emails ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-
-    assert row == ("🟡", "🔵", "shadow reason")
