@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from intelligence.priority_engine import PriorityEngine
 from pipeline.stage_llm import run_llm_stage
 from pipeline.stage_telegram import send_to_telegram
 from storage.knowledge_db import KnowledgeDB
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # === Инициализация write-only БД ===
 DB_PATH = Path("database.sqlite")
 knowledge_db = KnowledgeDB(DB_PATH)
+priority_engine = PriorityEngine(DB_PATH)
 
 
 def process_message(
@@ -54,14 +55,16 @@ def process_message(
     body_summary = llm_result.body_summary
     attachment_summaries = llm_result.attachment_summaries
 
+    # ---------- Stage 1.3: PASSIVE PRIORITY ADJUSTMENT ----------
+    priority = priority_engine.adjust_priority(
+        llm_priority=priority,
+        from_email=from_email,
+        received_at=received_at,
+    )
+
     # ---------- Stage 1.2: WRITE-ONLY CRM ----------
     try:
-        raw_body_hash = hashlib.sha256(
-            body_text.encode("utf-8", errors="ignore")
-        ).hexdigest()
-
         knowledge_db.save_email(
-            email_id=message_id,
             account_email=account_email,
             from_email=from_email,
             subject=subject,
@@ -69,7 +72,7 @@ def process_message(
             priority=priority,
             action_line=action_line,
             body_summary=body_summary,
-            raw_body_hash=raw_body_hash,
+            raw_body=body_text,
             attachment_summaries=[
                 (a["filename"], a["summary"])
                 for a in attachment_summaries
