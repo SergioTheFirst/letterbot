@@ -16,15 +16,32 @@ class KnowledgeDB:
         self._init_db()
 
     def _init_db(self) -> None:
-        schema_path = self.path.parent / "schema.sql"
+        schema_sql = self._read_sql_script("schema.sql")
+        views_sql = self._read_sql_script("views.sql")
         try:
             with sqlite3.connect(self.path) as conn:
                 conn.execute("PRAGMA journal_mode=WAL;")
-                if schema_path.exists():
-                    conn.executescript(schema_path.read_text(encoding="utf-8"))
+                if schema_sql:
+                    conn.executescript(schema_sql)
                 self._ensure_priority_reason_column(conn)
+                if views_sql:
+                    conn.executescript(views_sql)
+                    logger.debug("[CRM-ANALYTICS] views OK")
         except Exception as exc:
             logger.error("KnowledgeDB init failed: %s", exc)
+
+    def _read_sql_script(self, filename: str) -> str | None:
+        candidate_paths = (
+            self.path.parent / filename,
+            Path(__file__).resolve().parent / filename,
+        )
+        for path in candidate_paths:
+            try:
+                if path.exists():
+                    return path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+        return None
 
     @staticmethod
     def _hash_text(text: str) -> str:
