@@ -22,6 +22,7 @@ class KnowledgeDB:
                 conn.execute("PRAGMA journal_mode=WAL;")
                 if schema_path.exists():
                     conn.executescript(schema_path.read_text(encoding="utf-8"))
+                self._ensure_priority_reason_column(conn)
         except Exception as exc:
             logger.error("KnowledgeDB init failed: %s", exc)
 
@@ -31,6 +32,16 @@ class KnowledgeDB:
             return ""
         return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
 
+    def _ensure_priority_reason_column(self, conn: sqlite3.Connection) -> None:
+        try:
+            cur = conn.execute("PRAGMA table_info(emails);")
+            columns = {row[1] for row in cur.fetchall()}
+            if "priority_reason" not in columns:
+                conn.execute("ALTER TABLE emails ADD COLUMN priority_reason TEXT;")
+                conn.commit()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("KnowledgeDB migration failed: %s", exc)
+
     def save_email(
         self,
         *,
@@ -39,6 +50,7 @@ class KnowledgeDB:
         subject: str,
         received_at: str,
         priority: str,
+        priority_reason: str | None,
         action_line: str,
         body_summary: str,
         raw_body: str,
@@ -58,11 +70,12 @@ class KnowledgeDB:
                         subject,
                         received_at,
                         priority,
+                        priority_reason,
                         action_line,
                         body_summary,
                         raw_body_hash
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account_email,
@@ -70,6 +83,7 @@ class KnowledgeDB:
                         subject,
                         received_at,
                         priority,
+                        priority_reason,
                         action_line,
                         body_summary,
                         raw_body_hash,
