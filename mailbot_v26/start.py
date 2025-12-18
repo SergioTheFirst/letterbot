@@ -35,6 +35,7 @@ from pipeline.processor import InboundMessage, MessageProcessor
 from state_manager import StateManager
 from text.mime_utils import decode_mime_header
 from worker.telegram_sender import send_telegram
+from storage.self_check import run_self_check
 
 LOG_PATH = CURRENT_DIR / "mailbot.log"
 
@@ -187,6 +188,11 @@ def main(config_dir: Path | None = None) -> None:
             print(f"[ERROR] Storage initialization error: {exc}")
             time.sleep(10)
             return
+
+        try:
+            run_self_check()
+        except Exception:
+            logger.exception("Self-check execution failure")
 
         state = StateManager(CURRENT_DIR / "state.json")
         processor = MessageProcessor(config=config, state=state)
