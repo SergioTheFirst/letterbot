@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS emails (
     subject TEXT,
     received_at TEXT,
     priority TEXT,
+    original_priority TEXT,
     priority_reason TEXT,
     action_line TEXT,
     body_summary TEXT,
