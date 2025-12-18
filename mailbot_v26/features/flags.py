@@ -27,6 +27,7 @@ class FeatureFlags:
         self.ENABLE_TASK_SUGGESTIONS = False
         self.ENABLE_TG_EDITING = False
         self.ENABLE_SHADOW_PERSISTENCE = False
+        self.ENABLE_CRM_DIAGNOSTICS = False
 
         config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
         config_path = config_dir / "config.ini"
@@ -40,6 +41,7 @@ class FeatureFlags:
         self.ENABLE_TASK_SUGGESTIONS = self._get_flag(parser, "enable_task_suggestions")
         self.ENABLE_TG_EDITING = self._get_flag(parser, "enable_tg_editing")
         self.ENABLE_SHADOW_PERSISTENCE = self._get_flag(parser, "enable_shadow_persistence")
+        self.ENABLE_CRM_DIAGNOSTICS = self._get_flag(parser, "enable_crm_diagnostics")
 
     @staticmethod
     def _get_flag(parser: configparser.ConfigParser, option: str) -> bool:
