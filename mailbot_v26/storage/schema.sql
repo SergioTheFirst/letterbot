@@ -1,0 +1,31 @@
+PRAGMA journal_mode=WAL;
+
+CREATE TABLE IF NOT EXISTS emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_email TEXT NOT NULL,
+    from_email TEXT,
+    subject TEXT,
+    received_at TEXT,
+    priority TEXT,
+    action_line TEXT,
+    body_summary TEXT,
+    raw_body_hash TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_emails_account
+    ON emails(account_email);
+
+CREATE INDEX IF NOT EXISTS idx_emails_from
+    ON emails(from_email);
+
+CREATE INDEX IF NOT EXISTS idx_emails_priority
+    ON emails(priority);
+
+CREATE TABLE IF NOT EXISTS attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_id INTEGER NOT NULL,
+    filename TEXT,
+    summary TEXT,
+    FOREIGN KEY(email_id) REFERENCES emails(id)
+);
