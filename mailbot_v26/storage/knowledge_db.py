@@ -59,6 +59,14 @@ class KnowledgeDB:
                 migrations.append("ALTER TABLE emails ADD COLUMN priority_reason TEXT;")
             if "original_priority" not in columns:
                 migrations.append("ALTER TABLE emails ADD COLUMN original_priority TEXT;")
+            if "shadow_priority" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN shadow_priority TEXT;")
+            if "shadow_priority_reason" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN shadow_priority_reason TEXT;")
+            if "shadow_action_line" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN shadow_action_line TEXT;")
+            if "shadow_action_reason" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN shadow_action_reason TEXT;")
 
             for statement in migrations:
                 conn.execute(statement)
@@ -77,6 +85,10 @@ class KnowledgeDB:
         priority: str,
         original_priority: str | None = None,
         priority_reason: str | None = None,
+        shadow_priority: str | None = None,
+        shadow_priority_reason: str | None = None,
+        shadow_action_line: str | None = None,
+        shadow_action_reason: str | None = None,
         action_line: str,
         body_summary: str,
         raw_body: str,
@@ -98,11 +110,15 @@ class KnowledgeDB:
                         priority,
                         original_priority,
                         priority_reason,
+                        shadow_priority,
+                        shadow_priority_reason,
+                        shadow_action_line,
+                        shadow_action_reason,
                         action_line,
                         body_summary,
                         raw_body_hash
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account_email,
@@ -112,6 +128,10 @@ class KnowledgeDB:
                         priority,
                         original_priority,
                         priority_reason,
+                        shadow_priority,
+                        shadow_priority_reason,
+                        shadow_action_line,
+                        shadow_action_reason,
                         action_line,
                         body_summary,
                         raw_body_hash,
