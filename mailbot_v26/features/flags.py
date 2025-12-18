@@ -28,6 +28,7 @@ class FeatureFlags:
         self.ENABLE_TG_EDITING = False
         self.ENABLE_SHADOW_PERSISTENCE = False
         self.ENABLE_CRM_DIAGNOSTICS = False
+        self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
 
         config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
         config_path = config_dir / "config.ini"
@@ -42,6 +43,9 @@ class FeatureFlags:
         self.ENABLE_TG_EDITING = self._get_flag(parser, "enable_tg_editing")
         self.ENABLE_SHADOW_PERSISTENCE = self._get_flag(parser, "enable_shadow_persistence")
         self.ENABLE_CRM_DIAGNOSTICS = self._get_flag(parser, "enable_crm_diagnostics")
+        self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
+            parser, "auto_priority_confidence_threshold", default=0.6
+        )
 
     @staticmethod
     def _get_flag(parser: configparser.ConfigParser, option: str) -> bool:
@@ -49,6 +53,15 @@ class FeatureFlags:
             return parser.getboolean("features", option, fallback=False)
         except ValueError:
             return False
+
+    @staticmethod
+    def _get_float(
+        parser: configparser.ConfigParser, option: str, *, default: float
+    ) -> float:
+        try:
+            return parser.getfloat("features", option, fallback=default)
+        except ValueError:
+            return default
 
 
 __all__ = ["FeatureFlags"]

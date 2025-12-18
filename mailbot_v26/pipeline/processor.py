@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from features import FeatureFlags
+from priority.confidence_engine import PriorityConfidenceEngine
 from priority.shadow_engine import ShadowPriorityEngine
 from pipeline.stage_llm import run_llm_stage
 from pipeline.stage_telegram import send_to_telegram
@@ -23,12 +24,50 @@ knowledge_db = KnowledgeDB(DB_PATH)
 analytics = KnowledgeAnalytics(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
+priority_confidence_engine = PriorityConfidenceEngine()
 feature_flags = FeatureFlags()
 
 
 def _is_shadow_higher(shadow_priority: str, llm_priority: str) -> bool:
     priority_order = {"🔵": 0, "🟡": 1, "🔴": 2}
     return priority_order.get(shadow_priority, 0) > priority_order.get(llm_priority, 0)
+
+
+def _lookup_sender_stats(from_email: str) -> dict[str, object]:
+    normalized = (from_email or "").strip().lower()
+    if not normalized:
+        return {}
+
+    try:
+        for row in analytics.sender_stats():
+            sender = str(row.get("sender_email") or "").strip().lower()
+            if sender == normalized:
+                return row
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("Confidence lookup failed: %s", exc, exc_info=True)
+    return {}
+
+
+def _recent_history(from_email: str) -> dict[str, object]:
+    normalized = (from_email or "").strip().lower()
+    if not normalized:
+        return {}
+
+    try:
+        records = [
+            row
+            for row in analytics.priority_escalations(limit=50)
+            if str(row.get("from_email") or "").strip().lower() == normalized
+        ]
+        if not records:
+            return {}
+
+        escalations = len(records)
+        is_trending_up = escalations >= 2
+        return {"escalations": escalations, "is_trending_up": is_trending_up}
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("Confidence history failed: %s", exc, exc_info=True)
+        return {}
 
 
 def process_message(
@@ -99,29 +138,57 @@ def process_message(
             reason or "",
         )
 
+    # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged) ----------
+    confidence_score: float | None = None
+    confidence_decision: str | None = None
+    llm_priority_for_confidence = priority
+    if feature_flags.ENABLE_AUTO_PRIORITY and _is_shadow_higher(shadow_priority, priority):
+        confidence_score = priority_confidence_engine.score(
+            llm_priority=priority,
+            shadow_priority=shadow_priority,
+            sender_stats=_lookup_sender_stats(from_email),
+            recent_history=_recent_history(from_email),
+        )
+        threshold = feature_flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD
+
+        if confidence_score >= threshold:
+            original_priority = priority
+            priority = shadow_priority
+            priority_reason = shadow_reason or "Auto-priority escalation"
+            confidence_decision = "APPLIED"
+            logger.info(
+                "[AUTO-PRIORITY] from=%s llm=%s shadow=%s reason=%s",
+                from_email or "",
+                original_priority,
+                shadow_priority,
+                shadow_reason or "",
+            )
+        else:
+            confidence_decision = "SKIPPED"
+
+        logger.info(
+            "[AUTO-PRIORITY-CONFIDENCE]\nllm=%s shadow=%s confidence=%.2f threshold=%.1f → %s",
+            llm_priority_for_confidence,
+            shadow_priority,
+            confidence_score,
+            threshold,
+            confidence_decision or "SKIPPED",
+        )
+
     shadow_priority_to_persist: str | None = None
     shadow_priority_reason_to_persist: str | None = None
     shadow_action_line_to_persist: str | None = None
     shadow_action_reason_to_persist: str | None = None
+    confidence_score_to_persist: float | None = None
+    confidence_decision_to_persist: str | None = None
 
     if feature_flags.ENABLE_SHADOW_PERSISTENCE:
         shadow_priority_to_persist = shadow_priority
         shadow_priority_reason_to_persist = shadow_reason
         shadow_action_line_to_persist = shadow_action_line
         shadow_action_reason_to_persist = shadow_action_reason
-
-    # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged) ----------
-    if feature_flags.ENABLE_AUTO_PRIORITY and _is_shadow_higher(shadow_priority, priority):
-        original_priority = priority
-        priority = shadow_priority
-        priority_reason = shadow_reason or "Auto-priority escalation"
-        logger.info(
-            "[AUTO-PRIORITY] from=%s llm=%s shadow=%s reason=%s",
-            from_email or "",
-            original_priority,
-            shadow_priority,
-            shadow_reason or "",
-        )
+        confidence_score_to_persist = confidence_score
+        confidence_decision_to_persist = confidence_decision
 
     # ---------- Stage 1.2: WRITE-ONLY CRM ----------
     try:
@@ -137,6 +204,8 @@ def process_message(
             shadow_priority_reason=shadow_priority_reason_to_persist,
             shadow_action_line=shadow_action_line_to_persist,
             shadow_action_reason=shadow_action_reason_to_persist,
+            confidence_score=confidence_score_to_persist,
+            confidence_decision=confidence_decision_to_persist,
             action_line=action_line,
             body_summary=body_summary,
             raw_body=body_text,

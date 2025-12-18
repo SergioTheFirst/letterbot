@@ -67,6 +67,10 @@ class KnowledgeDB:
                 migrations.append("ALTER TABLE emails ADD COLUMN shadow_action_line TEXT;")
             if "shadow_action_reason" not in columns:
                 migrations.append("ALTER TABLE emails ADD COLUMN shadow_action_reason TEXT;")
+            if "confidence_score" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN confidence_score REAL;")
+            if "confidence_decision" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN confidence_decision TEXT;")
 
             for statement in migrations:
                 conn.execute(statement)
@@ -89,6 +93,8 @@ class KnowledgeDB:
         shadow_priority_reason: str | None = None,
         shadow_action_line: str | None = None,
         shadow_action_reason: str | None = None,
+        confidence_score: float | None = None,
+        confidence_decision: str | None = None,
         action_line: str,
         body_summary: str,
         raw_body: str,
@@ -114,11 +120,13 @@ class KnowledgeDB:
                         shadow_priority_reason,
                         shadow_action_line,
                         shadow_action_reason,
+                        confidence_score,
+                        confidence_decision,
                         action_line,
                         body_summary,
                         raw_body_hash
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account_email,
@@ -132,6 +140,8 @@ class KnowledgeDB:
                         shadow_priority_reason,
                         shadow_action_line,
                         shadow_action_reason,
+                        confidence_score,
+                        confidence_decision,
                         action_line,
                         body_summary,
                         raw_body_hash,

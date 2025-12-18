@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS emails (
     shadow_priority_reason TEXT,
     shadow_action_line TEXT,
     shadow_action_reason TEXT,
+    confidence_score REAL,
+    confidence_decision TEXT,
     action_line TEXT,
     body_summary TEXT,
     raw_body_hash TEXT,
