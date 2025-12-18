@@ -7,12 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from priority.shadow_engine import ShadowPriorityEngine
 from intelligence.priority_engine import PriorityEngine
+from priority.shadow_engine import ShadowPriorityEngine
 from pipeline.stage_llm import run_llm_stage
 from pipeline.stage_telegram import send_to_telegram
 from storage.analytics import KnowledgeAnalytics
 from storage.knowledge_db import KnowledgeDB
+from tasks.shadow_actions import ShadowActionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ knowledge_db = KnowledgeDB(DB_PATH)
 priority_engine = PriorityEngine(DB_PATH)
 analytics = KnowledgeAnalytics(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
+shadow_action_engine = ShadowActionEngine(analytics)
 
 
 def process_message(
@@ -71,6 +73,19 @@ def process_message(
             priority,
             shadow_priority,
             shadow_reason or "",
+        )
+
+    # ---------- Shadow Action (read-only, dry run) ----------
+    shadow_tasks = shadow_action_engine.compute(
+        account_email=account_email,
+        from_email=from_email,
+    )
+    for task, reason in shadow_tasks:
+        logger.info(
+            "[SHADOW-ACTION] from=%s task=%s reason=%s",
+            from_email or "",
+            task or "",
+            reason or "",
         )
 
     # ---------- Stage 1.3: PASSIVE PRIORITY ADJUSTMENT ----------
