@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from intelligence.priority_engine import PriorityEngine
+from features import FeatureFlags
 from priority.shadow_engine import ShadowPriorityEngine
 from pipeline.stage_llm import run_llm_stage
 from pipeline.stage_telegram import send_to_telegram
@@ -20,10 +20,15 @@ logger = logging.getLogger(__name__)
 # === Инициализация write-only БД ===
 DB_PATH = Path("database.sqlite")
 knowledge_db = KnowledgeDB(DB_PATH)
-priority_engine = PriorityEngine(DB_PATH)
 analytics = KnowledgeAnalytics(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
+feature_flags = FeatureFlags()
+
+
+def _is_shadow_higher(shadow_priority: str, llm_priority: str) -> bool:
+    priority_order = {"🔵": 0, "🟡": 1, "🔴": 2}
+    return priority_order.get(shadow_priority, 0) > priority_order.get(llm_priority, 0)
 
 
 def process_message(
@@ -57,6 +62,8 @@ def process_message(
         return
 
     priority = llm_result.priority
+    original_priority: str | None = None
+    priority_reason: str | None = None
     action_line = llm_result.action_line
     body_summary = llm_result.body_summary
     attachment_summaries = llm_result.attachment_summaries
@@ -88,12 +95,18 @@ def process_message(
             reason or "",
         )
 
-    # ---------- Stage 1.3: PASSIVE PRIORITY ADJUSTMENT ----------
-    priority, priority_reason = priority_engine.adjust_priority(
-        llm_priority=priority,
-        from_email=from_email,
-        received_at=received_at,
-    )
+    # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged) ----------
+    if feature_flags.ENABLE_AUTO_PRIORITY and _is_shadow_higher(shadow_priority, priority):
+        original_priority = priority
+        priority = shadow_priority
+        priority_reason = shadow_reason or "Auto-priority escalation"
+        logger.info(
+            "[AUTO-PRIORITY] from=%s llm=%s shadow=%s reason=%s",
+            from_email or "",
+            original_priority,
+            shadow_priority,
+            shadow_reason or "",
+        )
 
     # ---------- Stage 1.2: WRITE-ONLY CRM ----------
     try:
@@ -103,6 +116,7 @@ def process_message(
             subject=subject,
             received_at=received_at.isoformat(),
             priority=priority,
+            original_priority=original_priority,
             priority_reason=priority_reason,
             action_line=action_line,
             body_summary=body_summary,
