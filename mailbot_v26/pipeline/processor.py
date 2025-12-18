@@ -87,6 +87,10 @@ def process_message(
         account_email=account_email,
         from_email=from_email,
     )
+    shadow_action_line: str | None = None
+    shadow_action_reason: str | None = None
+    if shadow_tasks:
+        shadow_action_line, shadow_action_reason = shadow_tasks[0]
     for task, reason in shadow_tasks:
         logger.info(
             "[SHADOW-ACTION] from=%s task=%s reason=%s",
@@ -94,6 +98,17 @@ def process_message(
             task or "",
             reason or "",
         )
+
+    shadow_priority_to_persist: str | None = None
+    shadow_priority_reason_to_persist: str | None = None
+    shadow_action_line_to_persist: str | None = None
+    shadow_action_reason_to_persist: str | None = None
+
+    if feature_flags.ENABLE_SHADOW_PERSISTENCE:
+        shadow_priority_to_persist = shadow_priority
+        shadow_priority_reason_to_persist = shadow_reason
+        shadow_action_line_to_persist = shadow_action_line
+        shadow_action_reason_to_persist = shadow_action_reason
 
     # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged) ----------
     if feature_flags.ENABLE_AUTO_PRIORITY and _is_shadow_higher(shadow_priority, priority):
@@ -118,6 +133,10 @@ def process_message(
             priority=priority,
             original_priority=original_priority,
             priority_reason=priority_reason,
+            shadow_priority=shadow_priority_to_persist,
+            shadow_priority_reason=shadow_priority_reason_to_persist,
+            shadow_action_line=shadow_action_line_to_persist,
+            shadow_action_reason=shadow_action_reason_to_persist,
             action_line=action_line,
             body_summary=body_summary,
             raw_body=body_text,
@@ -126,6 +145,12 @@ def process_message(
                 for a in attachment_summaries
             ],
         )
+        if feature_flags.ENABLE_SHADOW_PERSISTENCE:
+            logger.info(
+                "[SHADOW-PERSIST] saved shadow fields for uid=%s account=%s",
+                message_id,
+                account_email,
+            )
 
     except Exception as exc:
         # ❗ БД — side-effect only

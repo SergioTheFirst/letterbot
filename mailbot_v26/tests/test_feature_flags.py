@@ -14,6 +14,7 @@ def test_flags_default_to_false_when_missing(tmp_path: Path) -> None:
     assert not flags.ENABLE_AUTO_PRIORITY
     assert not flags.ENABLE_TASK_SUGGESTIONS
     assert not flags.ENABLE_TG_EDITING
+    assert not flags.ENABLE_SHADOW_PERSISTENCE
 
 
 def test_flags_loaded_from_config(tmp_path: Path) -> None:
@@ -23,12 +24,14 @@ def test_flags_loaded_from_config(tmp_path: Path) -> None:
 enable_auto_priority = true
 enable_task_suggestions = false
 enable_tg_editing = 1
+enable_shadow_persistence = yes
 """,
     )
     flags = FeatureFlags(tmp_path)
     assert flags.ENABLE_AUTO_PRIORITY is True
     assert flags.ENABLE_TASK_SUGGESTIONS is False
     assert flags.ENABLE_TG_EDITING is True
+    assert flags.ENABLE_SHADOW_PERSISTENCE is True
 
 
 def test_invalid_flag_values_fallback_to_false(tmp_path: Path) -> None:
