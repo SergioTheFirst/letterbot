@@ -7,9 +7,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from priority.shadow_engine import ShadowPriorityEngine
 from intelligence.priority_engine import PriorityEngine
 from pipeline.stage_llm import run_llm_stage
 from pipeline.stage_telegram import send_to_telegram
+from storage.analytics import KnowledgeAnalytics
 from storage.knowledge_db import KnowledgeDB
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,8 @@ logger = logging.getLogger(__name__)
 DB_PATH = Path("database.sqlite")
 knowledge_db = KnowledgeDB(DB_PATH)
 priority_engine = PriorityEngine(DB_PATH)
+analytics = KnowledgeAnalytics(DB_PATH)
+shadow_priority_engine = ShadowPriorityEngine(analytics)
 
 
 def process_message(
@@ -54,6 +58,20 @@ def process_message(
     action_line = llm_result.action_line
     body_summary = llm_result.body_summary
     attachment_summaries = llm_result.attachment_summaries
+
+    # ---------- Shadow Priority (read-only, dry run) ----------
+    shadow_priority, shadow_reason = shadow_priority_engine.compute(
+        llm_priority=priority,
+        from_email=from_email,
+    )
+    if shadow_priority != priority:
+        logger.info(
+            "[SHADOW-PRIORITY] from=%s current=%s shadow=%s reason=%s",
+            from_email or "",
+            priority,
+            shadow_priority,
+            shadow_reason or "",
+        )
 
     # ---------- Stage 1.3: PASSIVE PRIORITY ADJUSTMENT ----------
     priority, priority_reason = priority_engine.adjust_priority(
