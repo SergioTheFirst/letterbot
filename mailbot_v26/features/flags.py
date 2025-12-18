@@ -24,11 +24,13 @@ class FeatureFlags:
 
     def __init__(self, base_dir: Optional[Path] = None) -> None:
         self.ENABLE_AUTO_PRIORITY = False
+        self.ENABLE_AUTO_ACTIONS = False
         self.ENABLE_TASK_SUGGESTIONS = False
         self.ENABLE_TG_EDITING = False
         self.ENABLE_SHADOW_PERSISTENCE = False
         self.ENABLE_CRM_DIAGNOSTICS = False
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
+        self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
         config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
         config_path = config_dir / "config.ini"
@@ -39,12 +41,16 @@ class FeatureFlags:
 
         parser.read(config_path, encoding="utf-8")
         self.ENABLE_AUTO_PRIORITY = self._get_flag(parser, "enable_auto_priority")
+        self.ENABLE_AUTO_ACTIONS = self._get_flag(parser, "enable_auto_actions")
         self.ENABLE_TASK_SUGGESTIONS = self._get_flag(parser, "enable_task_suggestions")
         self.ENABLE_TG_EDITING = self._get_flag(parser, "enable_tg_editing")
         self.ENABLE_SHADOW_PERSISTENCE = self._get_flag(parser, "enable_shadow_persistence")
         self.ENABLE_CRM_DIAGNOSTICS = self._get_flag(parser, "enable_crm_diagnostics")
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6
+        )
+        self.AUTO_ACTION_CONFIDENCE_THRESHOLD = self._get_float(
+            parser, "auto_action_confidence_threshold", default=0.75
         )
 
     @staticmethod

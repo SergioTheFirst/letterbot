@@ -71,6 +71,14 @@ class KnowledgeDB:
                 migrations.append("ALTER TABLE emails ADD COLUMN confidence_score REAL;")
             if "confidence_decision" not in columns:
                 migrations.append("ALTER TABLE emails ADD COLUMN confidence_decision TEXT;")
+            if "proposed_action_type" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN proposed_action_type TEXT;")
+            if "proposed_action_text" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN proposed_action_text TEXT;")
+            if "proposed_action_confidence" not in columns:
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN proposed_action_confidence REAL;"
+                )
 
             for statement in migrations:
                 conn.execute(statement)
@@ -95,6 +103,9 @@ class KnowledgeDB:
         shadow_action_reason: str | None = None,
         confidence_score: float | None = None,
         confidence_decision: str | None = None,
+        proposed_action_type: str | None = None,
+        proposed_action_text: str | None = None,
+        proposed_action_confidence: float | None = None,
         action_line: str,
         body_summary: str,
         raw_body: str,
@@ -122,11 +133,14 @@ class KnowledgeDB:
                         shadow_action_reason,
                         confidence_score,
                         confidence_decision,
+                        proposed_action_type,
+                        proposed_action_text,
+                        proposed_action_confidence,
                         action_line,
                         body_summary,
                         raw_body_hash
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account_email,
@@ -142,6 +156,9 @@ class KnowledgeDB:
                         shadow_action_reason,
                         confidence_score,
                         confidence_decision,
+                        proposed_action_type,
+                        proposed_action_text,
+                        proposed_action_confidence,
                         action_line,
                         body_summary,
                         raw_body_hash,
