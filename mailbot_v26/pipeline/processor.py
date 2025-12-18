@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from features import FeatureFlags
+from actions.auto_action_engine import AutoActionEngine
 from priority.confidence_engine import PriorityConfidenceEngine
 from priority.shadow_engine import ShadowPriorityEngine
 from pipeline.stage_llm import run_llm_stage
@@ -26,6 +27,9 @@ shadow_priority_engine = ShadowPriorityEngine(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
 feature_flags = FeatureFlags()
+auto_action_engine = AutoActionEngine(
+    confidence_threshold=feature_flags.AUTO_ACTION_CONFIDENCE_THRESHOLD
+)
 
 
 def _is_shadow_higher(shadow_priority: str, llm_priority: str) -> bool:
@@ -181,6 +185,28 @@ def process_message(
     shadow_action_reason_to_persist: str | None = None
     confidence_score_to_persist: float | None = None
     confidence_decision_to_persist: str | None = None
+    proposed_action_type_to_persist: str | None = None
+    proposed_action_text_to_persist: str | None = None
+    proposed_action_confidence_to_persist: float | None = None
+
+    proposed_action: dict | None = None
+    if feature_flags.ENABLE_AUTO_ACTIONS:
+        proposed_action = auto_action_engine.propose(
+            llm_action_line=action_line,
+            shadow_action=shadow_action_line,
+            priority=priority,
+            confidence=confidence_score or 0.0,
+        )
+
+        if proposed_action:
+            logger.info(
+                "[AUTO-ACTION]\nproposed=%s confidence=%.2f source=%s → STORED",
+                proposed_action.get("type", ""),
+                proposed_action.get("confidence", 0.0),
+                proposed_action.get("source", ""),
+            )
+        else:
+            logger.info("[AUTO-ACTION]\nconditions not met → SKIPPED")
 
     if feature_flags.ENABLE_SHADOW_PERSISTENCE:
         shadow_priority_to_persist = shadow_priority
@@ -189,6 +215,15 @@ def process_message(
         shadow_action_reason_to_persist = shadow_action_reason
         confidence_score_to_persist = confidence_score
         confidence_decision_to_persist = confidence_decision
+        proposed_action_type_to_persist = (
+            proposed_action.get("type") if proposed_action else None
+        )
+        proposed_action_text_to_persist = (
+            proposed_action.get("text") if proposed_action else None
+        )
+        proposed_action_confidence_to_persist = (
+            proposed_action.get("confidence") if proposed_action else None
+        )
 
     # ---------- Stage 1.2: WRITE-ONLY CRM ----------
     try:
@@ -206,6 +241,9 @@ def process_message(
             shadow_action_reason=shadow_action_reason_to_persist,
             confidence_score=confidence_score_to_persist,
             confidence_decision=confidence_decision_to_persist,
+            proposed_action_type=proposed_action_type_to_persist,
+            proposed_action_text=proposed_action_text_to_persist,
+            proposed_action_confidence=proposed_action_confidence_to_persist,
             action_line=action_line,
             body_summary=body_summary,
             raw_body=body_text,
