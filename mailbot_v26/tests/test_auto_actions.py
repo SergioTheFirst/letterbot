@@ -5,6 +5,8 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from mailbot_v26.actions import AutoActionEngine
+from mailbot_v26.llm.runtime_flags import RuntimeFlags
+from mailbot_v26.priority.auto_gates import GateDecision
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 # Stub missing pipeline dependencies before importing the processor
@@ -16,9 +18,21 @@ if "mailbot_v26.pipeline.stage_llm" not in sys.modules:
 if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     stage_telegram = types.ModuleType("mailbot_v26.pipeline.stage_telegram")
     stage_telegram.send_to_telegram = lambda **kwargs: None
+    stage_telegram.send_preview_to_telegram = lambda **kwargs: None
     sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
 
 from mailbot_v26.pipeline import processor
+
+
+class StubRuntimeFlagStore:
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+
+    def get_flags(self, *, force: bool = False):
+        return RuntimeFlags(enable_gigachat=False, enable_auto_priority=self.enabled), False
+
+    def set_enable_auto_priority(self, enabled: bool) -> None:
+        self.enabled = enabled
 
 
 def _llm_result(priority: str = "🔴", action_line: str = "Позвонить клиенту") -> SimpleNamespace:
@@ -106,8 +120,10 @@ def test_flag_off_skips_auto_actions(monkeypatch):
             ENABLE_AUTO_ACTIONS=False,
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
+            ENABLE_PREVIEW_ACTIONS=False,
         ),
     )
+    monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(False))
 
     called = False
 
@@ -177,7 +193,14 @@ def test_valid_auto_action_persisted(monkeypatch, tmp_path):
             ENABLE_AUTO_ACTIONS=True,
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=True,
+            ENABLE_PREVIEW_ACTIONS=False,
         ),
+    )
+    monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(True))
+    monkeypatch.setattr(
+        processor.auto_priority_gates,
+        "evaluate",
+        lambda **kwargs: GateDecision(open=True, reasons=()),
     )
     monkeypatch.setattr(
         processor,
@@ -244,8 +267,10 @@ def test_telegram_payload_not_changed(monkeypatch):
             ENABLE_AUTO_ACTIONS=False,
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
+            ENABLE_PREVIEW_ACTIONS=False,
         ),
     )
+    monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(False))
     monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: baseline_payload.update(kwargs))
 
     processor.process_message(
@@ -269,8 +294,10 @@ def test_telegram_payload_not_changed(monkeypatch):
             ENABLE_AUTO_ACTIONS=True,
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
+            ENABLE_PREVIEW_ACTIONS=False,
         ),
     )
+    monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(False))
     monkeypatch.setattr(processor.auto_action_engine, "propose", lambda **kwargs: {
         "type": "REVIEW",
         "text": "Проверить оплату",

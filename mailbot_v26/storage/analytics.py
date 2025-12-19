@@ -82,3 +82,62 @@ class KnowledgeAnalytics:
             query += " LIMIT ?"
             params.append(limit)
         return self._execute_select(query, params)
+
+    def shadow_accuracy(self, *, days: int) -> dict[str, float | int]:
+        query = """
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN shadow_priority = priority THEN 1 ELSE 0 END) AS match_count
+        FROM emails
+        WHERE TRIM(COALESCE(shadow_priority, '')) != ''
+          AND TRIM(COALESCE(priority, '')) != ''
+          AND created_at >= datetime('now', ?)
+        """
+        rows = self._execute_select(query, (f"-{days} days",))
+        stats = rows[0] if rows else {"total": 0, "match_count": 0}
+        total = int(stats.get("total", 0) or 0)
+        match_count = int(stats.get("match_count", 0) or 0)
+        accuracy = (match_count / total) if total > 0 else 0.0
+        return {"total": total, "accuracy": accuracy}
+
+    def auto_priority_reject_rate(
+        self, *, days: int | None = None, hours: int | None = None
+    ) -> dict[str, float | int]:
+        window = "7 days"
+        if hours is not None:
+            window = f"{hours} hours"
+        elif days is not None:
+            window = f"{days} days"
+        query = """
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN confidence_decision = 'SKIPPED' THEN 1 ELSE 0 END) AS rejected
+        FROM emails
+        WHERE confidence_decision IN ('APPLIED', 'SKIPPED')
+          AND created_at >= datetime('now', ?)
+        """
+        rows = self._execute_select(query, (f"-{window}",))
+        stats = rows[0] if rows else {"total": 0, "rejected": 0}
+        total = int(stats.get("total", 0) or 0)
+        rejected = int(stats.get("rejected", 0) or 0)
+        rate = (rejected / total) if total > 0 else 0.0
+        return {"total": total, "reject_rate": rate}
+
+    def auto_priority_confidence_scores(self, *, hours: int) -> list[float]:
+        query = """
+        SELECT confidence_score
+        FROM emails
+        WHERE confidence_score IS NOT NULL
+          AND created_at >= datetime('now', ?)
+        """
+        rows = self._execute_select(query, (f"-{hours} hours",))
+        scores: list[float] = []
+        for row in rows:
+            value = row.get("confidence_score")
+            if value is None:
+                continue
+            try:
+                scores.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        return scores

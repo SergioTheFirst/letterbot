@@ -5,6 +5,8 @@ import types
 from datetime import datetime
 from types import SimpleNamespace
 
+from mailbot_v26.llm.runtime_flags import RuntimeFlags
+from mailbot_v26.priority.auto_gates import GateDecision
 from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 
 
@@ -17,9 +19,21 @@ if "mailbot_v26.pipeline.stage_llm" not in sys.modules:
 if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     stage_telegram = types.ModuleType("mailbot_v26.pipeline.stage_telegram")
     stage_telegram.send_to_telegram = lambda **kwargs: None
+    stage_telegram.send_preview_to_telegram = lambda **kwargs: None
     sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
 
 from mailbot_v26.pipeline import processor
+
+
+class StubRuntimeFlagStore:
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+
+    def get_flags(self, *, force: bool = False):
+        return RuntimeFlags(enable_gigachat=False, enable_auto_priority=self.enabled), False
+
+    def set_enable_auto_priority(self, enabled: bool) -> None:
+        self.enabled = enabled
 
 
 def _llm_result() -> SimpleNamespace:
@@ -106,9 +120,13 @@ def test_flag_off_bypasses_auto_priority(monkeypatch):
         SimpleNamespace(
             ENABLE_AUTO_PRIORITY=False,
             AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
+            ENABLE_AUTO_ACTIONS=False,
+            AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
+            ENABLE_PREVIEW_ACTIONS=False,
         ),
     )
+    monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(False))
 
     processor.process_message(
         account_email="account@example.com",
@@ -152,8 +170,17 @@ def test_telegram_payload_unchanged(monkeypatch):
         SimpleNamespace(
             ENABLE_AUTO_PRIORITY=True,
             AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
+            ENABLE_AUTO_ACTIONS=False,
+            AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
+            ENABLE_PREVIEW_ACTIONS=False,
         ),
+    )
+    monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(True))
+    monkeypatch.setattr(
+        processor.auto_priority_gates,
+        "evaluate",
+        lambda **kwargs: GateDecision(open=True, reasons=()),
     )
 
     processor.process_message(

@@ -11,6 +11,8 @@ from typing import Any
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.features import FeatureFlags
 from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
+from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
+from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
 from .stage_llm import run_llm_stage
 from .stage_telegram import send_preview_to_telegram, send_to_telegram
@@ -27,7 +29,10 @@ analytics = KnowledgeAnalytics(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
+auto_priority_gates = AutoPriorityGates(analytics)
+auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
 feature_flags = FeatureFlags()
+runtime_flag_store = RuntimeFlagStore()
 auto_action_engine = AutoActionEngine(
     confidence_threshold=feature_flags.AUTO_ACTION_CONFIDENCE_THRESHOLD
 )
@@ -237,10 +242,13 @@ def process_message(
             shadow_reason or "",
         )
 
-    # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged) ----------
+    # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged + runtime) ----------
     confidence_score: float | None = None
     confidence_decision: str | None = None
     llm_priority_for_confidence = priority
+    runtime_flags, _ = runtime_flag_store.get_flags()
+    auto_priority_runtime_enabled = runtime_flags.enable_auto_priority
+    auto_priority_enabled = feature_flags.ENABLE_AUTO_PRIORITY and auto_priority_runtime_enabled
     should_score_confidence = _is_shadow_higher(shadow_priority, priority) and (
         feature_flags.ENABLE_AUTO_PRIORITY or feature_flags.ENABLE_AUTO_ACTIONS
     )
@@ -252,16 +260,45 @@ def process_message(
             recent_history=_recent_history(from_email),
         )
 
-    if feature_flags.ENABLE_AUTO_PRIORITY and should_score_confidence:
-        threshold = feature_flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD
+    if auto_priority_runtime_enabled:
+        breaker_status = auto_priority_breaker.check()
+        if breaker_status.tripped:
+            runtime_flag_store.set_enable_auto_priority(False)
+            auto_priority_runtime_enabled = False
+            auto_priority_enabled = False
+            logger.warning(
+                "[AUTO-PRIORITY-SAFETY] auto-disabled reason=%s",
+                breaker_status.reason or "unknown",
+            )
 
-        if confidence_score >= threshold:
+    gate_decision = None
+    auto_priority_allowed = False
+    if auto_priority_enabled and should_score_confidence:
+        gate_decision = auto_priority_gates.evaluate(
+            llm_priority=priority,
+            shadow_priority=shadow_priority,
+            confidence_score=confidence_score,
+        )
+        if gate_decision.open:
+            auto_priority_allowed = True
+        else:
+            logger.info(
+                "[AUTO-PRIORITY-GATE] status=CLOSED reasons=%s",
+                ",".join(gate_decision.reasons) if gate_decision.reasons else "unknown",
+            )
+
+    if auto_priority_allowed:
+        threshold = max(
+            feature_flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD,
+            AutoPriorityGates.MIN_CONFIDENCE,
+        )
+        if (confidence_score or 0.0) >= threshold:
             original_priority = priority
             priority = shadow_priority
             priority_reason = shadow_reason or "Auto-priority escalation"
             confidence_decision = "APPLIED"
             logger.info(
-                "[AUTO-PRIORITY] from=%s llm=%s shadow=%s reason=%s",
+                "[AUTO-PRIORITY-APPLY] from=%s llm=%s shadow=%s reason=%s",
                 from_email or "",
                 original_priority,
                 shadow_priority,
@@ -270,14 +307,28 @@ def process_message(
         else:
             confidence_decision = "SKIPPED"
 
+    if auto_priority_enabled and should_score_confidence:
         logger.info(
             "[AUTO-PRIORITY-CONFIDENCE]\nllm=%s shadow=%s confidence=%.2f threshold=%.1f → %s",
             llm_priority_for_confidence,
             shadow_priority,
-            confidence_score,
-            threshold,
+            confidence_score or 0.0,
+            max(
+                feature_flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD,
+                AutoPriorityGates.MIN_CONFIDENCE,
+            ),
             confidence_decision or "SKIPPED",
         )
+
+    logger.info(
+        "[AUTO-PRIORITY] enabled=%d applied=%d llm=%s shadow=%s final=%s confidence=%.2f",
+        1 if auto_priority_allowed else 0,
+        1 if confidence_decision == "APPLIED" else 0,
+        llm_priority_for_confidence,
+        shadow_priority,
+        priority,
+        confidence_score or 0.0,
+    )
 
     # ---------- Shadow Action (read-only, dry run) ----------
     shadow_tasks = shadow_action_engine.compute(
