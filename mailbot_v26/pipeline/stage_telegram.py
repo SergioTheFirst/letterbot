@@ -29,3 +29,21 @@ def send_to_telegram(
         chat_id,
         account_email,
     )
+
+
+def send_preview_to_telegram(
+    *,
+    chat_id: str,
+    preview_text: str,
+    account_email: str,
+) -> None:
+    """
+    Preview actions Telegram stage entrypoint for the legacy pipeline.
+
+    Uses plain text only; formatting/sending is deferred to production.
+    """
+    logger.info(
+        "Telegram preview not configured for legacy pipeline: chat_id=%s account=%s",
+        chat_id,
+        account_email,
+    )
