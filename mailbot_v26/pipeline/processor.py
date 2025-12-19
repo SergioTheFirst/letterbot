@@ -305,6 +305,7 @@ def process_message(
     proposed_action_type_to_persist: str | None = None
     proposed_action_text_to_persist: str | None = None
     proposed_action_confidence_to_persist: float | None = None
+    llm_provider: str | None = None
 
     proposed_action: dict | None = None
     if feature_flags.ENABLE_AUTO_ACTIONS:
@@ -366,6 +367,11 @@ def process_message(
             proposed_action.get("confidence") if proposed_action else None
         )
 
+    if hasattr(llm_result, "llm_provider"):
+        llm_provider = getattr(llm_result, "llm_provider")
+    elif isinstance(llm_result, dict):
+        llm_provider = llm_result.get("llm_provider")
+
     # ---------- Stage 1.2: WRITE-ONLY CRM ----------
     try:
         knowledge_db.save_email(
@@ -385,6 +391,7 @@ def process_message(
             proposed_action_type=proposed_action_type_to_persist,
             proposed_action_text=proposed_action_text_to_persist,
             proposed_action_confidence=proposed_action_confidence_to_persist,
+            llm_provider=llm_provider,
             action_line=action_line,
             body_summary=body_summary,
             raw_body=body_text,
