@@ -9,15 +9,15 @@ from types import SimpleNamespace
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 # Stub missing pipeline dependencies before importing the processor
-if "pipeline.stage_llm" not in sys.modules:
-    stage_llm = types.ModuleType("pipeline.stage_llm")
+if "mailbot_v26.pipeline.stage_llm" not in sys.modules:
+    stage_llm = types.ModuleType("mailbot_v26.pipeline.stage_llm")
     stage_llm.run_llm_stage = lambda **kwargs: None
-    sys.modules["pipeline.stage_llm"] = stage_llm
+    sys.modules["mailbot_v26.pipeline.stage_llm"] = stage_llm
 
-if "pipeline.stage_telegram" not in sys.modules:
-    stage_telegram = types.ModuleType("pipeline.stage_telegram")
+if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
+    stage_telegram = types.ModuleType("mailbot_v26.pipeline.stage_telegram")
     stage_telegram.send_to_telegram = lambda **kwargs: None
-    sys.modules["pipeline.stage_telegram"] = stage_telegram
+    sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
 
 from mailbot_v26.pipeline import processor
 

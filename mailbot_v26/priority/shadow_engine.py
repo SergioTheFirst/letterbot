@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from storage.analytics import KnowledgeAnalytics
+from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
 logger = logging.getLogger(__name__)
 

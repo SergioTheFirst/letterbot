@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from features import FeatureFlags
-from actions.auto_action_engine import AutoActionEngine
-from priority.confidence_engine import PriorityConfidenceEngine
-from priority.shadow_engine import ShadowPriorityEngine
+from mailbot_v26.actions.auto_action_engine import AutoActionEngine
+from mailbot_v26.features import FeatureFlags
+from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
+from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
 from .stage_llm import run_llm_stage
 from .stage_telegram import send_preview_to_telegram, send_to_telegram
-from storage.analytics import KnowledgeAnalytics
-from storage.knowledge_db import KnowledgeDB
-from tasks.shadow_actions import ShadowActionEngine
+from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.storage.knowledge_db import KnowledgeDB
+from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,77 @@ feature_flags = FeatureFlags()
 auto_action_engine = AutoActionEngine(
     confidence_threshold=feature_flags.AUTO_ACTION_CONFIDENCE_THRESHOLD
 )
+
+
+@dataclass
+class Attachment:
+    filename: str
+    content: bytes = b""
+    content_type: str = ""
+    text: str = ""
+
+
+@dataclass
+class AttachmentSummary:
+    filename: str
+    description: str
+    kind: str = ""
+    priority: int = 0
+    text_length: int = 0
+
+
+@dataclass
+class InboundMessage:
+    subject: str
+    body: str
+    sender: str = ""
+    attachments: list[Attachment] = field(default_factory=list)
+    received_at: datetime | None = None
+
+
+class MessageProcessor:
+    _ATTACHMENT_SNIPPET_LIMIT = 120
+    _MAX_ATTACHMENTS = 12
+    _VERB_ORDER = ["Сделать", "Ответить", "Проверить", "Уточнить"]
+
+    def __init__(self, config: Any, state: Any) -> None:
+        self.config = config
+        self.state = state
+
+    def process(self, account_login: str, message: InboundMessage) -> str:
+        """Lightweight placeholder processor to keep imports stable."""
+        sender = message.sender or "неизвестно"
+        subject = message.subject or "(без темы)"
+        summary = (message.body or "").strip()
+        summary = summary.split("\n")[0] if summary else ""
+        summary = self._trim_attachment_snippet(summary) if summary else ""
+        lines = [
+            f"🔵 от {sender}: {subject}",
+            f"<b>{subject}</b>",
+        ]
+        if summary:
+            lines.append(f"<i>{summary}</i>")
+        lines.append(f"{self._VERB_ORDER[0]}: проверить письмо")
+        return "\n".join(lines)
+
+    @classmethod
+    def _trim_attachment_snippet(cls, text: str) -> str:
+        if len(text) <= cls._ATTACHMENT_SNIPPET_LIMIT:
+            return text
+        return f"{text[: cls._ATTACHMENT_SNIPPET_LIMIT - 1]}…"
+
+    def _render_attachments(self, attachments: list[AttachmentSummary]) -> list[str]:
+        rendered: list[str] = []
+        for attachment in attachments[: self._MAX_ATTACHMENTS]:
+            description = self._trim_attachment_snippet(attachment.description or "")
+            if description:
+                rendered.append(f"{attachment.filename} — {description}")
+            else:
+                rendered.append(attachment.filename)
+        return rendered
+
+
+__all__ = ["Attachment", "AttachmentSummary", "InboundMessage", "MessageProcessor"]
 
 
 def _is_shadow_higher(shadow_priority: str, llm_priority: str) -> bool:
