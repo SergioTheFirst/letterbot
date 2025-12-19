@@ -125,34 +125,22 @@ def process_message(
             shadow_reason or "",
         )
 
-    # ---------- Shadow Action (read-only, dry run) ----------
-    shadow_tasks = shadow_action_engine.compute(
-        account_email=account_email,
-        from_email=from_email,
-    )
-    shadow_action_line: str | None = None
-    shadow_action_reason: str | None = None
-    if shadow_tasks:
-        shadow_action_line, shadow_action_reason = shadow_tasks[0]
-    for task, reason in shadow_tasks:
-        logger.info(
-            "[SHADOW-ACTION] from=%s task=%s reason=%s",
-            from_email or "",
-            task or "",
-            reason or "",
-        )
-
     # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged) ----------
     confidence_score: float | None = None
     confidence_decision: str | None = None
     llm_priority_for_confidence = priority
-    if feature_flags.ENABLE_AUTO_PRIORITY and _is_shadow_higher(shadow_priority, priority):
+    should_score_confidence = _is_shadow_higher(shadow_priority, priority) and (
+        feature_flags.ENABLE_AUTO_PRIORITY or feature_flags.ENABLE_AUTO_ACTIONS
+    )
+    if should_score_confidence:
         confidence_score = priority_confidence_engine.score(
             llm_priority=priority,
             shadow_priority=shadow_priority,
             sender_stats=_lookup_sender_stats(from_email),
             recent_history=_recent_history(from_email),
         )
+
+    if feature_flags.ENABLE_AUTO_PRIORITY and should_score_confidence:
         threshold = feature_flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD
 
         if confidence_score >= threshold:
@@ -177,6 +165,23 @@ def process_message(
             confidence_score,
             threshold,
             confidence_decision or "SKIPPED",
+        )
+
+    # ---------- Shadow Action (read-only, dry run) ----------
+    shadow_tasks = shadow_action_engine.compute(
+        account_email=account_email,
+        from_email=from_email,
+    )
+    shadow_action_line: str | None = None
+    shadow_action_reason: str | None = None
+    if shadow_tasks:
+        shadow_action_line, shadow_action_reason = shadow_tasks[0]
+    for task, reason in shadow_tasks:
+        logger.info(
+            "[SHADOW-ACTION] from=%s task=%s reason=%s",
+            from_email or "",
+            task or "",
+            reason or "",
         )
 
     shadow_priority_to_persist: str | None = None
@@ -208,7 +213,7 @@ def process_message(
         else:
             logger.info("[AUTO-ACTION]\nconditions not met → SKIPPED")
 
-    if feature_flags.ENABLE_PREVIEW_ACTIONS and proposed_action:
+    if getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False) and proposed_action:
         preview_reasons = [
             reason
             for reason in (shadow_action_reason, shadow_reason, priority_reason)
