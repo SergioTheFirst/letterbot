@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS emails (
     proposed_action_type TEXT,
     proposed_action_text TEXT,
     proposed_action_confidence REAL,
+    llm_provider TEXT,
     action_line TEXT,
     body_summary TEXT,
     raw_body_hash TEXT,

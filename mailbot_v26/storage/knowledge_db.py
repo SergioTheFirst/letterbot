@@ -80,6 +80,8 @@ class KnowledgeDB:
                 migrations.append(
                     "ALTER TABLE emails ADD COLUMN proposed_action_confidence REAL;"
                 )
+            if "llm_provider" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN llm_provider TEXT;")
 
             for statement in migrations:
                 conn.execute(statement)
@@ -107,6 +109,7 @@ class KnowledgeDB:
         proposed_action_type: str | None = None,
         proposed_action_text: str | None = None,
         proposed_action_confidence: float | None = None,
+        llm_provider: str | None = None,
         action_line: str,
         body_summary: str,
         raw_body: str,
@@ -137,11 +140,12 @@ class KnowledgeDB:
                         proposed_action_type,
                         proposed_action_text,
                         proposed_action_confidence,
+                        llm_provider,
                         action_line,
                         body_summary,
                         raw_body_hash
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account_email,
@@ -160,6 +164,7 @@ class KnowledgeDB:
                         proposed_action_type,
                         proposed_action_text,
                         proposed_action_confidence,
+                        llm_provider,
                         action_line,
                         body_summary,
                         raw_body_hash,

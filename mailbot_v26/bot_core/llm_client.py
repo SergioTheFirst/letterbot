@@ -6,12 +6,10 @@ pipeline stability, satisfying Constitution Section VI.1.
 """
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from mailbot_v26.llm.providers import CloudflareProvider, CloudflareProviderConfig
 
 @dataclass
 class CloudflareConfig:
@@ -25,46 +23,22 @@ class CloudflareLLMClient:
 
     def __init__(self, config: CloudflareConfig) -> None:
         self.config = config
-
-    def _build_request(self, prompt: str, data: str) -> urllib.request.Request:
-        url = (
-            f"https://api.cloudflare.com/client/v4/accounts/"
-            f"{self.config.account_id}/ai/run/{self.config.model}"
+        self._provider = CloudflareProvider(
+            CloudflareProviderConfig(
+                account_id=config.account_id,
+                api_token=config.api_token,
+                model=config.model,
+            )
         )
-        payload = json.dumps(
-            {
-                "messages": [
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": data},
-                ]
-            }
-        ).encode("utf-8")
-
-        request = urllib.request.Request(url, data=payload, method="POST")
-        request.add_header("Authorization", f"Bearer {self.config.api_token}")
-        request.add_header("Content-Type", "application/json")
-        return request
 
     def generate(self, prompt: str, data: str) -> str:
         """Return model output or empty string on failure."""
-        if not self.config.account_id or not self.config.api_token:
-            return ""
-
-        try:
-            request = self._build_request(prompt, data)
-            with urllib.request.urlopen(request, timeout=15) as response:
-                body = response.read().decode("utf-8")
-            parsed = json.loads(body)
-            choices = parsed.get("result", {}).get("response", {})
-            if isinstance(choices, dict) and "message" in choices:
-                content = choices["message"].get("content", "")
-            else:
-                content = parsed.get("result", {}).get("output", "")
-            if isinstance(content, list):
-                content = "".join(str(part) for part in content)
-            return str(content).strip()
-        except (urllib.error.URLError, json.JSONDecodeError, KeyError, TimeoutError, ValueError):
-            return ""
+        return self._provider.complete(
+            [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": data},
+            ]
+        )
 
 
 def load_prompt(path: Path) -> str:
