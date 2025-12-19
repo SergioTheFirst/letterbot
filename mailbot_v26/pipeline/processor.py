@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+import time
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,6 +10,7 @@ from typing import Any
 
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.features import FeatureFlags
+from mailbot_v26.observability import get_logger
 from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
 from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
@@ -20,7 +21,7 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
 
-logger = logging.getLogger(__name__)
+logger = get_logger("mailbot")
 
 # === Инициализация write-only БД ===
 DB_PATH = Path("database.sqlite")
@@ -210,12 +211,31 @@ def process_message(
     """
 
     # ---------- Stage LLM ----------
-    llm_result = run_llm_stage(
-        subject=subject,
+    logger.info(
+        "email_received",
+        email_id=message_id,
+        account=account_email,
         from_email=from_email,
-        body_text=body_text,
-        attachments=attachments,
+        subject=subject,
+        received_at=received_at.isoformat(),
     )
+    llm_start = time.perf_counter()
+    try:
+        llm_result = run_llm_stage(
+            subject=subject,
+            from_email=from_email,
+            body_text=body_text,
+            attachments=attachments,
+        )
+    except Exception as exc:
+        logger.error(
+            "processing_error",
+            stage="llm",
+            email_id=message_id,
+            error=str(exc),
+        )
+        raise
+    llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
 
     if not llm_result:
         logger.warning("LLM returned empty result, skipping message_id=%s", message_id)
@@ -227,6 +247,11 @@ def process_message(
     action_line = llm_result.action_line
     body_summary = llm_result.body_summary
     attachment_summaries = llm_result.attachment_summaries
+    llm_provider: str | None = None
+    if hasattr(llm_result, "llm_provider"):
+        llm_provider = getattr(llm_result, "llm_provider")
+    elif isinstance(llm_result, dict):
+        llm_provider = llm_result.get("llm_provider")
 
     # ---------- Shadow Priority (read-only, dry run) ----------
     shadow_priority, shadow_reason = shadow_priority_engine.compute(
@@ -330,6 +355,28 @@ def process_message(
         confidence_score or 0.0,
     )
 
+    logger.info(
+        "llm_decision",
+        email_id=message_id,
+        llm_provider=llm_provider or "unknown",
+        priority_llm=llm_result.priority,
+        priority_shadow=shadow_priority,
+        final_priority=priority,
+        confidence=confidence_score or 0.0,
+        action_line=action_line,
+        latency_ms=llm_latency_ms,
+    )
+
+    if auto_priority_enabled:
+        logger.info(
+            "auto_priority_evaluated",
+            email_id=message_id,
+            enabled=auto_priority_enabled,
+            original_priority=original_priority or llm_result.priority,
+            final_priority=priority,
+            reason=priority_reason or "",
+        )
+
     # ---------- Shadow Action (read-only, dry run) ----------
     shadow_tasks = shadow_action_engine.compute(
         account_email=account_email,
@@ -356,8 +403,6 @@ def process_message(
     proposed_action_type_to_persist: str | None = None
     proposed_action_text_to_persist: str | None = None
     proposed_action_confidence_to_persist: float | None = None
-    llm_provider: str | None = None
-
     proposed_action: dict | None = None
     if feature_flags.ENABLE_AUTO_ACTIONS:
         proposed_action = auto_action_engine.propose(
@@ -418,11 +463,6 @@ def process_message(
             proposed_action.get("confidence") if proposed_action else None
         )
 
-    if hasattr(llm_result, "llm_provider"):
-        llm_provider = getattr(llm_result, "llm_provider")
-    elif isinstance(llm_result, dict):
-        llm_provider = llm_result.get("llm_provider")
-
     # ---------- Stage 1.2: WRITE-ONLY CRM ----------
     try:
         knowledge_db.save_email(
@@ -461,18 +501,39 @@ def process_message(
     except Exception as exc:
         # ❗ БД — side-effect only
         logger.error("KnowledgeDB failed: %s", exc, exc_info=True)
+        logger.error(
+            "processing_error",
+            stage="crm",
+            email_id=message_id,
+            error=str(exc),
+        )
 
     # ---------- Stage Telegram ----------
-    send_to_telegram(
-        chat_id=telegram_chat_id,
-        priority=priority,
-        from_email=from_email,
-        subject=subject,
-        action_line=action_line,
-        body_summary=body_summary,
-        attachment_summaries=attachment_summaries,
-        account_email=account_email,
-    )
+    try:
+        send_to_telegram(
+            chat_id=telegram_chat_id,
+            priority=priority,
+            from_email=from_email,
+            subject=subject,
+            action_line=action_line,
+            body_summary=body_summary,
+            attachment_summaries=attachment_summaries,
+            account_email=account_email,
+        )
+        logger.info(
+            "telegram_sent",
+            email_id=message_id,
+            chat_id=telegram_chat_id,
+            success=True,
+        )
+    except Exception as exc:
+        logger.error(
+            "processing_error",
+            stage="telegram",
+            email_id=message_id,
+            error=str(exc),
+        )
+        raise
 
     if feature_flags.ENABLE_PREVIEW_ACTIONS:
         preview_actions = _extract_preview_actions(proposed_action)

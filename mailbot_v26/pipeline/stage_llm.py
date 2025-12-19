@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
+
+from mailbot_v26.observability import get_logger
 
 if TYPE_CHECKING:
     from mailbot_v26.bot_core.pipeline import PipelineContext
 
-logger = logging.getLogger(__name__)
+logger = get_logger("mailbot")
 
 
 def run_llm_stage(
@@ -31,9 +32,12 @@ def run_llm_stage(
         return ctx.llm_result
     attachments = attachments or []
     logger.error(
-        "LLM stage is not configured; subject=%s from=%s attachments=%d",
-        subject or "",
-        from_email or "",
-        len(attachments),
+        "processing_error",
+        stage="llm",
+        email_id=None,
+        error=(
+            "LLM stage is not configured; subject=%s from=%s attachments=%d"
+            % (subject or "", from_email or "", len(attachments))
+        ),
     )
     return None

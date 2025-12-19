@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from mailbot_v26.observability import get_logger
+
+logger = get_logger("mailbot")
 
 
 def send_to_telegram(
@@ -25,9 +26,9 @@ def send_to_telegram(
     side-effect behavior unchanged unless it is overridden.
     """
     logger.info(
-        "Telegram stage not configured for legacy pipeline: chat_id=%s account=%s",
-        chat_id,
-        account_email,
+        "telegram_stage_unconfigured",
+        chat_id=chat_id,
+        account_email=account_email,
     )
 
 
@@ -43,7 +44,7 @@ def send_preview_to_telegram(
     Uses plain text only; formatting/sending is deferred to production.
     """
     logger.info(
-        "Telegram preview not configured for legacy pipeline: chat_id=%s account=%s",
-        chat_id,
-        account_email,
+        "telegram_preview_unconfigured",
+        chat_id=chat_id,
+        account_email=account_email,
     )
