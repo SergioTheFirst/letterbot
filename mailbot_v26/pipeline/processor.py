@@ -12,7 +12,7 @@ from actions.auto_action_engine import AutoActionEngine
 from priority.confidence_engine import PriorityConfidenceEngine
 from priority.shadow_engine import ShadowPriorityEngine
 from .stage_llm import run_llm_stage
-from .stage_telegram import send_to_telegram
+from .stage_telegram import send_preview_to_telegram, send_to_telegram
 from storage.analytics import KnowledgeAnalytics
 from storage.knowledge_db import KnowledgeDB
 from tasks.shadow_actions import ShadowActionEngine
@@ -72,6 +72,46 @@ def _recent_history(from_email: str) -> dict[str, object]:
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("Confidence history failed: %s", exc, exc_info=True)
         return {}
+
+
+def _sanitize_preview_line(text: str) -> str:
+    cleaned = (
+        text.replace("<", "")
+        .replace(">", "")
+        .replace("*", "")
+        .replace("_", "")
+        .replace("\n", " ")
+        .replace("\r", " ")
+    )
+    return " ".join(cleaned.split())
+
+
+def _extract_preview_actions(proposed_action: dict | list | None) -> list[str]:
+    if not proposed_action:
+        return []
+    actions: list[str] = []
+    if isinstance(proposed_action, dict):
+        candidate = proposed_action.get("text")
+        if candidate:
+            actions.append(str(candidate))
+    elif isinstance(proposed_action, list):
+        for entry in proposed_action:
+            if isinstance(entry, dict):
+                candidate = entry.get("text")
+            else:
+                candidate = entry
+            if candidate:
+                actions.append(str(candidate))
+    else:
+        actions.append(str(proposed_action))
+    return [_sanitize_preview_line(action) for action in actions if action]
+
+
+def _build_preview_message(actions: list[str]) -> str:
+    lines = ["PREVIEW ACTIONS (не применено):"]
+    lines.extend(f"- {action}" for action in actions)
+    lines.append("Источник: AutoActionEngine, режим preview")
+    return "\n".join(lines)
 
 
 def process_message(
@@ -303,3 +343,27 @@ def process_message(
         attachment_summaries=attachment_summaries,
         account_email=account_email,
     )
+
+    if feature_flags.ENABLE_PREVIEW_ACTIONS:
+        preview_actions = _extract_preview_actions(proposed_action)
+        preview_actions = [action for action in preview_actions if action]
+        if not preview_actions:
+            logger.info(
+                "[PREVIEW-ACTIONS] skipped reason=no_proposals email_id=%s account=%s",
+                message_id,
+                account_email,
+            )
+            return
+
+        preview_text = _build_preview_message(preview_actions)
+        send_preview_to_telegram(
+            chat_id=telegram_chat_id,
+            preview_text=preview_text,
+            account_email=account_email,
+        )
+        logger.info(
+            "[PREVIEW-ACTIONS] sent count=%s email_id=%s account=%s",
+            len(preview_actions),
+            message_id,
+            account_email,
+        )

@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
 
+_DEFAULT_PROPOSAL = object()
+
 
 def _llm_result() -> SimpleNamespace:
     return SimpleNamespace(
@@ -14,7 +16,7 @@ def _llm_result() -> SimpleNamespace:
     )
 
 
-def _common_monkeypatches(monkeypatch, flags) -> dict[str, object]:
+def _common_monkeypatches(monkeypatch, flags, proposed_action=_DEFAULT_PROPOSAL) -> dict[str, object]:
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: _llm_result())
     monkeypatch.setattr(
         processor.shadow_priority_engine,
@@ -29,18 +31,32 @@ def _common_monkeypatches(monkeypatch, flags) -> dict[str, object]:
     monkeypatch.setattr(
         processor.auto_action_engine,
         "propose",
-        lambda **kwargs: {
-            "type": "PAYMENT",
-            "text": "Оплатить счет",
-            "source": "shadow",
-            "confidence": 0.9,
-        },
+        lambda **kwargs: (
+            proposed_action
+            if proposed_action is not _DEFAULT_PROPOSAL
+            else {
+                "type": "PAYMENT",
+                "text": "Оплатить счет",
+                "source": "shadow",
+                "confidence": 0.9,
+            }
+        ),
     )
     monkeypatch.setattr(processor, "feature_flags", flags)
 
     payload: dict[str, object] = {}
     monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: payload.update(kwargs))
     return payload
+
+
+def _preview_capture(monkeypatch) -> dict[str, object]:
+    preview_payload: dict[str, object] = {}
+    monkeypatch.setattr(
+        processor,
+        "send_preview_to_telegram",
+        lambda **kwargs: preview_payload.update(kwargs),
+    )
+    return preview_payload
 
 
 def test_preview_disabled_no_preview_generated(monkeypatch, caplog) -> None:
@@ -53,6 +69,7 @@ def test_preview_disabled_no_preview_generated(monkeypatch, caplog) -> None:
         ENABLE_PREVIEW_ACTIONS=False,
     )
     payload = _common_monkeypatches(monkeypatch, flags)
+    preview_payload = _preview_capture(monkeypatch)
 
     preview_called = False
 
@@ -81,6 +98,7 @@ def test_preview_disabled_no_preview_generated(monkeypatch, caplog) -> None:
 
     assert preview_called is False
     assert not any("[PREVIEW]" in record.message for record in caplog.records)
+    assert preview_payload == {}
     assert "chat_id" in payload
 
 
@@ -94,6 +112,7 @@ def test_preview_enabled_preview_generated(monkeypatch, caplog) -> None:
         ENABLE_PREVIEW_ACTIONS=True,
     )
     payload = _common_monkeypatches(monkeypatch, flags)
+    preview_payload = _preview_capture(monkeypatch)
 
     stored: dict[str, object] = {}
 
@@ -123,6 +142,13 @@ def test_preview_enabled_preview_generated(monkeypatch, caplog) -> None:
     assert stored.get("proposed_action")
     assert any("[PREVIEW]" in record.message for record in caplog.records)
     assert "chat_id" in payload
+    assert preview_payload.get("chat_id") == "chat"
+    preview_text = str(preview_payload.get("preview_text") or "")
+    assert preview_text.startswith("PREVIEW ACTIONS (не применено):")
+    assert preview_text.endswith("Источник: AutoActionEngine, режим preview")
+    assert "- Оплатить счет" in preview_text
+    for forbidden in ("<", ">", "*", "_", "</"):
+        assert forbidden not in preview_text
 
 
 def test_preview_does_not_change_telegram_payload(monkeypatch) -> None:
@@ -149,6 +175,7 @@ def test_preview_does_not_change_telegram_payload(monkeypatch) -> None:
         "knowledge_db",
         SimpleNamespace(save_email=lambda **kwargs: None, save_preview_action=lambda **kwargs: None),
     )
+    _preview_capture(monkeypatch)
 
     processor.process_message(
         account_email="account@example.com",
@@ -168,6 +195,7 @@ def test_preview_does_not_change_telegram_payload(monkeypatch) -> None:
         "send_to_telegram",
         lambda **kwargs: preview_payload.update(kwargs),
     )
+    _preview_capture(monkeypatch)
 
     processor.process_message(
         account_email="account@example.com",
@@ -181,3 +209,37 @@ def test_preview_does_not_change_telegram_payload(monkeypatch) -> None:
     )
 
     assert baseline_payload == preview_payload
+
+
+def test_preview_enabled_no_proposals(monkeypatch, caplog) -> None:
+    flags = SimpleNamespace(
+        ENABLE_AUTO_PRIORITY=False,
+        AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
+        ENABLE_AUTO_ACTIONS=True,
+        AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+        ENABLE_SHADOW_PERSISTENCE=False,
+        ENABLE_PREVIEW_ACTIONS=True,
+    )
+    _common_monkeypatches(monkeypatch, flags, proposed_action=None)
+    preview_payload = _preview_capture(monkeypatch)
+
+    monkeypatch.setattr(
+        processor,
+        "knowledge_db",
+        SimpleNamespace(save_email=lambda **kwargs: None, save_preview_action=lambda **kwargs: None),
+    )
+    caplog.set_level(logging.INFO)
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=301,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 3, 1, 12, 0),
+        body_text="Body",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    assert preview_payload == {}
+    assert any("[PREVIEW-ACTIONS] skipped reason=no_proposals" in record.message for record in caplog.records)
