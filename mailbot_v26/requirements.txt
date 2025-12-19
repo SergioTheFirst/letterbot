@@ -17,3 +17,4 @@ flask==2.0.1
 python-ldap==3.3.0
 pytest==6.2.5
 pytest-cov==2.12.1
+structlog==24.4.0
