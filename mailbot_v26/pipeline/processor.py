@@ -11,8 +11,8 @@ from features import FeatureFlags
 from actions.auto_action_engine import AutoActionEngine
 from priority.confidence_engine import PriorityConfidenceEngine
 from priority.shadow_engine import ShadowPriorityEngine
-from pipeline.stage_llm import run_llm_stage
-from pipeline.stage_telegram import send_to_telegram
+from .stage_llm import run_llm_stage
+from .stage_telegram import send_to_telegram
 from storage.analytics import KnowledgeAnalytics
 from storage.knowledge_db import KnowledgeDB
 from tasks.shadow_actions import ShadowActionEngine
@@ -207,6 +207,30 @@ def process_message(
             )
         else:
             logger.info("[AUTO-ACTION]\nconditions not met → SKIPPED")
+
+    if feature_flags.ENABLE_PREVIEW_ACTIONS and proposed_action:
+        preview_reasons = [
+            reason
+            for reason in (shadow_action_reason, shadow_reason, priority_reason)
+            if reason
+        ]
+        preview = {
+            "email_id": message_id,
+            "original_priority": original_priority or llm_result.priority,
+            "final_priority": priority,
+            "proposed_actions": [proposed_action],
+            "confidence": proposed_action.get("confidence", 0.0),
+            "reasons": preview_reasons,
+        }
+        logger.info("[PREVIEW] %s", preview)
+        try:
+            knowledge_db.save_preview_action(
+                email_id=message_id,
+                proposed_action=proposed_action,
+                confidence=proposed_action.get("confidence"),
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Preview action persistence failed: %s", exc, exc_info=True)
 
     if feature_flags.ENABLE_SHADOW_PERSISTENCE:
         shadow_priority_to_persist = shadow_priority
