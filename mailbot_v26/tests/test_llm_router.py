@@ -75,7 +75,10 @@ def test_gigachat_healthcheck_failure_falls_back(tmp_path) -> None:
     assert result == "cf"
     assert gigachat.calls == 0
     assert cloudflare.calls == 1
-    assert runtime_flags.read_text(encoding="utf-8") == "{\"enable_gigachat\": false}"
+    assert (
+        runtime_flags.read_text(encoding="utf-8")
+        == "{\"enable_gigachat\": false, \"enable_auto_priority\": false}"
+    )
 
 
 def test_gigachat_serializes_requests() -> None:
@@ -195,7 +198,10 @@ def test_auto_disable_on_consecutive_errors(tmp_path, caplog) -> None:
     assert result == "fallback"
     assert gigachat.calls == 6
     assert cloudflare.calls == 3
-    assert runtime_flags.read_text(encoding="utf-8") == "{\"enable_gigachat\": false}"
+    assert (
+        runtime_flags.read_text(encoding="utf-8")
+        == "{\"enable_gigachat\": false, \"enable_auto_priority\": false}"
+    )
     assert router._circuit_open_until is not None
     assert any(
         "[LLM-SAFETY]" in record.message and "consecutive_errors" in record.message
@@ -242,7 +248,10 @@ def test_auto_disable_on_latency(tmp_path, caplog) -> None:
     assert result == "fallback"
     assert gigachat.calls == 1
     assert cloudflare.calls == 1
-    assert runtime_flags.read_text(encoding="utf-8") == "{\"enable_gigachat\": false}"
+    assert (
+        runtime_flags.read_text(encoding="utf-8")
+        == "{\"enable_gigachat\": false, \"enable_auto_priority\": false}"
+    )
     assert any(
         "[LLM-SAFETY]" in record.message and "latency_exceeded" in record.message
         for record in caplog.records

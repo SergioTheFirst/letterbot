@@ -17,6 +17,7 @@ if "mailbot_v26.pipeline.stage_llm" not in sys.modules:
 if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     stage_telegram = types.ModuleType("mailbot_v26.pipeline.stage_telegram")
     stage_telegram.send_to_telegram = lambda **kwargs: None
+    stage_telegram.send_preview_to_telegram = lambda **kwargs: None
     sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
 
 from mailbot_v26.pipeline import processor
@@ -39,7 +40,10 @@ def _common_monkeypatches(monkeypatch, db_path, *, enable_shadow: bool) -> None:
         "feature_flags",
         SimpleNamespace(
             ENABLE_AUTO_PRIORITY=False,
+            ENABLE_AUTO_ACTIONS=False,
+            AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=enable_shadow,
+            ENABLE_PREVIEW_ACTIONS=False,
         ),
     )
     monkeypatch.setattr(

@@ -13,6 +13,7 @@ DEFAULT_RUNTIME_FLAGS_PATH = Path(__file__).resolve().parents[1] / "runtime_flag
 @dataclass(frozen=True)
 class RuntimeFlags:
     enable_gigachat: bool = False
+    enable_auto_priority: bool = False
 
 
 class RuntimeFlagStore:
@@ -38,15 +39,26 @@ class RuntimeFlagStore:
             return self._refresh_locked()
 
     def set_enable_gigachat(self, enabled: bool) -> None:
-        payload = {"enable_gigachat": bool(enabled)}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.path.with_suffix(".tmp")
-        with open(tmp_path, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, ensure_ascii=False)
-        tmp_path.replace(self.path)
         with self._lock:
+            flags = self._load_flags()
+            updated = RuntimeFlags(
+                enable_gigachat=bool(enabled),
+                enable_auto_priority=flags.enable_auto_priority,
+            )
+            self._write_flags(updated)
             self._last_mtime = self._safe_mtime()
-            self._flags = RuntimeFlags(enable_gigachat=enabled)
+            self._flags = updated
+
+    def set_enable_auto_priority(self, enabled: bool) -> None:
+        with self._lock:
+            flags = self._load_flags()
+            updated = RuntimeFlags(
+                enable_gigachat=flags.enable_gigachat,
+                enable_auto_priority=bool(enabled),
+            )
+            self._write_flags(updated)
+            self._last_mtime = self._safe_mtime()
+            self._flags = updated
 
     def _refresh_locked(self) -> Tuple[RuntimeFlags, bool]:
         mtime = self._safe_mtime()
@@ -72,7 +84,22 @@ class RuntimeFlagStore:
             return RuntimeFlags()
 
         enabled = raw.get("enable_gigachat", False)
-        return RuntimeFlags(enable_gigachat=bool(enabled))
+        auto_priority = raw.get("enable_auto_priority", False)
+        return RuntimeFlags(
+            enable_gigachat=bool(enabled),
+            enable_auto_priority=bool(auto_priority),
+        )
+
+    def _write_flags(self, flags: RuntimeFlags) -> None:
+        payload = {
+            "enable_gigachat": bool(flags.enable_gigachat),
+            "enable_auto_priority": bool(flags.enable_auto_priority),
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.path.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+        tmp_path.replace(self.path)
 
 
 __all__ = ["DEFAULT_RUNTIME_FLAGS_PATH", "RuntimeFlags", "RuntimeFlagStore"]
