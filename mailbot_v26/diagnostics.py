@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from features import FeatureFlags
-from storage.knowledge_query import KnowledgeQuery
+from mailbot_v26.features import FeatureFlags
+from mailbot_v26.storage.knowledge_query import KnowledgeQuery
 
 
 DEFAULT_DB_PATH = Path("database.sqlite")

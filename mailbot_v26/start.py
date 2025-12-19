@@ -11,11 +11,8 @@ from pathlib import Path
 from typing import List, Optional
 
 CURRENT_DIR = Path(__file__).resolve().parent
-# Добавляем родительскую папку в путь для импортов
-sys.path.insert(0, str(CURRENT_DIR))
-sys.path.insert(0, str(CURRENT_DIR.parent))
 
-from bot_core.pipeline import (
+from mailbot_v26.bot_core.pipeline import (
     PIPELINE_CACHE,
     PIPELINE_INBOUND_CACHE,
     PIPELINE_RAW_CACHE,
@@ -28,14 +25,14 @@ from bot_core.pipeline import (
     stage_tg,
     store_inbound,
 )
-from bot_core.storage import Storage
-from config_loader import AccountConfig, BotConfig, load_config
-from imap_client import ResilientIMAP
-from pipeline.processor import InboundMessage, MessageProcessor
-from state_manager import StateManager
-from text.mime_utils import decode_mime_header
-from worker.telegram_sender import send_telegram
-from storage.self_check import run_self_check
+from mailbot_v26.bot_core.storage import Storage
+from mailbot_v26.config_loader import AccountConfig, BotConfig, load_config
+from mailbot_v26.imap_client import ResilientIMAP
+from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
+from mailbot_v26.state_manager import StateManager
+from mailbot_v26.storage.self_check import run_self_check
+from mailbot_v26.text.mime_utils import decode_mime_header
+from mailbot_v26.worker.telegram_sender import send_telegram
 
 LOG_PATH = CURRENT_DIR / "mailbot.log"
 
