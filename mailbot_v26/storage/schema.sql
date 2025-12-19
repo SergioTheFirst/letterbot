@@ -40,3 +40,11 @@ CREATE TABLE IF NOT EXISTS attachments (
     summary TEXT,
     FOREIGN KEY(email_id) REFERENCES emails(id)
 );
+
+CREATE TABLE IF NOT EXISTS preview_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_id INTEGER NOT NULL,
+    proposed_action TEXT,
+    confidence REAL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);

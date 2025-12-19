@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import sqlite3
 from pathlib import Path
@@ -184,3 +185,34 @@ class KnowledgeDB:
 
         except Exception as exc:
             logger.error("KnowledgeDB save failed: %s", exc)
+
+    def save_preview_action(
+        self,
+        *,
+        email_id: int,
+        proposed_action: dict | None,
+        confidence: float | None,
+    ) -> None:
+        if proposed_action is None:
+            return
+        try:
+            payload = json.dumps(proposed_action, ensure_ascii=False)
+        except (TypeError, ValueError):
+            payload = str(proposed_action)
+
+        try:
+            with sqlite3.connect(self.path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO preview_actions (
+                        email_id,
+                        proposed_action,
+                        confidence
+                    )
+                    VALUES (?, ?, ?)
+                    """,
+                    (email_id, payload, confidence),
+                )
+                conn.commit()
+        except Exception as exc:
+            logger.error("KnowledgeDB preview action save failed: %s", exc)

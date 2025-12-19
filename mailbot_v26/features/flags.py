@@ -29,6 +29,7 @@ class FeatureFlags:
         self.ENABLE_TG_EDITING = False
         self.ENABLE_SHADOW_PERSISTENCE = False
         self.ENABLE_CRM_DIAGNOSTICS = False
+        self.ENABLE_PREVIEW_ACTIONS = False
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -46,6 +47,7 @@ class FeatureFlags:
         self.ENABLE_TG_EDITING = self._get_flag(parser, "enable_tg_editing")
         self.ENABLE_SHADOW_PERSISTENCE = self._get_flag(parser, "enable_shadow_persistence")
         self.ENABLE_CRM_DIAGNOSTICS = self._get_flag(parser, "enable_crm_diagnostics")
+        self.ENABLE_PREVIEW_ACTIONS = self._get_flag(parser, "enable_preview_actions")
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6
         )
