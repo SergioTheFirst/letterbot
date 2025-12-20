@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.observability import logger as observability_logger
 from mailbot_v26.pipeline import processor
+from mailbot_v26.priority.auto_engine import AutoPriorityEngine
 from mailbot_v26.priority.auto_gates import CircuitBreakerStatus, GateDecision
 
 
@@ -33,7 +34,7 @@ def _setup_processor(monkeypatch, processor_module) -> None:
     monkeypatch.setattr(processor_module, "run_llm_stage", lambda **kwargs: llm_result)
     monkeypatch.setattr(processor_module, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
     monkeypatch.setattr(
-        processor_module, "shadow_priority_engine", SimpleNamespace(compute=lambda **kwargs: ("🔴", "shadow"))
+        processor_module, "shadow_priority_engine", SimpleNamespace(compute=lambda **kwargs: ("🟡", "shadow"))
     )
     monkeypatch.setattr(processor_module, "shadow_action_engine", SimpleNamespace(compute=lambda **kwargs: []))
     monkeypatch.setattr(processor_module, "priority_confidence_engine", SimpleNamespace(score=lambda **kwargs: 0.95))
@@ -48,7 +49,7 @@ def _setup_processor(monkeypatch, processor_module) -> None:
     monkeypatch.setattr(
         processor_module,
         "runtime_flag_store",
-        SimpleNamespace(get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=True), False)),
+        SimpleNamespace(get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=True), False), set_enable_auto_priority=lambda **kwargs: None),
     )
     monkeypatch.setattr(
         processor_module,
@@ -63,6 +64,17 @@ def _setup_processor(monkeypatch, processor_module) -> None:
         ),
     )
     monkeypatch.setattr(processor_module, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(
+        processor_module,
+        "auto_priority_engine",
+        AutoPriorityEngine(
+            processor_module.auto_priority_gates,
+            processor_module.auto_priority_breaker,
+            processor_module.runtime_flag_store,
+            processor_module.system_health,
+            enabled_flag=lambda: processor_module.feature_flags.ENABLE_AUTO_PRIORITY,
+        ),
+    )
 
 
 def test_structured_logging_events_emitted(monkeypatch) -> None:
@@ -92,7 +104,7 @@ def test_structured_logging_events_emitted(monkeypatch) -> None:
         events.append(payload["event"])
     assert "email_received" in events
     assert "llm_decision" in events
-    assert "auto_priority_evaluated" in events
+    assert "auto_priority_applied" in events
     assert "telegram_sent" in events
     assert "signal_evaluated" in events
     assert "decision_traced" in events
@@ -230,6 +242,17 @@ def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
             ENABLE_PREVIEW_ACTIONS=False,
+        ),
+    )
+    monkeypatch.setattr(
+        processor,
+        "auto_priority_engine",
+        AutoPriorityEngine(
+            processor.auto_priority_gates,
+            processor.auto_priority_breaker,
+            processor.runtime_flag_store,
+            processor.system_health,
+            enabled_flag=lambda: processor.feature_flags.ENABLE_AUTO_PRIORITY,
         ),
     )
 

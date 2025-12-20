@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from statistics import median
-
+from mailbot_v26.observability import get_logger
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
 
 PRIORITY_ORDER = {"🔵": 0, "🟡": 1, "🔴": 2}
+logger = get_logger("mailbot")
 
 
 @dataclass(frozen=True)
@@ -24,9 +24,9 @@ class CircuitBreakerStatus:
 
 
 class AutoPriorityGates:
-    MIN_CONFIDENCE = 0.85
     MIN_SHADOW_ACCURACY_30D = 0.85
-    MAX_REJECT_RATE_7D = 0.15
+    MAX_REJECT_RATE_30D = 0.15
+    MIN_CONFIDENCE = 0.85
     MIN_SAMPLE_SIZE = 100
     MAX_PRIORITY_DELTA = 1
 
@@ -68,7 +68,7 @@ class AutoPriorityGates:
             reasons.append("shadow_accuracy")
 
         try:
-            reject_stats = self._analytics.auto_priority_reject_rate(days=7)
+            reject_stats = self._analytics.auto_priority_reject_rate(days=30)
         except Exception:
             reject_stats = {"total": 0, "reject_rate": 1.0}
             reasons.append("reject_rate_error")
@@ -77,15 +77,28 @@ class AutoPriorityGates:
         reject_rate = float(reject_stats.get("reject_rate", 1.0) or 1.0)
         if reject_total < self.MIN_SAMPLE_SIZE:
             reasons.append("reject_sample_size")
-        if reject_rate > self.MAX_REJECT_RATE_7D:
+        if reject_rate > self.MAX_REJECT_RATE_30D:
             reasons.append("reject_rate")
 
-        return GateDecision(open=not reasons, reasons=tuple(reasons))
+        decision = GateDecision(open=not reasons, reasons=tuple(reasons))
+        logger.info(
+            "AUTO-PRIORITY-GATE",
+            open=decision.open,
+            reasons=decision.reasons,
+            llm_priority=llm_priority,
+            shadow_priority=shadow_priority,
+            confidence=score,
+            delta=delta,
+            accuracy_30d=accuracy,
+            accuracy_total=total_samples,
+            reject_rate_30d=reject_rate,
+            reject_total=reject_total,
+        )
+        return decision
 
 
 class AutoPriorityCircuitBreaker:
-    MAX_REJECT_RATE_1H = 0.25
-    MIN_CONFIDENCE_P50 = 0.7
+    MAX_REJECT_RATE_24H = 0.25
 
     def __init__(self, analytics: KnowledgeAnalytics) -> None:
         self._analytics = analytics
@@ -93,22 +106,12 @@ class AutoPriorityCircuitBreaker:
     def check(self) -> CircuitBreakerStatus:
         reasons: list[str] = []
         reject_rate: float | None = None
-        confidence_p50: float | None = None
 
         try:
-            reject_stats = self._analytics.auto_priority_reject_rate(hours=1)
+            reject_stats = self._analytics.auto_priority_reject_rate(hours=24)
             reject_rate = float(reject_stats.get("reject_rate", 0.0) or 0.0)
-            if int(reject_stats.get("total", 0) or 0) > 0 and reject_rate > self.MAX_REJECT_RATE_1H:
-                reasons.append("reject_rate_1h")
-        except Exception:
-            pass
-
-        try:
-            scores = self._analytics.auto_priority_confidence_scores(hours=1)
-            if scores:
-                confidence_p50 = float(median(scores))
-                if confidence_p50 < self.MIN_CONFIDENCE_P50:
-                    reasons.append("confidence_p50")
+            if int(reject_stats.get("total", 0) or 0) > 0 and reject_rate > self.MAX_REJECT_RATE_24H:
+                reasons.append("reject_rate_24h")
         except Exception:
             pass
 
@@ -116,7 +119,7 @@ class AutoPriorityCircuitBreaker:
             tripped=bool(reasons),
             reason=",".join(reasons) if reasons else None,
             reject_rate=reject_rate,
-            confidence_p50=confidence_p50,
+            confidence_p50=None,
         )
 
 

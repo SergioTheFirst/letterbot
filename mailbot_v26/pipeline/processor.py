@@ -13,6 +13,7 @@ from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.features import FeatureFlags
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
+from mailbot_v26.priority.auto_engine import AutoPriorityEngine, AutoPriorityOutcome
 from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
 from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
@@ -41,6 +42,13 @@ auto_priority_gates = AutoPriorityGates(analytics)
 auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
 feature_flags = FeatureFlags()
 runtime_flag_store = RuntimeFlagStore()
+auto_priority_engine = AutoPriorityEngine(
+    auto_priority_gates,
+    auto_priority_breaker,
+    runtime_flag_store,
+    system_health,
+    enabled_flag=lambda: feature_flags.ENABLE_AUTO_PRIORITY,
+)
 auto_action_engine = AutoActionEngine(
     confidence_threshold=feature_flags.AUTO_ACTION_CONFIDENCE_THRESHOLD
 )
@@ -411,9 +419,6 @@ def process_message(
     confidence_score: float | None = None
     confidence_decision: str | None = None
     llm_priority_for_confidence = priority
-    runtime_flags, _ = runtime_flag_store.get_flags()
-    auto_priority_runtime_enabled = runtime_flags.enable_auto_priority
-    auto_priority_enabled = feature_flags.ENABLE_AUTO_PRIORITY and auto_priority_runtime_enabled
     should_score_confidence = _is_shadow_higher(shadow_priority, priority) and (
         feature_flags.ENABLE_AUTO_PRIORITY or feature_flags.ENABLE_AUTO_ACTIONS
     )
@@ -425,70 +430,49 @@ def process_message(
             recent_history=_recent_history(from_email),
         )
 
-    if auto_priority_runtime_enabled:
-        breaker_status = auto_priority_breaker.check()
-        if breaker_status.tripped:
-            runtime_flag_store.set_enable_auto_priority(False)
-            auto_priority_runtime_enabled = False
-            auto_priority_enabled = False
-            logger.warning(
-                "auto_priority_safety_disabled",
-                reason=breaker_status.reason or "unknown",
-            )
-
-    gate_decision = None
-    auto_priority_allowed = False
-    if auto_priority_enabled and should_score_confidence:
-        gate_decision = auto_priority_gates.evaluate(
-            llm_priority=priority,
-            shadow_priority=shadow_priority,
-            confidence_score=confidence_score,
-        )
-        if gate_decision.open:
-            auto_priority_allowed = True
-        else:
-            logger.info(
-                "auto_priority_gate_closed",
-                reasons=",".join(gate_decision.reasons) if gate_decision.reasons else "unknown",
-            )
-
-    if auto_priority_allowed:
-        threshold = max(
-            feature_flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD,
-            AutoPriorityGates.MIN_CONFIDENCE,
-        )
-        if (confidence_score or 0.0) >= threshold:
-            original_priority = priority
-            priority = shadow_priority
-            priority_reason = shadow_reason or "Auto-priority escalation"
-            confidence_decision = "APPLIED"
-            logger.info(
-                "auto_priority_applied",
-                from_email=from_email or "",
-                llm_priority=original_priority,
+    auto_priority_outcome = AutoPriorityOutcome(
+        final_priority=priority,
+        original_priority=None,
+        priority_reason=None,
+        confidence_score=confidence_score,
+        confidence_decision=None,
+        gate_decision=None,
+        applied=False,
+        skipped_reason=None,
+    )
+    if feature_flags.ENABLE_AUTO_PRIORITY:
+        try:
+            auto_priority_outcome = auto_priority_engine.evaluate(
+                llm_priority=priority,
                 shadow_priority=shadow_priority,
-                reason=shadow_reason or "",
+                shadow_reason=shadow_reason,
+                confidence_score=confidence_score,
             )
-        else:
-            confidence_decision = "SKIPPED"
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("auto_priority_error", error=str(exc))
 
-    if auto_priority_enabled and should_score_confidence:
+    if auto_priority_outcome.applied:
+        original_priority = auto_priority_outcome.original_priority
+        priority = auto_priority_outcome.final_priority
+        priority_reason = auto_priority_outcome.priority_reason
+        confidence_decision = auto_priority_outcome.confidence_decision
+    elif auto_priority_outcome.confidence_decision:
+        confidence_decision = auto_priority_outcome.confidence_decision
+
+    if feature_flags.ENABLE_AUTO_PRIORITY and should_score_confidence:
         logger.info(
             "auto_priority_confidence_scored",
             llm_priority=llm_priority_for_confidence,
             shadow_priority=shadow_priority,
             confidence=confidence_score or 0.0,
-            threshold=max(
-                feature_flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD,
-                AutoPriorityGates.MIN_CONFIDENCE,
-            ),
+            threshold=AutoPriorityGates.MIN_CONFIDENCE,
             decision=confidence_decision or "SKIPPED",
         )
 
     logger.info(
         "auto_priority_summary",
-        enabled=auto_priority_allowed,
-        applied=confidence_decision == "APPLIED",
+        enabled=auto_priority_outcome.applied,
+        applied=auto_priority_outcome.applied,
         llm_priority=llm_priority_for_confidence,
         shadow_priority=shadow_priority,
         final_priority=priority,
@@ -507,14 +491,15 @@ def process_message(
         latency_ms=llm_latency_ms,
     )
 
-    if auto_priority_enabled:
+    if feature_flags.ENABLE_AUTO_PRIORITY:
         logger.info(
             "auto_priority_evaluated",
             email_id=message_id,
-            enabled=auto_priority_enabled,
+            enabled=auto_priority_outcome.applied,
             original_priority=original_priority or llm_result.priority,
             final_priority=priority,
             reason=priority_reason or "",
+            skipped_reason=auto_priority_outcome.skipped_reason or "",
         )
 
     # ---------- Shadow Action (read-only, dry run) ----------

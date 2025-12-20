@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from mailbot_v26.actions import AutoActionEngine
 from mailbot_v26.llm.runtime_flags import RuntimeFlags
+from mailbot_v26.priority.auto_engine import AutoPriorityEngine
 from mailbot_v26.priority.auto_gates import GateDecision
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
@@ -19,6 +20,7 @@ if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     stage_telegram = types.ModuleType("mailbot_v26.pipeline.stage_telegram")
     stage_telegram.send_to_telegram = lambda **kwargs: None
     stage_telegram.send_preview_to_telegram = lambda **kwargs: None
+    stage_telegram.send_system_notice = lambda **kwargs: None
     sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
 
 from mailbot_v26.pipeline import processor
@@ -41,6 +43,20 @@ def _llm_result(priority: str = "🔴", action_line: str = "Позвонить �
         action_line=action_line,
         body_summary="Body summary",
         attachment_summaries=[{"filename": "file.txt", "summary": "summary"}],
+    )
+
+
+def _reset_auto_priority_engine(monkeypatch, runtime_store) -> None:
+    monkeypatch.setattr(
+        processor,
+        "auto_priority_engine",
+        AutoPriorityEngine(
+            processor.auto_priority_gates,
+            processor.auto_priority_breaker,
+            runtime_store,
+            processor.system_health,
+            enabled_flag=lambda: processor.feature_flags.ENABLE_AUTO_PRIORITY,
+        ),
     )
 
 
@@ -196,7 +212,9 @@ def test_valid_auto_action_persisted(monkeypatch, tmp_path):
             ENABLE_PREVIEW_ACTIONS=False,
         ),
     )
-    monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(True))
+    runtime_store = StubRuntimeFlagStore(True)
+    monkeypatch.setattr(processor, "runtime_flag_store", runtime_store)
+    _reset_auto_priority_engine(monkeypatch, runtime_store)
     monkeypatch.setattr(
         processor.auto_priority_gates,
         "evaluate",
