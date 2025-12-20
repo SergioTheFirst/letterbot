@@ -4,6 +4,7 @@ import html
 import logging
 import re
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from email import message_from_bytes
 from email.message import Message as EmailMessage
@@ -234,8 +235,8 @@ def _extract_attachment_text(att: Attachment) -> str:
 
 
 def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachment]:
-    attachments: List[Attachment] = []
     byte_limit = max_mb * 1024 * 1024
+    candidates: list[tuple[str, str, bytes, int]] = []
     for part in email_obj.walk():
         raw_filename = part.get_filename()
         filename = decode_mime_header(raw_filename or "")
@@ -259,30 +260,49 @@ def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachmen
             if not filename or filename.lower().startswith("attachment.bin"):
                 payload = b""
                 continue
-
-            temp_attachment = Attachment(
-                filename=filename,
-                content=payload,
-                content_type=part.get_content_type() or "",
-                text="",
-                size_bytes=payload_size,
+            candidates.append(
+                (
+                    filename,
+                    part.get_content_type() or "",
+                    payload,
+                    payload_size,
+                )
             )
-            extracted_text = _extract_attachment_text(temp_attachment)
-            temp_attachment.content = b""
-            del temp_attachment
-            payload = b""
-            del payload
-
-            attachment = Attachment(
-                filename=filename,
-                content=b"",
-                content_type=part.get_content_type() or "",
-                text=extracted_text,
-                size_bytes=payload_size,
-            )
-            attachments.append(attachment)
         except Exception:
             continue
+    if not candidates:
+        return []
+
+    def _extract(candidate: tuple[str, str, bytes, int]) -> str:
+        filename, content_type, payload, payload_size = candidate
+        temp_attachment = Attachment(
+            filename=filename,
+            content=payload,
+            content_type=content_type,
+            text="",
+            size_bytes=payload_size,
+        )
+        extracted_text = _extract_attachment_text(temp_attachment)
+        temp_attachment.content = b""
+        del temp_attachment
+        return extracted_text
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(_extract, candidate) for candidate in candidates]
+        extracted_texts = [future.result() for future in futures]
+
+    attachments: List[Attachment] = []
+    for (filename, content_type, _payload, payload_size), extracted_text in zip(
+        candidates, extracted_texts
+    ):
+        attachment = Attachment(
+            filename=filename,
+            content=b"",
+            content_type=content_type,
+            text=extracted_text,
+            size_bytes=payload_size,
+        )
+        attachments.append(attachment)
     return attachments
 
 

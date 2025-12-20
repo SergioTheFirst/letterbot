@@ -1,4 +1,7 @@
 import mailbot_v26.start as start
+from email.message import EmailMessage
+
+from mailbot_v26.bot_core import pipeline as core_pipeline
 from mailbot_v26.pipeline.processor import Attachment
 
 
@@ -63,3 +66,40 @@ def test_docx_text_is_extracted():
     att = Attachment(filename="offer.docx", content=data, content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     text = start._extract_attachment_text(att)
     assert "Договор" in text
+
+
+def test_async_attachment_extraction_order_and_workers(monkeypatch):
+    captured = {}
+
+    class ImmediateFuture:
+        def __init__(self, value):
+            self._value = value
+
+        def result(self):
+            return self._value
+
+    class SpyExecutor:
+        def __init__(self, max_workers):
+            captured["max_workers"] = max_workers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def submit(self, fn, *args, **kwargs):
+            return ImmediateFuture(fn(*args, **kwargs))
+
+    monkeypatch.setattr(core_pipeline, "ThreadPoolExecutor", SpyExecutor)
+
+    message = EmailMessage()
+    message.set_content("body")
+    message.add_attachment("first", subtype="plain", filename="first.txt")
+    message.add_attachment("second", subtype="plain", filename="second.txt")
+
+    attachments = core_pipeline._extract_attachments(message, max_mb=5)
+
+    assert captured["max_workers"] <= 2
+    assert [att.filename for att in attachments] == ["first.txt", "second.txt"]
+    assert [att.text for att in attachments] == ["first", "second"]

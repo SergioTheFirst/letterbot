@@ -21,6 +21,7 @@ from .stage_telegram import send_preview_to_telegram, send_to_telegram
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
+from .signal_quality import evaluate_signal_quality
 
 logger = get_logger("mailbot")
 
@@ -47,6 +48,7 @@ class Attachment:
     content: bytes = b""
     content_type: str = ""
     text: str = ""
+    size_bytes: int = 0
 
 
 @dataclass
@@ -200,6 +202,16 @@ def _build_preview_message(actions: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _build_signal_fallback(subject: str, from_email: str) -> str:
+    safe_subject = subject or "(без темы)"
+    safe_sender = from_email or "неизвестно"
+    return (
+        "Тело письма недоступно (низкое качество извлечения).\n"
+        f"Тема: {safe_subject}\n"
+        f"От: {safe_sender}"
+    )
+
+
 def process_message(
     *,
     account_email: str,
@@ -227,12 +239,28 @@ def process_message(
         subject=subject,
         received_at=received_at.isoformat(),
     )
+    signal_quality = evaluate_signal_quality(body_text or "")
+    fallback_used = False
+    llm_body_text = body_text
+    if not signal_quality.is_usable:
+        llm_body_text = _build_signal_fallback(subject, from_email)
+        fallback_used = True
+        logger.info("signal_fallback_used", reason=signal_quality.reason)
+    logger.info(
+        "signal_evaluated",
+        email_id=message_id,
+        entropy=signal_quality.entropy,
+        printable_ratio=signal_quality.printable_ratio,
+        quality_score=signal_quality.quality_score,
+        is_usable=signal_quality.is_usable,
+        fallback_used=fallback_used,
+    )
     llm_start = time.perf_counter()
     try:
         llm_result = run_llm_stage(
             subject=subject,
             from_email=from_email,
-            body_text=body_text,
+            body_text=llm_body_text,
             attachments=attachments,
         )
     except Exception as exc:
