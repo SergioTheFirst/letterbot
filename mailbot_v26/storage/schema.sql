@@ -69,3 +69,44 @@ CREATE TABLE IF NOT EXISTS decision_traces (
     shadow_priority TEXT,
     compressed BOOLEAN DEFAULT FALSE
 );
+
+CREATE TABLE IF NOT EXISTS entities (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    first_seen DATETIME,
+    last_seen DATETIME,
+    metadata JSON
+);
+
+CREATE INDEX IF NOT EXISTS idx_entities_norm_name
+    ON entities(normalized_name);
+
+CREATE TABLE IF NOT EXISTS relationships (
+    id TEXT PRIMARY KEY,
+    entity_from TEXT NOT NULL,
+    entity_to TEXT NOT NULL,
+    type TEXT NOT NULL,
+    strength REAL DEFAULT 1.0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS entity_baselines (
+    entity_id TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    baseline_value REAL,
+    sample_size INTEGER,
+    computed_at DATETIME,
+    PRIMARY KEY (entity_id, metric)
+);
+
+CREATE TABLE IF NOT EXISTS interaction_events (
+    id TEXT PRIMARY KEY,
+    entity_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    event_time DATETIME,
+    metadata JSON,
+    deviation REAL,
+    is_anomaly BOOLEAN
+);
