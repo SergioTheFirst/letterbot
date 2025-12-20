@@ -19,6 +19,7 @@ from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
 from .stage_llm import run_llm_stage
 from .stage_telegram import send_preview_to_telegram, send_to_telegram
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.storage.context_layer import ContextStore
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
 from .signal_quality import evaluate_signal_quality
@@ -30,6 +31,7 @@ DB_PATH = Path("database.sqlite")
 knowledge_db = KnowledgeDB(DB_PATH)
 analytics = KnowledgeAnalytics(DB_PATH)
 decision_trace_writer = DecisionTraceWriter(DB_PATH)
+context_store = ContextStore(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
@@ -217,6 +219,7 @@ def process_message(
     account_email: str,
     message_id: int,
     from_email: str,
+    from_name: str | None = None,
     subject: str,
     received_at: datetime,
     body_text: str,
@@ -239,6 +242,23 @@ def process_message(
         subject=subject,
         received_at=received_at.isoformat(),
     )
+    entity_resolution = None
+    try:
+        entity_resolution = context_store.resolve_sender_entity(
+            from_email=from_email,
+            from_name=from_name,
+            entity_type="person",
+            event_time=received_at,
+        )
+        if entity_resolution:
+            logger.info(
+                "entity_resolved",
+                entity_id=entity_resolution.entity_id,
+                entity_type=entity_resolution.entity_type,
+                confidence=entity_resolution.confidence,
+            )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("entity_resolution_failed", error=str(exc))
     signal_quality = evaluate_signal_quality(body_text or "")
     fallback_used = False
     llm_body_text = body_text
@@ -543,6 +563,30 @@ def process_message(
             email_id=message_id,
             error=str(exc),
         )
+
+    if entity_resolution:
+        try:
+            context_store.record_interaction_event(
+                entity_id=entity_resolution.entity_id,
+                event_type="email_received",
+                event_time=received_at,
+                metadata={
+                    "email_id": message_id,
+                    "from_email": from_email,
+                    "subject": subject,
+                },
+            )
+            baseline_value, _ = context_store.recompute_email_frequency(
+                entity_id=entity_resolution.entity_id
+            )
+            logger.info(
+                "baseline_updated",
+                entity_id=entity_resolution.entity_id,
+                metric="email_frequency",
+                value=baseline_value,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("context_layer_failed", error=str(exc))
 
     # ---------- Stage Decision Trace ----------
     try:
