@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Iterable
 
+from mailbot_v26.insights.commitment_tracker import Commitment
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,7 +117,7 @@ class KnowledgeDB:
         body_summary: str,
         raw_body: str,
         attachment_summaries: Iterable[tuple[str, str]],
-    ) -> None:
+    ) -> int | None:
         try:
             with sqlite3.connect(self.path) as conn:
                 cur = conn.cursor()
@@ -188,9 +190,49 @@ class KnowledgeDB:
                     )
 
                 conn.commit()
+                return int(email_id)
 
         except Exception as exc:
             logger.error("KnowledgeDB save failed: %s", exc)
+            return None
+
+    def save_commitments(
+        self,
+        *,
+        email_row_id: int,
+        commitments: Iterable[Commitment],
+    ) -> bool:
+        try:
+            with sqlite3.connect(self.path) as conn:
+                conn.executemany(
+                    """
+                    INSERT INTO commitments (
+                        email_row_id,
+                        source,
+                        commitment_text,
+                        deadline_iso,
+                        status,
+                        confidence
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            email_row_id,
+                            commitment.source,
+                            commitment.commitment_text,
+                            commitment.deadline_iso,
+                            commitment.status,
+                            commitment.confidence,
+                        )
+                        for commitment in commitments
+                    ],
+                )
+                conn.commit()
+            return True
+        except Exception as exc:
+            logger.error("KnowledgeDB commitments save failed: %s", exc)
+            return False
 
     def save_preview_action(
         self,
