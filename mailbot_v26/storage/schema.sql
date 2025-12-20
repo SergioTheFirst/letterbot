@@ -49,3 +49,24 @@ CREATE TABLE IF NOT EXISTS preview_actions (
     confidence REAL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS decision_traces (
+    id TEXT PRIMARY KEY,
+    created_at TEXT,
+    email_id TEXT,
+    account_email TEXT,
+    prompt_full TEXT,
+    prompt_vars TEXT,
+    crm_context TEXT,
+    llm_provider TEXT,
+    llm_model TEXT,
+    llm_request TEXT,
+    llm_response TEXT,
+    llm_latency_ms INTEGER,
+    decision_json TEXT,
+    confidence REAL,
+    reason_code TEXT,
+    reason_text TEXT,
+    shadow_decision TEXT,
+    diff_json TEXT
+);

@@ -11,6 +11,7 @@ from typing import Any
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.features import FeatureFlags
 from mailbot_v26.observability import get_logger
+from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
 from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
@@ -27,6 +28,7 @@ logger = get_logger("mailbot")
 DB_PATH = Path("database.sqlite")
 knowledge_db = KnowledgeDB(DB_PATH)
 analytics = KnowledgeAnalytics(DB_PATH)
+decision_trace_writer = DecisionTraceWriter(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
@@ -183,6 +185,12 @@ def _extract_preview_actions(proposed_action: dict | list | None) -> list[str]:
     else:
         actions.append(str(proposed_action))
     return [_sanitize_preview_line(action) for action in actions if action]
+
+
+def _read_llm_field(llm_result: Any, key: str, default: Any = None) -> Any:
+    if isinstance(llm_result, dict):
+        return llm_result.get(key, default)
+    return getattr(llm_result, key, default)
 
 
 def _build_preview_message(actions: list[str]) -> str:
@@ -507,6 +515,63 @@ def process_message(
             email_id=message_id,
             error=str(exc),
         )
+
+    # ---------- Stage Decision Trace ----------
+    try:
+        prompt_full = _read_llm_field(llm_result, "prompt_full", "") or ""
+        prompt_vars = _read_llm_field(llm_result, "prompt_vars", {}) or {}
+        crm_context = _read_llm_field(llm_result, "crm_context", None)
+        llm_model = _read_llm_field(llm_result, "llm_model", "") or ""
+        llm_request = _read_llm_field(llm_result, "llm_request", "") or ""
+        llm_response = _read_llm_field(llm_result, "llm_response", "") or ""
+        reason_code = "auto_priority" if priority_reason else None
+        decision_payload = {
+            "priority": priority,
+            "action_line": action_line,
+            "body_summary": body_summary,
+            "attachment_summaries": attachment_summaries,
+        }
+        shadow_decision = None
+        diff = None
+        if shadow_priority or shadow_action_line:
+            shadow_decision = {
+                "priority": shadow_priority,
+                "action_line": shadow_action_line,
+            }
+            diff_entries: dict[str, dict[str, str | None]] = {}
+            if shadow_priority and shadow_priority != priority:
+                diff_entries["priority"] = {
+                    "final": priority,
+                    "shadow": shadow_priority,
+                }
+            if shadow_action_line and shadow_action_line != action_line:
+                diff_entries["action_line"] = {
+                    "final": action_line,
+                    "shadow": shadow_action_line,
+                }
+            if diff_entries:
+                diff = diff_entries
+
+        decision_trace_writer.write(
+            email_id=str(message_id),
+            account_email=account_email,
+            prompt_full=prompt_full,
+            prompt_vars=prompt_vars,
+            crm_context=crm_context,
+            llm_provider=llm_provider or "unknown",
+            llm_model=llm_model,
+            llm_request=llm_request,
+            llm_response=llm_response,
+            llm_latency_ms=llm_latency_ms,
+            decision=decision_payload,
+            confidence=confidence_score,
+            reason_code=reason_code,
+            reason_text=priority_reason,
+            shadow_decision=shadow_decision,
+            diff=diff,
+        )
+    except Exception as exc:
+        logger.error("decision_trace_failed", error=str(exc))
 
     # ---------- Stage Telegram ----------
     try:
