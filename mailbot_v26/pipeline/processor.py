@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
 import time
-from datetime import datetime
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +18,11 @@ from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPrio
 from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
 from .stage_llm import run_llm_stage
-from .stage_telegram import send_preview_to_telegram, send_to_telegram
+from .stage_telegram import send_preview_to_telegram, send_system_notice, send_to_telegram
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.context_layer import ContextStore
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
+from mailbot_v26.system_health import system_health
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
 from .signal_quality import evaluate_signal_quality
 
@@ -214,6 +216,44 @@ def _build_signal_fallback(subject: str, from_email: str) -> str:
     )
 
 
+def _notify_system_mode_change(
+    *,
+    change,
+    chat_id: str,
+    account_email: str,
+) -> None:
+    if change is None:
+        return
+    try:
+        send_system_notice(
+            chat_id=chat_id,
+            notice_text=system_health.system_notice(change),
+            account_email=account_email,
+        )
+        logger.info(
+            "system_mode_notice_sent",
+            chat_id=chat_id,
+            account_email=account_email,
+            mode=change.current.value,
+        )
+    except Exception as exc:  # pragma: no cover - optional notification
+        logger.error(
+            "system_mode_notice_failed",
+            chat_id=chat_id,
+            account_email=account_email,
+            error=str(exc),
+        )
+
+
+def _check_crm_available() -> bool:
+    try:
+        with sqlite3.connect(knowledge_db.path) as conn:
+            conn.execute("SELECT 1;")
+        return True
+    except Exception:
+        return False
+
+
 def process_message(
     *,
     account_email: str,
@@ -284,6 +324,16 @@ def process_message(
             attachments=attachments,
         )
     except Exception as exc:
+        change = system_health.update_component(
+            "LLM",
+            False,
+            reason=str(exc) or "LLM stage failed",
+        )
+        _notify_system_mode_change(
+            change=change,
+            chat_id=telegram_chat_id,
+            account_email=account_email,
+        )
         logger.error(
             "processing_error",
             stage="llm",
@@ -294,8 +344,24 @@ def process_message(
     llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
 
     if not llm_result:
+        change = system_health.update_component(
+            "LLM",
+            False,
+            reason="LLM returned empty result",
+        )
+        _notify_system_mode_change(
+            change=change,
+            chat_id=telegram_chat_id,
+            account_email=account_email,
+        )
         logger.warning("llm_empty_result", email_id=message_id)
         return
+    change = system_health.update_component("LLM", True)
+    _notify_system_mode_change(
+        change=change,
+        chat_id=telegram_chat_id,
+        account_email=account_email,
+    )
 
     priority = llm_result.priority
     original_priority: str | None = None
@@ -521,6 +587,17 @@ def process_message(
 
     # ---------- Stage 1.2: WRITE-ONLY CRM ----------
     try:
+        if not _check_crm_available():
+            change = system_health.update_component(
+                "CRM",
+                False,
+                reason="CRM unavailable",
+            )
+            _notify_system_mode_change(
+                change=change,
+                chat_id=telegram_chat_id,
+                account_email=account_email,
+            )
         knowledge_db.save_email(
             account_email=account_email,
             from_email=from_email,
@@ -553,9 +630,25 @@ def process_message(
                 email_id=message_id,
                 account_email=account_email,
             )
+        change = system_health.update_component("CRM", True)
+        _notify_system_mode_change(
+            change=change,
+            chat_id=telegram_chat_id,
+            account_email=account_email,
+        )
 
     except Exception as exc:
         # ❗ БД — side-effect only
+        change = system_health.update_component(
+            "CRM",
+            False,
+            reason=str(exc) or "CRM write failed",
+        )
+        _notify_system_mode_change(
+            change=change,
+            chat_id=telegram_chat_id,
+            account_email=account_email,
+        )
         logger.error("knowledge_db_failed", error=str(exc))
         logger.error(
             "processing_error",
@@ -642,6 +735,12 @@ def process_message(
             attachment_summaries=attachment_summaries,
             account_email=account_email,
         )
+        change = system_health.update_component("Telegram", True)
+        _notify_system_mode_change(
+            change=change,
+            chat_id=telegram_chat_id,
+            account_email=account_email,
+        )
         logger.info(
             "telegram_sent",
             email_id=message_id,
@@ -649,6 +748,16 @@ def process_message(
             success=True,
         )
     except Exception as exc:
+        change = system_health.update_component(
+            "Telegram",
+            False,
+            reason=str(exc) or "Telegram send failed",
+        )
+        _notify_system_mode_change(
+            change=change,
+            chat_id=telegram_chat_id,
+            account_email=account_email,
+        )
         logger.error(
             "processing_error",
             stage="telegram",
