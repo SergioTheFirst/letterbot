@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS preview_actions (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS action_feedback (
+    id TEXT PRIMARY KEY,
+    email_id TEXT,
+    proposed_action TEXT,
+    decision TEXT,
+    user_note TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS decision_traces (
     id TEXT PRIMARY KEY,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
