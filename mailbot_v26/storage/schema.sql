@@ -52,21 +52,20 @@ CREATE TABLE IF NOT EXISTS preview_actions (
 
 CREATE TABLE IF NOT EXISTS decision_traces (
     id TEXT PRIMARY KEY,
-    created_at TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     email_id TEXT,
     account_email TEXT,
-    prompt_full TEXT,
-    prompt_vars TEXT,
-    crm_context TEXT,
+    signal_entropy REAL,
+    signal_printable_ratio REAL,
+    signal_quality_score REAL,
+    signal_fallback_used BOOLEAN,
     llm_provider TEXT,
     llm_model TEXT,
-    llm_request TEXT,
-    llm_response TEXT,
-    llm_latency_ms INTEGER,
-    decision_json TEXT,
+    prompt_full TEXT,
+    response_full TEXT,
+    priority TEXT,
+    action_line TEXT,
     confidence REAL,
-    reason_code TEXT,
-    reason_text TEXT,
-    shadow_decision TEXT,
-    diff_json TEXT
+    shadow_priority TEXT,
+    compressed BOOLEAN DEFAULT FALSE
 );

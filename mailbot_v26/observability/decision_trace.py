@@ -1,25 +1,13 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from mailbot_v26.observability import get_logger
 
 logger = get_logger("mailbot")
-
-
-def _to_json(value: Any) -> str | None:
-    if value is None:
-        return None
-    try:
-        return json.dumps(value, ensure_ascii=False)
-    except (TypeError, ValueError):
-        return json.dumps(str(value), ensure_ascii=False)
 
 
 @dataclass(slots=True)
@@ -38,23 +26,22 @@ class DecisionTraceWriter:
                     """
                     CREATE TABLE IF NOT EXISTS decision_traces (
                         id TEXT PRIMARY KEY,
-                        created_at TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         email_id TEXT,
                         account_email TEXT,
-                        prompt_full TEXT,
-                        prompt_vars TEXT,
-                        crm_context TEXT,
+                        signal_entropy REAL,
+                        signal_printable_ratio REAL,
+                        signal_quality_score REAL,
+                        signal_fallback_used BOOLEAN,
                         llm_provider TEXT,
                         llm_model TEXT,
-                        llm_request TEXT,
-                        llm_response TEXT,
-                        llm_latency_ms INTEGER,
-                        decision_json TEXT,
+                        prompt_full TEXT,
+                        response_full TEXT,
+                        priority TEXT,
+                        action_line TEXT,
                         confidence REAL,
-                        reason_code TEXT,
-                        reason_text TEXT,
-                        shadow_decision TEXT,
-                        diff_json TEXT
+                        shadow_priority TEXT,
+                        compressed BOOLEAN DEFAULT FALSE
                     );
                     """
                 )
@@ -66,20 +53,19 @@ class DecisionTraceWriter:
         *,
         email_id: str,
         account_email: str,
+        signal_entropy: float,
+        signal_printable_ratio: float,
+        signal_quality_score: float,
+        signal_fallback_used: bool,
         prompt_full: str,
-        prompt_vars: dict,
-        crm_context: dict | None,
         llm_provider: str,
         llm_model: str,
-        llm_request: str,
-        llm_response: str,
-        llm_latency_ms: int,
-        decision: dict,
+        response_full: str,
         confidence: float | None,
-        reason_code: str | None,
-        reason_text: str | None,
-        shadow_decision: dict | None,
-        diff: dict | None,
+        priority: str,
+        action_line: str,
+        shadow_priority: str | None,
+        compressed: bool = False,
     ) -> None:
         try:
             with sqlite3.connect(self.path) as conn:
@@ -87,47 +73,43 @@ class DecisionTraceWriter:
                     """
                     INSERT INTO decision_traces (
                         id,
-                        created_at,
                         email_id,
                         account_email,
-                        prompt_full,
-                        prompt_vars,
-                        crm_context,
+                        signal_entropy,
+                        signal_printable_ratio,
+                        signal_quality_score,
+                        signal_fallback_used,
                         llm_provider,
                         llm_model,
-                        llm_request,
-                        llm_response,
-                        llm_latency_ms,
-                        decision_json,
+                        prompt_full,
+                        response_full,
+                        priority,
+                        action_line,
                         confidence,
-                        reason_code,
-                        reason_text,
-                        shadow_decision,
-                        diff_json
+                        shadow_priority,
+                        compressed
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         uuid.uuid4().hex,
-                        datetime.utcnow().isoformat(),
                         email_id,
                         account_email,
-                        prompt_full,
-                        _to_json(prompt_vars),
-                        _to_json(crm_context),
+                        signal_entropy,
+                        signal_printable_ratio,
+                        signal_quality_score,
+                        signal_fallback_used,
                         llm_provider,
                         llm_model,
-                        llm_request,
-                        llm_response,
-                        llm_latency_ms,
-                        _to_json(decision),
+                        prompt_full,
+                        response_full,
+                        priority,
+                        action_line,
                         confidence,
-                        reason_code,
-                        reason_text,
-                        _to_json(shadow_decision),
-                        _to_json(diff),
+                        shadow_priority,
+                        compressed,
                     ),
                 )
                 conn.commit()
-        except Exception as exc:
-            logger.error("decision_trace_write_failed", error=str(exc))
+        except Exception:
+            raise
