@@ -94,6 +94,7 @@ def test_structured_logging_events_emitted(monkeypatch) -> None:
     assert "llm_decision" in events
     assert "auto_priority_evaluated" in events
     assert "telegram_sent" in events
+    assert "signal_evaluated" in events
 
 
 def test_observability_logger_outputs_json() -> None:
@@ -158,6 +159,45 @@ def test_telegram_payload_stability(monkeypatch) -> None:
         "attachment_summaries": [{"filename": "file.txt", "summary": "summary"}],
         "account_email": "account@example.com",
     }
+
+
+def test_signal_fallback_logging(monkeypatch) -> None:
+    observability_logger._CONFIGURED = False
+    stream, handler, root_logger = _capture_plain_json_logs()
+
+    _setup_processor(monkeypatch, processor)
+    try:
+        processor.process_message(
+            account_email="account@example.com",
+            message_id=99,
+            from_email="sender@example.com",
+            subject="Subject",
+            received_at=datetime(2024, 1, 1, 12, 0),
+            body_text="a" * 100,
+            attachments=[],
+            telegram_chat_id="chat",
+        )
+    finally:
+        root_logger.removeHandler(handler)
+
+    payloads = [
+        json.loads(line)
+        for line in stream.getvalue().splitlines()
+        if line.strip()
+    ]
+    evaluated = [entry for entry in payloads if entry["event"] == "signal_evaluated"]
+    assert evaluated
+    evaluated_payload = evaluated[0]
+    assert "entropy" in evaluated_payload
+    assert "printable_ratio" in evaluated_payload
+    assert "quality_score" in evaluated_payload
+    assert evaluated_payload["fallback_used"] is True
+
+    fallback_events = [
+        entry for entry in payloads if entry["event"] == "signal_fallback_used"
+    ]
+    assert fallback_events
+    assert fallback_events[0]["reason"] == "entropy_below_threshold"
 
 
 def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
