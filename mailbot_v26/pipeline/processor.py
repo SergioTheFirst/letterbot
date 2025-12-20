@@ -126,7 +126,7 @@ def _lookup_sender_stats(from_email: str) -> dict[str, object]:
             if sender == normalized:
                 return row
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("Confidence lookup failed: %s", exc, exc_info=True)
+        logger.error("confidence_lookup_failed", error=str(exc))
     return {}
 
 
@@ -148,7 +148,7 @@ def _recent_history(from_email: str) -> dict[str, object]:
         is_trending_up = escalations >= 2
         return {"escalations": escalations, "is_trending_up": is_trending_up}
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("Confidence history failed: %s", exc, exc_info=True)
+        logger.error("confidence_history_failed", error=str(exc))
         return {}
 
 
@@ -238,7 +238,7 @@ def process_message(
     llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
 
     if not llm_result:
-        logger.warning("LLM returned empty result, skipping message_id=%s", message_id)
+        logger.warning("llm_empty_result", email_id=message_id)
         return
 
     priority = llm_result.priority
@@ -260,11 +260,11 @@ def process_message(
     )
     if shadow_priority != priority:
         logger.info(
-            "[SHADOW-PRIORITY] from=%s current=%s shadow=%s reason=%s",
-            from_email or "",
-            priority,
-            shadow_priority,
-            shadow_reason or "",
+            "shadow_priority_computed",
+            from_email=from_email or "",
+            current_priority=priority,
+            shadow_priority=shadow_priority,
+            reason=shadow_reason or "",
         )
 
     # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged + runtime) ----------
@@ -292,8 +292,8 @@ def process_message(
             auto_priority_runtime_enabled = False
             auto_priority_enabled = False
             logger.warning(
-                "[AUTO-PRIORITY-SAFETY] auto-disabled reason=%s",
-                breaker_status.reason or "unknown",
+                "auto_priority_safety_disabled",
+                reason=breaker_status.reason or "unknown",
             )
 
     gate_decision = None
@@ -308,8 +308,8 @@ def process_message(
             auto_priority_allowed = True
         else:
             logger.info(
-                "[AUTO-PRIORITY-GATE] status=CLOSED reasons=%s",
-                ",".join(gate_decision.reasons) if gate_decision.reasons else "unknown",
+                "auto_priority_gate_closed",
+                reasons=",".join(gate_decision.reasons) if gate_decision.reasons else "unknown",
             )
 
     if auto_priority_allowed:
@@ -323,36 +323,36 @@ def process_message(
             priority_reason = shadow_reason or "Auto-priority escalation"
             confidence_decision = "APPLIED"
             logger.info(
-                "[AUTO-PRIORITY-APPLY] from=%s llm=%s shadow=%s reason=%s",
-                from_email or "",
-                original_priority,
-                shadow_priority,
-                shadow_reason or "",
+                "auto_priority_applied",
+                from_email=from_email or "",
+                llm_priority=original_priority,
+                shadow_priority=shadow_priority,
+                reason=shadow_reason or "",
             )
         else:
             confidence_decision = "SKIPPED"
 
     if auto_priority_enabled and should_score_confidence:
         logger.info(
-            "[AUTO-PRIORITY-CONFIDENCE]\nllm=%s shadow=%s confidence=%.2f threshold=%.1f → %s",
-            llm_priority_for_confidence,
-            shadow_priority,
-            confidence_score or 0.0,
-            max(
+            "auto_priority_confidence_scored",
+            llm_priority=llm_priority_for_confidence,
+            shadow_priority=shadow_priority,
+            confidence=confidence_score or 0.0,
+            threshold=max(
                 feature_flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD,
                 AutoPriorityGates.MIN_CONFIDENCE,
             ),
-            confidence_decision or "SKIPPED",
+            decision=confidence_decision or "SKIPPED",
         )
 
     logger.info(
-        "[AUTO-PRIORITY] enabled=%d applied=%d llm=%s shadow=%s final=%s confidence=%.2f",
-        1 if auto_priority_allowed else 0,
-        1 if confidence_decision == "APPLIED" else 0,
-        llm_priority_for_confidence,
-        shadow_priority,
-        priority,
-        confidence_score or 0.0,
+        "auto_priority_summary",
+        enabled=auto_priority_allowed,
+        applied=confidence_decision == "APPLIED",
+        llm_priority=llm_priority_for_confidence,
+        shadow_priority=shadow_priority,
+        final_priority=priority,
+        confidence=confidence_score or 0.0,
     )
 
     logger.info(
@@ -388,10 +388,10 @@ def process_message(
         shadow_action_line, shadow_action_reason = shadow_tasks[0]
     for task, reason in shadow_tasks:
         logger.info(
-            "[SHADOW-ACTION] from=%s task=%s reason=%s",
-            from_email or "",
-            task or "",
-            reason or "",
+            "shadow_action_candidate",
+            from_email=from_email or "",
+            task=task or "",
+            reason=reason or "",
         )
 
     shadow_priority_to_persist: str | None = None
@@ -414,13 +414,13 @@ def process_message(
 
         if proposed_action:
             logger.info(
-                "[AUTO-ACTION]\nproposed=%s confidence=%.2f source=%s → STORED",
-                proposed_action.get("type", ""),
-                proposed_action.get("confidence", 0.0),
-                proposed_action.get("source", ""),
+                "auto_action_stored",
+                action_type=proposed_action.get("type", ""),
+                confidence=proposed_action.get("confidence", 0.0),
+                source=proposed_action.get("source", ""),
             )
         else:
-            logger.info("[AUTO-ACTION]\nconditions not met → SKIPPED")
+            logger.info("auto_action_skipped", reason="conditions_not_met")
 
     if getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False) and proposed_action:
         preview_reasons = [
@@ -436,7 +436,7 @@ def process_message(
             "confidence": proposed_action.get("confidence", 0.0),
             "reasons": preview_reasons,
         }
-        logger.info("[PREVIEW] %s", preview)
+        logger.info("preview_action_generated", preview=preview)
         try:
             knowledge_db.save_preview_action(
                 email_id=message_id,
@@ -444,7 +444,7 @@ def process_message(
                 confidence=proposed_action.get("confidence"),
             )
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("Preview action persistence failed: %s", exc, exc_info=True)
+            logger.error("preview_action_persist_failed", error=str(exc))
 
     if feature_flags.ENABLE_SHADOW_PERSISTENCE:
         shadow_priority_to_persist = shadow_priority
@@ -493,14 +493,14 @@ def process_message(
         )
         if feature_flags.ENABLE_SHADOW_PERSISTENCE:
             logger.info(
-                "[SHADOW-PERSIST] saved shadow fields for uid=%s account=%s",
-                message_id,
-                account_email,
+                "shadow_persist_saved",
+                email_id=message_id,
+                account_email=account_email,
             )
 
     except Exception as exc:
         # ❗ БД — side-effect only
-        logger.error("KnowledgeDB failed: %s", exc, exc_info=True)
+        logger.error("knowledge_db_failed", error=str(exc))
         logger.error(
             "processing_error",
             stage="crm",
@@ -540,9 +540,10 @@ def process_message(
         preview_actions = [action for action in preview_actions if action]
         if not preview_actions:
             logger.info(
-                "[PREVIEW-ACTIONS] skipped reason=no_proposals email_id=%s account=%s",
-                message_id,
-                account_email,
+                "preview_actions_skipped",
+                reason="no_proposals",
+                email_id=message_id,
+                account_email=account_email,
             )
             return
 
@@ -553,8 +554,8 @@ def process_message(
             account_email=account_email,
         )
         logger.info(
-            "[PREVIEW-ACTIONS] sent count=%s email_id=%s account=%s",
-            len(preview_actions),
-            message_id,
-            account_email,
+            "preview_actions_sent",
+            count=len(preview_actions),
+            email_id=message_id,
+            account_email=account_email,
         )

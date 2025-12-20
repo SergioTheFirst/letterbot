@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import builtins
-import importlib
 import io
 import json
 import logging
-import sys
 from datetime import datetime
 from types import SimpleNamespace
-
-import pytest
 
 from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.observability import logger as observability_logger
@@ -71,24 +66,8 @@ def _setup_processor(monkeypatch, processor_module) -> None:
 
 
 def test_structured_logging_events_emitted(monkeypatch) -> None:
-    structlog = pytest.importorskip("structlog")
     observability_logger._CONFIGURED = False
-    observability_logger.STRUCTLOG_AVAILABLE = True
-    observability_logger.structlog = structlog
-
-    stream = io.StringIO()
-    handler = logging.StreamHandler(stream)
-    formatter = structlog.stdlib.ProcessorFormatter(
-        processor=structlog.processors.JSONRenderer(),
-        foreign_pre_chain=[
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.add_logger_name,
-        ],
-    )
-    handler.setFormatter(formatter)
-    root_logger = logging.getLogger()
-    root_logger.addHandler(handler)
-    root_logger.setLevel(logging.INFO)
+    stream, handler, root_logger = _capture_plain_json_logs()
 
     _setup_processor(monkeypatch, processor)
     try:
@@ -105,35 +84,23 @@ def test_structured_logging_events_emitted(monkeypatch) -> None:
     finally:
         root_logger.removeHandler(handler)
 
-    events = [
-        json.loads(line)["event"]
-        for line in stream.getvalue().splitlines()
-        if line.strip()
-    ]
+    events = []
+    for line in stream.getvalue().splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        events.append(payload["event"])
     assert "email_received" in events
     assert "llm_decision" in events
     assert "auto_priority_evaluated" in events
     assert "telegram_sent" in events
 
 
-def test_fallback_logging_without_structlog(monkeypatch) -> None:
-    original_import = builtins.__import__
-
-    def _blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "structlog":
-            raise ImportError("structlog unavailable")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _blocked_import)
-    sys.modules.pop("mailbot_v26.observability.logger", None)
-    sys.modules.pop("mailbot_v26.observability", None)
-    sys.modules.pop("mailbot_v26.pipeline.processor", None)
-    reloaded_logger = importlib.import_module("mailbot_v26.observability.logger")
-    fallback_processor = importlib.import_module("mailbot_v26.pipeline.processor")
+def test_observability_logger_outputs_json() -> None:
+    observability_logger._CONFIGURED = False
     stream, handler, root_logger = _capture_plain_json_logs()
-    _setup_processor(monkeypatch, fallback_processor)
     try:
-        logger = reloaded_logger.get_logger("mailbot")
+        logger = observability_logger.get_logger("mailbot")
         logger.info("email_received", email_id=123)
     finally:
         root_logger.removeHandler(handler)
@@ -141,6 +108,8 @@ def test_fallback_logging_without_structlog(monkeypatch) -> None:
     payload = json.loads(stream.getvalue().strip())
     assert payload["event"] == "email_received"
     assert payload["email_id"] == 123
+    assert payload["level"] == "INFO"
+    assert payload["timestamp"].endswith("Z")
 
 
 def test_telegram_payload_stability(monkeypatch) -> None:
