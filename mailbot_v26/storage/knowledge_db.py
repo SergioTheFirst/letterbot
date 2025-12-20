@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Iterable
 
@@ -221,3 +222,39 @@ class KnowledgeDB:
                 conn.commit()
         except Exception as exc:
             logger.error("KnowledgeDB preview action save failed: %s", exc)
+
+    def save_action_feedback(
+        self,
+        *,
+        email_id: str,
+        proposed_action: dict | None,
+        decision: str,
+        user_note: str | None = None,
+    ) -> str:
+        feedback_id = uuid.uuid4().hex
+        payload = ""
+        if proposed_action is not None:
+            try:
+                payload = json.dumps(proposed_action, ensure_ascii=False)
+            except (TypeError, ValueError):
+                payload = str(proposed_action)
+
+        try:
+            with sqlite3.connect(self.path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO action_feedback (
+                        id,
+                        email_id,
+                        proposed_action,
+                        decision,
+                        user_note
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (feedback_id, email_id, payload, decision, user_note),
+                )
+                conn.commit()
+        except Exception as exc:
+            logger.error("KnowledgeDB feedback save failed: %s", exc)
+        return feedback_id

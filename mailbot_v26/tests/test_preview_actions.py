@@ -1,8 +1,10 @@
+import json
 import logging
 from datetime import datetime
 from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
+from mailbot_v26.system_health import OperationalMode
 
 _DEFAULT_PROPOSAL = object()
 
@@ -97,7 +99,11 @@ def test_preview_disabled_no_preview_generated(monkeypatch, caplog) -> None:
     )
 
     assert preview_called is False
-    assert not any("[PREVIEW]" in record.message for record in caplog.records)
+    assert not any(
+        json.loads(record.message).get("event") == "preview_shown"
+        for record in caplog.records
+        if record.message.startswith("{")
+    )
     assert preview_payload == {}
     assert "chat_id" in payload
 
@@ -140,13 +146,20 @@ def test_preview_enabled_preview_generated(monkeypatch, caplog) -> None:
 
     assert stored.get("email_id") == 102
     assert stored.get("proposed_action")
-    assert any("[PREVIEW]" in record.message for record in caplog.records)
+    assert any(
+        json.loads(record.message).get("event") == "preview_shown"
+        for record in caplog.records
+        if record.message.startswith("{")
+    )
     assert "chat_id" in payload
     assert preview_payload.get("chat_id") == "chat"
     preview_text = str(preview_payload.get("preview_text") or "")
-    assert preview_text.startswith("PREVIEW ACTIONS (не применено):")
-    assert preview_text.endswith("Источник: AutoActionEngine, режим preview")
-    assert "- Оплатить счет" in preview_text
+    assert preview_text.startswith("🤖 AI Preview")
+    assert "Предлагаемое действие:" in preview_text
+    assert "• Оплатить счет" in preview_text
+    assert "Причина:" in preview_text
+    assert "Confidence: 0.90" in preview_text
+    assert preview_text.endswith("[✅ Принять] [❌ Отклонить]")
     for forbidden in ("<", ">", "*", "_", "</"):
         assert forbidden not in preview_text
 
@@ -242,4 +255,54 @@ def test_preview_enabled_no_proposals(monkeypatch, caplog) -> None:
     )
 
     assert preview_payload == {}
-    assert any("[PREVIEW-ACTIONS] skipped reason=no_proposals" in record.message for record in caplog.records)
+    assert any(
+        json.loads(record.message).get("event") == "preview_actions_skipped"
+        and json.loads(record.message).get("reason") == "no_proposals"
+        for record in caplog.records
+        if record.message.startswith("{")
+    )
+
+
+def test_preview_skipped_when_llm_degraded(monkeypatch, caplog) -> None:
+    flags = SimpleNamespace(
+        ENABLE_AUTO_PRIORITY=False,
+        AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
+        ENABLE_AUTO_ACTIONS=True,
+        AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+        ENABLE_SHADOW_PERSISTENCE=False,
+        ENABLE_PREVIEW_ACTIONS=True,
+    )
+    _common_monkeypatches(monkeypatch, flags)
+    preview_payload = _preview_capture(monkeypatch)
+
+    monkeypatch.setattr(
+        processor,
+        "knowledge_db",
+        SimpleNamespace(save_email=lambda **kwargs: None, save_preview_action=lambda **kwargs: None),
+    )
+    degraded_health = SimpleNamespace(
+        mode=OperationalMode.DEGRADED_NO_LLM,
+        update_component=lambda *args, **kwargs: None,
+        system_notice=lambda change: "",
+    )
+    monkeypatch.setattr(processor, "system_health", degraded_health)
+    caplog.set_level(logging.INFO)
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=401,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 4, 1, 12, 0),
+        body_text="Body",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    assert preview_payload == {}
+    assert any(
+        json.loads(record.message).get("event") == "preview_actions_skipped"
+        and json.loads(record.message).get("reason") == "system_degraded_no_llm"
+        for record in caplog.records
+        if record.message.startswith("{")
+    )

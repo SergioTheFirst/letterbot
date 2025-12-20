@@ -22,7 +22,7 @@ from .stage_telegram import send_preview_to_telegram, send_system_notice, send_t
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.context_layer import ContextStore
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
-from mailbot_v26.system_health import system_health
+from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
 from .signal_quality import evaluate_signal_quality
 
@@ -199,10 +199,28 @@ def _read_llm_field(llm_result: Any, key: str, default: Any = None) -> Any:
     return getattr(llm_result, key, default)
 
 
-def _build_preview_message(actions: list[str]) -> str:
-    lines = ["PREVIEW ACTIONS (не применено):"]
-    lines.extend(f"- {action}" for action in actions)
-    lines.append("Источник: AutoActionEngine, режим preview")
+def _build_preview_message(
+    *,
+    action_text: str,
+    reasons: list[str],
+    confidence: float | None,
+) -> str:
+    action_line = _sanitize_preview_line(action_text)
+    safe_reasons = [_sanitize_preview_line(reason) for reason in reasons if reason]
+    if not safe_reasons:
+        safe_reasons = ["нет данных"]
+    confidence_value = confidence if confidence is not None else 0.0
+    lines = [
+        "🤖 AI Preview",
+        "",
+        "Предлагаемое действие:",
+        f"• {action_line}",
+        "Причина:",
+    ]
+    lines.extend(f"• {reason}" for reason in safe_reasons)
+    lines.append(f"Confidence: {confidence_value:.2f}")
+    lines.append("")
+    lines.append("[✅ Принять] [❌ Отклонить]")
     return "\n".join(lines)
 
 
@@ -767,6 +785,16 @@ def process_message(
         raise
 
     if feature_flags.ENABLE_PREVIEW_ACTIONS:
+        if system_health.mode == OperationalMode.DEGRADED_NO_LLM:
+            logger.info(
+                "preview_actions_skipped",
+                reason="system_degraded_no_llm",
+                email_id=message_id,
+                account_email=account_email,
+                system_mode=system_health.mode.value,
+            )
+            return
+
         preview_actions = _extract_preview_actions(proposed_action)
         preview_actions = [action for action in preview_actions if action]
         if not preview_actions:
@@ -775,18 +803,24 @@ def process_message(
                 reason="no_proposals",
                 email_id=message_id,
                 account_email=account_email,
+                system_mode=system_health.mode.value,
             )
             return
 
-        preview_text = _build_preview_message(preview_actions)
+        preview_text = _build_preview_message(
+            action_text=preview_actions[0],
+            reasons=[reason for reason in (shadow_action_reason, shadow_reason, priority_reason) if reason],
+            confidence=proposed_action.get("confidence") if proposed_action else None,
+        )
         send_preview_to_telegram(
             chat_id=telegram_chat_id,
             preview_text=preview_text,
             account_email=account_email,
         )
         logger.info(
-            "preview_actions_sent",
-            count=len(preview_actions),
+            "preview_shown",
             email_id=message_id,
-            account_email=account_email,
+            action_type=proposed_action.get("type", "") if proposed_action else "",
+            confidence=proposed_action.get("confidence", 0.0) if proposed_action else 0.0,
+            system_mode=system_health.mode.value,
         )
