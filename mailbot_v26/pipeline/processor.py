@@ -547,59 +547,44 @@ def process_message(
     # ---------- Stage Decision Trace ----------
     try:
         prompt_full = _read_llm_field(llm_result, "prompt_full", "") or ""
-        prompt_vars = _read_llm_field(llm_result, "prompt_vars", {}) or {}
-        crm_context = _read_llm_field(llm_result, "crm_context", None)
+        response_full = (
+            _read_llm_field(llm_result, "response_full", "")
+            or _read_llm_field(llm_result, "llm_response", "")
+            or ""
+        )
         llm_model = _read_llm_field(llm_result, "llm_model", "") or ""
-        llm_request = _read_llm_field(llm_result, "llm_request", "") or ""
-        llm_response = _read_llm_field(llm_result, "llm_response", "") or ""
-        reason_code = "auto_priority" if priority_reason else None
-        decision_payload = {
-            "priority": priority,
-            "action_line": action_line,
-            "body_summary": body_summary,
-            "attachment_summaries": attachment_summaries,
-        }
-        shadow_decision = None
-        diff = None
-        if shadow_priority or shadow_action_line:
-            shadow_decision = {
-                "priority": shadow_priority,
-                "action_line": shadow_action_line,
-            }
-            diff_entries: dict[str, dict[str, str | None]] = {}
-            if shadow_priority and shadow_priority != priority:
-                diff_entries["priority"] = {
-                    "final": priority,
-                    "shadow": shadow_priority,
-                }
-            if shadow_action_line and shadow_action_line != action_line:
-                diff_entries["action_line"] = {
-                    "final": action_line,
-                    "shadow": shadow_action_line,
-                }
-            if diff_entries:
-                diff = diff_entries
 
         decision_trace_writer.write(
             email_id=str(message_id),
             account_email=account_email,
+            signal_entropy=signal_quality.entropy,
+            signal_printable_ratio=signal_quality.printable_ratio,
+            signal_quality_score=signal_quality.quality_score,
+            signal_fallback_used=fallback_used,
             prompt_full=prompt_full,
-            prompt_vars=prompt_vars,
-            crm_context=crm_context,
             llm_provider=llm_provider or "unknown",
             llm_model=llm_model,
-            llm_request=llm_request,
-            llm_response=llm_response,
-            llm_latency_ms=llm_latency_ms,
-            decision=decision_payload,
+            response_full=response_full,
             confidence=confidence_score,
-            reason_code=reason_code,
-            reason_text=priority_reason,
-            shadow_decision=shadow_decision,
-            diff=diff,
+            priority=priority,
+            action_line=action_line,
+            shadow_priority=shadow_priority,
+        )
+        logger.info(
+            "decision_traced",
+            email_id=message_id,
+            provider=llm_provider or "unknown",
+            entropy=signal_quality.entropy,
+            fallback_used=fallback_used,
+            priority=priority,
+            confidence=confidence_score or 0.0,
         )
     except Exception as exc:
-        logger.error("decision_trace_failed", error=str(exc))
+        logger.error(
+            "TRACE_WRITE_FAILED",
+            email_id=message_id,
+            error=str(exc),
+        )
 
     # ---------- Stage Telegram ----------
     try:

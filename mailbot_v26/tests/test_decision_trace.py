@@ -71,7 +71,7 @@ def test_decision_trace_persists_prompt_and_response(monkeypatch, tmp_path) -> N
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
             """
-            SELECT prompt_full, llm_response
+            SELECT prompt_full, response_full
             FROM decision_traces
             ORDER BY created_at DESC
             LIMIT 1
@@ -135,3 +135,32 @@ def test_decision_trace_write_failure_does_not_stop_pipeline(monkeypatch, tmp_pa
     )
 
     assert sent.get("chat_id") == "chat"
+
+
+def test_decision_trace_records_signal_fallback(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "decision_trace_signal.sqlite"
+    _common_monkeypatches(monkeypatch, db_path)
+    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=13,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 1, 12, 0),
+        body_text="a" * 120,
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT signal_fallback_used
+            FROM decision_traces
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert row == (1,)

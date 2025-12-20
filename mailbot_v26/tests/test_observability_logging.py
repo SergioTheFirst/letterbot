@@ -95,6 +95,7 @@ def test_structured_logging_events_emitted(monkeypatch) -> None:
     assert "auto_priority_evaluated" in events
     assert "telegram_sent" in events
     assert "signal_evaluated" in events
+    assert "decision_traced" in events
 
 
 def test_observability_logger_outputs_json() -> None:
