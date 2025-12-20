@@ -306,3 +306,113 @@ def test_preview_skipped_when_llm_degraded(monkeypatch, caplog) -> None:
         for record in caplog.records
         if record.message.startswith("{")
     )
+
+
+def test_commitments_preview_flag_off(monkeypatch) -> None:
+    flags = SimpleNamespace(
+        ENABLE_AUTO_PRIORITY=False,
+        AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
+        ENABLE_AUTO_ACTIONS=True,
+        AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+        ENABLE_SHADOW_PERSISTENCE=False,
+        ENABLE_PREVIEW_ACTIONS=True,
+        ENABLE_COMMITMENT_TRACKER=False,
+    )
+    _common_monkeypatches(monkeypatch, flags)
+    preview_payload = _preview_capture(monkeypatch)
+
+    monkeypatch.setattr(
+        processor,
+        "knowledge_db",
+        SimpleNamespace(
+            save_email=lambda **kwargs: 1,
+            save_preview_action=lambda **kwargs: None,
+            save_commitments=lambda **kwargs: True,
+        ),
+    )
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=501,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 5, 1, 12, 0),
+        body_text="Вышлю отчет до 25.12.2025.",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    preview_text = str(preview_payload.get("preview_text") or "")
+    assert "📝 Обязательства" not in preview_text
+
+
+def test_commitments_preview_block_and_payload_unchanged(monkeypatch) -> None:
+    flags_off = SimpleNamespace(
+        ENABLE_AUTO_PRIORITY=False,
+        AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
+        ENABLE_AUTO_ACTIONS=True,
+        AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+        ENABLE_SHADOW_PERSISTENCE=False,
+        ENABLE_PREVIEW_ACTIONS=True,
+        ENABLE_COMMITMENT_TRACKER=False,
+    )
+    flags_on = SimpleNamespace(
+        ENABLE_AUTO_PRIORITY=False,
+        AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
+        ENABLE_AUTO_ACTIONS=True,
+        AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+        ENABLE_SHADOW_PERSISTENCE=False,
+        ENABLE_PREVIEW_ACTIONS=True,
+        ENABLE_COMMITMENT_TRACKER=True,
+    )
+
+    baseline_payload = _common_monkeypatches(monkeypatch, flags_off)
+    monkeypatch.setattr(
+        processor,
+        "knowledge_db",
+        SimpleNamespace(
+            save_email=lambda **kwargs: 1,
+            save_preview_action=lambda **kwargs: None,
+            save_commitments=lambda **kwargs: True,
+        ),
+    )
+    _preview_capture(monkeypatch)
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=502,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 6, 1, 12, 0),
+        body_text="Пришлю отчет до 25.12.2025.",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    commitment_payload = _common_monkeypatches(monkeypatch, flags_on)
+    preview_payload = _preview_capture(monkeypatch)
+    monkeypatch.setattr(
+        processor,
+        "knowledge_db",
+        SimpleNamespace(
+            save_email=lambda **kwargs: 2,
+            save_preview_action=lambda **kwargs: None,
+            save_commitments=lambda **kwargs: True,
+        ),
+    )
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=503,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 6, 2, 12, 0),
+        body_text="Пришлю отчет до 25.12.2025.",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    preview_text = str(preview_payload.get("preview_text") or "")
+    assert "📝 Обязательства" in preview_text
+    assert "• Пришлю отчет до 25.12.2025 — 2025-12-25" in preview_text
+    assert baseline_payload == commitment_payload

@@ -119,3 +119,24 @@ CREATE TABLE IF NOT EXISTS interaction_events (
     deviation REAL,
     is_anomaly BOOLEAN
 );
+
+CREATE TABLE IF NOT EXISTS commitments (
+    id INTEGER PRIMARY KEY,
+    email_row_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    commitment_text TEXT NOT NULL,
+    deadline_iso TEXT,
+    status TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(email_row_id) REFERENCES emails(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_commitments_email_row_id
+    ON commitments(email_row_id);
+
+CREATE INDEX IF NOT EXISTS idx_commitments_status
+    ON commitments(status);
+
+CREATE INDEX IF NOT EXISTS idx_commitments_deadline_iso
+    ON commitments(deadline_iso);

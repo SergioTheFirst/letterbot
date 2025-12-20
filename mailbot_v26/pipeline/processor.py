@@ -11,6 +11,7 @@ from typing import Any
 
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.features import FeatureFlags
+from mailbot_v26.insights.commitment_tracker import Commitment, detect_commitments
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine, AutoPriorityOutcome
@@ -232,6 +233,21 @@ def _build_preview_message(
     return "\n".join(lines)
 
 
+def _append_commitments_preview(
+    preview_text: str, commitments: list[Commitment]
+) -> str:
+    if not commitments:
+        return preview_text
+    lines = [preview_text, "", "📝 Обязательства"]
+    for commitment in commitments:
+        safe_text = _sanitize_preview_line(commitment.commitment_text)
+        line = f"• {safe_text}"
+        if commitment.deadline_iso:
+            line = f"{line} — {commitment.deadline_iso}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _build_signal_fallback(subject: str, from_email: str) -> str:
     safe_subject = subject or "(без темы)"
     safe_sender = from_email or "неизвестно"
@@ -299,7 +315,7 @@ def process_message(
     ⚠️ Поведение Telegram и LLM НЕ МЕНЯЕМ
     """
 
-    # ---------- Stage LLM ----------
+    # ---------- Stage PARSE (Commitment Tracker) ----------
     logger.info(
         "email_received",
         email_id=message_id,
@@ -308,6 +324,28 @@ def process_message(
         subject=subject,
         received_at=received_at.isoformat(),
     )
+    commitments: list[Commitment] = []
+    enable_commitments = getattr(feature_flags, "ENABLE_COMMITMENT_TRACKER", False)
+    if enable_commitments:
+        try:
+            commitments = detect_commitments(body_text or "")
+            if commitments:
+                logger.info(
+                    "commitment_detected",
+                    email_id=message_id,
+                    account=account_email,
+                    sender=from_email,
+                    count=len(commitments),
+                    has_deadlines=any(c.deadline_iso for c in commitments),
+                )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "commitment_detection_failed",
+                email_id=message_id,
+                error=str(exc),
+            )
+
+    # ---------- Stage LLM ----------
     entity_resolution = None
     try:
         entity_resolution = context_store.resolve_sender_entity(
@@ -589,6 +627,7 @@ def process_message(
         )
 
     # ---------- Stage 1.2: WRITE-ONLY CRM ----------
+    email_row_id: int | None = None
     try:
         if not _check_crm_available():
             change = system_health.update_component(
@@ -601,7 +640,7 @@ def process_message(
                 chat_id=telegram_chat_id,
                 account_email=account_email,
             )
-        knowledge_db.save_email(
+        email_row_id = knowledge_db.save_email(
             account_email=account_email,
             from_email=from_email,
             subject=subject,
@@ -659,6 +698,45 @@ def process_message(
             email_id=message_id,
             error=str(exc),
         )
+
+    if enable_commitments and commitments:
+        if system_health.mode == OperationalMode.EMERGENCY_READ_ONLY:
+            logger.error(
+                "commitments_persist_failed",
+                email_id=message_id,
+                error="crm_unavailable",
+            )
+        elif email_row_id is None:
+            logger.error(
+                "commitments_persist_failed",
+                email_id=message_id,
+                error="missing_email_row_id",
+            )
+        else:
+            try:
+                saved = knowledge_db.save_commitments(
+                    email_row_id=email_row_id,
+                    commitments=commitments,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "commitments_persist_failed",
+                    email_id=message_id,
+                    error=str(exc),
+                )
+            else:
+                if saved:
+                    logger.info(
+                        "commitments_persisted",
+                        email_id=message_id,
+                        count=len(commitments),
+                    )
+                else:
+                    logger.error(
+                        "commitments_persist_failed",
+                        email_id=message_id,
+                        error="commitments_save_failed",
+                    )
 
     if entity_resolution:
         try:
@@ -797,6 +875,13 @@ def process_message(
             reasons=[reason for reason in (shadow_action_reason, shadow_reason, priority_reason) if reason],
             confidence=proposed_action.get("confidence") if proposed_action else None,
         )
+        if enable_commitments and commitments:
+            preview_text = _append_commitments_preview(preview_text, commitments)
+            logger.info(
+                "commitments_preview_shown",
+                email_id=message_id,
+                count=len(commitments),
+            )
         send_preview_to_telegram(
             chat_id=telegram_chat_id,
             preview_text=preview_text,
