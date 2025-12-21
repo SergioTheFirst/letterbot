@@ -25,6 +25,7 @@ from mailbot_v26.insights.relationship_health import RelationshipHealthCalculato
 from mailbot_v26.insights.trust_score import TrustScoreCalculator
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
+from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.observability.metrics import (
     MetricsAggregator,
     SystemGates,
@@ -58,6 +59,7 @@ decision_trace_writer = DecisionTraceWriter(DB_PATH)
 trust_snapshot_writer = TrustSnapshotWriter(DB_PATH)
 relationship_health_snapshot_writer = RelationshipHealthSnapshotWriter(DB_PATH)
 context_store = ContextStore(DB_PATH)
+event_emitter = EventEmitter(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
@@ -459,11 +461,37 @@ def process_message(
                                     commitment_id=update.commitment_id,
                                     reason=update.reason,
                                 )
+                                event_emitter.emit(
+                                    type="commitment_fulfilled",
+                                    timestamp=received_at,
+                                    email_id=message_id,
+                                    payload={
+                                        "commitment_id": update.commitment_id,
+                                        "old_status": update.old_status,
+                                        "new_status": update.new_status,
+                                        "reason": update.reason,
+                                        "deadline_iso": update.deadline_iso,
+                                        "commitment_text": update.commitment_text,
+                                    },
+                                )
                             if update.new_status == "expired":
                                 logger.info(
                                     "commitment_expired",
                                     commitment_id=update.commitment_id,
                                     reason=update.reason,
+                                )
+                                event_emitter.emit(
+                                    type="commitment_expired",
+                                    timestamp=received_at,
+                                    email_id=message_id,
+                                    payload={
+                                        "commitment_id": update.commitment_id,
+                                        "old_status": update.old_status,
+                                        "new_status": update.new_status,
+                                        "reason": update.reason,
+                                        "deadline_iso": update.deadline_iso,
+                                        "commitment_text": update.commitment_text,
+                                    },
                                 )
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.error(
@@ -472,6 +500,17 @@ def process_message(
                     sender=from_email,
                     error=str(exc),
                 )
+
+    event_emitter.emit(
+        type="email_received",
+        timestamp=received_at,
+        email_id=message_id,
+        payload={
+            "account_email": account_email,
+            "from_email": from_email,
+            "subject": subject,
+        },
+    )
 
     # ---------- Stage LLM ----------
     entity_resolution = None
@@ -868,6 +907,24 @@ def process_message(
                         email_id=message_id,
                         count=len(commitments),
                     )
+                    for commitment in commitments:
+                        event_emitter.emit(
+                            type="commitment_created",
+                            timestamp=received_at,
+                            entity_id=(
+                                entity_resolution.entity_id
+                                if entity_resolution
+                                else None
+                            ),
+                            email_id=message_id,
+                            payload={
+                                "commitment_text": commitment.commitment_text,
+                                "deadline_iso": commitment.deadline_iso,
+                                "status": commitment.status,
+                                "source": commitment.source,
+                                "confidence": commitment.confidence,
+                            },
+                        )
                 else:
                     logger.error(
                         "commitments_persist_failed",
@@ -974,6 +1031,17 @@ def process_message(
                 sample_size=trust_result.snapshot.sample_size,
                 data_window_days=trust_result.data_window_days,
             )
+            event_emitter.emit(
+                type="trust_score_updated",
+                timestamp=datetime.now(timezone.utc),
+                entity_id=entity_resolution.entity_id,
+                email_id=message_id,
+                payload={
+                    "trust_score": trust_result.snapshot.score,
+                    "sample_size": trust_result.snapshot.sample_size,
+                    "data_window_days": trust_result.data_window_days,
+                },
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error(
                 "trust_score_compute_failed",
@@ -1002,6 +1070,18 @@ def process_message(
                 ),
                 trend=health_snapshot.components_breakdown.get("trend_delta"),
                 data_window_days=health_snapshot.data_window_days,
+            )
+            event_emitter.emit(
+                type="relationship_health_updated",
+                timestamp=datetime.now(timezone.utc),
+                entity_id=entity_resolution.entity_id,
+                email_id=message_id,
+                payload={
+                    "health_score": health_snapshot.health_score,
+                    "reason": health_snapshot.reason,
+                    "components": health_snapshot.components_breakdown,
+                    "data_window_days": health_snapshot.data_window_days,
+                },
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error(

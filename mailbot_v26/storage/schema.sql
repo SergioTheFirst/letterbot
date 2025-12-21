@@ -130,6 +130,15 @@ CREATE TABLE IF NOT EXISTS interaction_events (
     is_anomaly BOOLEAN
 );
 
+CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    entity_id TEXT,
+    email_id TEXT,
+    payload JSON
+);
+
 CREATE TABLE IF NOT EXISTS commitments (
     id INTEGER PRIMARY KEY,
     email_row_id INTEGER NOT NULL,
