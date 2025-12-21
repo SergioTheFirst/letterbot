@@ -20,6 +20,7 @@ from mailbot_v26.insights.commitment_lifecycle import (
     CommitmentStatusUpdate,
     evaluate_commitment_updates,
 )
+from mailbot_v26.insights.relationship_health import RelationshipHealthCalculator
 from mailbot_v26.insights.trust_score import TrustScoreCalculator
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
@@ -27,6 +28,9 @@ from mailbot_v26.observability.metrics import (
     MetricsAggregator,
     SystemGates,
     SystemHealthSnapshotter,
+)
+from mailbot_v26.observability.relationship_health_snapshot import (
+    RelationshipHealthSnapshotWriter,
 )
 from mailbot_v26.observability.trust_snapshot import TrustSnapshotWriter
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine, AutoPriorityOutcome
@@ -51,6 +55,7 @@ knowledge_db = KnowledgeDB(DB_PATH)
 analytics = KnowledgeAnalytics(DB_PATH)
 decision_trace_writer = DecisionTraceWriter(DB_PATH)
 trust_snapshot_writer = TrustSnapshotWriter(DB_PATH)
+relationship_health_snapshot_writer = RelationshipHealthSnapshotWriter(DB_PATH)
 context_store = ContextStore(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
@@ -63,6 +68,10 @@ system_snapshotter = SystemHealthSnapshotter(metrics_aggregator, system_gates)
 feature_flags = FeatureFlags()
 runtime_flag_store = RuntimeFlagStore()
 trust_score_calculator = TrustScoreCalculator(analytics)
+relationship_health_calculator = RelationshipHealthCalculator(
+    analytics,
+    trust_score_calculator,
+)
 auto_priority_engine = AutoPriorityEngine(
     auto_priority_gates,
     auto_priority_breaker,
@@ -940,6 +949,7 @@ def process_message(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("context_layer_failed", error=str(exc))
 
+    trust_result = None
     if entity_resolution and from_email:
         try:
             trust_result = trust_score_calculator.compute(
@@ -962,6 +972,35 @@ def process_message(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error(
                 "trust_score_compute_failed",
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
+
+    if entity_resolution and from_email and trust_result is not None:
+        try:
+            health_snapshot = relationship_health_calculator.compute(
+                entity_id=entity_resolution.entity_id,
+                from_email=from_email,
+                trust_score_result=trust_result,
+            )
+            relationship_health_snapshot_writer.write(health_snapshot)
+            logger.info(
+                "relationship_health_computed",
+                entity_id=entity_resolution.entity_id,
+                health_score=health_snapshot.health_score,
+                trust_score=health_snapshot.components_breakdown.get("trust_score"),
+                commitments_expired_30d=health_snapshot.components_breakdown.get(
+                    "commitments_expired_30d"
+                ),
+                response_time_delta=health_snapshot.components_breakdown.get(
+                    "response_time_delta"
+                ),
+                trend=health_snapshot.components_breakdown.get("trend_delta"),
+                data_window_days=health_snapshot.data_window_days,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "relationship_health_compute_failed",
                 entity_id=entity_resolution.entity_id,
                 error=str(exc),
             )

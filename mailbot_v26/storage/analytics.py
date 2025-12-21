@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from datetime import datetime
@@ -246,3 +247,39 @@ class KnowledgeAnalytics:
             "recent": int(row.get("recent") or 0),
             "previous": int(row.get("previous") or 0),
         }
+
+    def interaction_event_response_times(
+        self,
+        *,
+        entity_id: str,
+        event_type: str,
+        days: int,
+        metadata_key: str = "response_time_hours",
+    ) -> list[float]:
+        if not entity_id:
+            return []
+        query = """
+        SELECT metadata
+        FROM interaction_events
+        WHERE entity_id = ?
+          AND event_type = ?
+          AND event_time >= datetime('now', ?)
+        """
+        rows = self._execute_select(query, (entity_id, event_type, f"-{days} days"))
+        values: list[float] = []
+        for row in rows:
+            raw = row.get("metadata")
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            value = payload.get(metadata_key)
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if number >= 0:
+                values.append(number)
+        return values
