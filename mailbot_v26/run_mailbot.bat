@@ -6,11 +6,11 @@ echo ===========================================
 echo      MAILBOT PREMIUM v26 - START
 echo ===========================================
 
-REM Папка, где лежит start.py
-set BOTDIR=C:\pro\mailbot\mailpro\mailbot_v26
-
-echo Переход в папку бота...
-cd /d "%BOTDIR%"
+REM Переход в корень репозитория
+set SCRIPT_DIR=%~dp0
+for %%I in ("%SCRIPT_DIR%..") do set REPO_ROOT=%%~fI
+echo Переход в корень репозитория...
+cd /d "%REPO_ROOT%"
 
 echo Проверка Python...
 python --version >nul 2>&1
@@ -21,16 +21,14 @@ IF %ERRORLEVEL% NEQ 0 (
 )
 
 echo Активация виртуального окружения...
-IF EXIST venv\Scripts\activate (
-    call venv\Scripts\activate
-) ELSE (
-    echo Creating venv...
-    python -m venv venv
+IF EXIST mailbot_v26\venv\Scripts\activate (
+    call mailbot_v26\venv\Scripts\activate
+) ELSE IF EXIST venv\Scripts\activate (
     call venv\Scripts\activate
 )
 
 echo Запуск MailBot...
-python start.py
+python -m mailbot_v26.start
 
 echo.
 echo ===========================================
