@@ -21,6 +21,7 @@ from mailbot_v26.insights.commitment_lifecycle import (
     evaluate_commitment_updates,
 )
 from mailbot_v26.insights.aggregator import Insight, aggregate_insights
+from mailbot_v26.insights.digest import InsightDigest, build_insight_digest
 from mailbot_v26.insights.relationship_anomaly import RelationshipAnomalyDetector
 from mailbot_v26.insights.relationship_health import RelationshipHealthCalculator
 from mailbot_v26.insights.temporal_reasoning import (
@@ -333,6 +334,23 @@ def _append_insights_preview(
         lines.append(f"• {title} ({severity})")
         lines.append(f"  {explanation}")
         lines.append(f"  Рекомендация: {recommendation}")
+    return "\n".join(lines)
+
+
+def _append_insight_digest_preview(
+    preview_text: str,
+    digest: InsightDigest | None,
+) -> str:
+    if digest is None:
+        return preview_text
+    status = _sanitize_preview_line(digest.status_label)
+    headline = _sanitize_preview_line(digest.headline)
+    lines = [preview_text, "", "🧭 Insight Digest", status, headline]
+    if digest.short_explanation:
+        for line in digest.short_explanation.split("\n"):
+            clean_line = _sanitize_preview_line(line)
+            if clean_line:
+                lines.append(clean_line)
     return "\n".join(lines)
 
 
@@ -1056,6 +1074,7 @@ def process_message(
     health_snapshot = None
     temporal_insights: list[TemporalState] = []
     aggregated_insights: list[Insight] = []
+    insight_digest: InsightDigest | None = None
     if entity_resolution and from_email:
         try:
             trust_result = trust_score_calculator.compute(
@@ -1208,6 +1227,25 @@ def process_message(
                 error=str(exc),
             )
 
+        try:
+            insight_digest = build_insight_digest(
+                aggregated_insights,
+                trust_result.snapshot.score if trust_result else None,
+                health_snapshot,
+            )
+            logger.info(
+                "insight_digest_built",
+                entity_id=entity_resolution.entity_id,
+                status_label=insight_digest.status_label,
+                headline=insight_digest.headline,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "insight_digest_failed",
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
+
     # ---------- Stage Decision Trace ----------
     try:
         prompt_full = _read_llm_field(llm_result, "prompt_full", "") or ""
@@ -1351,6 +1389,11 @@ def process_message(
                 label=str(commitment_signal_preview["label"]),
                 fulfilled_count=int(commitment_signal_preview["fulfilled_count"]),
                 expired_count=int(commitment_signal_preview["expired_count"]),
+            )
+        if insight_digest:
+            preview_text = _append_insight_digest_preview(
+                preview_text,
+                insight_digest,
             )
         if aggregated_insights:
             preview_text = _append_insights_preview(
