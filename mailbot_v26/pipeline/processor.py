@@ -20,6 +20,7 @@ from mailbot_v26.insights.commitment_lifecycle import (
     CommitmentStatusUpdate,
     evaluate_commitment_updates,
 )
+from mailbot_v26.insights.relationship_anomaly import RelationshipAnomalyDetector
 from mailbot_v26.insights.relationship_health import RelationshipHealthCalculator
 from mailbot_v26.insights.trust_score import TrustScoreCalculator
 from mailbot_v26.observability import get_logger
@@ -69,6 +70,10 @@ feature_flags = FeatureFlags()
 runtime_flag_store = RuntimeFlagStore()
 trust_score_calculator = TrustScoreCalculator(analytics)
 relationship_health_calculator = RelationshipHealthCalculator(
+    analytics,
+    trust_score_calculator,
+)
+relationship_anomaly_detector = RelationshipAnomalyDetector(
     analytics,
     trust_score_calculator,
 )
@@ -1004,6 +1009,38 @@ def process_message(
                 entity_id=entity_resolution.entity_id,
                 error=str(exc),
             )
+        else:
+            try:
+                anomalies = relationship_anomaly_detector.detect(
+                    entity_id=entity_resolution.entity_id,
+                    from_email=from_email,
+                    trust_score_result=trust_result,
+                    health_snapshot=health_snapshot,
+                )
+                if anomalies:
+                    for anomaly in anomalies:
+                        logger.info(
+                            "relationship_anomaly_detected",
+                            entity_id=anomaly.entity_id,
+                            anomaly_type=anomaly.anomaly_type,
+                            severity=anomaly.severity,
+                            rhs_current=health_snapshot.health_score,
+                            trust_score=trust_result.snapshot.score,
+                            evidence=anomaly.evidence,
+                        )
+                else:
+                    logger.info(
+                        "relationship_anomaly_none",
+                        entity_id=entity_resolution.entity_id,
+                        rhs_current=health_snapshot.health_score,
+                        trust_score=trust_result.snapshot.score,
+                    )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "relationship_anomaly_detection_failed",
+                    entity_id=entity_resolution.entity_id,
+                    error=str(exc),
+                )
 
     # ---------- Stage Decision Trace ----------
     try:
