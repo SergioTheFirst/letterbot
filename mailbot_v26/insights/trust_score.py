@@ -43,10 +43,23 @@ class TrustScoreCalculator:
         *,
         entity_id: str,
         from_email: str | None,
+        response_window_days: int | None = None,
+        trend_window_days: int | None = None,
     ) -> TrustScoreResult:
-        commitment_score, commitment_samples = self._commitment_reliability(from_email)
-        response_score, response_samples = self._response_consistency(entity_id)
-        trend_score, trend_samples = self._trend_direction(entity_id)
+        response_window = response_window_days or self.RESPONSE_WINDOW_DAYS
+        trend_window = trend_window_days or self.TREND_WINDOW_DAYS
+        commitment_score, commitment_samples = self._commitment_reliability(
+            from_email,
+            days=trend_window,
+        )
+        response_score, response_samples = self._response_consistency(
+            entity_id,
+            days=response_window,
+        )
+        trend_score, trend_samples = self._trend_direction(
+            entity_id,
+            days=trend_window,
+        )
 
         components = TrustScoreComponents(
             commitment_reliability=commitment_score,
@@ -69,7 +82,7 @@ class TrustScoreCalculator:
             return TrustScoreResult(
                 snapshot=snapshot,
                 components=components,
-                data_window_days=self.RESPONSE_WINDOW_DAYS,
+                data_window_days=response_window,
             )
 
         trust_score = (
@@ -88,18 +101,20 @@ class TrustScoreCalculator:
         return TrustScoreResult(
             snapshot=snapshot,
             components=components,
-            data_window_days=self.RESPONSE_WINDOW_DAYS,
+            data_window_days=response_window,
         )
 
     def _commitment_reliability(
         self,
         from_email: str | None,
+        *,
+        days: int,
     ) -> tuple[float | None, int]:
         if not from_email:
             return None, 0
         stats = self.analytics.commitment_stats_by_sender(
             from_email=from_email,
-            days=self.TREND_WINDOW_DAYS,
+            days=days,
         )
         fulfilled = int(stats.get("fulfilled_count", 0) or 0)
         expired = int(stats.get("expired_count", 0) or 0)
@@ -108,13 +123,13 @@ class TrustScoreCalculator:
             return None, 0
         return fulfilled / denominator, denominator
 
-    def _response_consistency(self, entity_id: str) -> tuple[float | None, int]:
+    def _response_consistency(self, entity_id: str, *, days: int) -> tuple[float | None, int]:
         if not entity_id:
             return None, 0
         timestamps = self.analytics.interaction_event_times(
             entity_id=entity_id,
             event_type="email_received",
-            days=self.RESPONSE_WINDOW_DAYS,
+            days=days,
         )
         if len(timestamps) <= self.MIN_RESPONSE_SAMPLES:
             return None, len(timestamps)
@@ -132,14 +147,14 @@ class TrustScoreCalculator:
         )
         return normalized, len(deltas)
 
-    def _trend_direction(self, entity_id: str) -> tuple[float | None, int]:
+    def _trend_direction(self, entity_id: str, *, days: int) -> tuple[float | None, int]:
         if not entity_id:
             return None, 0
         counts = self.analytics.interaction_event_counts(
             entity_id=entity_id,
             event_type="email_received",
-            recent_days=self.TREND_WINDOW_DAYS,
-            previous_days=self.TREND_WINDOW_DAYS,
+            recent_days=days,
+            previous_days=days,
         )
         recent = int(counts.get("recent", 0) or 0)
         previous = int(counts.get("previous", 0) or 0)
