@@ -471,6 +471,15 @@ def process_message(
                 entity_type=entity_resolution.entity_type,
                 confidence=entity_resolution.confidence,
             )
+            try:
+                context_store.resolve_entity_relationships(
+                    entity_id=entity_resolution.entity_id,
+                    from_email=from_email,
+                    from_name=from_name,
+                    event_time=received_at,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("entity_relationship_resolution_failed", error=str(exc))
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("entity_resolution_failed", error=str(exc))
     signal_quality = evaluate_signal_quality(body_text or "")

@@ -79,3 +79,74 @@ def test_recompute_email_frequency_baseline(tmp_path) -> None:
 
     assert sample_size == 15
     assert baseline_value == pytest.approx(0.5)
+
+
+def test_entity_resolution_links_by_email_match(tmp_path) -> None:
+    db_path = tmp_path / "context.sqlite"
+    store = ContextStore(db_path)
+
+    first = store.resolve_sender_entity(
+        from_email="ivan@example.com",
+        from_name="ivan",
+    )
+    second = store.resolve_sender_entity(
+        from_email="ivan@example.com",
+        from_name="Ivan Ivanov",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.entity_id != second.entity_id
+
+    store.resolve_entity_relationships(
+        entity_id=second.entity_id,
+        from_email="ivan@example.com",
+        from_name="Ivan Ivanov",
+        event_time=datetime.utcnow(),
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        relationship = conn.execute(
+            """
+            SELECT entity_from, entity_to, type, strength
+            FROM relationships
+            WHERE type = 'entity_resolution';
+            """
+        ).fetchone()
+
+    assert relationship is not None
+    assert {relationship[0], relationship[1]} == {first.entity_id, second.entity_id}
+    assert relationship[2] == "entity_resolution"
+    assert relationship[3] == pytest.approx(1.0)
+
+
+def test_entity_resolution_skips_different_domains(tmp_path) -> None:
+    db_path = tmp_path / "context.sqlite"
+    store = ContextStore(db_path)
+
+    first = store.resolve_sender_entity(
+        from_email="ivan@example.com",
+        from_name="Ivan",
+    )
+    second = store.resolve_sender_entity(
+        from_email="ivan@other.com",
+        from_name="Ivan Ivanov",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.entity_id != second.entity_id
+
+    relationships = store.resolve_entity_relationships(
+        entity_id=second.entity_id,
+        from_email="ivan@other.com",
+        from_name="Ivan Ivanov",
+        event_time=datetime.utcnow(),
+    )
+
+    assert relationships == []
+
+    with sqlite3.connect(db_path) as conn:
+        total = conn.execute("SELECT COUNT(*) FROM relationships;").fetchone()[0]
+
+    assert total == 0
