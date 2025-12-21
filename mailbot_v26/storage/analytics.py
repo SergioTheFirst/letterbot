@@ -248,6 +248,26 @@ class KnowledgeAnalytics:
             "previous": int(row.get("previous") or 0),
         }
 
+    def interaction_event_count(
+        self,
+        *,
+        entity_id: str,
+        event_type: str,
+        days: int,
+    ) -> int:
+        if not entity_id:
+            return 0
+        query = """
+        SELECT COUNT(*) AS total
+        FROM interaction_events
+        WHERE entity_id = ?
+          AND event_type = ?
+          AND event_time >= datetime('now', ?)
+        """
+        rows = self._execute_select(query, (entity_id, event_type, f"-{days} days"))
+        row = rows[0] if rows else {}
+        return int(row.get("total") or 0)
+
     def interaction_event_response_times(
         self,
         *,
@@ -283,3 +303,25 @@ class KnowledgeAnalytics:
             if number >= 0:
                 values.append(number)
         return values
+
+    def entity_baseline(
+        self,
+        *,
+        entity_id: str,
+        metric: str,
+    ) -> dict[str, float | int | None]:
+        if not entity_id:
+            return {"baseline_value": None, "sample_size": 0}
+        query = """
+        SELECT baseline_value, sample_size
+        FROM entity_baselines
+        WHERE entity_id = ?
+          AND metric = ?
+        LIMIT 1
+        """
+        rows = self._execute_select(query, (entity_id, metric))
+        row = rows[0] if rows else {}
+        return {
+            "baseline_value": row.get("baseline_value"),
+            "sample_size": int(row.get("sample_size") or 0),
+        }

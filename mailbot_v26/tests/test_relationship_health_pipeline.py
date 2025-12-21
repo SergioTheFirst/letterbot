@@ -88,6 +88,11 @@ def test_relationship_health_does_not_change_telegram_payload(monkeypatch) -> No
             reason=None,
         ),
     )
+    monkeypatch.setattr(
+        processor.relationship_anomaly_detector,
+        "detect",
+        lambda **kwargs: [],
+    )
 
     processor.process_message(
         account_email="account@example.com",
