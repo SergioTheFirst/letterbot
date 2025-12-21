@@ -313,6 +313,60 @@ class KnowledgeDB:
             logger.error("KnowledgeDB commitments update failed: %s", exc)
             return False
 
+    def upsert_entity_signal(
+        self,
+        *,
+        entity_id: str,
+        signal_type: str,
+        score: int,
+        label: str,
+        computed_at: str,
+        sample_size: int,
+    ) -> str | None:
+        try:
+            with sqlite3.connect(self.path) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    """
+                    SELECT label
+                    FROM entity_signals
+                    WHERE entity_id = ? AND signal_type = ?
+                    """,
+                    (entity_id, signal_type),
+                ).fetchone()
+                previous_label = str(row["label"]) if row and row["label"] is not None else None
+                conn.execute(
+                    """
+                    INSERT INTO entity_signals (
+                        entity_id,
+                        signal_type,
+                        score,
+                        label,
+                        computed_at,
+                        sample_size
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(entity_id, signal_type) DO UPDATE SET
+                        score = excluded.score,
+                        label = excluded.label,
+                        computed_at = excluded.computed_at,
+                        sample_size = excluded.sample_size
+                    """,
+                    (
+                        entity_id,
+                        signal_type,
+                        score,
+                        label,
+                        computed_at,
+                        sample_size,
+                    ),
+                )
+                conn.commit()
+                return previous_label
+        except Exception as exc:
+            logger.error("KnowledgeDB entity signal upsert failed: %s", exc)
+            return None
+
     def save_preview_action(
         self,
         *,

@@ -4,6 +4,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
+from mailbot_v26.storage.context_layer import EntityResolution
 from mailbot_v26.system_health import OperationalMode
 
 _DEFAULT_PROPOSAL = object()
@@ -420,3 +421,82 @@ def test_commitments_preview_block_and_payload_unchanged(monkeypatch) -> None:
     assert "📝 Обязательства" in preview_text
     assert "• \"Пришлю отчет до 25.12.2025\" — ⏳ ожидается" in preview_text
     assert baseline_payload == commitment_payload
+
+
+def test_commitment_signal_preview_block(monkeypatch) -> None:
+    flags = SimpleNamespace(
+        ENABLE_AUTO_PRIORITY=False,
+        AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
+        ENABLE_AUTO_ACTIONS=True,
+        AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+        ENABLE_SHADOW_PERSISTENCE=False,
+        ENABLE_PREVIEW_ACTIONS=True,
+        ENABLE_COMMITMENT_TRACKER=True,
+    )
+    _common_monkeypatches(monkeypatch, flags)
+    preview_payload = _preview_capture(monkeypatch)
+
+    class _Analytics:
+        def commitment_stats_by_sender(self, *, from_email: str, days: int = 30) -> dict[str, int]:
+            return {
+                "total_commitments": 4,
+                "fulfilled_count": 3,
+                "expired_count": 1,
+                "unknown_count": 0,
+            }
+
+        def sender_stats(self, limit=None):  # pragma: no cover - defensive
+            return []
+
+        def priority_escalations(self, limit=None):  # pragma: no cover - defensive
+            return []
+
+    monkeypatch.setattr(processor, "analytics", _Analytics())
+    monkeypatch.setattr(
+        processor.context_store,
+        "resolve_sender_entity",
+        lambda **kwargs: EntityResolution(
+            entity_id="entity-1",
+            entity_type="person",
+            confidence=1.0,
+        ),
+    )
+    monkeypatch.setattr(
+        processor.context_store,
+        "record_interaction_event",
+        lambda **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        processor.context_store,
+        "recompute_email_frequency",
+        lambda **kwargs: (0.0, 0),
+    )
+    monkeypatch.setattr(
+        processor,
+        "knowledge_db",
+        SimpleNamespace(
+            save_email=lambda **kwargs: 1,
+            save_preview_action=lambda **kwargs: None,
+            save_commitments=lambda **kwargs: True,
+            fetch_pending_commitments_by_sender=lambda **kwargs: [],
+            update_commitment_statuses=lambda **kwargs: True,
+            upsert_entity_signal=lambda **kwargs: None,
+        ),
+    )
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=601,
+        from_email="client@company.com",
+        subject="Subject",
+        received_at=datetime(2024, 7, 1, 12, 0),
+        body_text="Пришлю отчет до 25.12.2025.",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    preview_text = str(preview_payload.get("preview_text") or "")
+    assert "🔎 Контекст отношений:" in preview_text
+    assert "Контрагент: client@company.com" in preview_text
+    assert "Надёжность обязательств: 🟡 Нестабилен 75/100" in preview_text
+    assert "(выполнено: 3, просрочено: 1 за 30 дней)" in preview_text
