@@ -150,3 +150,35 @@ def test_entity_resolution_skips_different_domains(tmp_path) -> None:
         total = conn.execute("SELECT COUNT(*) FROM relationships;").fetchone()[0]
 
     assert total == 0
+
+
+def test_latest_interaction_event_time_returns_latest(tmp_path) -> None:
+    db_path = tmp_path / "context.sqlite"
+    store = ContextStore(db_path)
+    resolution = store.resolve_sender_entity(
+        from_email="sender@example.com",
+        from_name="Sender",
+    )
+    assert resolution is not None
+
+    now = datetime.utcnow()
+    store.record_interaction_event(
+        entity_id=resolution.entity_id,
+        event_type="email_received",
+        event_time=now - timedelta(hours=6),
+        metadata={"email_id": 1},
+    )
+    store.record_interaction_event(
+        entity_id=resolution.entity_id,
+        event_type="email_received",
+        event_time=now - timedelta(hours=2),
+        metadata={"email_id": 2},
+    )
+
+    latest = store.latest_interaction_event_time(
+        entity_id=resolution.entity_id,
+        event_type="email_received",
+    )
+
+    assert latest is not None
+    assert latest == now - timedelta(hours=2)

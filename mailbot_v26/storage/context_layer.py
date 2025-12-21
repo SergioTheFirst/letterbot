@@ -422,6 +422,36 @@ class ContextStore:
 
         return deviation, is_anomaly
 
+    def latest_interaction_event_time(
+        self,
+        *,
+        entity_id: str,
+        event_type: str,
+    ) -> datetime | None:
+        if not entity_id:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT event_time
+                FROM interaction_events
+                WHERE entity_id = ?
+                  AND event_type = ?
+                ORDER BY event_time DESC
+                LIMIT 1
+                """,
+                (entity_id, event_type),
+            ).fetchone()
+        if not row:
+            return None
+        value = row[0]
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value))
+        except ValueError:
+            return None
+
     def recompute_email_frequency(
         self,
         *,

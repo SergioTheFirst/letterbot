@@ -989,6 +989,23 @@ def process_message(
 
     if entity_resolution:
         try:
+            last_received = context_store.latest_interaction_event_time(
+                entity_id=entity_resolution.entity_id,
+                event_type="email_received",
+            )
+            if last_received and received_at > last_received:
+                response_time_hours = (
+                    received_at - last_received
+                ).total_seconds() / 3600.0
+                context_store.record_interaction_event(
+                    entity_id=entity_resolution.entity_id,
+                    event_type="response_time",
+                    event_time=received_at,
+                    metadata={
+                        "response_time_hours": round(response_time_hours, 4),
+                        "previous_received_at": last_received.isoformat(),
+                    },
+                )
             context_store.record_interaction_event(
                 entity_id=entity_resolution.entity_id,
                 event_type="email_received",
