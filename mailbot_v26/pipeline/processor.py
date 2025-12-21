@@ -22,6 +22,11 @@ from mailbot_v26.insights.commitment_lifecycle import (
 )
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
+from mailbot_v26.observability.metrics import (
+    MetricsAggregator,
+    SystemGates,
+    SystemHealthSnapshotter,
+)
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine, AutoPriorityOutcome
 from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
@@ -49,6 +54,9 @@ shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
 auto_priority_gates = AutoPriorityGates(analytics)
 auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
+metrics_aggregator = MetricsAggregator(DB_PATH)
+system_gates = SystemGates()
+system_snapshotter = SystemHealthSnapshotter(metrics_aggregator, system_gates)
 feature_flags = FeatureFlags()
 runtime_flag_store = RuntimeFlagStore()
 auto_priority_engine = AutoPriorityEngine(
@@ -350,6 +358,11 @@ def process_message(
 
     ⚠️ Поведение Telegram и LLM НЕ МЕНЯЕМ
     """
+
+    try:
+        system_snapshotter.maybe_log()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("system_health_snapshot_failed", error=str(exc))
 
     # ---------- Stage PARSE (Commitment Tracker) ----------
     logger.info(

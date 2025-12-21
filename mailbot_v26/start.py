@@ -30,6 +30,7 @@ from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.config_loader import AccountConfig, BotConfig, load_config
 from mailbot_v26.imap_client import ResilientIMAP
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
+from mailbot_v26.pipeline import processor as processor_module
 from mailbot_v26.state_manager import StateManager
 from mailbot_v26.storage.self_check import run_self_check
 from mailbot_v26.text.mime_utils import decode_mime_header
@@ -164,6 +165,10 @@ def main(config_dir: Path | None = None) -> None:
 
     logger.info("=== MailBot v26 started ===")
     program_start = datetime.now()
+    try:
+        processor_module.system_snapshotter.log_startup()
+    except Exception as exc:  # pragma: no cover - optional observability
+        logger.error("system_health_snapshot_failed", error=str(exc))
 
     storage: Storage | None = None
     try:
