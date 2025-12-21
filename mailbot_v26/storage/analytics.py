@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -175,3 +176,73 @@ class KnowledgeAnalytics:
             except (TypeError, ValueError):
                 continue
         return scores
+
+    def interaction_event_times(
+        self,
+        *,
+        entity_id: str,
+        event_type: str,
+        days: int,
+    ) -> list[datetime]:
+        if not entity_id:
+            return []
+        query = """
+        SELECT event_time
+        FROM interaction_events
+        WHERE entity_id = ?
+          AND event_type = ?
+          AND event_time >= datetime('now', ?)
+        ORDER BY event_time ASC
+        """
+        rows = self._execute_select(query, (entity_id, event_type, f"-{days} days"))
+        timestamps: list[datetime] = []
+        for row in rows:
+            value = row.get("event_time")
+            if not value:
+                continue
+            try:
+                timestamps.append(datetime.fromisoformat(str(value)))
+            except ValueError:
+                continue
+        return timestamps
+
+    def interaction_event_counts(
+        self,
+        *,
+        entity_id: str,
+        event_type: str,
+        recent_days: int,
+        previous_days: int,
+    ) -> dict[str, int]:
+        if not entity_id:
+            return {"recent": 0, "previous": 0}
+        query = """
+        SELECT
+            SUM(CASE WHEN event_time >= datetime('now', ?) THEN 1 ELSE 0 END) AS recent,
+            SUM(
+                CASE
+                    WHEN event_time >= datetime('now', ?)
+                     AND event_time < datetime('now', ?)
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS previous
+        FROM interaction_events
+        WHERE entity_id = ?
+          AND event_type = ?
+        """
+        rows = self._execute_select(
+            query,
+            (
+                f"-{recent_days} days",
+                f"-{recent_days + previous_days} days",
+                f"-{recent_days} days",
+                entity_id,
+                event_type,
+            ),
+        )
+        row = rows[0] if rows else {}
+        return {
+            "recent": int(row.get("recent") or 0),
+            "previous": int(row.get("previous") or 0),
+        }

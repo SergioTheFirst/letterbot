@@ -20,6 +20,7 @@ from mailbot_v26.insights.commitment_lifecycle import (
     CommitmentStatusUpdate,
     evaluate_commitment_updates,
 )
+from mailbot_v26.insights.trust_score import TrustScoreCalculator
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.metrics import (
@@ -27,6 +28,7 @@ from mailbot_v26.observability.metrics import (
     SystemGates,
     SystemHealthSnapshotter,
 )
+from mailbot_v26.observability.trust_snapshot import TrustSnapshotWriter
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine, AutoPriorityOutcome
 from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
@@ -48,6 +50,7 @@ DB_PATH = Path("database.sqlite")
 knowledge_db = KnowledgeDB(DB_PATH)
 analytics = KnowledgeAnalytics(DB_PATH)
 decision_trace_writer = DecisionTraceWriter(DB_PATH)
+trust_snapshot_writer = TrustSnapshotWriter(DB_PATH)
 context_store = ContextStore(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
@@ -59,6 +62,7 @@ system_gates = SystemGates()
 system_snapshotter = SystemHealthSnapshotter(metrics_aggregator, system_gates)
 feature_flags = FeatureFlags()
 runtime_flag_store = RuntimeFlagStore()
+trust_score_calculator = TrustScoreCalculator(analytics)
 auto_priority_engine = AutoPriorityEngine(
     auto_priority_gates,
     auto_priority_breaker,
@@ -935,6 +939,32 @@ def process_message(
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("context_layer_failed", error=str(exc))
+
+    if entity_resolution and from_email:
+        try:
+            trust_result = trust_score_calculator.compute(
+                entity_id=entity_resolution.entity_id,
+                from_email=from_email,
+            )
+            trust_snapshot_writer.write(trust_result.snapshot)
+            logger.info(
+                "trust_score_computed",
+                entity_id=entity_resolution.entity_id,
+                trust_score=trust_result.snapshot.score,
+                components={
+                    "commitment": trust_result.components.commitment_reliability,
+                    "response": trust_result.components.response_consistency,
+                    "trend": trust_result.components.trend,
+                },
+                sample_size=trust_result.snapshot.sample_size,
+                data_window_days=trust_result.data_window_days,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "trust_score_compute_failed",
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
 
     # ---------- Stage Decision Trace ----------
     try:
