@@ -20,8 +20,13 @@ from mailbot_v26.insights.commitment_lifecycle import (
     CommitmentStatusUpdate,
     evaluate_commitment_updates,
 )
+from mailbot_v26.insights.aggregator import Insight, aggregate_insights
 from mailbot_v26.insights.relationship_anomaly import RelationshipAnomalyDetector
 from mailbot_v26.insights.relationship_health import RelationshipHealthCalculator
+from mailbot_v26.insights.temporal_reasoning import (
+    TemporalReasoningEngine,
+    TemporalState,
+)
 from mailbot_v26.insights.trust_score import TrustScoreCalculator
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
@@ -79,6 +84,7 @@ relationship_anomaly_detector = RelationshipAnomalyDetector(
     analytics,
     trust_score_calculator,
 )
+temporal_reasoning_engine = TemporalReasoningEngine(analytics)
 auto_priority_engine = AutoPriorityEngine(
     auto_priority_gates,
     auto_priority_breaker,
@@ -309,6 +315,24 @@ def _append_commitment_signal_preview(
         f"  Надёжность обязательств: {label} {score}/100",
         f"  (выполнено: {fulfilled_count}, просрочено: {expired_count} за 30 дней)",
     ]
+    return "\n".join(lines)
+
+
+def _append_insights_preview(
+    preview_text: str,
+    insights: list[Insight],
+) -> str:
+    if not insights:
+        return preview_text
+    lines = [preview_text, "", "💡 Insights"]
+    for insight in insights:
+        title = _sanitize_preview_line(insight.type)
+        severity = _sanitize_preview_line(insight.severity)
+        explanation = _sanitize_preview_line(insight.explanation)
+        recommendation = _sanitize_preview_line(insight.recommendation)
+        lines.append(f"• {title} ({severity})")
+        lines.append(f"  {explanation}")
+        lines.append(f"  Рекомендация: {recommendation}")
     return "\n".join(lines)
 
 
@@ -1029,6 +1053,9 @@ def process_message(
             logger.error("context_layer_failed", error=str(exc))
 
     trust_result = None
+    health_snapshot = None
+    temporal_insights: list[TemporalState] = []
+    aggregated_insights: list[Insight] = []
     if entity_resolution and from_email:
         try:
             trust_result = trust_score_calculator.compute(
@@ -1138,6 +1165,48 @@ def process_message(
                     entity_id=entity_resolution.entity_id,
                     error=str(exc),
                 )
+
+    if entity_resolution:
+        try:
+            temporal_insights = temporal_reasoning_engine.evaluate(
+                entity_id=entity_resolution.entity_id,
+                from_email=from_email,
+                now=datetime.now(timezone.utc),
+            )
+            if temporal_insights:
+                logger.info(
+                    "temporal_insights_detected",
+                    entity_id=entity_resolution.entity_id,
+                    insight_types=[state.state_type for state in temporal_insights],
+                    severities=[state.severity for state in temporal_insights],
+                )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "temporal_insight_failed",
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
+
+    if entity_resolution:
+        try:
+            aggregated_insights = aggregate_insights(
+                temporal_insights,
+                trust_result.snapshot.score if trust_result else None,
+                health_snapshot,
+            )
+            if aggregated_insights:
+                logger.info(
+                    "insights_aggregated",
+                    entity_id=entity_resolution.entity_id,
+                    insight_types=[insight.type for insight in aggregated_insights],
+                    severities=[insight.severity for insight in aggregated_insights],
+                )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "insight_aggregation_failed",
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
 
     # ---------- Stage Decision Trace ----------
     try:
@@ -1282,6 +1351,11 @@ def process_message(
                 label=str(commitment_signal_preview["label"]),
                 fulfilled_count=int(commitment_signal_preview["fulfilled_count"]),
                 expired_count=int(commitment_signal_preview["expired_count"]),
+            )
+        if aggregated_insights:
+            preview_text = _append_insights_preview(
+                preview_text,
+                aggregated_insights,
             )
         send_preview_to_telegram(
             chat_id=telegram_chat_id,
