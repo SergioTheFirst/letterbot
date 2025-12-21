@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+from datetime import datetime
+from types import SimpleNamespace
+
+from mailbot_v26.insights.aggregator import Insight
+from mailbot_v26.pipeline import processor
+from mailbot_v26.storage.context_layer import EntityResolution
+
+
+def _common_flags() -> SimpleNamespace:
+    return SimpleNamespace(
+        ENABLE_AUTO_PRIORITY=False,
+        AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
+        ENABLE_AUTO_ACTIONS=False,
+        AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+        ENABLE_SHADOW_PERSISTENCE=False,
+        ENABLE_PREVIEW_ACTIONS=False,
+        ENABLE_COMMITMENT_TRACKER=False,
+    )
+
+
+def _stub_llm_result():
+    return SimpleNamespace(
+        priority="🔵",
+        action_line="Проверить письмо",
+        body_summary="Body summary",
+        attachment_summaries=[],
+    )
+
+
+def test_insight_aggregator_does_not_change_telegram_payload(monkeypatch) -> None:
+    monkeypatch.setattr(processor, "feature_flags", _common_flags())
+    monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: _stub_llm_result())
+    monkeypatch.setattr(processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", ""))
+    monkeypatch.setattr(processor.shadow_action_engine, "compute", lambda *args, **kwargs: [])
+    monkeypatch.setattr(processor, "send_preview_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor.temporal_reasoning_engine, "evaluate", lambda **kwargs: [])
+    monkeypatch.setattr(
+        processor,
+        "aggregate_insights",
+        lambda *args, **kwargs: [
+            Insight(
+                type="⚠️ Reliability Degradation",
+                severity="LOW",
+                explanation="Контрагент начал хуже выполнять обещания.",
+                recommendation="Сверьте текущие договорённости и подготовьте мягкий follow-up.",
+            )
+        ],
+    )
+
+    sent: list[dict[str, object]] = []
+
+    def _send_to_telegram(**kwargs) -> None:
+        sent.append(kwargs)
+
+    monkeypatch.setattr(processor, "send_to_telegram", _send_to_telegram)
+    monkeypatch.setattr(
+        processor.context_store,
+        "resolve_sender_entity",
+        lambda **kwargs: EntityResolution(
+            entity_id="entity-1",
+            entity_type="person",
+            confidence=1.0,
+        ),
+    )
+    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
+    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: 1))
+    monkeypatch.setattr(
+        processor,
+        "trust_snapshot_writer",
+        SimpleNamespace(write=lambda *args, **kwargs: None),
+    )
+    monkeypatch.setattr(
+        processor,
+        "relationship_health_snapshot_writer",
+        SimpleNamespace(write=lambda *args, **kwargs: None),
+    )
+    monkeypatch.setattr(
+        processor.trust_score_calculator,
+        "compute",
+        lambda **kwargs: SimpleNamespace(
+            snapshot=SimpleNamespace(score=0.8, sample_size=5),
+            components=SimpleNamespace(
+                commitment_reliability=1.0,
+                response_consistency=0.9,
+                trend=0.5,
+            ),
+            data_window_days=60,
+        ),
+    )
+    monkeypatch.setattr(
+        processor.relationship_health_calculator,
+        "compute",
+        lambda **kwargs: SimpleNamespace(
+            entity_id="entity-1",
+            health_score=75.0,
+            components_breakdown={},
+            data_window_days=90,
+            reason=None,
+        ),
+    )
+    monkeypatch.setattr(
+        processor.relationship_anomaly_detector,
+        "detect",
+        lambda **kwargs: [],
+    )
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=202,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 7, 10, 12, 0),
+        body_text="Text",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    assert sent == [
+        {
+            "chat_id": "chat",
+            "priority": "🔵",
+            "from_email": "sender@example.com",
+            "subject": "Subject",
+            "action_line": "Проверить письмо",
+            "body_summary": "Body summary",
+            "attachment_summaries": [],
+            "account_email": "account@example.com",
+        }
+    ]
