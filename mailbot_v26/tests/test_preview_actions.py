@@ -328,6 +328,8 @@ def test_commitments_preview_flag_off(monkeypatch) -> None:
             save_email=lambda **kwargs: 1,
             save_preview_action=lambda **kwargs: None,
             save_commitments=lambda **kwargs: True,
+            fetch_pending_commitments_by_sender=lambda **kwargs: [],
+            update_commitment_statuses=lambda **kwargs: True,
         ),
     )
 
@@ -398,6 +400,8 @@ def test_commitments_preview_block_and_payload_unchanged(monkeypatch) -> None:
             save_email=lambda **kwargs: 2,
             save_preview_action=lambda **kwargs: None,
             save_commitments=lambda **kwargs: True,
+            fetch_pending_commitments_by_sender=lambda **kwargs: [],
+            update_commitment_statuses=lambda **kwargs: True,
         ),
     )
 
@@ -414,5 +418,5 @@ def test_commitments_preview_block_and_payload_unchanged(monkeypatch) -> None:
 
     preview_text = str(preview_payload.get("preview_text") or "")
     assert "📝 Обязательства" in preview_text
-    assert "• Пришлю отчет до 25.12.2025 — 2025-12-25" in preview_text
+    assert "• \"Пришлю отчет до 25.12.2025\" — ⏳ ожидается" in preview_text
     assert baseline_payload == commitment_payload

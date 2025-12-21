@@ -5,13 +5,17 @@ from __future__ import annotations
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.features import FeatureFlags
 from mailbot_v26.insights.commitment_tracker import Commitment, detect_commitments
+from mailbot_v26.insights.commitment_lifecycle import (
+    CommitmentStatusUpdate,
+    evaluate_commitment_updates,
+)
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine, AutoPriorityOutcome
@@ -239,11 +243,18 @@ def _append_commitments_preview(
     if not commitments:
         return preview_text
     lines = [preview_text, "", "📝 Обязательства"]
+    status_labels = {
+        "pending": ("⏳", "ожидается"),
+        "fulfilled": ("✅", "выполнено"),
+        "expired": ("⚠️", "просрочено"),
+        "unknown": ("❓", "неизвестно"),
+    }
     for commitment in commitments:
         safe_text = _sanitize_preview_line(commitment.commitment_text)
-        line = f"• {safe_text}"
-        if commitment.deadline_iso:
-            line = f"{line} — {commitment.deadline_iso}"
+        icon, label = status_labels.get(
+            commitment.status, ("❓", commitment.status or "неизвестно")
+        )
+        line = f"• \"{safe_text}\" — {icon} {label}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -344,6 +355,67 @@ def process_message(
                 email_id=message_id,
                 error=str(exc),
             )
+
+    commitment_status_updates: list[CommitmentStatusUpdate] = []
+    if enable_commitments and from_email:
+        if system_health.mode == OperationalMode.EMERGENCY_READ_ONLY:
+            logger.error(
+                "commitment_status_update_failed",
+                email_id=message_id,
+                sender=from_email,
+                error="crm_unavailable",
+            )
+        else:
+            try:
+                pending_commitments = knowledge_db.fetch_pending_commitments_by_sender(
+                    from_email=from_email
+                )
+                commitment_status_updates = evaluate_commitment_updates(
+                    pending_commitments,
+                    message_body=body_text or "",
+                    message_received_at=received_at,
+                    now=datetime.now(timezone.utc),
+                )
+                if commitment_status_updates:
+                    saved = knowledge_db.update_commitment_statuses(
+                        updates=commitment_status_updates
+                    )
+                    if not saved:
+                        logger.error(
+                            "commitment_status_update_failed",
+                            email_id=message_id,
+                            sender=from_email,
+                            error="commitment_status_save_failed",
+                        )
+                        commitment_status_updates = []
+                    else:
+                        for update in commitment_status_updates:
+                            logger.info(
+                                "commitment_status_changed",
+                                commitment_id=update.commitment_id,
+                                old_status=update.old_status,
+                                new_status=update.new_status,
+                                reason=update.reason,
+                            )
+                            if update.new_status == "fulfilled":
+                                logger.info(
+                                    "commitment_fulfilled_detected",
+                                    commitment_id=update.commitment_id,
+                                    reason=update.reason,
+                                )
+                            if update.new_status == "expired":
+                                logger.info(
+                                    "commitment_expired",
+                                    commitment_id=update.commitment_id,
+                                    reason=update.reason,
+                                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "commitment_status_update_failed",
+                    email_id=message_id,
+                    sender=from_email,
+                    error=str(exc),
+                )
 
     # ---------- Stage LLM ----------
     entity_resolution = None
@@ -875,12 +947,27 @@ def process_message(
             reasons=[reason for reason in (shadow_action_reason, shadow_reason, priority_reason) if reason],
             confidence=proposed_action.get("confidence") if proposed_action else None,
         )
-        if enable_commitments and commitments:
-            preview_text = _append_commitments_preview(preview_text, commitments)
+        if enable_commitments and (commitments or commitment_status_updates):
+            preview_commitments = list(commitments)
+            preview_commitments.extend(
+                [
+                    Commitment(
+                        commitment_text=update.commitment_text,
+                        deadline_iso=update.deadline_iso,
+                        status=update.new_status,
+                        source="crm",
+                        confidence=1.0,
+                    )
+                    for update in commitment_status_updates
+                ]
+            )
+            preview_text = _append_commitments_preview(
+                preview_text, preview_commitments
+            )
             logger.info(
                 "commitments_preview_shown",
                 email_id=message_id,
-                count=len(commitments),
+                count=len(preview_commitments),
             )
         send_preview_to_telegram(
             chat_id=telegram_chat_id,
