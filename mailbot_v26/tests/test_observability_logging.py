@@ -274,3 +274,30 @@ def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
 
     assert payload["priority"] == "🔴"
     assert saved_payload["priority"] == "🔴"
+
+
+def test_system_health_snapshot_logging_does_not_break(monkeypatch) -> None:
+    _setup_processor(monkeypatch, processor)
+    monkeypatch.setattr(
+        processor,
+        "system_snapshotter",
+        SimpleNamespace(
+            maybe_log=lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+        ),
+    )
+
+    payload: dict[str, object] = {}
+    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: payload.update(kwargs))
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=55,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 1, 12, 0),
+        body_text="Body",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    assert payload.get("chat_id") == "chat"
