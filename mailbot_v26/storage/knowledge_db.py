@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Iterable
 
 from mailbot_v26.insights.commitment_tracker import Commitment
+from mailbot_v26.insights.commitment_lifecycle import (
+    CommitmentRecord,
+    CommitmentStatusUpdate,
+    parse_sqlite_datetime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +237,80 @@ class KnowledgeDB:
             return True
         except Exception as exc:
             logger.error("KnowledgeDB commitments save failed: %s", exc)
+            return False
+
+    def fetch_pending_commitments_by_sender(
+        self,
+        *,
+        from_email: str,
+    ) -> list[CommitmentRecord]:
+        if not from_email:
+            return []
+        try:
+            with sqlite3.connect(self.path) as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.execute(
+                    """
+                    SELECT
+                        c.id,
+                        c.commitment_text,
+                        c.deadline_iso,
+                        c.status,
+                        c.created_at
+                    FROM commitments c
+                    JOIN emails e ON e.id = c.email_row_id
+                    WHERE lower(e.from_email) = lower(?)
+                      AND c.status = 'pending'
+                    ORDER BY c.created_at ASC
+                    """,
+                    (from_email,),
+                )
+                rows = cur.fetchall()
+        except Exception as exc:
+            logger.error("KnowledgeDB commitments fetch failed: %s", exc)
+            return []
+
+        commitments: list[CommitmentRecord] = []
+        for row in rows:
+            created_at = parse_sqlite_datetime(row["created_at"])
+            if created_at is None:
+                continue
+            commitments.append(
+                CommitmentRecord(
+                    commitment_id=int(row["id"]),
+                    commitment_text=str(row["commitment_text"]),
+                    deadline_iso=row["deadline_iso"],
+                    status=str(row["status"]),
+                    created_at=created_at,
+                )
+            )
+        return commitments
+
+    def update_commitment_statuses(
+        self,
+        *,
+        updates: Iterable[CommitmentStatusUpdate],
+    ) -> bool:
+        update_list = list(updates)
+        if not update_list:
+            return True
+        try:
+            with sqlite3.connect(self.path) as conn:
+                conn.executemany(
+                    """
+                    UPDATE commitments
+                    SET status = ?
+                    WHERE id = ?
+                    """,
+                    [
+                        (update.new_status, update.commitment_id)
+                        for update in update_list
+                    ],
+                )
+                conn.commit()
+            return True
+        except Exception as exc:
+            logger.error("KnowledgeDB commitments update failed: %s", exc)
             return False
 
     def save_preview_action(
