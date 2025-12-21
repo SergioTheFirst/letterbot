@@ -83,6 +83,40 @@ class KnowledgeAnalytics:
             params.append(limit)
         return self._execute_select(query, params)
 
+    def commitment_stats_by_sender(
+        self,
+        *,
+        from_email: str,
+        days: int = 30,
+    ) -> dict[str, int]:
+        if not from_email:
+            return {
+                "total_commitments": 0,
+                "fulfilled_count": 0,
+                "expired_count": 0,
+                "unknown_count": 0,
+            }
+        query = """
+        SELECT
+            COUNT(*) AS total_commitments,
+            SUM(CASE WHEN c.status = 'fulfilled' THEN 1 ELSE 0 END) AS fulfilled_count,
+            SUM(CASE WHEN c.status = 'expired' THEN 1 ELSE 0 END) AS expired_count,
+            SUM(CASE WHEN c.status = 'unknown' THEN 1 ELSE 0 END) AS unknown_count
+        FROM commitments c
+        JOIN emails e ON e.id = c.email_row_id
+        WHERE lower(e.from_email) = lower(?)
+          AND c.created_at >= datetime('now', ?)
+        """
+        window = f"-{days} days"
+        rows = self._execute_select(query, (from_email, window))
+        row = rows[0] if rows else {}
+        return {
+            "total_commitments": int(row.get("total_commitments") or 0),
+            "fulfilled_count": int(row.get("fulfilled_count") or 0),
+            "expired_count": int(row.get("expired_count") or 0),
+            "unknown_count": int(row.get("unknown_count") or 0),
+        }
+
     def shadow_accuracy(self, *, days: int) -> dict[str, float | int]:
         query = """
         SELECT

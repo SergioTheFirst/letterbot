@@ -11,6 +11,10 @@ from typing import Any
 
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.features import FeatureFlags
+from mailbot_v26.insights.commitment_signals import (
+    CommitmentReliabilityMetrics,
+    compute_commitment_reliability,
+)
 from mailbot_v26.insights.commitment_tracker import Commitment, detect_commitments
 from mailbot_v26.insights.commitment_lifecycle import (
     CommitmentStatusUpdate,
@@ -256,6 +260,27 @@ def _append_commitments_preview(
         )
         line = f"• \"{safe_text}\" — {icon} {label}"
         lines.append(line)
+    return "\n".join(lines)
+
+
+def _append_commitment_signal_preview(
+    preview_text: str,
+    *,
+    from_email: str,
+    score: int,
+    label: str,
+    fulfilled_count: int,
+    expired_count: int,
+) -> str:
+    safe_sender = _sanitize_preview_line(from_email or "неизвестно")
+    lines = [
+        preview_text,
+        "",
+        "🔎 Контекст отношений:",
+        f"  Контрагент: {safe_sender}",
+        f"  Надёжность обязательств: {label} {score}/100",
+        f"  (выполнено: {fulfilled_count}, просрочено: {expired_count} за 30 дней)",
+    ]
     return "\n".join(lines)
 
 
@@ -810,6 +835,61 @@ def process_message(
                         error="commitments_save_failed",
                     )
 
+    commitment_signal_preview: dict[str, object] | None = None
+    if enable_commitments and entity_resolution and from_email:
+        try:
+            stats = analytics.commitment_stats_by_sender(
+                from_email=from_email,
+                days=30,
+            )
+            metrics = CommitmentReliabilityMetrics(
+                total_commitments=stats["total_commitments"],
+                fulfilled_count=stats["fulfilled_count"],
+                expired_count=stats["expired_count"],
+                unknown_count=stats["unknown_count"],
+            )
+            signal = compute_commitment_reliability(metrics)
+            previous_label = knowledge_db.upsert_entity_signal(
+                entity_id=entity_resolution.entity_id,
+                signal_type="commitment_reliability",
+                score=signal.score,
+                label=signal.label,
+                computed_at=datetime.now(timezone.utc).isoformat(),
+                sample_size=signal.sample_size,
+            )
+            logger.info(
+                "entity_signal_computed",
+                entity_id=entity_resolution.entity_id,
+                signal_type="commitment_reliability",
+                score=signal.score,
+                label=signal.label,
+                sample_size=signal.sample_size,
+            )
+            if previous_label and previous_label != signal.label:
+                logger.info(
+                    "entity_signal_changed",
+                    entity_id=entity_resolution.entity_id,
+                    signal_type="commitment_reliability",
+                    old_label=previous_label,
+                    new_label=signal.label,
+                    score=signal.score,
+                    sample_size=signal.sample_size,
+                )
+            if signal.sample_size > 0:
+                commitment_signal_preview = {
+                    "score": signal.score,
+                    "label": signal.label,
+                    "fulfilled_count": metrics.fulfilled_count,
+                    "expired_count": metrics.expired_count,
+                }
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "entity_signal_compute_failed",
+                entity_id=entity_resolution.entity_id,
+                signal_type="commitment_reliability",
+                error=str(exc),
+            )
+
     if entity_resolution:
         try:
             context_store.record_interaction_event(
@@ -968,6 +1048,15 @@ def process_message(
                 "commitments_preview_shown",
                 email_id=message_id,
                 count=len(preview_commitments),
+            )
+        if commitment_signal_preview:
+            preview_text = _append_commitment_signal_preview(
+                preview_text,
+                from_email=from_email,
+                score=int(commitment_signal_preview["score"]),
+                label=str(commitment_signal_preview["label"]),
+                fulfilled_count=int(commitment_signal_preview["fulfilled_count"]),
+                expired_count=int(commitment_signal_preview["expired_count"]),
             )
         send_preview_to_telegram(
             chat_id=telegram_chat_id,

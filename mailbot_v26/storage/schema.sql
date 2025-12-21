@@ -110,6 +110,16 @@ CREATE TABLE IF NOT EXISTS entity_baselines (
     PRIMARY KEY (entity_id, metric)
 );
 
+CREATE TABLE IF NOT EXISTS entity_signals (
+    entity_id TEXT NOT NULL,
+    signal_type TEXT NOT NULL,
+    score INTEGER,
+    label TEXT,
+    computed_at DATETIME,
+    sample_size INTEGER,
+    PRIMARY KEY (entity_id, signal_type)
+);
+
 CREATE TABLE IF NOT EXISTS interaction_events (
     id TEXT PRIMARY KEY,
     entity_id TEXT NOT NULL,
