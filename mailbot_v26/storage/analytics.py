@@ -207,6 +207,33 @@ class KnowledgeAnalytics:
                 continue
         return timestamps
 
+    def latest_interaction_event_time(
+        self,
+        *,
+        entity_id: str,
+        event_type: str,
+    ) -> datetime | None:
+        if not entity_id:
+            return None
+        query = """
+        SELECT event_time
+        FROM interaction_events
+        WHERE entity_id = ?
+          AND event_type = ?
+        ORDER BY event_time DESC
+        LIMIT 1
+        """
+        rows = self._execute_select(query, (entity_id, event_type))
+        if not rows:
+            return None
+        value = rows[0].get("event_time")
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value))
+        except ValueError:
+            return None
+
     def interaction_event_counts(
         self,
         *,
@@ -325,3 +352,31 @@ class KnowledgeAnalytics:
             "baseline_value": row.get("baseline_value"),
             "sample_size": int(row.get("sample_size") or 0),
         }
+
+    def pending_commitments_with_deadline(
+        self,
+        *,
+        from_email: str,
+        days_ahead: int | None = None,
+    ) -> list[dict[str, object]]:
+        if not from_email:
+            return []
+        query = """
+        SELECT
+            c.id AS commitment_id,
+            c.commitment_text,
+            c.deadline_iso,
+            c.status,
+            c.created_at
+        FROM commitments c
+        JOIN emails e ON e.id = c.email_row_id
+        WHERE lower(e.from_email) = lower(?)
+          AND c.deadline_iso IS NOT NULL
+          AND c.status NOT IN ('fulfilled', 'expired')
+        """
+        params: list[object] = [from_email]
+        if days_ahead is not None:
+            query += " AND date(c.deadline_iso) <= date('now', ?)"
+            params.append(f"+{days_ahead} days")
+        query += " ORDER BY c.deadline_iso ASC"
+        return self._execute_select(query, params)
