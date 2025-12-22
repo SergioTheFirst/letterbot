@@ -28,6 +28,7 @@ from mailbot_v26.bot_core.pipeline import (
 )
 from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.config_loader import AccountConfig, BotConfig, load_config
+from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthcheck
 from mailbot_v26.imap_client import ResilientIMAP
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
 from mailbot_v26.pipeline import processor as processor_module
@@ -188,6 +189,8 @@ def main(config_dir: Path | None = None) -> None:
             time.sleep(10)
             return
 
+        accounts_to_poll = run_startup_mail_account_healthcheck(config, send_telegram)
+
         try:
             health_checker = StartupHealthChecker(base_config_dir, config)
             results = health_checker.run()
@@ -236,7 +239,7 @@ def main(config_dir: Path | None = None) -> None:
                 print(f"{'=' * 60}")
                 logger.info("Cycle %d started", cycle)
 
-                for account in config.accounts:
+                for account in accounts_to_poll:
                     login = account.login or "no_login"
                     print(f"\n[MAIL] Checking: {login}")
 
