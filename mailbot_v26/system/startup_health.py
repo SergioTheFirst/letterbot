@@ -1,0 +1,230 @@
+from __future__ import annotations
+
+import logging
+import os
+import platform
+import sqlite3
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Sequence
+
+from mailbot_v26.config_loader import BotConfig
+from mailbot_v26.llm import router as llm_router
+from mailbot_v26.llm.providers import (
+    CloudflareProvider,
+    CloudflareProviderConfig,
+    GigaChatProvider,
+    GigaChatProviderConfig,
+)
+from mailbot_v26.system_health import OperationalMode, SystemHealth
+from mailbot_v26.worker.telegram_sender import ping_telegram
+
+logger = logging.getLogger(__name__)
+
+
+class HealthStatus:
+    OK = "OK"
+    DEGRADED = "DEGRADED"
+    FAILED = "FAILED"
+
+
+@dataclass(frozen=True)
+class HealthCheckResult:
+    component: str
+    status: str
+    details: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"component": self.component, "status": self.status, "details": self.details}
+
+
+class StartupHealthChecker:
+    def __init__(self, config_dir: Path, config: BotConfig) -> None:
+        self._config_dir = config_dir
+        self._config = config
+
+    def run(self) -> list[dict[str, str]]:
+        results = [
+            self._safe_check(self._check_python),
+            self._safe_check(self._check_os),
+            self._safe_check(self._check_db),
+            self._safe_check(self._check_telegram),
+        ]
+        results.extend(self._safe_check(self._check_gigachat, fallback=[]) or [])
+        results.extend(self._safe_check(self._check_cloudflare, fallback=[]) or [])
+        return [result.as_dict() for result in results]
+
+    def evaluate_mode(self, results: Sequence[dict[str, str]]) -> OperationalMode:
+        system_health = SystemHealth()
+        components = {item["component"]: item for item in results}
+        db_status = components.get("DB", {}).get("status")
+        telegram_status = components.get("Telegram", {}).get("status")
+        llm_ok = any(
+            item.get("status") == HealthStatus.OK
+            for name, item in components.items()
+            if name in {"GigaChat", "Cloudflare"}
+        )
+        if db_status:
+            system_health.update_component("CRM", db_status == HealthStatus.OK)
+        if telegram_status:
+            system_health.update_component("Telegram", telegram_status == HealthStatus.OK)
+        system_health.update_component("LLM", llm_ok)
+        return system_health.mode
+
+    def _safe_check(
+        self,
+        fn,
+        *,
+        fallback: HealthCheckResult | list[HealthCheckResult] | None = None,
+    ) -> HealthCheckResult | list[HealthCheckResult]:
+        try:
+            return fn()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("startup_health_check_failed", extra={"component": fn.__name__}, exc_info=True)
+            return (
+                fallback
+                if fallback is not None
+                else HealthCheckResult(fn.__name__, HealthStatus.FAILED, str(exc))
+            )
+
+    def _check_python(self) -> HealthCheckResult:
+        version = sys.version_info
+        ok = version >= (3, 10)
+        status = HealthStatus.OK if ok else HealthStatus.FAILED
+        details = f"{version.major}.{version.minor}.{version.micro}"
+        if not ok:
+            details = f"{details} (requires >=3.10)"
+        return HealthCheckResult("Python", status, details)
+
+    def _check_os(self) -> HealthCheckResult:
+        system = platform.system() or "Unknown"
+        release = platform.release() or ""
+        cwd = os.getcwd()
+        details = f"{system} {release}".strip()
+        if cwd:
+            details = f"{details} (cwd={cwd})"
+        return HealthCheckResult("OS", HealthStatus.OK, details)
+
+    def _check_db(self) -> HealthCheckResult:
+        db_path = self._config.storage.db_path
+        try:
+            with sqlite3.connect(f"file:{db_path}?mode=rwc", uri=True) as conn:
+                conn.execute("BEGIN;")
+                conn.execute("CREATE TEMP TABLE IF NOT EXISTS startup_health_probe (id INTEGER);")
+                conn.execute("INSERT INTO startup_health_probe (id) VALUES (1);")
+                conn.execute("ROLLBACK;")
+        except sqlite3.Error as exc:
+            return HealthCheckResult("DB", HealthStatus.FAILED, f"{db_path} ({exc})")
+        return HealthCheckResult("DB", HealthStatus.OK, str(db_path))
+
+    def _check_telegram(self) -> HealthCheckResult:
+        token = self._config.keys.telegram_bot_token
+        ok, details = ping_telegram(token)
+        status = HealthStatus.OK if ok else HealthStatus.FAILED
+        return HealthCheckResult("Telegram", status, details)
+
+    def _check_gigachat(self) -> list[HealthCheckResult]:
+        try:
+            config = llm_router._load_llm_config(self._config_dir)
+        except Exception as exc:
+            return [HealthCheckResult("GigaChat", HealthStatus.FAILED, f"config error: {exc}")]
+        enabled = bool(config.gigachat_enabled or config.gigachat_api_key)
+        if not enabled:
+            return [HealthCheckResult("GigaChat", HealthStatus.DEGRADED, "disabled")]
+        if not config.gigachat_api_key:
+            return [HealthCheckResult("GigaChat", HealthStatus.FAILED, "missing api key")]
+        provider = GigaChatProvider(
+            GigaChatProviderConfig(
+                api_key=config.gigachat_api_key,
+                base_url=config.gigachat_base_url,
+                model=config.gigachat_model,
+            )
+        )
+        ok = provider.healthcheck()
+        status = HealthStatus.OK if ok else HealthStatus.FAILED
+        details = "active" if ok else "healthcheck failed"
+        return [HealthCheckResult("GigaChat", status, details)]
+
+    def _check_cloudflare(self) -> list[HealthCheckResult]:
+        try:
+            config = llm_router._load_llm_config(self._config_dir)
+        except Exception as exc:
+            return [
+                HealthCheckResult("Cloudflare", HealthStatus.FAILED, f"config error: {exc}")
+            ]
+        if not config.cloudflare_enabled:
+            return [HealthCheckResult("Cloudflare", HealthStatus.DEGRADED, "disabled")]
+        if not config.cloudflare_account_id or not config.cloudflare_api_key:
+            return [HealthCheckResult("Cloudflare", HealthStatus.FAILED, "missing credentials")]
+        provider = CloudflareProvider(
+            CloudflareProviderConfig(
+                account_id=config.cloudflare_account_id,
+                api_token=config.cloudflare_api_key,
+                model=config.cloudflare_model,
+            )
+        )
+        ok = provider.healthcheck()
+        status = HealthStatus.OK if ok else HealthStatus.FAILED
+        details = "active" if ok else "healthcheck failed"
+        return [HealthCheckResult("Cloudflare", status, details)]
+
+
+class LaunchReportBuilder:
+    def __init__(self, version_label: str = "MailBot Premium v26") -> None:
+        self._version_label = version_label
+
+    def build(self, results: Sequence[dict[str, str]], mode: OperationalMode) -> str:
+        index = {item["component"]: item for item in results}
+        lines = [
+            "---",
+            f"🚀 {self._version_label} started",
+            "",
+            "System:",
+            self._format_line("Python", index.get("Python")),
+            self._format_line("OS", index.get("OS")),
+            self._format_line("DB", index.get("DB")),
+            "",
+            "LLM:",
+            self._format_line("GigaChat", index.get("GigaChat")),
+            self._format_line("Cloudflare", index.get("Cloudflare")),
+            "",
+            "Telegram:",
+            self._format_line("Status", index.get("Telegram")),
+            "",
+            "Mode:",
+            f"- Operational mode: {mode.value}",
+            "---",
+        ]
+        return "\n".join(lines)
+
+    def _format_line(self, label: str, entry: dict[str, str] | None) -> str:
+        if not entry:
+            return f"- {label}: FAILED (missing)"
+        status = entry.get("status", HealthStatus.FAILED)
+        details = entry.get("details", "")
+        if details:
+            return f"- {label}: {status} ({details})"
+        return f"- {label}: {status}"
+
+
+def dispatch_launch_report(bot_token: str, chat_id: str, report: str) -> bool:
+    from mailbot_v26.worker.telegram_sender import send_telegram
+
+    if not bot_token or not chat_id or not report:
+        logger.error("launch_report_skipped", extra={"reason": "missing_token_chat_or_report"})
+        return False
+    try:
+        return send_telegram(bot_token, chat_id, report)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("launch_report_send_failed", extra={"error": str(exc)}, exc_info=True)
+        return False
+
+
+__all__ = [
+    "HealthCheckResult",
+    "HealthStatus",
+    "LaunchReportBuilder",
+    "StartupHealthChecker",
+    "dispatch_launch_report",
+]

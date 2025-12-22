@@ -48,3 +48,31 @@ def send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
         return False
 
     return True
+
+
+def ping_telegram(bot_token: str) -> tuple[bool, str]:
+    """
+    Проверяет доступность Telegram API для бота.
+    НИЧЕГО не отправляет.
+    НИКОГДА не бросает исключения.
+    """
+    if not bot_token:
+        log.error("Telegram ping failed: empty token")
+        return False, "missing bot token"
+
+    if not requests:
+        log.error("Telegram ping failed: requests module not available")
+        return False, "requests module not available"
+
+    url = f"https://api.telegram.org/bot{bot_token}/getMe"
+    try:
+        resp = requests.get(url, timeout=10)
+    except Exception as exc:
+        log.error("Telegram ping exception: %s", exc)
+        return False, f"exception: {exc}"
+
+    if resp.status_code != 200:
+        log.error("Telegram ping HTTP error %s: %s", resp.status_code, resp.text)
+        return False, f"http {resp.status_code}"
+
+    return True, "reachable"

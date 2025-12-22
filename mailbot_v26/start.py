@@ -33,6 +33,11 @@ from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
 from mailbot_v26.pipeline import processor as processor_module
 from mailbot_v26.state_manager import StateManager
 from mailbot_v26.storage.self_check import run_self_check
+from mailbot_v26.system.startup_health import (
+    LaunchReportBuilder,
+    StartupHealthChecker,
+    dispatch_launch_report,
+)
 from mailbot_v26.text.mime_utils import decode_mime_header
 from mailbot_v26.worker.telegram_sender import send_telegram
 
@@ -182,6 +187,26 @@ def main(config_dir: Path | None = None) -> None:
             print(f"[ERROR] Configuration error: {exc}")
             time.sleep(10)
             return
+
+        try:
+            health_checker = StartupHealthChecker(base_config_dir, config)
+            results = health_checker.run()
+            mode = health_checker.evaluate_mode(results)
+            report = LaunchReportBuilder().build(results, mode)
+            launch_chat_id = config.general.admin_chat_id
+            if not launch_chat_id and config.accounts:
+                launch_chat_id = config.accounts[0].telegram_chat_id
+            if launch_chat_id:
+                ok = dispatch_launch_report(
+                    config.keys.telegram_bot_token,
+                    launch_chat_id,
+                    report,
+                )
+                logger.info("Launch report send status: %s", "OK" if ok else "FAIL")
+            else:
+                logger.warning("Launch report skipped: missing admin chat id")
+        except Exception:
+            logger.exception("Startup health check failed")
 
         try:
             storage = Storage(config.storage.db_path)

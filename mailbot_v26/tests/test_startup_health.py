@@ -1,0 +1,140 @@
+import importlib
+import logging
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+from mailbot_v26.config_loader import load_config
+from mailbot_v26.system.startup_health import (
+    HealthStatus,
+    LaunchReportBuilder,
+    StartupHealthChecker,
+    dispatch_launch_report,
+)
+from mailbot_v26.worker import telegram_sender
+
+
+def _write_config_files(tmp_path, *, gigachat_enabled: bool, gigachat_key: str) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.ini").write_text(
+        "\n".join(
+            [
+                "[general]",
+                "check_interval = 180",
+                "max_attachment_mb = 10",
+                "admin_chat_id = 123",
+                "",
+                "[storage]",
+                f"db_path = {tmp_path / 'mailbot.sqlite'}",
+                "",
+                "[llm]",
+                "primary = cloudflare",
+                "fallback = cloudflare",
+                "",
+                "[gigachat]",
+                f"enabled = {'true' if gigachat_enabled else 'false'}",
+                f"api_key = {gigachat_key}",
+                "",
+                "[cloudflare]",
+                "enabled = true",
+                "",
+                "[llm_safety]",
+                "gigachat_max_consecutive_errors = 3",
+                "gigachat_max_latency_sec = 10",
+                "gigachat_cooldown_sec = 600",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text(
+        "\n".join(
+            [
+                "[account1]",
+                "login = test@example.com",
+                "password = secret",
+                "host = imap.example.com",
+                "port = 993",
+                "use_ssl = true",
+                "telegram_chat_id = 123",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (config_dir / "keys.ini").write_text(
+        "\n".join(
+            [
+                "[telegram]",
+                "bot_token = token",
+                "",
+                "[cloudflare]",
+                "account_id = account",
+                "api_token = token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_startup_health_checker_never_raises(tmp_path, monkeypatch) -> None:
+    _write_config_files(tmp_path, gigachat_enabled=False, gigachat_key="")
+    config_dir = tmp_path / "config"
+    config = load_config(config_dir)
+    monkeypatch.setattr(telegram_sender, "requests", None)
+    checker = StartupHealthChecker(config_dir, config)
+    results = checker.run()
+    assert isinstance(results, list)
+    assert {item["component"] for item in results} >= {
+        "Python",
+        "OS",
+        "DB",
+        "Telegram",
+        "GigaChat",
+        "Cloudflare",
+    }
+
+
+def test_gigachat_unavailable_cloudflare_ok(tmp_path, monkeypatch) -> None:
+    _write_config_files(tmp_path, gigachat_enabled=True, gigachat_key="")
+    config_dir = tmp_path / "config"
+    config = load_config(config_dir)
+    monkeypatch.setattr(telegram_sender, "requests", None)
+    checker = StartupHealthChecker(config_dir, config)
+    results = {item["component"]: item for item in checker.run()}
+    assert results["GigaChat"]["status"] in {HealthStatus.FAILED, HealthStatus.DEGRADED}
+    assert results["Cloudflare"]["status"] == HealthStatus.OK
+
+
+def test_launch_report_deterministic() -> None:
+    builder = LaunchReportBuilder(version_label="MailBot Premium v26")
+    results = [
+        {"component": "Cloudflare", "status": HealthStatus.OK, "details": "active"},
+        {"component": "GigaChat", "status": HealthStatus.DEGRADED, "details": "disabled"},
+        {"component": "DB", "status": HealthStatus.OK, "details": "/db"},
+        {"component": "OS", "status": HealthStatus.OK, "details": "Linux"},
+        {"component": "Python", "status": HealthStatus.OK, "details": "3.11"},
+        {"component": "Telegram", "status": HealthStatus.OK, "details": "reachable"},
+    ]
+    report_a = builder.build(results, mode=SimpleNamespace(value="FULL"))
+    report_b = builder.build(list(reversed(results)), mode=SimpleNamespace(value="FULL"))
+    assert report_a == report_b
+
+
+def test_dispatch_launch_report_does_not_raise(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    def raising_send(*_args, **_kwargs) -> bool:
+        raise RuntimeError("send failed")
+
+    monkeypatch.setattr(telegram_sender, "send_telegram", raising_send)
+    with caplog.at_level(logging.ERROR):
+        ok = dispatch_launch_report("token", "chat", "report")
+    assert ok is False
+    assert "launch_report_send_failed" in caplog.text
+
+
+def test_startup_health_import_has_no_pipeline_side_effects(monkeypatch) -> None:
+    for module_name in list(sys.modules):
+        if module_name.startswith("mailbot_v26.pipeline"):
+            del sys.modules[module_name]
+    importlib.reload(sys.modules["mailbot_v26.system.startup_health"])
+    assert not any(name.startswith("mailbot_v26.pipeline") for name in sys.modules)
