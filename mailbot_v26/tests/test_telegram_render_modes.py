@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+from datetime import datetime
+from types import SimpleNamespace
+
+import pytest
+
+from mailbot_v26.pipeline import processor
+
+
+def _setup_processor(monkeypatch) -> None:
+    llm_result = SimpleNamespace(
+        priority="🔴",
+        action_line="Проверить письмо",
+        body_summary="Summary",
+        attachment_summaries=[],
+        llm_provider="gigachat",
+        failed=False,
+    )
+    monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
+    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor,
+        "feature_flags",
+        SimpleNamespace(
+            ENABLE_AUTO_PRIORITY=False,
+            ENABLE_AUTO_ACTIONS=False,
+            AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+            ENABLE_SHADOW_PERSISTENCE=False,
+            ENABLE_PREVIEW_ACTIONS=False,
+        ),
+    )
+    monkeypatch.setattr(
+        processor.shadow_priority_engine,
+        "compute",
+        lambda llm_priority, from_email: (llm_priority, None),
+    )
+    monkeypatch.setattr(
+        processor.shadow_action_engine,
+        "compute",
+        lambda account_email, from_email: [],
+    )
+    monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **kwargs: None)
+    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
+    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+
+
+def test_no_short_template_when_data_exists() -> None:
+    ctx = processor.TelegramRenderContext(
+        extracted_text_len=42,
+        attachments_count=0,
+        llm_failed=True,
+        signal_invalid=True,
+    )
+
+    mode = processor.choose_tg_render_mode(ctx)
+
+    assert mode is processor.TelegramRenderMode.FULL
+
+
+def test_attachments_visible_without_llm(monkeypatch) -> None:
+    _setup_processor(monkeypatch)
+    monkeypatch.setattr(
+        processor,
+        "evaluate_signal_quality",
+        lambda _: SimpleNamespace(
+            entropy=0.0,
+            printable_ratio=0.0,
+            quality_score=0.0,
+            is_usable=False,
+            reason="empty",
+        ),
+    )
+    sent: dict[str, object] = {}
+    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    attachments = [
+        {
+            "filename": "one.doc",
+            "content_type": "application/msword",
+            "text": "a" * 10,
+        },
+    ]
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=11,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 1, 12, 0),
+        body_text="",
+        attachments=attachments,
+        telegram_chat_id="chat",
+    )
+
+    telegram_text = sent["telegram_text"]
+    assert "Вложения: 1" in telegram_text
+    assert "DOC" in telegram_text
+
+
+def test_safe_fallback_still_shows_attachments(monkeypatch) -> None:
+    _setup_processor(monkeypatch)
+    monkeypatch.setattr(processor, "_build_telegram_text", lambda **kwargs: "short")
+
+    sent: dict[str, object] = {}
+    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    attachments = [
+        {
+            "filename": "one.doc",
+            "content_type": "application/msword",
+            "text": "a" * 10,
+        },
+    ]
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=12,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 1, 12, 0),
+        body_text="Body text that should not disappear.",
+        attachments=attachments,
+        telegram_chat_id="chat",
+    )
+
+    telegram_text = sent["telegram_text"]
+    assert telegram_text.startswith("📧 Письмо получено")
+    assert "Вложения: 1" in telegram_text
+
+
+def test_renderer_mode_logged(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    _setup_processor(monkeypatch)
+    sent: dict[str, object] = {}
+    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    with caplog.at_level("INFO"):
+        processor.process_message(
+            account_email="account@example.com",
+            message_id=13,
+            from_email="sender@example.com",
+            subject="Subject",
+            received_at=datetime(2024, 1, 1, 12, 0),
+            body_text="Body text with enough content to pass validation.",
+            attachments=[],
+            telegram_chat_id="chat",
+        )
+
+    assert "tg_render_mode_selected" in caplog.text
