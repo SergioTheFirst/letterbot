@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from mailbot_v26.insights.relationship_health import HealthSnapshot
 from mailbot_v26.pipeline import processor
+from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.storage.context_layer import EntityResolution
 
 
@@ -105,6 +106,18 @@ def test_relationship_health_does_not_change_telegram_payload(monkeypatch) -> No
         telegram_chat_id="chat",
     )
 
+    telegram_text = telegram_safe(
+        processor._build_telegram_text(
+            priority="🔵",
+            from_email="sender@example.com",
+            subject="Subject",
+            action_line="Проверить письмо",
+            body_summary="Body summary",
+            body_text="Text",
+            attachment_summary="",
+        )
+    )
+
     assert sent == [
         {
             "chat_id": "chat",
@@ -114,6 +127,7 @@ def test_relationship_health_does_not_change_telegram_payload(monkeypatch) -> No
             "action_line": "Проверить письмо",
             "body_summary": "Body summary",
             "attachment_summaries": [],
+            "telegram_text": telegram_text,
             "account_email": "account@example.com",
         }
     ]

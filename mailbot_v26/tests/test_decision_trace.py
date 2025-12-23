@@ -107,6 +107,7 @@ def test_decision_trace_does_not_change_telegram_payload(monkeypatch, tmp_path) 
         "action_line",
         "body_summary",
         "attachment_summaries",
+        "telegram_text",
         "account_email",
     }
 

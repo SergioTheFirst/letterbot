@@ -50,6 +50,7 @@ def test_telegram_payload_unchanged(monkeypatch) -> None:
         "action_line",
         "body_summary",
         "attachment_summaries",
+        "telegram_text",
         "account_email",
     }
 
@@ -98,5 +99,6 @@ def test_telegram_payload_unchanged_with_gigachat_provider(monkeypatch) -> None:
         "action_line",
         "body_summary",
         "attachment_summaries",
+        "telegram_text",
         "account_email",
     }

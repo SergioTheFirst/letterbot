@@ -25,6 +25,7 @@ if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
 
 from mailbot_v26.pipeline import processor
+from mailbot_v26.telegram_utils import telegram_safe
 
 
 class StubRuntimeFlagStore:
@@ -212,6 +213,18 @@ def test_telegram_payload_unchanged(monkeypatch):
         telegram_chat_id="chat",
     )
 
+    telegram_text = telegram_safe(
+        processor._build_telegram_text(
+            priority="🟡",
+            from_email="sender@example.com",
+            subject="Subject",
+            action_line=llm_result.action_line,
+            body_summary=llm_result.body_summary,
+            body_text="Body",
+            attachment_summary="",
+        )
+    )
+
     expected_payload = {
         "chat_id": "chat",
         "priority": "🟡",
@@ -220,6 +233,7 @@ def test_telegram_payload_unchanged(monkeypatch):
         "action_line": llm_result.action_line,
         "body_summary": llm_result.body_summary,
         "attachment_summaries": llm_result.attachment_summaries,
+        "telegram_text": telegram_text,
         "account_email": "account@example.com",
     }
 

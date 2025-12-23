@@ -30,6 +30,7 @@ from mailbot_v26.insights.temporal_reasoning import (
 )
 from mailbot_v26.insights.trust_score import TrustScoreCalculator
 from mailbot_v26.observability import get_logger
+from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.observability.metrics import (
@@ -123,6 +124,18 @@ class InboundMessage:
     sender: str = ""
     attachments: list[Attachment] = field(default_factory=list)
     received_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EmailContext:
+    subject: str
+    from_email: str
+    body_text: str
+    attachments_count: int
+
+
+class InvalidTelegramPayload(ValueError):
+    pass
 
 
 class MessageProcessor:
@@ -222,6 +235,146 @@ def _sanitize_preview_line(text: str) -> str:
         .replace("\r", " ")
     )
     return " ".join(cleaned.split())
+
+
+_TELEGRAM_BODY_LIMIT = 800
+_MIN_TELEGRAM_LEN = 40
+
+
+def _attachment_kind(attachment: dict[str, Any]) -> str:
+    content_type = str(attachment.get("content_type") or attachment.get("type") or "").lower()
+    filename = str(attachment.get("filename") or "").lower()
+    extension = filename.rsplit(".", 1)[-1] if "." in filename else ""
+    if "pdf" in content_type or extension == "pdf":
+        return "PDF"
+    if "word" in content_type or extension in {"doc", "docx"}:
+        return "DOC"
+    if "excel" in content_type or "spreadsheet" in content_type or extension in {"xls", "xlsx"}:
+        return "XLS"
+    if extension:
+        return extension.upper()
+    if content_type:
+        return content_type.split("/")[-1].upper()
+    return "FILE"
+
+
+def _attachment_text_length(attachment: dict[str, Any]) -> int:
+    if isinstance(attachment.get("chars"), int):
+        return int(attachment["chars"])
+    text = attachment.get("text") or ""
+    if isinstance(text, bytes):
+        return len(text.decode(errors="ignore"))
+    return len(str(text))
+
+
+def _build_attachment_details(
+    attachments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    details: list[dict[str, Any]] = []
+    for attachment in attachments:
+        details.append(
+            {
+                "kind": _attachment_kind(attachment),
+                "chars": _attachment_text_length(attachment),
+            }
+        )
+    return details
+
+
+def _build_attachment_summary(details: list[dict[str, Any]]) -> str:
+    if not details:
+        return ""
+    total_chars = sum(detail["chars"] for detail in details)
+    lines = [f"📎 Вложения: {len(details)}", f"Всего текста: {total_chars} chars"]
+    lines.extend(f"- {detail['kind']}: {detail['chars']} chars" for detail in details)
+    return "\n".join(lines)
+
+
+def _trim_telegram_body(text: str) -> str:
+    cleaned = text.strip()
+    if len(cleaned) <= _TELEGRAM_BODY_LIMIT:
+        return cleaned
+    return f"{cleaned[: _TELEGRAM_BODY_LIMIT - 1]}…"
+
+
+def _looks_like_subject_only(text: str, subject: str) -> bool:
+    if not text.strip():
+        return True
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) > 2:
+        return False
+    normalized = " ".join(lines).lower()
+    normalized_subject = (subject or "").strip().lower()
+    if normalized_subject and normalized_subject in normalized:
+        return len(normalized) <= len(normalized_subject) + 10
+    return len(lines) == 1
+
+
+def _build_telegram_text(
+    *,
+    priority: str,
+    from_email: str,
+    subject: str,
+    action_line: str,
+    body_summary: str,
+    body_text: str,
+    attachment_summary: str,
+) -> str:
+    safe_subject = subject or "(без темы)"
+    safe_sender = from_email or "неизвестно"
+    lines = [f"{priority} Новое письмо", f"Тема: {safe_subject}", f"От: {safe_sender}"]
+    if action_line:
+        lines.append(f"Действие: {action_line}")
+    content = body_summary.strip() or body_text.strip()
+    if content:
+        lines.append("")
+        lines.append(_trim_telegram_body(content))
+    if attachment_summary:
+        lines.append("")
+        lines.append(attachment_summary)
+    return "\n".join(lines)
+
+
+def validate_tg_payload(text: str, ctx: EmailContext) -> str:
+    if len(text.strip()) < _MIN_TELEGRAM_LEN:
+        raise InvalidTelegramPayload("too short")
+    if ctx.attachments_count > 0 and "влож" not in text.lower():
+        raise InvalidTelegramPayload("attachments missing")
+    if _looks_like_subject_only(text, ctx.subject) and (
+        ctx.body_text.strip() or ctx.attachments_count > 0
+    ):
+        raise InvalidTelegramPayload("subject_only")
+    return text
+
+
+def _build_tg_fallback(
+    *,
+    subject: str,
+    from_email: str,
+    attachment_summary: str,
+) -> str:
+    safe_subject = subject or "(без темы)"
+    safe_sender = from_email or "неизвестно"
+    lines = [
+        "📧 Письмо получено",
+        "",
+        f"Тема: {safe_subject}",
+        f"От: {safe_sender}",
+    ]
+    if attachment_summary:
+        lines.append("")
+        lines.append(attachment_summary)
+    else:
+        lines.append("")
+        lines.append("📎 Вложения: 0")
+    lines.extend(
+        [
+            "",
+            "⚠️ Основной текст не удалось безопасно отобразить.",
+            "ℹ️ Детали сохранены в системе.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _extract_preview_actions(proposed_action: dict | list | None) -> list[str]:
@@ -1289,6 +1442,51 @@ def process_message(
         )
 
     # ---------- Stage Telegram ----------
+    attachment_details = _build_attachment_details(attachments)
+    attachment_summary = _build_attachment_summary(attachment_details)
+    telegram_text_raw = _build_telegram_text(
+        priority=priority,
+        from_email=from_email,
+        subject=subject,
+        action_line=action_line,
+        body_summary=body_summary,
+        body_text=body_text,
+        attachment_summary=attachment_summary,
+    )
+    ctx = EmailContext(
+        subject=subject,
+        from_email=from_email,
+        body_text=body_text or "",
+        attachments_count=len(attachments),
+    )
+    payload_invalid = False
+    try:
+        telegram_text_raw = validate_tg_payload(telegram_text_raw, ctx)
+    except InvalidTelegramPayload as exc:
+        payload_invalid = True
+        logger.warning(
+            "tg_payload_invalid",
+            email_id=message_id,
+            reason=str(exc),
+            attachments=len(attachments),
+            body_chars=len(body_text or ""),
+        )
+        event_emitter.emit(
+            type="tg_payload_invalid",
+            timestamp=received_at,
+            email_id=message_id,
+            payload={
+                "reason": str(exc),
+                "attachments": len(attachments),
+                "body_chars": len(body_text or ""),
+            },
+        )
+        telegram_text_raw = _build_tg_fallback(
+            subject=subject,
+            from_email=from_email,
+            attachment_summary=attachment_summary,
+        )
+    telegram_text = telegram_safe(telegram_text_raw)
     try:
         send_to_telegram(
             chat_id=telegram_chat_id,
@@ -1298,6 +1496,7 @@ def process_message(
             action_line=action_line,
             body_summary=body_summary,
             attachment_summaries=attachment_summaries,
+            telegram_text=telegram_text,
             account_email=account_email,
         )
         change = system_health.update_component("Telegram", True)
@@ -1306,12 +1505,20 @@ def process_message(
             chat_id=telegram_chat_id,
             account_email=account_email,
         )
-        logger.info(
-            "telegram_sent",
-            email_id=message_id,
-            chat_id=telegram_chat_id,
-            success=True,
-        )
+        if payload_invalid:
+            logger.warning(
+                "telegram_fallback_sent",
+                email_id=message_id,
+                chat_id=telegram_chat_id,
+                success=True,
+            )
+        else:
+            logger.info(
+                "telegram_sent",
+                email_id=message_id,
+                chat_id=telegram_chat_id,
+                success=True,
+            )
     except Exception as exc:
         change = system_health.update_component(
             "Telegram",
