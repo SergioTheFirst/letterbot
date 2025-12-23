@@ -45,7 +45,7 @@ def test_commitment_signal_crm_failure_does_not_break_pipeline(monkeypatch, capl
             "confidence": 0.9,
         },
     )
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
     monkeypatch.setattr(processor, "send_preview_to_telegram", lambda **kwargs: None)
 
     class _Analytics:

@@ -1,23 +1,16 @@
 from __future__ import annotations
 
-from typing import Any
+from .telegram_payload import TelegramPayload
 
 from mailbot_v26.observability import get_logger
 
 logger = get_logger("mailbot")
 
 
-def send_to_telegram(
+def enqueue_tg(
     *,
-    chat_id: str,
-    priority: str,
-    from_email: str,
-    subject: str,
-    action_line: str,
-    body_summary: str,
-    attachment_summaries: list[dict[str, Any]],
-    telegram_text: str,
-    account_email: str,
+    email_id: int,
+    payload: TelegramPayload,
 ) -> None:
     """
     Telegram stage entrypoint for the legacy pipeline.
@@ -28,9 +21,10 @@ def send_to_telegram(
     """
     logger.info(
         "telegram_stage_unconfigured",
-        chat_id=chat_id,
-        account_email=account_email,
-        telegram_text=telegram_text,
+        email_id=email_id,
+        chat_id=payload.metadata.get("chat_id"),
+        account_email=payload.metadata.get("account_email"),
+        telegram_text=payload.html_text,
     )
 
 

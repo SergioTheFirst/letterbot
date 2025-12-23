@@ -55,7 +55,7 @@ def _common_monkeypatches(monkeypatch, db_path) -> None:
 def test_decision_trace_persists_prompt_and_response(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "decision_trace.sqlite"
     _common_monkeypatches(monkeypatch, db_path)
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
 
     processor.process_message(
         account_email="account@example.com",
@@ -85,8 +85,11 @@ def test_decision_trace_does_not_change_telegram_payload(monkeypatch, tmp_path) 
     db_path = tmp_path / "decision_trace_payload.sqlite"
     _common_monkeypatches(monkeypatch, db_path)
 
-    payload: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: payload.update(kwargs))
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        payload_store["payload"] = payload
+
+    payload_store: dict[str, object] = {}
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -99,17 +102,14 @@ def test_decision_trace_does_not_change_telegram_payload(monkeypatch, tmp_path) 
         telegram_chat_id="chat",
     )
 
-    assert set(payload.keys()) == {
-        "chat_id",
-        "priority",
-        "from_email",
-        "subject",
-        "action_line",
-        "body_summary",
-        "attachment_summaries",
-        "telegram_text",
-        "account_email",
-    }
+    payload = payload_store["payload"]
+    assert payload.metadata["chat_id"] == "chat"
+    assert payload.metadata["account_email"] == "account@example.com"
+    assert payload.metadata["action_line"] == "Позвонить клиенту"
+    assert payload.metadata["body_summary"] == "Summary"
+    assert payload.metadata["attachment_summaries"] == [
+        {"filename": "file.txt", "summary": "summary"}
+    ]
 
 
 def test_decision_trace_write_failure_does_not_stop_pipeline(monkeypatch, tmp_path) -> None:
@@ -122,7 +122,11 @@ def test_decision_trace_write_failure_does_not_stop_pipeline(monkeypatch, tmp_pa
     monkeypatch.setattr(processor, "decision_trace_writer", SimpleNamespace(write=_raise_write))
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -135,13 +139,13 @@ def test_decision_trace_write_failure_does_not_stop_pipeline(monkeypatch, tmp_pa
         telegram_chat_id="chat",
     )
 
-    assert sent.get("chat_id") == "chat"
+    assert sent.get("payload").metadata.get("chat_id") == "chat"
 
 
 def test_decision_trace_records_signal_fallback(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "decision_trace_signal.sqlite"
     _common_monkeypatches(monkeypatch, db_path)
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
 
     processor.process_message(
         account_email="account@example.com",

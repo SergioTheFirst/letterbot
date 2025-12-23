@@ -1,6 +1,6 @@
 import logging
 
-from mailbot_v26.telegram_utils import telegram_safe
+from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 
 try:
     import requests
@@ -10,13 +10,15 @@ except Exception:
 log = logging.getLogger(__name__)
 
 
-def send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
+def send_telegram(payload: TelegramPayload) -> bool:
     """
     Отправляет сообщение в Telegram.
     Безопасно экранирует HTML и удаляет обратные слеши.
     НИКОГДА не бросает исключения.
     """
-    if not bot_token or not chat_id or not text:
+    bot_token = payload.metadata.get("bot_token")
+    chat_id = payload.metadata.get("chat_id")
+    if not bot_token or not chat_id or not payload.html_text:
         log.error("Telegram send failed: empty token, chat_id or text")
         return False
 
@@ -26,14 +28,12 @@ def send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
-    safe_text = telegram_safe(text)
-
     try:
         resp = requests.post(
             url,
             json={
                 "chat_id": chat_id,
-                "text": safe_text,
+                "text": payload.html_text,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             },

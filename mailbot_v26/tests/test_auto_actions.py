@@ -18,7 +18,7 @@ if "mailbot_v26.pipeline.stage_llm" not in sys.modules:
 
 if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     stage_telegram = types.ModuleType("mailbot_v26.pipeline.stage_telegram")
-    stage_telegram.send_to_telegram = lambda **kwargs: None
+    stage_telegram.enqueue_tg = lambda **kwargs: None
     stage_telegram.send_preview_to_telegram = lambda **kwargs: None
     stage_telegram.send_system_notice = lambda **kwargs: None
     sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
@@ -149,8 +149,12 @@ def test_flag_off_skips_auto_actions(monkeypatch):
 
     monkeypatch.setattr(processor.auto_action_engine, "propose", _fail_if_called)
 
-    payload: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: payload.update(kwargs))
+    payload_store: dict[str, object] = {}
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        payload_store["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -164,16 +168,14 @@ def test_flag_off_skips_auto_actions(monkeypatch):
     )
 
     assert called is False
-    assert set(payload.keys()) == {
-        "chat_id",
-        "priority",
-        "from_email",
-        "subject",
-        "action_line",
-        "body_summary",
-        "attachment_summaries",
-        "account_email",
-    }
+    payload = payload_store["payload"]
+    assert payload.metadata["chat_id"] == "chat"
+    assert payload.metadata["account_email"] == "account@example.com"
+    assert payload.metadata["action_line"] == "Позвонить клиенту"
+    assert payload.metadata["body_summary"] == "Body summary"
+    assert payload.metadata["attachment_summaries"] == [
+        {"filename": "file.txt", "summary": "summary"}
+    ]
 
 
 def test_valid_auto_action_persisted(monkeypatch, tmp_path):
@@ -225,7 +227,7 @@ def test_valid_auto_action_persisted(monkeypatch, tmp_path):
         "auto_action_engine",
         AutoActionEngine(confidence_threshold=0.75),
     )
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
 
     processor.process_message(
         account_email="account@example.com",
@@ -289,7 +291,10 @@ def test_telegram_payload_not_changed(monkeypatch):
         ),
     )
     monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(False))
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: baseline_payload.update(kwargs))
+    def _enqueue_baseline(*, email_id: int, payload) -> None:
+        baseline_payload["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_baseline)
 
     processor.process_message(
         account_email="account@example.com",
@@ -322,7 +327,10 @@ def test_telegram_payload_not_changed(monkeypatch):
         "source": "shadow",
         "confidence": 0.8,
     })
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: with_auto_actions.update(kwargs))
+    def _enqueue_with_auto(*, email_id: int, payload) -> None:
+        with_auto_actions["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_with_auto)
 
     processor.process_message(
         account_email="account@example.com",
@@ -335,4 +343,4 @@ def test_telegram_payload_not_changed(monkeypatch):
         telegram_chat_id="chat",
     )
 
-    assert baseline_payload == with_auto_actions
+    assert baseline_payload["payload"] == with_auto_actions["payload"]

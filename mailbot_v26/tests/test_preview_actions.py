@@ -47,9 +47,13 @@ def _common_monkeypatches(monkeypatch, flags, proposed_action=_DEFAULT_PROPOSAL)
     )
     monkeypatch.setattr(processor, "feature_flags", flags)
 
-    payload: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: payload.update(kwargs))
-    return payload
+    payload_store: dict[str, object] = {}
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        payload_store["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
+    return payload_store
 
 
 def _preview_capture(monkeypatch) -> dict[str, object]:
@@ -106,7 +110,7 @@ def test_preview_disabled_no_preview_generated(monkeypatch, caplog) -> None:
         if record.message.startswith("{")
     )
     assert preview_payload == {}
-    assert "chat_id" in payload
+    assert payload["payload"].metadata.get("chat_id") == "chat"
 
 
 def test_preview_enabled_preview_generated(monkeypatch, caplog) -> None:
@@ -152,7 +156,7 @@ def test_preview_enabled_preview_generated(monkeypatch, caplog) -> None:
         for record in caplog.records
         if record.message.startswith("{")
     )
-    assert "chat_id" in payload
+    assert payload["payload"].metadata.get("chat_id") == "chat"
     assert preview_payload.get("chat_id") == "chat"
     preview_text = str(preview_payload.get("preview_text") or "")
     assert preview_text.startswith("🤖 AI Preview")
@@ -204,11 +208,11 @@ def test_preview_does_not_change_telegram_payload(monkeypatch) -> None:
 
     preview_payload: dict[str, object] = {}
     monkeypatch.setattr(processor, "feature_flags", flags_on)
-    monkeypatch.setattr(
-        processor,
-        "send_to_telegram",
-        lambda **kwargs: preview_payload.update(kwargs),
-    )
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        preview_payload["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     _preview_capture(monkeypatch)
 
     processor.process_message(
@@ -222,7 +226,7 @@ def test_preview_does_not_change_telegram_payload(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    assert baseline_payload == preview_payload
+    assert baseline_payload["payload"] == preview_payload["payload"]
 
 
 def test_preview_enabled_no_proposals(monkeypatch, caplog) -> None:
@@ -420,7 +424,7 @@ def test_commitments_preview_block_and_payload_unchanged(monkeypatch) -> None:
     preview_text = str(preview_payload.get("preview_text") or "")
     assert "📝 Обязательства" in preview_text
     assert "• \"Пришлю отчет до 25.12.2025\" — ⏳ ожидается" in preview_text
-    assert baseline_payload == commitment_payload
+    assert baseline_payload["payload"] == commitment_payload["payload"]
 
 
 def test_commitment_signal_preview_block(monkeypatch) -> None:

@@ -16,7 +16,7 @@ if "mailbot_v26.pipeline.stage_llm" not in sys.modules:
 
 if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     stage_telegram = types.ModuleType("mailbot_v26.pipeline.stage_telegram")
-    stage_telegram.send_to_telegram = lambda **kwargs: None
+    stage_telegram.enqueue_tg = lambda **kwargs: None
     stage_telegram.send_preview_to_telegram = lambda **kwargs: None
     sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
 
@@ -63,7 +63,10 @@ def _process_once(monkeypatch, tmp_path, *, enable_shadow: bool):
     sent: dict[str, object] = {}
 
     _common_monkeypatches(monkeypatch, db_path, enable_shadow=enable_shadow)
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -83,7 +86,7 @@ def test_flag_off_skips_shadow_fields(monkeypatch, tmp_path):
     db_path = tmp_path / "shadow_disabled.sqlite"
 
     _common_monkeypatches(monkeypatch, db_path, enable_shadow=False)
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
 
     processor.process_message(
         account_email="account@example.com",
@@ -125,7 +128,7 @@ def test_flag_on_persists_shadow_fields(monkeypatch, tmp_path):
     db_path = tmp_path / "shadow_enabled.sqlite"
 
     _common_monkeypatches(monkeypatch, db_path, enable_shadow=True)
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
 
     processor.process_message(
         account_email="account@example.com",
@@ -157,7 +160,7 @@ def test_telegram_payload_unchanged(monkeypatch, tmp_path):
     off_db, sent_off = _process_once(monkeypatch, tmp_path, enable_shadow=False)
     on_db, sent_on = _process_once(monkeypatch, tmp_path, enable_shadow=True)
 
-    assert sent_off == sent_on
+    assert sent_off["payload"] == sent_on["payload"]
 
     with sqlite3.connect(off_db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM emails").fetchone()[0] == 1

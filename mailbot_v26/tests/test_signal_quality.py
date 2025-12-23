@@ -62,7 +62,7 @@ def _configure_minimal_processor(monkeypatch, llm_result) -> dict[str, str]:
             ENABLE_PREVIEW_ACTIONS=False,
         ),
     )
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
     return captured
 
 

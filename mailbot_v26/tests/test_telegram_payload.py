@@ -4,6 +4,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
+from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 
 
 def test_telegram_payload_unchanged(monkeypatch) -> None:
@@ -28,8 +29,13 @@ def test_telegram_payload_unchanged(monkeypatch) -> None:
         ),
     )
 
-    payload: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: payload.update(kwargs))
+    captured: dict[str, object] = {}
+
+    def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
+        captured["email_id"] = email_id
+        captured["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -42,17 +48,11 @@ def test_telegram_payload_unchanged(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    assert set(payload.keys()) == {
-        "chat_id",
-        "priority",
-        "from_email",
-        "subject",
-        "action_line",
-        "body_summary",
-        "attachment_summaries",
-        "telegram_text",
-        "account_email",
-    }
+    payload = captured["payload"]
+    assert isinstance(payload, TelegramPayload)
+    assert payload.metadata["subject"] == "Subject"
+    assert payload.metadata["sender"] == "sender@example.com"
+    assert payload.metadata["extracted_text"] == "Body"
 
 
 def test_telegram_payload_unchanged_with_gigachat_provider(monkeypatch) -> None:
@@ -77,8 +77,13 @@ def test_telegram_payload_unchanged_with_gigachat_provider(monkeypatch) -> None:
         ),
     )
 
-    payload: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: payload.update(kwargs))
+    captured: dict[str, object] = {}
+
+    def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
+        captured["email_id"] = email_id
+        captured["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -91,14 +96,8 @@ def test_telegram_payload_unchanged_with_gigachat_provider(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    assert set(payload.keys()) == {
-        "chat_id",
-        "priority",
-        "from_email",
-        "subject",
-        "action_line",
-        "body_summary",
-        "attachment_summaries",
-        "telegram_text",
-        "account_email",
-    }
+    payload = captured["payload"]
+    assert isinstance(payload, TelegramPayload)
+    assert payload.metadata["subject"] == "Subject"
+    assert payload.metadata["sender"] == "sender@example.com"
+    assert payload.metadata["extracted_text"] == "Body"

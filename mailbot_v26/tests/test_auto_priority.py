@@ -20,7 +20,7 @@ if "mailbot_v26.pipeline.stage_llm" not in sys.modules:
 
 if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     stage_telegram = types.ModuleType("mailbot_v26.pipeline.stage_telegram")
-    stage_telegram.send_to_telegram = lambda **kwargs: None
+    stage_telegram.enqueue_tg = lambda **kwargs: None
     stage_telegram.send_preview_to_telegram = lambda **kwargs: None
     stage_telegram.send_system_notice = lambda **kwargs: None
     sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
@@ -75,11 +75,11 @@ def test_flag_off_priority_stays_llm(monkeypatch):
     )
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(
-        processor,
-        "send_to_telegram",
-        lambda **kwargs: sent.update(kwargs),
-    )
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     monkeypatch.setattr(
         processor,
         "knowledge_db",
@@ -110,7 +110,7 @@ def test_flag_off_priority_stays_llm(monkeypatch):
         telegram_chat_id="chat",
     )
 
-    assert sent["priority"] == "🔵"
+    assert sent["payload"].priority == "🔵"
 
 
 def test_flag_on_applies_shadow_priority(monkeypatch):
@@ -124,11 +124,11 @@ def test_flag_on_applies_shadow_priority(monkeypatch):
     )
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(
-        processor,
-        "send_to_telegram",
-        lambda **kwargs: sent.update(kwargs),
-    )
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     monkeypatch.setattr(
         processor,
         "knowledge_db",
@@ -171,11 +171,12 @@ def test_flag_on_applies_shadow_priority(monkeypatch):
         telegram_chat_id="chat",
     )
 
-    assert sent["priority"] == "🟡"
-    assert sent["action_line"] == llm_result.action_line
-    assert sent["body_summary"] == llm_result.body_summary
-    assert sent["attachment_summaries"] == llm_result.attachment_summaries
-    assert sent["account_email"] == "account@example.com"
+    payload = sent["payload"]
+    assert payload.priority == "🟡"
+    assert payload.metadata["action_line"] == llm_result.action_line
+    assert payload.metadata["body_summary"] == llm_result.body_summary
+    assert payload.metadata["attachment_summaries"] == llm_result.attachment_summaries
+    assert payload.metadata["account_email"] == "account@example.com"
 
 
 def test_db_persistence_records_original_priority(monkeypatch, tmp_path):
@@ -190,7 +191,7 @@ def test_db_persistence_records_original_priority(monkeypatch, tmp_path):
         lambda llm_priority, from_email: ("🟡", "shadow reason"),
     )
 
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
     monkeypatch.setattr(
         processor,
         "knowledge_db",
@@ -278,7 +279,11 @@ def test_gate_closed_skips_auto_priority(monkeypatch):
     )
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -291,7 +296,7 @@ def test_gate_closed_skips_auto_priority(monkeypatch):
         telegram_chat_id="chat",
     )
 
-    assert sent["priority"] == "🔵"
+    assert sent["payload"].priority == "🔵"
 
 
 def test_runtime_flag_off_disables_auto_priority(monkeypatch):
@@ -326,7 +331,11 @@ def test_runtime_flag_off_disables_auto_priority(monkeypatch):
     )
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -339,7 +348,7 @@ def test_runtime_flag_off_disables_auto_priority(monkeypatch):
         telegram_chat_id="chat",
     )
 
-    assert sent["priority"] == "🔵"
+    assert sent["payload"].priority == "🔵"
 
 
 def test_circuit_breaker_disables_auto_priority(monkeypatch):
@@ -384,7 +393,11 @@ def test_circuit_breaker_disables_auto_priority(monkeypatch):
     )
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -399,4 +412,4 @@ def test_circuit_breaker_disables_auto_priority(monkeypatch):
 
     assert runtime_store.enabled is False
     assert runtime_store.disable_calls == 1
-    assert sent["priority"] == "🔵"
+    assert sent["payload"].priority == "🔵"

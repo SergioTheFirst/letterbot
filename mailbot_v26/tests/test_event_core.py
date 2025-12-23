@@ -143,12 +143,12 @@ def test_event_core_emits_expected_events(monkeypatch, tmp_path) -> None:
     )
     monkeypatch.setattr(processor, "send_preview_to_telegram", lambda **kwargs: None)
 
-    sent: list[dict[str, object]] = []
+    sent: list[object] = []
 
-    def _send_to_telegram(**kwargs) -> None:
-        sent.append(kwargs)
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent.append(payload)
 
-    monkeypatch.setattr(processor, "send_to_telegram", _send_to_telegram)
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -214,10 +214,10 @@ def test_event_emit_errors_do_not_break_pipeline(monkeypatch, tmp_path) -> None:
 
     sent: list[dict[str, object]] = []
 
-    def _send_to_telegram(**kwargs) -> None:
-        sent.append(kwargs)
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent.append(payload)
 
-    monkeypatch.setattr(processor, "send_to_telegram", _send_to_telegram)
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",

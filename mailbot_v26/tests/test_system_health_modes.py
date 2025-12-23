@@ -56,7 +56,7 @@ def _setup_pipeline(monkeypatch, *, llm_result) -> None:
             ENABLE_PREVIEW_ACTIONS=False,
         ),
     )
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
     monkeypatch.setattr(processor, "send_system_notice", lambda **kwargs: None)
 
 

@@ -96,7 +96,11 @@ def test_golden_dataset_accuracy(monkeypatch, tmp_path) -> None:
 
         monkeypatch.setattr(processor, "run_llm_stage", _fake_run_llm_stage)
         captured: dict[str, object] = {}
-        monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: captured.update(kwargs))
+
+        def _enqueue_tg(*, email_id: int, payload) -> None:
+            captured["payload"] = payload
+
+        monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
         processor.process_message(
             account_email="account@example.com",
@@ -110,9 +114,10 @@ def test_golden_dataset_accuracy(monkeypatch, tmp_path) -> None:
         )
 
         total += 1
-        priority_match = captured.get("priority") == expected.priority
+        payload = captured.get("payload")
+        priority_match = payload and payload.priority == expected.priority
         action_match = _fuzzy_match(
-            str(captured.get("action_line", "")),
+            str(payload.metadata.get("action_line", "")) if payload else "",
             expected.action_line,
         )
         if priority_match and action_match:

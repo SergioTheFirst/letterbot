@@ -19,7 +19,7 @@ if "mailbot_v26.pipeline.stage_llm" not in sys.modules:
 
 if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     stage_telegram = types.ModuleType("mailbot_v26.pipeline.stage_telegram")
-    stage_telegram.send_to_telegram = lambda **kwargs: None
+    stage_telegram.enqueue_tg = lambda **kwargs: None
     stage_telegram.send_preview_to_telegram = lambda **kwargs: None
     stage_telegram.send_system_notice = lambda **kwargs: None
     sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
@@ -121,11 +121,11 @@ def test_flag_off_bypasses_auto_priority(monkeypatch):
     )
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(
-        processor,
-        "send_to_telegram",
-        lambda **kwargs: sent.update(kwargs),
-    )
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     monkeypatch.setattr(
         processor,
         "knowledge_db",
@@ -156,7 +156,7 @@ def test_flag_off_bypasses_auto_priority(monkeypatch):
         telegram_chat_id="chat",
     )
 
-    assert sent["priority"] == llm_result.priority
+    assert sent["payload"].priority == llm_result.priority
 
 
 def test_telegram_payload_unchanged(monkeypatch):
@@ -175,11 +175,11 @@ def test_telegram_payload_unchanged(monkeypatch):
     )
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(
-        processor,
-        "send_to_telegram",
-        lambda **kwargs: sent.update(kwargs),
-    )
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
     monkeypatch.setattr(
         processor,
@@ -213,28 +213,24 @@ def test_telegram_payload_unchanged(monkeypatch):
         telegram_chat_id="chat",
     )
 
-    telegram_text = telegram_safe(
-        processor._build_telegram_text(
-            priority="🟡",
-            from_email="sender@example.com",
-            subject="Subject",
-            action_line=llm_result.action_line,
-            body_summary=llm_result.body_summary,
-            body_text="Body",
-            attachment_summary="",
-        )
+    base_text = processor._build_telegram_text(
+        priority="🟡",
+        from_email="sender@example.com",
+        subject="Subject",
+        action_line=llm_result.action_line,
+        body_summary=llm_result.body_summary,
+        body_text="Body",
+        attachment_summary="",
     )
+    if "Body" not in base_text:
+        base_text = f"{base_text}\n\n{processor._trim_telegram_body('Body')}"
+    telegram_text = telegram_safe(base_text)
 
-    expected_payload = {
-        "chat_id": "chat",
-        "priority": "🟡",
-        "from_email": "sender@example.com",
-        "subject": "Subject",
-        "action_line": llm_result.action_line,
-        "body_summary": llm_result.body_summary,
-        "attachment_summaries": llm_result.attachment_summaries,
-        "telegram_text": telegram_text,
-        "account_email": "account@example.com",
-    }
-
-    assert sent == expected_payload
+    payload = sent["payload"]
+    assert payload.priority == "🟡"
+    assert payload.html_text == telegram_text
+    assert payload.metadata["chat_id"] == "chat"
+    assert payload.metadata["account_email"] == "account@example.com"
+    assert payload.metadata["action_line"] == llm_result.action_line
+    assert payload.metadata["body_summary"] == llm_result.body_summary
+    assert payload.metadata["attachment_summaries"] == llm_result.attachment_summaries

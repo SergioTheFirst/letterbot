@@ -209,13 +209,20 @@ class LaunchReportBuilder:
 
 
 def dispatch_launch_report(bot_token: str, chat_id: str, report: str) -> bool:
+    from mailbot_v26.pipeline.telegram_payload import TelegramPayload
+    from mailbot_v26.telegram_utils import telegram_safe
     from mailbot_v26.worker.telegram_sender import send_telegram
 
     if not bot_token or not chat_id or not report:
         logger.error("launch_report_skipped", extra={"reason": "missing_token_chat_or_report"})
         return False
+    payload = TelegramPayload(
+        html_text=telegram_safe(report),
+        priority="🔵",
+        metadata={"bot_token": bot_token, "chat_id": chat_id},
+    )
     try:
-        return send_telegram(bot_token, chat_id, report)
+        return send_telegram(payload)
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("launch_report_send_failed", extra={"error": str(exc)}, exc_info=True)
         return False
