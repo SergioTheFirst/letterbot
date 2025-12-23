@@ -8,6 +8,7 @@ import pytest
 
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.pipeline import processor
+from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 
 
 def _setup_processor(monkeypatch) -> None:
@@ -55,7 +56,11 @@ def _load_event_types(db_path) -> list[str]:
 def test_tg_payload_with_attachments(monkeypatch) -> None:
     _setup_processor(monkeypatch)
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     attachments = [
         {
@@ -91,7 +96,7 @@ def test_tg_payload_with_attachments(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    telegram_text = sent["telegram_text"]
+    telegram_text = sent["payload"].html_text
     assert "Вложения: 4" in telegram_text
     assert "DOC" in telegram_text
     assert "XLS" in telegram_text
@@ -103,7 +108,11 @@ def test_tg_payload_never_subject_only(monkeypatch) -> None:
     monkeypatch.setattr(processor, "_build_telegram_text", lambda **kwargs: "Subject")
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -116,7 +125,7 @@ def test_tg_payload_never_subject_only(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    assert sent["telegram_text"].startswith("📧 Письмо получено")
+    assert sent["payload"].html_text.startswith("📧 Письмо получено")
 
 
 def test_tg_payload_validator_blocks_empty(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -124,7 +133,11 @@ def test_tg_payload_validator_blocks_empty(monkeypatch, caplog: pytest.LogCaptur
     monkeypatch.setattr(processor, "_build_telegram_text", lambda **kwargs: "short")
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     with caplog.at_level("WARNING"):
         processor.process_message(
@@ -139,7 +152,7 @@ def test_tg_payload_validator_blocks_empty(monkeypatch, caplog: pytest.LogCaptur
         )
 
     assert "tg_payload_invalid" in caplog.text
-    assert sent["telegram_text"].startswith("📧 Письмо получено")
+    assert sent["payload"].html_text.startswith("📧 Письмо получено")
 
 
 def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, tmp_path) -> None:
@@ -149,7 +162,11 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, tmp_path) -> 
     monkeypatch.setattr(processor, "event_emitter", emitter)
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",

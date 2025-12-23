@@ -58,8 +58,8 @@ def test_all_accounts_ok_no_telegram_warning(monkeypatch, tmp_path: Path) -> Non
     )
     messages: list[str] = []
 
-    def _send_telegram(token: str, chat_id: str, text: str) -> bool:
-        messages.append(text)
+    def _send_telegram(payload) -> bool:
+        messages.append(payload.html_text)
         return True
 
     accounts_to_poll = mail_accounts.run_startup_mail_account_healthcheck(config, _send_telegram)
@@ -95,8 +95,8 @@ def test_failed_account_sends_warning(monkeypatch, tmp_path: Path) -> None:
     )
     messages: list[str] = []
 
-    def _send_telegram(token: str, chat_id: str, text: str) -> bool:
-        messages.append(text)
+    def _send_telegram(payload) -> bool:
+        messages.append(payload.html_text)
         return True
 
     mail_accounts.run_startup_mail_account_healthcheck(config, _send_telegram)

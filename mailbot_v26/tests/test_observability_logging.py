@@ -63,7 +63,7 @@ def _setup_processor(monkeypatch, processor_module) -> None:
             ENABLE_PREVIEW_ACTIONS=False,
         ),
     )
-    monkeypatch.setattr(processor_module, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor_module, "enqueue_tg", lambda **kwargs: None)
     monkeypatch.setattr(
         processor_module,
         "auto_priority_engine",
@@ -148,8 +148,12 @@ def test_telegram_payload_stability(monkeypatch) -> None:
         ),
     )
 
-    payload: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: payload.update(kwargs))
+    captured: dict[str, object] = {}
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        captured["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     processor.process_message(
         account_email="account@example.com",
@@ -162,16 +166,15 @@ def test_telegram_payload_stability(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    assert payload == {
-        "chat_id": "chat",
-        "priority": "🟡",
-        "from_email": "sender@example.com",
-        "subject": "Subject",
-        "action_line": "Проверить документы",
-        "body_summary": "Summary",
-        "attachment_summaries": [{"filename": "file.txt", "summary": "summary"}],
-        "account_email": "account@example.com",
-    }
+    payload = captured["payload"]
+    assert payload.priority == "🟡"
+    assert payload.metadata["chat_id"] == "chat"
+    assert payload.metadata["account_email"] == "account@example.com"
+    assert payload.metadata["action_line"] == "Проверить документы"
+    assert payload.metadata["body_summary"] == "Summary"
+    assert payload.metadata["attachment_summaries"] == [
+        {"filename": "file.txt", "summary": "summary"}
+    ]
 
 
 def test_signal_fallback_logging(monkeypatch) -> None:
@@ -258,8 +261,11 @@ def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
 
     saved_payload: dict[str, object] = {}
     monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: saved_payload.update(kwargs)))
-    payload: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: payload.update(kwargs))
+    def _capture_payload(*, email_id: int, payload) -> None:
+        payload_store["payload"] = payload
+
+    payload_store: dict[str, object] = {}
+    monkeypatch.setattr(processor, "enqueue_tg", _capture_payload)
 
     processor.process_message(
         account_email="account@example.com",
@@ -272,7 +278,7 @@ def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    assert payload["priority"] == "🔴"
+    assert payload_store["payload"].priority == "🔴"
     assert saved_payload["priority"] == "🔴"
 
 
@@ -286,8 +292,12 @@ def test_system_health_snapshot_logging_does_not_break(monkeypatch) -> None:
         ),
     )
 
-    payload: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: payload.update(kwargs))
+    payload_store: dict[str, object] = {}
+
+    def _capture_payload(*, email_id: int, payload) -> None:
+        payload_store["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _capture_payload)
 
     processor.process_message(
         account_email="account@example.com",
@@ -300,4 +310,4 @@ def test_system_health_snapshot_logging_does_not_break(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    assert payload.get("chat_id") == "chat"
+    assert payload_store["payload"].metadata.get("chat_id") == "chat"

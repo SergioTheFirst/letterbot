@@ -72,7 +72,11 @@ def test_attachments_visible_without_llm(monkeypatch) -> None:
         ),
     )
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     attachments = [
         {
@@ -93,7 +97,7 @@ def test_attachments_visible_without_llm(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    telegram_text = sent["telegram_text"]
+    telegram_text = sent["payload"].html_text
     assert "Вложения: 1" in telegram_text
     assert "DOC" in telegram_text
 
@@ -103,7 +107,11 @@ def test_safe_fallback_still_shows_attachments(monkeypatch) -> None:
     monkeypatch.setattr(processor, "_build_telegram_text", lambda **kwargs: "short")
 
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     attachments = [
         {
@@ -124,7 +132,7 @@ def test_safe_fallback_still_shows_attachments(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    telegram_text = sent["telegram_text"]
+    telegram_text = sent["payload"].html_text
     assert telegram_text.startswith("📧 Письмо получено")
     assert "Вложения: 1" in telegram_text
 
@@ -132,7 +140,11 @@ def test_safe_fallback_still_shows_attachments(monkeypatch) -> None:
 def test_renderer_mode_logged(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
     _setup_processor(monkeypatch)
     sent: dict[str, object] = {}
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: sent.update(kwargs))
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
     with caplog.at_level("INFO"):
         processor.process_message(

@@ -62,7 +62,7 @@ def test_commitments_persist_failed_logs(monkeypatch, caplog) -> None:
             update_commitment_statuses=lambda **kwargs: True,
         ),
     )
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
 
     caplog.set_level(logging.INFO)
 
@@ -131,7 +131,7 @@ def test_commitment_status_update_crm_error_logs(monkeypatch, caplog) -> None:
             update_commitment_statuses=lambda **kwargs: True,
         ),
     )
-    monkeypatch.setattr(processor, "send_to_telegram", lambda **kwargs: None)
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
 
     caplog.set_level(logging.INFO)
 

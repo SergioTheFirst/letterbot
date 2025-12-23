@@ -41,12 +41,12 @@ def test_trust_score_compute_failure_does_not_break_pipeline(monkeypatch) -> Non
     monkeypatch.setattr(processor.shadow_action_engine, "compute", lambda *args, **kwargs: [])
     monkeypatch.setattr(processor, "send_preview_to_telegram", lambda **kwargs: None)
 
-    sent: list[dict[str, object]] = []
+    sent: list[object] = []
 
-    def _send_to_telegram(**kwargs) -> None:
-        sent.append(kwargs)
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent.append(payload)
 
-    monkeypatch.setattr(processor, "send_to_telegram", _send_to_telegram)
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     monkeypatch.setattr(
         processor.context_store,
         "resolve_sender_entity",
@@ -82,12 +82,12 @@ def test_trust_score_does_not_change_telegram_payload(monkeypatch) -> None:
     monkeypatch.setattr(processor.shadow_action_engine, "compute", lambda *args, **kwargs: [])
     monkeypatch.setattr(processor, "send_preview_to_telegram", lambda **kwargs: None)
 
-    sent: list[dict[str, object]] = []
+    sent: list[object] = []
 
-    def _send_to_telegram(**kwargs) -> None:
-        sent.append(kwargs)
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        sent.append(payload)
 
-    monkeypatch.setattr(processor, "send_to_telegram", _send_to_telegram)
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     monkeypatch.setattr(
         processor.context_store,
         "resolve_sender_entity",
@@ -135,28 +135,25 @@ def test_trust_score_does_not_change_telegram_payload(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    telegram_text = telegram_safe(
-        processor._build_telegram_text(
-            priority="🔵",
-            from_email="sender@example.com",
-            subject="Subject",
-            action_line="Проверить письмо",
-            body_summary="Body summary",
-            body_text="Text",
-            attachment_summary="",
-        )
+    base_text = processor._build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Subject",
+        action_line="Проверить письмо",
+        body_summary="Body summary",
+        body_text="Text",
+        attachment_summary="",
     )
+    if "Text" not in base_text:
+        base_text = f"{base_text}\n\n{processor._trim_telegram_body('Text')}"
+    telegram_text = telegram_safe(base_text)
 
-    assert sent == [
-        {
-            "chat_id": "chat",
-            "priority": "🔵",
-            "from_email": "sender@example.com",
-            "subject": "Subject",
-            "action_line": "Проверить письмо",
-            "body_summary": "Body summary",
-            "attachment_summaries": [],
-            "telegram_text": telegram_text,
-            "account_email": "account@example.com",
-        }
-    ]
+    assert len(sent) == 1
+    payload = sent[0]
+    assert payload.priority == "🔵"
+    assert payload.html_text == telegram_text
+    assert payload.metadata["chat_id"] == "chat"
+    assert payload.metadata["account_email"] == "account@example.com"
+    assert payload.metadata["action_line"] == "Проверить письмо"
+    assert payload.metadata["body_summary"] == "Body summary"
+    assert payload.metadata["attachment_summaries"] == []

@@ -38,6 +38,7 @@ from mailbot_v26.config_loader import (
 from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthcheck
 from mailbot_v26.imap_client import ResilientIMAP
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
+from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.pipeline import processor as processor_module
 from mailbot_v26.state_manager import StateManager
 from mailbot_v26.storage.self_check import run_self_check
@@ -47,6 +48,7 @@ from mailbot_v26.system.startup_health import (
     dispatch_launch_report,
 )
 from mailbot_v26.text.mime_utils import decode_mime_header
+from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.worker.telegram_sender import send_telegram
 
 LOG_PATH = CURRENT_DIR / "mailbot.log"
@@ -79,6 +81,20 @@ def _get_account_by_login(config: BotConfig, login: str) -> Optional["AccountCon
         if acc.login == login:
             return acc
     return None
+
+
+def _build_system_payload(
+    *,
+    text: str,
+    bot_token: str,
+    chat_id: str,
+    priority: str = "🔵",
+) -> TelegramPayload:
+    return TelegramPayload(
+        html_text=telegram_safe(text),
+        priority=priority,
+        metadata={"bot_token": bot_token, "chat_id": chat_id},
+    )
 
 
 def _fail_open_process(
@@ -116,11 +132,12 @@ def _fail_open_process(
         logger.error("Fail-open missing account for %s", ctx.account_email)
         return
 
-    ok = send_telegram(
-        config.keys.telegram_bot_token,
-        account.telegram_chat_id,
-        final_text.strip(),
+    payload = _build_system_payload(
+        text=final_text.strip(),
+        bot_token=config.keys.telegram_bot_token,
+        chat_id=account.telegram_chat_id,
     )
+    ok = send_telegram(payload)
     status = "OK" if ok else "FAIL"
     logger.error("Fail-open Telegram send status for email %s: %s", ctx.email_id, status)
 
@@ -197,11 +214,12 @@ def main(config_dir: Path | None = None) -> None:
                 general = load_general_config(base_config_dir)
                 keys = load_keys_config(base_config_dir)
                 if general.admin_chat_id:
-                    ok = send_telegram(
-                        keys.telegram_bot_token,
-                        general.admin_chat_id,
-                        f"\U0001F6A8 INVALID ACCOUNT ID\n{exc}",
+                    payload = _build_system_payload(
+                        text=f"\U0001F6A8 INVALID ACCOUNT ID\n{exc}",
+                        bot_token=keys.telegram_bot_token,
+                        chat_id=general.admin_chat_id,
                     )
+                    ok = send_telegram(payload)
                     if not ok:
                         logger.error("Failed to send invalid account id alert")
                 else:
@@ -318,11 +336,12 @@ def main(config_dir: Path | None = None) -> None:
                                 else:
                                     final_text = processor.process(login, inbound)
                                     if final_text and final_text.strip():
-                                        ok = send_telegram(
-                                            config.keys.telegram_bot_token,
-                                            account.telegram_chat_id,
-                                            final_text.strip(),
+                                        payload = _build_system_payload(
+                                            text=final_text.strip(),
+                                            bot_token=config.keys.telegram_bot_token,
+                                            chat_id=account.telegram_chat_id,
                                         )
+                                        ok = send_telegram(payload)
                                         status = "[OK] sent" if ok else "[FAIL] failed"
                                         print(f"      │  Telegram: {status}")
                                         logger.info("UID %s: Telegram %s", uid, "OK" if ok else "FAIL")

@@ -91,8 +91,8 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, caplog):
     def fake_emit(self, **kwargs):
         emitted_events.append(kwargs)
 
-    def fake_send_to_telegram(*, telegram_text: str, **kwargs):
-        captured["telegram_text"] = telegram_text
+    def fake_enqueue_tg(*, email_id: int, payload):
+        captured["telegram_text"] = payload.html_text
 
     def fake_validate(text, ctx):
         raise processor_module.InvalidTelegramPayload("attachments missing")
@@ -110,7 +110,7 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, caplog):
         )
 
     monkeypatch.setattr(processor_module, "validate_tg_payload", fake_validate)
-    monkeypatch.setattr(processor_module, "send_to_telegram", fake_send_to_telegram)
+    monkeypatch.setattr(processor_module, "enqueue_tg", fake_enqueue_tg)
     monkeypatch.setattr(processor_module.EventEmitter, "emit", fake_emit)
     monkeypatch.setattr(processor_module, "run_llm_stage", fake_run_llm_stage)
     monkeypatch.setattr(processor_module.context_store, "resolve_sender_entity", lambda **kwargs: None)

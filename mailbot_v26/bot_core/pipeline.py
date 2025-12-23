@@ -16,8 +16,10 @@ from mailbot_v26.bot_core.extractors.doc import extract_docx_text
 from mailbot_v26.bot_core.extractors.excel import extract_excel_text
 from mailbot_v26.bot_core.extractors.pdf import extract_pdf_text
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
+from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.text.mime_utils import decode_bytes, decode_mime_header
 from mailbot_v26.text.sanitize import sanitize_text
+from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.worker.telegram_sender import send_telegram
 
 try:  # local import to avoid circular typing issues
@@ -377,11 +379,15 @@ def stage_tg(ctx: PipelineContext) -> None:
     ctx.telegram_text = telegram_text
 
     if telegram_text and telegram_text.strip():
-        send_telegram(
-            _PIPELINE_CONFIG.keys.telegram_bot_token,
-            account.telegram_chat_id,
-            telegram_text.strip(),
+        payload = TelegramPayload(
+            html_text=telegram_safe(telegram_text.strip()),
+            priority="🔵",
+            metadata={
+                "bot_token": _PIPELINE_CONFIG.keys.telegram_bot_token,
+                "chat_id": account.telegram_chat_id,
+            },
         )
+        send_telegram(payload)
     logger.info("[PIPELINE] email_id=%s stage=TG done", ctx.email_id)
 
     # cleanup to avoid leaks
