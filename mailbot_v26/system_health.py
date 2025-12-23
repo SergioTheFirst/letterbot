@@ -76,11 +76,14 @@ class SystemHealth:
 
     def _determine_mode(self) -> tuple[OperationalMode, str]:
         crm = self._components.get("CRM")
+        mail = self._components.get("Mail")
         llm = self._components.get("LLM")
         telegram = self._components.get("Telegram")
 
         if crm is not None and crm.available is False:
             return OperationalMode.EMERGENCY_READ_ONLY, crm.reason or "CRM unavailable"
+        if mail is not None and mail.available is False:
+            return OperationalMode.EMERGENCY_READ_ONLY, mail.reason or "Mail unavailable"
         if llm is not None and llm.available is False:
             return OperationalMode.DEGRADED_NO_LLM, llm.reason or "LLM unavailable"
         if telegram is not None and telegram.available is False:

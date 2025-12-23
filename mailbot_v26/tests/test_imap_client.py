@@ -39,7 +39,7 @@ class _FakeIMAPClient:
 @pytest.fixture()
 def account() -> AccountConfig:
     return AccountConfig(
-        name="test",
+        account_id="test",
         login="user@example.com",
         password="secret",
         host="imap.example.com",

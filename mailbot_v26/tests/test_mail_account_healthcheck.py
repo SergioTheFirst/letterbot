@@ -45,7 +45,7 @@ def test_all_accounts_ok_no_telegram_warning(monkeypatch, tmp_path: Path) -> Non
         tmp_path,
         [
             AccountConfig(
-                name="A",
+                account_id="A",
                 login="ok@example.com",
                 password="pw",
                 host="imap.ok",
@@ -73,7 +73,7 @@ def test_failed_account_sends_warning(monkeypatch, tmp_path: Path) -> None:
         tmp_path,
         [
             AccountConfig(
-                name="A",
+                account_id="A",
                 login="ok@example.com",
                 password="pw",
                 host="imap.ok",
@@ -82,7 +82,7 @@ def test_failed_account_sends_warning(monkeypatch, tmp_path: Path) -> None:
                 telegram_chat_id="chat",
             ),
             AccountConfig(
-                name="B",
+                account_id="B",
                 login="bad@example.com",
                 password="pw",
                 host="imap.bad",
@@ -101,9 +101,10 @@ def test_failed_account_sends_warning(monkeypatch, tmp_path: Path) -> None:
     mail_accounts.run_startup_mail_account_healthcheck(config, _send_telegram)
 
     assert len(messages) == 1
-    assert "bad@example.com" in messages[0]
+    assert "ACCOUNT LOGIN FAILED" in messages[0]
+    assert "Account: B" in messages[0]
+    assert "Host: imap.bad" in messages[0]
     assert "auth failed" in messages[0]
-    assert "НЕ будет обрабатывать" in messages[0]
 
 
 def test_failed_account_excluded_from_polling(monkeypatch, tmp_path: Path) -> None:
@@ -112,7 +113,7 @@ def test_failed_account_excluded_from_polling(monkeypatch, tmp_path: Path) -> No
         tmp_path,
         [
             AccountConfig(
-                name="A",
+                account_id="A",
                 login="ok@example.com",
                 password="pw",
                 host="imap.ok",
@@ -121,7 +122,7 @@ def test_failed_account_excluded_from_polling(monkeypatch, tmp_path: Path) -> No
                 telegram_chat_id="chat",
             ),
             AccountConfig(
-                name="C",
+                account_id="C",
                 login="broken@example.com",
                 password="pw",
                 host="imap.broken",
