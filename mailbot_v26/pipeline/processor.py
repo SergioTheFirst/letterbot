@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,34 @@ class EmailContext:
     from_email: str
     body_text: str
     attachments_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramRenderContext:
+    extracted_text_len: int
+    attachments_count: int
+    llm_failed: bool
+    signal_invalid: bool
+
+
+class TelegramRenderMode(Enum):
+    FULL = "full"
+    SAFE_FALLBACK = "safe_fallback"
+    SHORT_TEMPLATE = "short_template"
+
+
+def choose_tg_render_mode(ctx: TelegramRenderContext) -> TelegramRenderMode:
+    if ctx.extracted_text_len > 0 or ctx.attachments_count > 0:
+        mode = TelegramRenderMode.FULL
+    elif ctx.llm_failed or ctx.signal_invalid:
+        mode = TelegramRenderMode.SAFE_FALLBACK
+    else:
+        mode = TelegramRenderMode.SHORT_TEMPLATE
+    assert not (
+        mode == TelegramRenderMode.SHORT_TEMPLATE
+        and (ctx.extracted_text_len > 0 or ctx.attachments_count > 0)
+    )
+    return mode
 
 
 class InvalidTelegramPayload(ValueError):
@@ -374,6 +403,20 @@ def _build_tg_fallback(
             "ℹ️ Детали сохранены в системе.",
         ]
     )
+    return "\n".join(lines)
+
+
+def _build_tg_short_template(*, subject: str, from_email: str) -> str:
+    safe_subject = subject or "(без темы)"
+    safe_sender = from_email or "неизвестно"
+    lines = [
+        "📧 Письмо получено",
+        "",
+        f"Тема: {safe_subject}",
+        f"От: {safe_sender}",
+        "",
+        "ℹ️ Детали будут доступны позже.",
+    ]
     return "\n".join(lines)
 
 
@@ -1444,48 +1487,78 @@ def process_message(
     # ---------- Stage Telegram ----------
     attachment_details = _build_attachment_details(attachments)
     attachment_summary = _build_attachment_summary(attachment_details)
-    telegram_text_raw = _build_telegram_text(
-        priority=priority,
-        from_email=from_email,
-        subject=subject,
-        action_line=action_line,
-        body_summary=body_summary,
-        body_text=body_text,
-        attachment_summary=attachment_summary,
-    )
-    ctx = EmailContext(
-        subject=subject,
-        from_email=from_email,
-        body_text=body_text or "",
+    render_context = TelegramRenderContext(
+        extracted_text_len=len(body_text or ""),
         attachments_count=len(attachments),
+        llm_failed=bool(_read_llm_field(llm_result, "failed", False))
+        or bool(_read_llm_field(llm_result, "error", False)),
+        signal_invalid=not signal_quality.is_usable,
     )
+    render_mode = choose_tg_render_mode(render_context)
+
+    telegram_text_raw = ""
     payload_invalid = False
-    try:
-        telegram_text_raw = validate_tg_payload(telegram_text_raw, ctx)
-    except InvalidTelegramPayload as exc:
-        payload_invalid = True
-        logger.warning(
-            "tg_payload_invalid",
-            email_id=message_id,
-            reason=str(exc),
-            attachments=len(attachments),
-            body_chars=len(body_text or ""),
+    if render_mode == TelegramRenderMode.FULL:
+        telegram_text_raw = _build_telegram_text(
+            priority=priority,
+            from_email=from_email,
+            subject=subject,
+            action_line=action_line,
+            body_summary=body_summary,
+            body_text=body_text,
+            attachment_summary=attachment_summary,
         )
-        event_emitter.emit(
-            type="tg_payload_invalid",
-            timestamp=received_at,
-            email_id=message_id,
-            payload={
-                "reason": str(exc),
-                "attachments": len(attachments),
-                "body_chars": len(body_text or ""),
-            },
+        ctx = EmailContext(
+            subject=subject,
+            from_email=from_email,
+            body_text=body_text or "",
+            attachments_count=len(attachments),
         )
+        try:
+            telegram_text_raw = validate_tg_payload(telegram_text_raw, ctx)
+        except InvalidTelegramPayload as exc:
+            payload_invalid = True
+            render_mode = TelegramRenderMode.SAFE_FALLBACK
+            logger.warning(
+                "tg_payload_invalid",
+                email_id=message_id,
+                reason=str(exc),
+                attachments=len(attachments),
+                body_chars=len(body_text or ""),
+            )
+            event_emitter.emit(
+                type="tg_payload_invalid",
+                timestamp=received_at,
+                email_id=message_id,
+                payload={
+                    "reason": str(exc),
+                    "attachments": len(attachments),
+                    "body_chars": len(body_text or ""),
+                },
+            )
+            telegram_text_raw = _build_tg_fallback(
+                subject=subject,
+                from_email=from_email,
+                attachment_summary=attachment_summary,
+            )
+    elif render_mode == TelegramRenderMode.SAFE_FALLBACK:
         telegram_text_raw = _build_tg_fallback(
             subject=subject,
             from_email=from_email,
             attachment_summary=attachment_summary,
         )
+    else:
+        telegram_text_raw = _build_tg_short_template(
+            subject=subject,
+            from_email=from_email,
+        )
+    logger.info(
+        "tg_render_mode_selected",
+        email_id=message_id,
+        mode=render_mode.name,
+        extracted_text_len=render_context.extracted_text_len,
+        attachments=render_context.attachments_count,
+    )
     telegram_text = telegram_safe(telegram_text_raw)
     try:
         send_to_telegram(
