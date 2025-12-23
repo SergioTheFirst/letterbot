@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import imaplib
 import logging
+import socket
 from typing import Callable, Iterable, List, Optional
 
 from imapclient import IMAPClient
@@ -22,6 +24,7 @@ class MailAccountHealth:
 def check_mail_accounts(accounts: Iterable[AccountConfig]) -> List[MailAccountHealth]:
     results: List[MailAccountHealth] = []
     observability = observability_logger.get_logger("mailbot")
+    logger = logging.getLogger(__name__)
     for account in accounts:
         client: Optional[IMAPClient] = None
         try:
@@ -41,23 +44,73 @@ def check_mail_accounts(accounts: Iterable[AccountConfig]) -> List[MailAccountHe
                 account_id=account.account_id,
             )
         except Exception as exc:
-            logging.getLogger(__name__).error(
-                "IMAP login failed for %s: %s",
+            error_details = _format_exception(exc)
+            masked_login = _mask_login(account.login)
+            logger.error(
+                "IMAP login failed for %s: %s (host=%s port=%s use_ssl=%s login=%s)",
                 account.account_id,
-                exc,
+                error_details,
+                account.host,
+                account.port,
+                account.use_ssl,
+                masked_login,
             )
+            if isinstance(exc, socket.gaierror):
+                logger.error(
+                    "IMAP login DNS error for %s: %s (host=%s port=%s use_ssl=%s login=%s)",
+                    account.account_id,
+                    error_details,
+                    account.host,
+                    account.port,
+                    account.use_ssl,
+                    masked_login,
+                )
+            elif isinstance(exc, socket.timeout):
+                logger.error(
+                    "IMAP login timeout for %s: %s (host=%s port=%s use_ssl=%s login=%s)",
+                    account.account_id,
+                    error_details,
+                    account.host,
+                    account.port,
+                    account.use_ssl,
+                    masked_login,
+                )
+            elif isinstance(exc, imaplib.IMAP4.error):
+                logger.error(
+                    "IMAP login auth failure for %s: %s (host=%s port=%s use_ssl=%s login=%s)",
+                    account.account_id,
+                    error_details,
+                    account.host,
+                    account.port,
+                    account.use_ssl,
+                    masked_login,
+                )
+            elif isinstance(exc, (ConnectionRefusedError, ConnectionResetError)):
+                logger.error(
+                    "IMAP login connection refused/reset for %s: %s (host=%s port=%s use_ssl=%s login=%s)",
+                    account.account_id,
+                    error_details,
+                    account.host,
+                    account.port,
+                    account.use_ssl,
+                    masked_login,
+                )
             results.append(
                 MailAccountHealth(
                     account_id=account.account_id,
                     host=account.host,
                     status="FAILED",
-                    error=str(exc),
+                    error=error_details,
                 )
             )
             observability.error(
                 "account_login_failed",
                 account_id=account.account_id,
-                error=str(exc),
+                error=error_details,
+                host=account.host,
+                port=account.port,
+                use_ssl=account.use_ssl,
+                login=masked_login,
             )
         finally:
             if client is not None:
@@ -68,6 +121,21 @@ def check_mail_accounts(accounts: Iterable[AccountConfig]) -> List[MailAccountHe
                         "IMAP logout failed for %s", account.account_id
                     )
     return results
+
+
+def _format_exception(exc: Exception) -> str:
+    message = str(exc)
+    if not message or message == "None":
+        message = repr(exc)
+    if not message or message == "None":
+        message = "<No error details>"
+    return f"{exc.__class__.__name__}: {message}"
+
+
+def _mask_login(login: str) -> str:
+    if not login:
+        return "<empty>"
+    return f"{login[:2]}...({len(login)})"
 
 
 def filter_accounts_by_health(
