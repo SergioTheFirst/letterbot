@@ -27,7 +27,14 @@ from mailbot_v26.bot_core.pipeline import (
     store_inbound,
 )
 from mailbot_v26.bot_core.storage import Storage
-from mailbot_v26.config_loader import AccountConfig, BotConfig, load_config
+from mailbot_v26.config_loader import (
+    AccountConfig,
+    BotConfig,
+    InvalidAccountIdError,
+    load_config,
+    load_general_config,
+    load_keys_config,
+)
 from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthcheck
 from mailbot_v26.imap_client import ResilientIMAP
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
@@ -183,6 +190,26 @@ def main(config_dir: Path | None = None) -> None:
             config = load_config(base_config_dir)
             logger.info("Configuration loaded: %d accounts", len(config.accounts))
             print(f"[OK] Loaded {len(config.accounts)} accounts")
+        except InvalidAccountIdError as exc:
+            logger.exception("Invalid account id in accounts.ini")
+            print(f"[ERROR] Configuration error: {exc}")
+            try:
+                general = load_general_config(base_config_dir)
+                keys = load_keys_config(base_config_dir)
+                if general.admin_chat_id:
+                    ok = send_telegram(
+                        keys.telegram_bot_token,
+                        general.admin_chat_id,
+                        f"\U0001F6A8 INVALID ACCOUNT ID\n{exc}",
+                    )
+                    if not ok:
+                        logger.error("Failed to send invalid account id alert")
+                else:
+                    logger.error("Invalid account id alert skipped: missing admin chat id")
+            except Exception:
+                logger.exception("Failed to send invalid account id alert")
+            time.sleep(10)
+            return
         except Exception as exc:
             logger.exception("Failed to load configuration")
             print(f"[ERROR] Configuration error: {exc}")

@@ -5,6 +5,7 @@ import pytest
 from mailbot_v26.config_loader import (
     BotConfig,
     ConfigError,
+    InvalidAccountIdError,
     load_accounts_config,
     load_config,
     load_general_config,
@@ -61,6 +62,7 @@ def test_load_full_config(tmp_path: Path) -> None:
     cfg = load_config(tmp_path)
     assert isinstance(cfg, BotConfig)
     assert cfg.general.check_interval == 400
+    assert cfg.accounts[0].account_id == "primary"
     assert cfg.accounts[0].login == "sample@example.com"
     assert cfg.keys.telegram_bot_token == "token"
     storage_cfg = load_storage_config(tmp_path)
@@ -75,6 +77,23 @@ def test_missing_files_raise() -> None:
 def test_accounts_missing_section(tmp_path: Path) -> None:
     write_file(tmp_path, "accounts.ini", "")
     with pytest.raises(ConfigError):
+        load_accounts_config(tmp_path)
+
+
+def test_accounts_invalid_section_name(tmp_path: Path) -> None:
+    write_file(
+        tmp_path,
+        "accounts.ini",
+        """[Bad-Name]
+login = sample@example.com
+password = secret
+host = imap.example.com
+port = 993
+use_ssl = true
+telegram_chat_id = 222
+""",
+    )
+    with pytest.raises(InvalidAccountIdError):
         load_accounts_config(tmp_path)
 
 

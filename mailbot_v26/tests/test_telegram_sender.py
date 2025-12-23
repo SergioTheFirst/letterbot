@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from mailbot_v26.worker import telegram_sender
+from mailbot_v26.telegram_utils import telegram_safe
 
 
 class DummyResponse:
@@ -63,3 +64,16 @@ def test_send_telegram_requests_missing(monkeypatch: pytest.MonkeyPatch, caplog:
     with caplog.at_level(logging.ERROR):
         assert telegram_sender.send_telegram("token", "123", "hello") is False
     assert "requests module not available" in caplog.text
+
+
+def test_send_telegram_escapes_html_and_backslashes(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
+        captured.update(json)
+        return DummyResponse(status_code=200, text="ok")
+
+    monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
+    text = "HQ\\MedvevSS <b>hi</b> & \"quote\" 'single'"
+    assert telegram_sender.send_telegram("token", "123", text) is True
+    assert captured["text"] == telegram_safe(text)

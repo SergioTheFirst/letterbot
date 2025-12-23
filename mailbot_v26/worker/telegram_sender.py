@@ -1,5 +1,7 @@
 import logging
 
+from mailbot_v26.telegram_utils import telegram_safe
+
 try:
     import requests
 except Exception:
@@ -11,7 +13,7 @@ log = logging.getLogger(__name__)
 def send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
     """
     Отправляет сообщение в Telegram.
-    НИЧЕГО не форматирует.
+    Безопасно экранирует HTML и удаляет обратные слеши.
     НИКОГДА не бросает исключения.
     """
     if not bot_token or not chat_id or not text:
@@ -24,12 +26,14 @@ def send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
+    safe_text = telegram_safe(text)
+
     try:
         resp = requests.post(
             url,
             json={
                 "chat_id": chat_id,
-                "text": text,
+                "text": safe_text,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             },

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import configparser
 from dataclasses import dataclass
+import re
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -29,7 +30,7 @@ class GeneralConfig:
 class AccountConfig:
     """Configuration for a single IMAP account."""
 
-    name: str
+    account_id: str
     login: str
     password: str
     host: str
@@ -69,6 +70,17 @@ class ConfigError(Exception):
     """Raised when configuration files are missing or invalid."""
 
 
+class InvalidAccountIdError(ConfigError):
+    """Raised when account IDs do not match the allowed pattern."""
+
+    def __init__(self, invalid_ids: list[str]) -> None:
+        super().__init__(f"Invalid account_id(s) in accounts.ini: {', '.join(invalid_ids)}")
+        self.invalid_ids = invalid_ids
+
+
+ACCOUNT_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
+
+
 def _read_config_file(path: Path) -> configparser.ConfigParser:
     parser = configparser.ConfigParser()
     if not path.exists():
@@ -96,11 +108,15 @@ def load_general_config(base_dir: Path = CONFIG_DIR) -> GeneralConfig:
 def load_accounts_config(base_dir: Path = CONFIG_DIR) -> List[AccountConfig]:
     parser = _read_config_file(base_dir / "accounts.ini")
     accounts: List[AccountConfig] = []
+    invalid_ids: list[str] = []
     for section_name in parser.sections():
+        if not ACCOUNT_ID_PATTERN.fullmatch(section_name):
+            invalid_ids.append(section_name)
+            continue
         section = parser[section_name]
         try:
             account = AccountConfig(
-                name=section_name,
+                account_id=section_name,
                 login=section["login"],
                 password=section["password"],
                 host=section.get("host", ""),
@@ -113,6 +129,9 @@ def load_accounts_config(base_dir: Path = CONFIG_DIR) -> List[AccountConfig]:
         except ValueError as exc:
             raise ConfigError(f"Invalid numeric field in accounts.ini:{section_name}: {exc}") from exc
         accounts.append(account)
+
+    if invalid_ids:
+        raise InvalidAccountIdError(invalid_ids)
 
     if not accounts:
         raise ConfigError("No accounts defined in accounts.ini")
@@ -168,6 +187,7 @@ __all__ = [
     "BotConfig",
     "ConfigError",
     "GeneralConfig",
+    "InvalidAccountIdError",
     "KeysConfig",
     "StorageConfig",
     "load_config",

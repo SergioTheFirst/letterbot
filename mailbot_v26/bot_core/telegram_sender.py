@@ -6,6 +6,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from mailbot_v26.telegram_utils import telegram_safe
+
 
 def send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool:
     """Send message via Telegram HTTP API. Returns success flag."""
@@ -15,7 +17,7 @@ def send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool:
     payload = urllib.parse.urlencode(
         {
             "chat_id": chat_id,
-            "text": text,
+            "text": telegram_safe(text),
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
