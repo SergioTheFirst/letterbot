@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import imaplib
 from pathlib import Path
 
 from mailbot_v26.config_loader import (
@@ -139,3 +140,55 @@ def test_failed_account_excluded_from_polling(monkeypatch, tmp_path: Path) -> No
     )
 
     assert [account.login for account in accounts_to_poll] == ["ok@example.com"]
+
+
+def test_healthcheck_error_message_not_none(monkeypatch) -> None:
+    class EmptyMessageIMAPClient(FakeIMAPClient):
+        def login(self, login: str, password: str) -> None:
+            raise Exception(None)
+
+    monkeypatch.setattr(mail_accounts, "IMAPClient", EmptyMessageIMAPClient)
+
+    results = mail_accounts.check_mail_accounts(
+        [
+            AccountConfig(
+                account_id="E",
+                login="empty@example.com",
+                password="pw",
+                host="imap.empty",
+                port=993,
+                use_ssl=True,
+                telegram_chat_id="chat",
+            ),
+        ]
+    )
+
+    assert results[0].status == "FAILED"
+    assert results[0].error is not None
+    assert results[0].error != "None"
+
+
+def test_healthcheck_imap_auth_failure_details(monkeypatch) -> None:
+    class AuthFailIMAPClient(FakeIMAPClient):
+        def login(self, login: str, password: str) -> None:
+            raise imaplib.IMAP4.error("AUTH failed")
+
+    monkeypatch.setattr(mail_accounts, "IMAPClient", AuthFailIMAPClient)
+
+    results = mail_accounts.check_mail_accounts(
+        [
+            AccountConfig(
+                account_id="F",
+                login="auth@example.com",
+                password="pw",
+                host="imap.auth",
+                port=993,
+                use_ssl=True,
+                telegram_chat_id="chat",
+            ),
+        ]
+    )
+
+    assert results[0].status == "FAILED"
+    assert results[0].error is not None
+    assert "AUTH failed" in results[0].error
