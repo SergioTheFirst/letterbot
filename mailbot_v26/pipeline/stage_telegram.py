@@ -16,6 +16,7 @@ def send_to_telegram(
     action_line: str,
     body_summary: str,
     attachment_summaries: list[dict[str, Any]],
+    telegram_text: str,
     account_email: str,
 ) -> None:
     """
@@ -29,6 +30,7 @@ def send_to_telegram(
         "telegram_stage_unconfigured",
         chat_id=chat_id,
         account_email=account_email,
+        telegram_text=telegram_text,
     )
 
 
