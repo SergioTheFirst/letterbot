@@ -26,6 +26,11 @@ CREATE TABLE IF NOT EXISTS emails (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS digest_state (
+    account_email TEXT PRIMARY KEY,
+    last_digest_sent_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_emails_account
     ON emails(account_email);
 

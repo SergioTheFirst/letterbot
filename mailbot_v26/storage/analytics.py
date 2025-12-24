@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
+from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
+
 logger = logging.getLogger(__name__)
 
 
@@ -380,3 +382,155 @@ class KnowledgeAnalytics:
             params.append(f"+{days_ahead} days")
         query += " ORDER BY c.deadline_iso ASC"
         return self._execute_select(query, params)
+
+    def deferred_digest_counts(self, *, account_email: str) -> dict[str, int]:
+        if not account_email:
+            return {
+                "total": 0,
+                "attachments_only": 0,
+                "informational": 0,
+            }
+        total_rows = self._execute_select(
+            """
+            SELECT COUNT(*) AS total
+            FROM emails
+            WHERE deferred_for_digest = 1
+              AND account_email = ?
+            """,
+            (account_email,),
+        )
+        total = int(total_rows[0].get("total") or 0) if total_rows else 0
+        attachments_rows = self._execute_select(
+            """
+            SELECT COUNT(DISTINCT e.id) AS attachments_only
+            FROM emails e
+            JOIN attachments a ON a.email_id = e.id
+            WHERE e.deferred_for_digest = 1
+              AND e.account_email = ?
+              AND COALESCE(e.raw_body_hash, '') = ''
+            """,
+            (account_email,),
+        )
+        attachments_only = (
+            int(attachments_rows[0].get("attachments_only") or 0)
+            if attachments_rows
+            else 0
+        )
+        informational = max(total - attachments_only, 0)
+        return {
+            "total": total,
+            "attachments_only": attachments_only,
+            "informational": informational,
+        }
+
+    def commitment_status_counts(self, *, account_email: str) -> dict[str, int]:
+        if not account_email:
+            return {"pending": 0, "expired": 0}
+        rows = self._execute_select(
+            """
+            SELECT
+                SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+                SUM(CASE WHEN c.status = 'expired' THEN 1 ELSE 0 END) AS expired_count
+            FROM commitments c
+            JOIN emails e ON e.id = c.email_row_id
+            WHERE e.account_email = ?
+            """,
+            (account_email,),
+        )
+        row = rows[0] if rows else {}
+        return {
+            "pending": int(row.get("pending_count") or 0),
+            "expired": int(row.get("expired_count") or 0),
+        }
+
+    def latest_trust_score_delta(self, *, limit: int = 50) -> dict[str, object] | None:
+        try:
+            rows = self._execute_select(
+                """
+                SELECT entity_id, trust_score, created_at
+                FROM trust_snapshots
+                WHERE trust_score IS NOT NULL
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        except sqlite3.OperationalError:
+            return None
+        latest_by_entity: dict[str, dict[str, object]] = {}
+        for row in rows:
+            entity_id = str(row.get("entity_id") or "")
+            if not entity_id:
+                continue
+            score_value = row.get("trust_score")
+            if score_value is None:
+                continue
+            try:
+                score = float(score_value)
+            except (TypeError, ValueError):
+                continue
+            created_at = parse_sqlite_datetime(str(row.get("created_at") or "")) or None
+            if entity_id not in latest_by_entity:
+                latest_by_entity[entity_id] = {
+                    "current_score": score,
+                    "current_at": created_at,
+                }
+                continue
+            previous = latest_by_entity[entity_id]
+            previous_score = float(previous["current_score"])
+            delta = score - previous_score
+            return {
+                "entity_id": entity_id,
+                "current_score": score,
+                "previous_score": previous_score,
+                "delta": delta,
+                "current_at": created_at,
+            }
+        return None
+
+    def latest_relationship_health_delta(
+        self, *, limit: int = 50
+    ) -> dict[str, object] | None:
+        try:
+            rows = self._execute_select(
+                """
+                SELECT entity_id, health_score, created_at
+                FROM relationship_health_snapshots
+                WHERE health_score IS NOT NULL
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        except sqlite3.OperationalError:
+            return None
+        latest_by_entity: dict[str, dict[str, object]] = {}
+        for row in rows:
+            entity_id = str(row.get("entity_id") or "")
+            if not entity_id:
+                continue
+            score_value = row.get("health_score")
+            if score_value is None:
+                continue
+            try:
+                score = float(score_value)
+            except (TypeError, ValueError):
+                continue
+            created_at = parse_sqlite_datetime(str(row.get("created_at") or "")) or None
+            if entity_id not in latest_by_entity:
+                latest_by_entity[entity_id] = {
+                    "current_score": score,
+                    "current_at": created_at,
+                }
+                continue
+            previous = latest_by_entity[entity_id]
+            previous_score = float(previous["current_score"])
+            delta = score - previous_score
+            return {
+                "entity_id": entity_id,
+                "current_score": score,
+                "previous_score": previous_score,
+                "delta": delta,
+                "current_at": created_at,
+            }
+        return None
