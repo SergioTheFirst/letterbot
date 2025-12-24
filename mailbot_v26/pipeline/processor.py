@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from enum import Enum
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
+from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.features import FeatureFlags
 from mailbot_v26.insights.commitment_signals import (
     CommitmentReliabilityMetrics,
@@ -48,6 +50,7 @@ from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
 from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
+from mailbot_v26.text.clean_email import clean_email_body
 from .stage_llm import run_llm_stage
 from .stage_telegram import enqueue_tg, send_preview_to_telegram, send_system_notice
 from .telegram_payload import TelegramPayload
@@ -191,6 +194,7 @@ class InvalidTelegramPayload(ValueError):
 class MessageProcessor:
     _ATTACHMENT_SNIPPET_LIMIT = 120
     _MAX_ATTACHMENTS = 12
+    _VERB_ORDER = ("Проверить", "Ответить", "Сделать", "Согласовать")
 
     def __init__(self, config: Any, state: Any) -> None:
         self.config = config
@@ -200,16 +204,27 @@ class MessageProcessor:
         """Lightweight placeholder processor to keep imports stable."""
         sender = message.sender or "неизвестно"
         subject = message.subject or "(без темы)"
-        summary = (message.body or "").strip()
-        summary = summary.split("\n")[0] if summary else ""
-        summary = self._trim_attachment_snippet(summary) if summary else ""
+        body_text = message.body or ""
+        priority = self._choose_priority(subject, body_text, message.attachments or [])
+        action_line = self._normalize_action_subject(
+            "Проверить",
+            subject,
+            message.attachments or [],
+            body_text,
+        )
+        summary = self._summarize_body(body_text, subject)
+        attachments = self._build_attachment_summaries(message.attachments or [], subject)
+
         lines = [
-            f"🔵 от {sender}: {subject}",
+            f"{priority} от {sender}: {subject}",
             f"<b>{subject}</b>",
+            action_line,
         ]
         if summary:
             lines.append(f"<i>{summary}</i>")
-        lines.append("Действие: проверить письмо")
+        if attachments:
+            lines.extend(self._render_attachments(attachments))
+        lines.append(f"<i>to: {account_login}</i>")
         return "\n".join(lines)
 
     @classmethod
@@ -220,13 +235,165 @@ class MessageProcessor:
 
     def _render_attachments(self, attachments: list[AttachmentSummary]) -> list[str]:
         rendered: list[str] = []
-        for attachment in attachments[: self._MAX_ATTACHMENTS]:
+        for attachment in attachments:
             description = self._trim_attachment_snippet(attachment.description or "")
             if description:
                 rendered.append(f"{attachment.filename} — {description}")
             else:
                 rendered.append(attachment.filename)
         return rendered
+
+    def _build_attachment_summaries(
+        self,
+        attachments: list[Attachment],
+        subject: str,
+    ) -> list[AttachmentSummary]:
+        summaries: list[AttachmentSummary] = []
+        for attachment in attachments:
+            if self._is_image_attachment(attachment):
+                continue
+            kind = self._attachment_kind(attachment)
+            try:
+                description, text_length = self._summarize_attachment(
+                    attachment,
+                    subject,
+                    kind,
+                )
+            except Exception:
+                description, text_length = "", len(attachment.text or "")
+            summaries.append(
+                AttachmentSummary(
+                    filename=attachment.filename,
+                    description=description,
+                    kind=kind,
+                    priority=0,
+                    text_length=text_length,
+                )
+            )
+        return summaries
+
+    def _summarize_attachment(
+        self,
+        attachment: Attachment,
+        subject: str,
+        kind: str,
+    ) -> tuple[str, int]:
+        text = (attachment.text or "").strip()
+        if not text:
+            return "", 0
+        lowered_subject = (subject or "").lower()
+        doc_type = "OTHER"
+        if kind in {"XLS", "XLSX", "XLSM", "XLSB", "TABLE"}:
+            doc_type = "TABLE"
+        elif kind in {"DOC", "DOCX"} and any(token in lowered_subject for token in ("договор", "contract")):
+            doc_type = "CONTRACT"
+        snippet = pick_attachment_fact(text, attachment.filename, doc_type) or ""
+        snippet = snippet.replace('"', "").replace("«", "").replace("»", "")
+        snippet = snippet.replace(";", " ").replace("|", " ")
+        snippet = re.sub(r"\s+", " ", snippet).strip()
+        if not snippet:
+            snippet = re.sub(r"\s+", " ", text.replace(";", " ").replace("|", " ")).strip()
+        if not snippet:
+            return "", len(text)
+        words = snippet.split()
+        if len(words) > 12:
+            snippet = " ".join(words[:12])
+        if len(snippet) > self._ATTACHMENT_SNIPPET_LIMIT:
+            snippet = self._trim_attachment_snippet(snippet)
+        return snippet, len(text)
+
+    def _summarize_body(self, body: str, subject: str) -> str:
+        cleaned = clean_email_body(body)
+        if not cleaned:
+            return ""
+        cleaned = self._unescape_newlines(cleaned)
+        base = pick_email_body_fact(cleaned) or cleaned
+        base = re.sub(r"[<>]", "", base)
+        base = base.replace('"', "").replace("«", "").replace("»", "")
+        base = re.sub(r"\s+", " ", base).strip()
+        if not base or self._is_greeting_only(base):
+            return ""
+        words = base.split()
+        if len(words) < 8:
+            words = cleaned.split()
+        if len(words) < 8:
+            extra_words = [word for word in subject.split() if word]
+            words.extend(extra_words)
+        if len(words) < 8:
+            return ""
+        summary = " ".join(words[:12]).strip()
+        if len(summary) > 120:
+            summary = summary[:119].rstrip() + "…"
+        return summary
+
+    @staticmethod
+    def _unescape_newlines(text: str) -> str:
+        if "\\n" in text and "\n" not in text:
+            return text.replace("\\r\\n", "\n").replace("\\n", "\n")
+        return text
+
+    @staticmethod
+    def _is_greeting_only(text: str) -> bool:
+        greetings = ("добрый день", "добрый вечер", "здравствуйте", "привет", "hello", "hi")
+        lowered = text.lower().strip()
+        if any(lowered.startswith(greet) for greet in greetings) and len(lowered.split()) <= 4:
+            return True
+        return False
+
+    @staticmethod
+    def _choose_priority(subject: str, body: str, attachments: list[Attachment]) -> str:
+        combined = " ".join([subject or "", body or ""]).lower()
+        attachment_names = " ".join(att.filename.lower() for att in attachments if att.filename)
+        if any(token in combined for token in ("срочно", "urgent", "оплат", "счет", "invoice")):
+            return "🔴"
+        if any(token in combined for token in ("договор", "contract", "согласован", "approval")):
+            return "🟡"
+        if any(token in attachment_names for token in ("invoice", "счет")):
+            return "🔴"
+        if any(token in attachment_names for token in ("contract", "догов")):
+            return "🟡"
+        return "🔵"
+
+    @staticmethod
+    def _is_image_attachment(attachment: Attachment) -> bool:
+        content_type = (attachment.content_type or "").lower()
+        filename = (attachment.filename or "").lower()
+        if content_type.startswith("image/"):
+            return True
+        return filename.endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"))
+
+    @staticmethod
+    def _attachment_kind(attachment: Attachment) -> str:
+        filename = (attachment.filename or "").lower()
+        content_type = (attachment.content_type or "").lower()
+        extension = filename.rsplit(".", 1)[-1] if "." in filename else ""
+        if "excel" in content_type or extension in {"xls", "xlsx", "xlsm", "xlsb"}:
+            return "XLS"
+        if "word" in content_type or extension in {"doc", "docx"}:
+            return "DOC"
+        if "pdf" in content_type or extension == "pdf":
+            return "PDF"
+        if extension:
+            return extension.upper()
+        return "FILE"
+
+    def _normalize_action_subject(
+        self,
+        verb: str,
+        subject: str,
+        attachments: list[Attachment],
+        body: str,
+    ) -> str:
+        lowered = (subject or "").lower()
+        if "прайс" in lowered or "цена" in lowered or "счет" in lowered:
+            return f"{verb} цены"
+        if "документ" in lowered or "договор" in lowered:
+            return f"{verb} документы"
+        if any(att.filename.lower().endswith((".xls", ".xlsx")) for att in attachments if att.filename):
+            return f"{verb} таблицы"
+        if body and "договор" in body.lower():
+            return f"{verb} документы"
+        return f"{verb} письмо"
 
 
 __all__ = ["Attachment", "AttachmentSummary", "InboundMessage", "MessageProcessor"]
