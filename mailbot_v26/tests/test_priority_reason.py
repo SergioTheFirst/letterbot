@@ -93,7 +93,7 @@ def test_save_email_persists_priority_reason(tmp_path: Path) -> None:
         priority="🟡",
         priority_reason="Повышен до 🟡: тестовая причина",
         action_line="Action",
-        body_summary="Summary",
+        body_summary="Краткое описание письма.",
         raw_body="Body",
         attachment_summaries=[],
     )

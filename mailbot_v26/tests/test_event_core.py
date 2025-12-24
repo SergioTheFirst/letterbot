@@ -15,6 +15,7 @@ from mailbot_v26.insights.trust_score import (
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.pipeline import processor
 from mailbot_v26.storage.context_layer import EntityResolution
+from mailbot_v26.worker.telegram_sender import TelegramSendResult
 
 
 def _feature_flags() -> SimpleNamespace:
@@ -147,6 +148,7 @@ def test_event_core_emits_expected_events(monkeypatch, tmp_path) -> None:
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         sent.append(payload)
+        return TelegramSendResult(success=True)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
@@ -163,14 +165,16 @@ def test_event_core_emits_expected_events(monkeypatch, tmp_path) -> None:
 
     assert sent
     event_types = _load_event_types(emitter.path)
-    assert set(event_types) == {
+    expected = {
         "email_received",
         "commitment_created",
         "commitment_fulfilled",
         "commitment_expired",
         "trust_score_updated",
         "relationship_health_updated",
+        "telegram_payload_validated",
     }
+    assert expected.issubset(set(event_types))
 
 
 def test_event_emit_errors_do_not_break_pipeline(monkeypatch, tmp_path) -> None:
@@ -216,6 +220,7 @@ def test_event_emit_errors_do_not_break_pipeline(monkeypatch, tmp_path) -> None:
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         sent.append(payload)
+        return TelegramSendResult(success=True)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 

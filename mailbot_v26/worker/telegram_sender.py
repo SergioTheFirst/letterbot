@@ -1,30 +1,42 @@
+from __future__ import annotations
+
+import importlib.util
 import logging
+from dataclasses import dataclass
 
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 
-try:
-    import requests
-except Exception:
+requests_spec = importlib.util.find_spec("requests")
+if requests_spec is None:
     requests = None
+else:
+    import requests
 
 log = logging.getLogger(__name__)
 
 
-def send_telegram(payload: TelegramPayload) -> bool:
+@dataclass(frozen=True, slots=True)
+class TelegramSendResult:
+    success: bool
+    error: str | None = None
+    status_code: int | None = None
+
+
+def send_telegram(payload: TelegramPayload) -> TelegramSendResult:
     """
     Отправляет сообщение в Telegram.
-    Безопасно экранирует HTML и удаляет обратные слеши.
+    Возвращает явный результат (успех/ошибка).
     НИКОГДА не бросает исключения.
     """
     bot_token = payload.metadata.get("bot_token")
     chat_id = payload.metadata.get("chat_id")
     if not bot_token or not chat_id or not payload.html_text:
         log.error("Telegram send failed: empty token, chat_id or text")
-        return False
+        return TelegramSendResult(success=False, error="missing required fields")
 
-    if not requests:
+    if requests is None:
         log.error("Telegram send failed: requests module not available")
-        return False
+        return TelegramSendResult(success=False, error="requests module not available")
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
@@ -41,7 +53,7 @@ def send_telegram(payload: TelegramPayload) -> bool:
         )
     except Exception as exc:
         log.error("Telegram send exception: %s", exc)
-        return False
+        return TelegramSendResult(success=False, error=str(exc))
 
     if resp.status_code != 200:
         log.error(
@@ -49,9 +61,13 @@ def send_telegram(payload: TelegramPayload) -> bool:
             resp.status_code,
             resp.text,
         )
-        return False
+        return TelegramSendResult(
+            success=False,
+            error=resp.text,
+            status_code=resp.status_code,
+        )
 
-    return True
+    return TelegramSendResult(success=True)
 
 
 def ping_telegram(bot_token: str) -> tuple[bool, str]:

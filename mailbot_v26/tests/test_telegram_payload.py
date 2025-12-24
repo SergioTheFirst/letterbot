@@ -5,13 +5,14 @@ from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
+from mailbot_v26.worker.telegram_sender import TelegramSendResult
 
 
 def test_telegram_payload_unchanged(monkeypatch) -> None:
     llm_result = SimpleNamespace(
         priority="🔴",
         action_line="Позвонить клиенту",
-        body_summary="Summary",
+        body_summary="Краткое описание письма.",
         attachment_summaries=[{"filename": "file.txt", "summary": "summary"}],
         llm_provider="cloudflare",
     )
@@ -34,6 +35,7 @@ def test_telegram_payload_unchanged(monkeypatch) -> None:
     def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
         captured["email_id"] = email_id
         captured["payload"] = payload
+        return TelegramSendResult(success=True)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
@@ -59,7 +61,7 @@ def test_telegram_payload_unchanged_with_gigachat_provider(monkeypatch) -> None:
     llm_result = SimpleNamespace(
         priority="🔴",
         action_line="Позвонить клиенту",
-        body_summary="Summary",
+        body_summary="Краткое описание письма.",
         attachment_summaries=[{"filename": "file.txt", "summary": "summary"}],
         llm_provider="gigachat",
     )
@@ -82,6 +84,7 @@ def test_telegram_payload_unchanged_with_gigachat_provider(monkeypatch) -> None:
     def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
         captured["email_id"] = email_id
         captured["payload"] = payload
+        return TelegramSendResult(success=True)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 

@@ -13,7 +13,7 @@ def _llm_result() -> SimpleNamespace:
     return SimpleNamespace(
         priority="🔴",
         action_line="Позвонить клиенту",
-        body_summary="Summary",
+        body_summary="Краткое описание письма.",
         attachment_summaries=[{"filename": "file.txt", "summary": "summary"}],
         llm_provider="cloudflare",
         llm_model="test-model",
@@ -106,7 +106,7 @@ def test_decision_trace_does_not_change_telegram_payload(monkeypatch, tmp_path) 
     assert payload.metadata["chat_id"] == "chat"
     assert payload.metadata["account_email"] == "account@example.com"
     assert payload.metadata["action_line"] == "Позвонить клиенту"
-    assert payload.metadata["body_summary"] == "Summary"
+    assert payload.metadata["body_summary"] == "Краткое описание письма."
     assert payload.metadata["attachment_summaries"] == [
         {"filename": "file.txt", "summary": "summary"}
     ]

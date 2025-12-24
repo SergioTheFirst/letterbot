@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.pipeline import processor
+from mailbot_v26.worker.telegram_sender import TelegramSendResult
 from mailbot_v26.system_health import OperationalMode, system_health
 
 
@@ -56,7 +57,11 @@ def _setup_pipeline(monkeypatch, *, llm_result) -> None:
             ENABLE_PREVIEW_ACTIONS=False,
         ),
     )
-    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
+    monkeypatch.setattr(
+        processor,
+        "enqueue_tg",
+        lambda **kwargs: TelegramSendResult(success=True),
+    )
     monkeypatch.setattr(processor, "send_system_notice", lambda **kwargs: None)
 
 
@@ -84,7 +89,7 @@ def test_crm_unavailable_sets_emergency_read_only(monkeypatch) -> None:
     llm_result = SimpleNamespace(
         priority="🔵",
         action_line="Ответить",
-        body_summary="Summary",
+        body_summary="Краткое описание письма.",
         attachment_summaries=[],
         llm_provider="cloudflare",
     )
@@ -120,7 +125,7 @@ def test_recovery_returns_full_mode(monkeypatch) -> None:
     llm_result = SimpleNamespace(
         priority="🟡",
         action_line="Проверить",
-        body_summary="Summary",
+        body_summary="Краткое описание письма.",
         attachment_summaries=[],
         llm_provider="gigachat",
     )

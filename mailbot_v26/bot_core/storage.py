@@ -217,5 +217,16 @@ class Storage:
                 (error, self._now(), email_id),
             )
 
+    def set_email_delivery_failed(self, email_id: int, error: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE emails
+                SET status = 'DELIVERY_FAILED', error_last = ?, updated_at = ?
+                WHERE id = ?;
+                """,
+                (error, self._now(), email_id),
+            )
+
 
 __all__ = ["Storage"]
