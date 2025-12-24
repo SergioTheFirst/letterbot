@@ -13,7 +13,7 @@ Key decisions:
 - Gate decisions set deferred_for_digest=true and persist for later digest when gated.
 
 State:
-- Attention Gate implemented with persistence flag and tests added.
+- Attention Gate and tests already present; no code changes required.
 
 Done:
 - Added deterministic Attention Gate before Telegram send with safe fallback.
@@ -21,7 +21,7 @@ Done:
 - Added tests for gate logic, persistence, and payload stability.
 
 Now:
-- Commit changes and prepare PR.
+- No implementation changes needed; awaiting further instructions.
 
 Next:
 - None.
@@ -30,12 +30,4 @@ Open questions (UNCONFIRMED if needed):
 - None.
 
 Working set (files/ids/commands):
-- mailbot_v26/pipeline/attention_gate.py
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/storage/knowledge_db.py
-- mailbot_v26/storage/schema.sql
-- mailbot_v26/tests/test_attention_gate.py
-- mailbot_v26/tests/test_attention_gate_persistence.py
-- pytest mailbot_v26/tests/test_attention_gate.py
-- pytest mailbot_v26/tests/test_attention_gate_persistence.py
-- pytest mailbot_v26/tests/test_observability_logging.py::test_telegram_payload_stability
+- CONTINUITY.md
