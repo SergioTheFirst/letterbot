@@ -90,6 +90,10 @@ class KnowledgeDB:
                 )
             if "llm_provider" not in columns:
                 migrations.append("ALTER TABLE emails ADD COLUMN llm_provider TEXT;")
+            if "deferred_for_digest" not in columns:
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN deferred_for_digest INTEGER DEFAULT 0;"
+                )
 
             for statement in migrations:
                 conn.execute(statement)
@@ -118,6 +122,7 @@ class KnowledgeDB:
         proposed_action_text: str | None = None,
         proposed_action_confidence: float | None = None,
         llm_provider: str | None = None,
+        deferred_for_digest: bool = False,
         action_line: str,
         body_summary: str,
         raw_body: str,
@@ -149,11 +154,12 @@ class KnowledgeDB:
                         proposed_action_text,
                         proposed_action_confidence,
                         llm_provider,
+                        deferred_for_digest,
                         action_line,
                         body_summary,
                         raw_body_hash
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account_email,
@@ -173,6 +179,7 @@ class KnowledgeDB:
                         proposed_action_text,
                         proposed_action_confidence,
                         llm_provider,
+                        1 if deferred_for_digest else 0,
                         action_line,
                         body_summary,
                         raw_body_hash,
@@ -200,6 +207,28 @@ class KnowledgeDB:
         except Exception as exc:
             logger.error("KnowledgeDB save failed: %s", exc)
             return None
+
+    def mark_deferred_for_digest(
+        self,
+        *,
+        email_row_id: int,
+        deferred: bool = True,
+    ) -> bool:
+        try:
+            with sqlite3.connect(self.path) as conn:
+                conn.execute(
+                    """
+                    UPDATE emails
+                    SET deferred_for_digest = ?
+                    WHERE id = ?
+                    """,
+                    (1 if deferred else 0, email_row_id),
+                )
+                conn.commit()
+            return True
+        except Exception as exc:
+            logger.error("KnowledgeDB deferred update failed: %s", exc)
+            return False
 
     def save_commitments(
         self,

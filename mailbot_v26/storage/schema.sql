@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS emails (
     proposed_action_text TEXT,
     proposed_action_confidence REAL,
     llm_provider TEXT,
+    deferred_for_digest INTEGER DEFAULT 0,
     action_line TEXT,
     body_summary TEXT,
     raw_body_hash TEXT,
