@@ -46,8 +46,14 @@ class ResilientIMAP:
             self.state.set_imap_status(self.account.login, "error", "imapclient missing")
             self.logger.error("IMAP client dependency is not available; skipping fetch")
             return []
+        client = None
         try:
-            client = IMAPClient(self.account.host, port=self.account.port, ssl=self.account.use_ssl)
+            client = IMAPClient(
+                self.account.host,
+                port=self.account.port,
+                ssl=self.account.use_ssl,
+                timeout=30,
+            )
             client.login(self.account.login, self.account.password)
             client.select_folder("INBOX")
             uids: Iterable[int] = client.search(criteria[0])
@@ -79,6 +85,12 @@ class ResilientIMAP:
             self.state.set_imap_status(self.account.login, "error", str(exc))
             self.logger.exception("IMAP fetch failed for %s", self.account.login)
             return []
+        finally:
+            if client is not None:
+                try:
+                    client.logout()
+                except Exception:
+                    self.logger.warning("IMAP logout failed for %s", self.account.login)
 
 
 __all__ = ["ResilientIMAP"]

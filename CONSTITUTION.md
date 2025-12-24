@@ -1,24 +1,20 @@
 - Goal (incl. success criteria):
-  - Fix MailBot Premium v26 polling loop so it runs indefinitely, handles errors per cycle, and passes required loop tests (3 cycles, empty inbox, IMAP error, bad account).
+  - Identify why email checking stops after the first mailbox and fix the mail checking logic so it continues through all mailboxes.
 - Constraints/Assumptions:
-  - Only adjust loop control + exception handling; no business logic, pipeline order, Telegram payload, threading, or architecture changes.
-  - Must inspect specified files before coding; minimal safe fix.
+  - Keep changes minimal and aligned with repository conventions.
 - Key decisions:
-  - Added cycle-level exception handling and optional max_cycles for tests to prevent loop exit on errors.
+  - Add IMAP socket timeout and ensure connections are closed after each fetch.
 - State:
-  - Fix implemented; tests added and passing for polling loop scenarios.
+  - Fix applied to IMAP fetch behavior.
 - Done:
-  - Inspected start loop, IMAP client, and pipeline handling.
-  - Wrapped polling cycle to log and continue after errors; ensured sleep each cycle.
-  - Added polling loop tests covering empty inbox, IMAP exception, and bad account isolation.
-  - Ran: pytest -q mailbot_v26/tests/test_polling_loop.py
+  - Read workspace operating rules and current constitution.
+  - Added IMAP timeout and logout handling to prevent blocking after the first mailbox.
 - Now:
-  - Prepare commit and PR.
+  - Run relevant checks if feasible.
 - Next:
-  - None.
+  - Commit and prepare PR.
 - Open questions (UNCONFIRMED if needed):
-  - None.
+  - Which executable or entry point the user runs (UNCONFIRMED).
 - Working set (files/ids/commands):
-  - mailbot_v26/start.py
-  - mailbot_v26/tests/test_polling_loop.py
-  - pytest -q mailbot_v26/tests/test_polling_loop.py
+  - CONSTITUTION.md
+  - mailbot_v26/imap_client.py
