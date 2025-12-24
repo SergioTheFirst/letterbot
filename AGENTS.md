@@ -3,21 +3,21 @@
 These rules are mandatory unless the user explicitly overrides them.
 
 ## 0) Canonical source of truth
-- The canonical, compaction-safe workspace ledger is: `constitution.md` (repo root unless stated otherwise).
-- Treat `constitution.md` as the only trusted memory across long sessions.
-- If something is not written in `constitution.md`, treat it as UNKNOWN and ask (at most) 1–3 targeted questions.
+- The canonical, compaction-safe workspace ledger is: `CONTINUITY.md` (repo root unless stated otherwise).
+- Treat `CONTINUITY.md` as the only trusted memory across long sessions.
+- If something is not written in `CONTINUITY.md`, treat it as UNKNOWN and ask (at most) 1–3 targeted questions.
 
 ## 1) Mandatory start-of-turn routine (ALWAYS)
 Before doing any work (planning, coding, running commands):
-1) Open and read `constitution.md`.
+1) Open and read `CONTINUITY.md`.
 2) Update it if needed (see Section 2).
 3) Only then proceed.
 
-If `constitution.md` does not exist:
+If `CONTINUITY.md` does not exist:
 - Create it in the repository root with the template in Section 4, then continue.
 
-## 2) When to update `constitution.md` (ALWAYS)
-Update `constitution.md` immediately when any of the following changes:
+## 2) When to update `CONTINUITY.md` (ALWAYS)
+Update `CONTINUITY.md` immediately when any of the following changes:
 - Goal or success criteria
 - Constraints / assumptions
 - Key decisions / tradeoffs
@@ -37,7 +37,7 @@ Update discipline:
 - Run the most relevant checks/tests after changes when feasible.
 - If a step is risky or irreversible, ask for approval first.
 
-## 4) Required `constitution.md` format (keep headings)
+## 4) Required `CONTINUITY.md` format (keep headings)
 Use exactly these headings:
 
 - Goal (incl. success criteria):
@@ -55,4 +55,5 @@ Use exactly these headings:
 - Do NOT add ritual preambles.
 - Only include a “Constitution Snapshot” (Goal + Now/Next + Open Questions) when:
   a) the user asks, or
-  b) you made a material update to `constitution.md`.
+  b) you made a material update to `CONTINUITY.md`.
+
