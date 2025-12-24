@@ -1,5 +1,5 @@
 Goal (incl. success criteria):
-- Fix Telegram bot message formatting so forwarded email content renders cleanly (no raw headers/\n) and all related functions work as expected. Success: Telegram output shows readable sender/subject/body without raw escape sequences; features verified.
+- Add constitution rule forbidding parallel GigaChat (Sber) requests; only sequential allowed. Success: constitution explicitly states prohibition and rationale.
 
 Constraints/Assumptions:
 - Must read/update this ledger each turn.
@@ -11,23 +11,20 @@ Key decisions:
 - Keep MessageProcessor output structure but improve summary/attachments generation.
 
 State:
-- Code changes complete; tests run.
+- Constitution update in progress.
 
 Done:
-- Added cleaned body summary and attachment summary logic in MessageProcessor.
-- Allowed Telegram-safe HTML tags (<b>/<i>) in telegram_safe.
-- Ran targeted pytest subset.
+- Read CONTINUITY.md and AGENTS.md.
+- Added constitution rule forbidding parallel GigaChat requests.
 
 Now:
-- Prepare commit and PR.
-
-Next:
 - Commit changes and create PR.
 
+Next:
+- None.
+
 Open questions (UNCONFIRMED if needed):
-- Confirm if Telegram template should be further adjusted beyond current structure.
+- None.
 
 Working set (files/ids/commands):
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/telegram_utils.py
-- pytest mailbot_v26/tests/test_body_summary.py mailbot_v26/tests/test_pipeline_processor.py mailbot_v26/tests/test_attachment_descriptions.py
+- CONSTITUTION.md
