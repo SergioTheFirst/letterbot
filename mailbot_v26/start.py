@@ -187,7 +187,7 @@ def _process_queue(storage: Storage, config: BotConfig, processor: MessageProces
             _fail_open_process(config, processor, ctx)
 
 
-def main(config_dir: Path | None = None) -> None:
+def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> None:
     print("\n" + "=" * 60)
     print("MAILBOT PREMIUM v26 - STARTING")
     print("=" * 60)
@@ -282,102 +282,118 @@ def main(config_dir: Path | None = None) -> None:
                 print(f"\n{'=' * 60}")
                 print(f"CYCLE #{cycle} - {time.strftime('%H:%M:%S')}")
                 print(f"{'=' * 60}")
-                logger.info("Cycle %d started", cycle)
+                logger.info("Cycle #%d started", cycle)
 
-                for account in accounts_to_poll:
-                    login = account.login or "no_login"
-                    print(f"\n[MAIL] Checking: {login}")
+                try:
+                    for account in accounts_to_poll:
+                        login = account.login or "no_login"
+                        print(f"\n[MAIL] Checking: {login}")
 
-                    try:
-                        imap = ResilientIMAP(account, state, program_start)
-                        new_messages = imap.fetch_new_messages()
+                        try:
+                            imap = ResilientIMAP(account, state, program_start)
+                            new_messages = imap.fetch_new_messages()
 
-                        if not new_messages:
-                            print("   └─ no new messages")
-                            continue
+                            if not new_messages:
+                                print("   └─ no new messages")
+                                continue
 
-                        print(f"   └─ received {len(new_messages)} new messages")
+                            print(f"   └─ received {len(new_messages)} new messages")
 
-                        for uid, raw in new_messages:
-                            print(f"      ├─ UID {uid}")
-                            try:
-                                inbound = parse_raw_email(raw, config)
-                                subject = inbound.subject[:60] if inbound.subject else "(no subject)"
-                                print(f"      │  Subject: {subject}")
+                            for uid, raw in new_messages:
+                                print(f"      ├─ UID {uid}")
+                                try:
+                                    inbound = parse_raw_email(raw, config)
+                                    subject = inbound.subject[:60] if inbound.subject else "(no subject)"
+                                    print(f"      │  Subject: {subject}")
 
-                                message_obj = message_from_bytes(raw)
-                                message_id = message_obj.get("Message-ID") if message_obj else None
-                                from_header = decode_mime_header(message_obj.get("From", "")) if message_obj else ""
-                                from_name, from_email = parseaddr(from_header or inbound.sender)
-                                received_at = decode_mime_header(message_obj.get("Date", "")) if message_obj else None
-                                attachments_count = len(inbound.attachments or [])
+                                    message_obj = message_from_bytes(raw)
+                                    message_id = message_obj.get("Message-ID") if message_obj else None
+                                    from_header = decode_mime_header(message_obj.get("From", "")) if message_obj else ""
+                                    from_name, from_email = parseaddr(from_header or inbound.sender)
+                                    received_at = decode_mime_header(message_obj.get("Date", "")) if message_obj else None
+                                    attachments_count = len(inbound.attachments or [])
 
-                                if storage:
-                                    email_id = storage.upsert_email(
-                                        account_email=account.login,
-                                        uid=uid,
-                                        message_id=message_id,
-                                        from_email=from_email or None,
-                                        from_name=from_name or None,
-                                        subject=inbound.subject,
-                                        received_at=received_at or None,
-                                        attachments_count=attachments_count,
-                                    )
-                                    ctx = PipelineContext(
-                                        email_id=email_id,
-                                        account_email=account.login,
-                                        uid=uid,
-                                    )
-                                    PIPELINE_CACHE[email_id] = ctx
-                                    remember_raw_email(email_id, raw)
-                                    store_inbound(email_id, inbound)
-                                    storage.enqueue_stage(email_id, "PARSE")
-                                    print(f"      │  Enqueued PARSE for email_id={email_id}")
-                                else:
-                                    final_text = processor.process(login, inbound)
-                                    if final_text and final_text.strip():
-                                        payload = _build_system_payload(
-                                            text=final_text.strip(),
-                                            bot_token=config.keys.telegram_bot_token,
-                                            chat_id=account.telegram_chat_id,
+                                    if storage:
+                                        email_id = storage.upsert_email(
+                                            account_email=account.login,
+                                            uid=uid,
+                                            message_id=message_id,
+                                            from_email=from_email or None,
+                                            from_name=from_name or None,
+                                            subject=inbound.subject,
+                                            received_at=received_at or None,
+                                            attachments_count=attachments_count,
                                         )
-                                        ok = send_telegram(payload)
-                                        status = "[OK] sent" if ok else "[FAIL] failed"
-                                        print(f"      │  Telegram: {status}")
-                                        logger.info("UID %s: Telegram %s", uid, "OK" if ok else "FAIL")
+                                        ctx = PipelineContext(
+                                            email_id=email_id,
+                                            account_email=account.login,
+                                            uid=uid,
+                                        )
+                                        PIPELINE_CACHE[email_id] = ctx
+                                        remember_raw_email(email_id, raw)
+                                        store_inbound(email_id, inbound)
+                                        storage.enqueue_stage(email_id, "PARSE")
+                                        print(f"      │  Enqueued PARSE for email_id={email_id}")
                                     else:
-                                        print(f"      │  Result: empty")
+                                        final_text = processor.process(login, inbound)
+                                        if final_text and final_text.strip():
+                                            payload = _build_system_payload(
+                                                text=final_text.strip(),
+                                                bot_token=config.keys.telegram_bot_token,
+                                                chat_id=account.telegram_chat_id,
+                                            )
+                                            ok = send_telegram(payload)
+                                            status = "[OK] sent" if ok else "[FAIL] failed"
+                                            print(f"      │  Telegram: {status}")
+                                            logger.info(
+                                                "UID %s: Telegram %s",
+                                                uid,
+                                                "OK" if ok else "FAIL",
+                                            )
+                                        else:
+                                            print("      │  Result: empty")
 
-                            except Exception as e:
-                                print(f"      └─ [ERROR] {e}")
-                                logger.exception("Processing error for UID %s", uid)
+                                except Exception as e:
+                                    print(f"      └─ [ERROR] {e}")
+                                    logger.exception("Processing error for UID %s", uid)
 
-                        state.save()
+                            state.save()
 
-                    except Exception as e:
-                        print(f"   └─ [IMAP ERROR] {e}")
-                        logger.exception("IMAP error for %s", login)
+                        except Exception as e:
+                            print(f"   └─ [IMAP ERROR] {e}")
+                            logger.exception("IMAP error for %s", login)
 
-                if storage:
-                    try:
-                        _process_queue(storage, config, processor)
-                    except Exception:
-                        logger.exception("Queue dispatcher failure")
-                        for ctx in list(PIPELINE_CACHE.values()):
-                            _fail_open_process(config, processor, ctx)
+                    if storage:
+                        try:
+                            _process_queue(storage, config, processor)
+                        except Exception:
+                            logger.exception("Queue dispatcher failure")
+                            for ctx in list(PIPELINE_CACHE.values()):
+                                _fail_open_process(config, processor, ctx)
+                except Exception:
+                    logger.exception("Cycle %d failed", cycle)
 
-                state.save()
+                try:
+                    state.save()
+                except Exception:
+                    logger.exception("State save failed after cycle %d", cycle)
+
                 delay = max(120, config.general.check_interval)
                 print(f"\n[WAIT] Sleeping {delay} seconds...")
-                time.sleep(delay)
+                try:
+                    time.sleep(delay)
+                except KeyboardInterrupt:
+                    print("\n\n[STOP] Stopped by user")
+                    logger.info("Stopped by user")
+                    break
+                except Exception:
+                    logger.exception("Sleep failed after cycle %d", cycle)
 
+                if max_cycles is not None and cycle >= max_cycles:
+                    break
         except KeyboardInterrupt:
             print("\n\n[STOP] Stopped by user")
             logger.info("Stopped by user")
-        except Exception as e:
-            print(f"\n\n[CRITICAL] {e}")
-            logger.exception("Fatal error")
-            time.sleep(10)
     finally:
         if storage:
             storage.close()
