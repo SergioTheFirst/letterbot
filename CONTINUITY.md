@@ -1,26 +1,27 @@
 Goal (incl. success criteria):
-- Ensure every processed email results in a valid, meaningful, delivered Telegram message with fallback, transactional delivery semantics, validation, and observability. Success: tests cover fallback, validation, retries, and TG stage is never done on failure.
+- Add a deterministic Message Insight Arbiter between LLM and Telegram send that replaces vague summaries with clear rule-based fallbacks, without changing Telegram payload schema or pipeline order. Success: new arbiter behavior is covered for attachments-only, commitments present, and extraction failure cases; TG payload stability tests still pass; system continues if arbiter fails.
 
 Constraints/Assumptions:
 - Follow repo AGENTS instructions; update this ledger each turn.
-- Do not change pipeline order, payload schema (beyond content), or IMAP/LLM logic.
+- Do not change Telegram payload structure, pipeline order, queue, IMAP, or LLM logic.
+- Arbiter is pure rule-based, idempotent, side-effect free; log decisions with [INSIGHT-ARBITER].
 - Commit changes and create PR after.
 
 Key decisions:
-- Enforce summary quality with minimum length/word checks plus placeholder detection before allowing LLM payloads.
-- Validate Telegram markup after sanitization and fall back on invalid payloads.
+- Insert a deterministic arbiter step after LLM summary and before Telegram send; if arbiter fails, fall back to existing behavior.
+- Define low-signal detection using rule-based heuristics over LLM summary and extracted metadata.
 
 State:
-- Implementing payload contract, fallback generator, and TG delivery retries.
+- Implemented Message Insight Arbiter and tests.
 
 Done:
-- Added payload contract checks, deterministic fallback, and transactional TG send handling.
-- Added observability events and metrics for payload validation and delivery.
-- Added/updated unit tests for fallback, validation, and TG delivery retries.
-- Tests: pytest mailbot_v26/tests/test_telegram_sender.py; pytest mailbot_v26/tests/test_telegram_payload_validation.py; pytest mailbot_v26/tests/test_telegram_payload_pipeline.py; pytest mailbot_v26/tests/test_telegram_delivery_pipeline.py.
+- Added deterministic Message Insight Arbiter with low-signal detection and fallbacks.
+- Wired arbiter into pipeline before Telegram payload build with safe failure handling.
+- Added unit tests for arbiter (attachments-only, commitments, extraction failure).
+- Tests: pytest mailbot_v26/tests/test_insight_arbiter.py; pytest mailbot_v26/tests/test_observability_logging.py::test_telegram_payload_stability.
 
 Now:
-- Finalize updates, review diffs, and prepare commit/PR.
+- Review changes, commit, and prepare PR.
 
 Next:
 - None.
@@ -29,14 +30,8 @@ Open questions (UNCONFIRMED if needed):
 - None.
 
 Working set (files/ids/commands):
+- mailbot_v26/pipeline/insight_arbiter.py
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/pipeline/stage_telegram.py
-- mailbot_v26/worker/telegram_sender.py
-- mailbot_v26/bot_core/pipeline.py
-- mailbot_v26/start.py
-- mailbot_v26/observability/metrics.py
-- mailbot_v26/tests/test_telegram_delivery_pipeline.py
-- pytest mailbot_v26/tests/test_telegram_sender.py
-- pytest mailbot_v26/tests/test_telegram_payload_validation.py
-- pytest mailbot_v26/tests/test_telegram_payload_pipeline.py
-- pytest mailbot_v26/tests/test_telegram_delivery_pipeline.py
+- mailbot_v26/tests/test_insight_arbiter.py
+- pytest mailbot_v26/tests/test_insight_arbiter.py
+- pytest mailbot_v26/tests/test_observability_logging.py::test_telegram_payload_stability

@@ -51,6 +51,7 @@ from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPrio
 from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
 from mailbot_v26.text.clean_email import clean_email_body
+from .insight_arbiter import InsightArbiterInput, apply_insight_arbiter
 from .stage_llm import run_llm_stage
 from .stage_telegram import enqueue_tg, send_preview_to_telegram, send_system_notice
 from .telegram_payload import TelegramPayload
@@ -1948,6 +1949,25 @@ def process_message(
     # ---------- Stage Telegram ----------
     attachment_details = _build_attachment_details(attachments)
     attachment_summary = _build_attachment_summary(attachment_details)
+    extracted_text_len = len(body_text or "")
+    try:
+        arbiter_result = apply_insight_arbiter(
+            InsightArbiterInput(
+                llm_summary=body_summary,
+                extracted_text_len=extracted_text_len,
+                attachment_details=attachment_details,
+                commitments=commitments,
+                email_id=message_id,
+            )
+        )
+    except Exception as exc:  # pragma: no cover - safety net
+        logger.error(
+            "[INSIGHT-ARBITER] failed",
+            email_id=message_id,
+            error=str(exc),
+        )
+    else:
+        body_summary = arbiter_result.summary
     build_context = TelegramBuildContext(
         email_id=message_id,
         received_at=received_at,
@@ -1960,7 +1980,7 @@ def process_message(
         attachment_summary=attachment_summary,
         attachment_details=attachment_details,
         attachments_count=len(attachments),
-        extracted_text_len=len(body_text or ""),
+        extracted_text_len=extracted_text_len,
         llm_failed=bool(_read_llm_field(llm_result, "failed", False))
         or bool(_read_llm_field(llm_result, "error", False)),
         signal_invalid=not signal_quality.is_usable,
