@@ -1,27 +1,27 @@
 Goal (incl. success criteria):
-- Add a deterministic Message Insight Arbiter between LLM and Telegram send that replaces vague summaries with clear rule-based fallbacks, without changing Telegram payload schema or pipeline order. Success: new arbiter behavior is covered for attachments-only, commitments present, and extraction failure cases; TG payload stability tests still pass; system continues if arbiter fails.
+- Add deterministic Attention Gate immediately before Telegram send to defer non-urgent emails to Digest, without changing pipeline order or Telegram payload schema. Success: gate logs decisions, defers attachments-only informational emails with persistence, bypasses high priority or commitments, defaults to current behavior on gate failure, and existing Telegram payload stability tests still pass.
 
 Constraints/Assumptions:
 - Follow repo AGENTS instructions; update this ledger each turn.
 - Do not change Telegram payload structure, pipeline order, queue, IMAP, or LLM logic.
-- Arbiter is pure rule-based, idempotent, side-effect free; log decisions with [INSIGHT-ARBITER].
+- Attention Gate is pure rule-based; log decisions with [ATTENTION-GATE].
+- System remains operational if gate errors (fallback to current behavior).
 - Commit changes and create PR after.
 
 Key decisions:
-- Insert a deterministic arbiter step after LLM summary and before Telegram send; if arbiter fails, fall back to existing behavior.
-- Define low-signal detection using rule-based heuristics over LLM summary and extracted metadata.
+- Insert deterministic gate immediately before Telegram send; on error, fall back to send.
+- Gate decisions set deferred_for_digest=true and persist for later digest when gated.
 
 State:
-- Implemented Message Insight Arbiter and tests.
+- Attention Gate implemented with persistence flag and tests added.
 
 Done:
-- Added deterministic Message Insight Arbiter with low-signal detection and fallbacks.
-- Wired arbiter into pipeline before Telegram payload build with safe failure handling.
-- Added unit tests for arbiter (attachments-only, commitments, extraction failure).
-- Tests: pytest mailbot_v26/tests/test_insight_arbiter.py; pytest mailbot_v26/tests/test_observability_logging.py::test_telegram_payload_stability.
+- Added deterministic Attention Gate before Telegram send with safe fallback.
+- Persisted deferred_for_digest flag in CRM storage with migrations.
+- Added tests for gate logic, persistence, and payload stability.
 
 Now:
-- Review changes, commit, and prepare PR.
+- Commit changes and prepare PR.
 
 Next:
 - None.
@@ -30,8 +30,12 @@ Open questions (UNCONFIRMED if needed):
 - None.
 
 Working set (files/ids/commands):
-- mailbot_v26/pipeline/insight_arbiter.py
+- mailbot_v26/pipeline/attention_gate.py
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/tests/test_insight_arbiter.py
-- pytest mailbot_v26/tests/test_insight_arbiter.py
+- mailbot_v26/storage/knowledge_db.py
+- mailbot_v26/storage/schema.sql
+- mailbot_v26/tests/test_attention_gate.py
+- mailbot_v26/tests/test_attention_gate_persistence.py
+- pytest mailbot_v26/tests/test_attention_gate.py
+- pytest mailbot_v26/tests/test_attention_gate_persistence.py
 - pytest mailbot_v26/tests/test_observability_logging.py::test_telegram_payload_stability

@@ -51,6 +51,11 @@ from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPrio
 from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
 from mailbot_v26.text.clean_email import clean_email_body
+from .attention_gate import (
+    AttentionGateInput,
+    apply_attention_gate,
+    max_insight_severity,
+)
 from .insight_arbiter import InsightArbiterInput, apply_insight_arbiter
 from .stage_llm import run_llm_stage
 from .stage_telegram import enqueue_tg, send_preview_to_telegram, send_system_notice
@@ -2002,68 +2007,137 @@ def process_message(
         extracted_text_len=build_context.extracted_text_len,
         attachments=build_context.attachments_count,
     )
+    deadlines_count = sum(
+        1 for commitment in commitments if commitment.deadline_iso
+    )
+    relationship_health_delta: float | None = None
+    if health_snapshot is not None:
+        value = health_snapshot.components_breakdown.get("trend_delta")
+        try:
+            relationship_health_delta = float(value)
+        except (TypeError, ValueError):
+            relationship_health_delta = None
+    deferred_for_digest = False
+    attention_reason = "default_send"
     try:
-        result = enqueue_tg(email_id=message_id, payload=payload)
-        if result is None:
-            logger.warning("telegram_delivery_unchecked", email_id=message_id)
-            result_success = True
-            result_error = None
-        else:
-            result_success = result.success
-            result_error = result.error
-        if not result_success:
-            raise RuntimeError(result_error or "Telegram delivery failed")
-        change = system_health.update_component("Telegram", True)
-        _notify_system_mode_change(
-            change=change,
-            chat_id=telegram_chat_id,
-            account_email=account_email,
-        )
-        if render_mode != TelegramRenderMode.FULL or payload_invalid:
-            logger.warning(
-                "telegram_fallback_sent",
+        gate_result = apply_attention_gate(
+            AttentionGateInput(
+                priority=priority,
+                commitments=commitments,
+                deadlines_count=deadlines_count,
+                insight_severity=max_insight_severity(aggregated_insights),
+                attachments_only=extracted_text_len <= 0 and len(attachments) > 0,
+                relationship_health_delta=relationship_health_delta,
                 email_id=message_id,
-                chat_id=telegram_chat_id,
-                success=True,
             )
-        else:
-            logger.info(
-                "telegram_sent",
-                email_id=message_id,
-                chat_id=telegram_chat_id,
-                success=True,
-            )
-    except Exception as exc:
-        change = system_health.update_component(
-            "Telegram",
-            False,
-            reason=str(exc) or "Telegram send failed",
         )
-        _notify_system_mode_change(
-            change=change,
-            chat_id=telegram_chat_id,
-            account_email=account_email,
-        )
-        event_emitter.emit(
-            type="telegram_delivery_failed",
-            timestamp=received_at,
-            email_id=message_id,
-            payload={"error": str(exc)},
-        )
+        deferred_for_digest = gate_result.deferred
+        attention_reason = gate_result.reason
+    except Exception as exc:  # pragma: no cover - defensive fallback
         logger.error(
-            "processing_error",
-            stage="telegram",
+            "[ATTENTION-GATE] failed",
             email_id=message_id,
             error=str(exc),
         )
-        raise
-    else:
-        event_emitter.emit(
-            type="telegram_delivery_succeeded",
-            timestamp=received_at,
+        deferred_for_digest = False
+        attention_reason = "gate_failed"
+
+    if deferred_for_digest:
+        if email_row_id is None:
+            logger.error(
+                "[ATTENTION-GATE] persistence_failed",
+                email_id=message_id,
+                reason="missing_email_row_id",
+                attention_reason=attention_reason,
+            )
+        else:
+            persisted = knowledge_db.mark_deferred_for_digest(
+                email_row_id=email_row_id,
+                deferred=True,
+            )
+            if not persisted:
+                logger.error(
+                    "[ATTENTION-GATE] persistence_failed",
+                    email_id=message_id,
+                    reason="crm_update_failed",
+                    attention_reason=attention_reason,
+                )
+            else:
+                logger.info(
+                    "[ATTENTION-GATE] persisted",
+                    email_id=message_id,
+                    attention_reason=attention_reason,
+                )
+
+    if deferred_for_digest:
+        logger.info(
+            "telegram_deferred_for_digest",
             email_id=message_id,
-            payload={"render_mode": render_mode.name},
+            reason=attention_reason,
         )
+    else:
+        try:
+            result = enqueue_tg(email_id=message_id, payload=payload)
+            if result is None:
+                logger.warning("telegram_delivery_unchecked", email_id=message_id)
+                result_success = True
+                result_error = None
+            else:
+                result_success = result.success
+                result_error = result.error
+            if not result_success:
+                raise RuntimeError(result_error or "Telegram delivery failed")
+            change = system_health.update_component("Telegram", True)
+            _notify_system_mode_change(
+                change=change,
+                chat_id=telegram_chat_id,
+                account_email=account_email,
+            )
+            if render_mode != TelegramRenderMode.FULL or payload_invalid:
+                logger.warning(
+                    "telegram_fallback_sent",
+                    email_id=message_id,
+                    chat_id=telegram_chat_id,
+                    success=True,
+                )
+            else:
+                logger.info(
+                    "telegram_sent",
+                    email_id=message_id,
+                    chat_id=telegram_chat_id,
+                    success=True,
+                )
+        except Exception as exc:
+            change = system_health.update_component(
+                "Telegram",
+                False,
+                reason=str(exc) or "Telegram send failed",
+            )
+            _notify_system_mode_change(
+                change=change,
+                chat_id=telegram_chat_id,
+                account_email=account_email,
+            )
+            event_emitter.emit(
+                type="telegram_delivery_failed",
+                timestamp=received_at,
+                email_id=message_id,
+                payload={"error": str(exc)},
+            )
+            logger.error(
+                "processing_error",
+                stage="telegram",
+                email_id=message_id,
+                error=str(exc),
+            )
+            raise
+        else:
+            event_emitter.emit(
+                type="telegram_delivery_succeeded",
+                timestamp=received_at,
+                email_id=message_id,
+                payload={"render_mode": render_mode.name},
+            )
 
     if feature_flags.ENABLE_PREVIEW_ACTIONS:
         if system_health.mode == OperationalMode.DEGRADED_NO_LLM:
