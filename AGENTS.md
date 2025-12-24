@@ -1,31 +1,45 @@
-## Continuity Ledger (compaction-safe)
-Maintain a single Continuity Ledger for this workspace in `
-http://
-CONTINUITY.md (https://t.co/Navn22TRF7)`. The ledger is the canonical session briefing designed to survive context compaction; do not rely on earlier chat text unless it’s reflected in the ledger.
+# Codex Workspace Operating Rules (binding)
 
-### How it works
-- At the start of every assistant turn: read `
-http://
-CONTINUITY.md (https://t.co/Navn22TRF7)`, update it to reflect the latest goal/constraints/decisions/state, then proceed with the work.
-- Update `
-http://
-CONTINUITY.md (https://t.co/Navn22TRF7)` again whenever any of these change: goal, constraints/assumptions, key decisions, progress state (Done/Now/Next), or important tool outcomes.
-- Keep it short and stable: facts only, no transcripts. Prefer bullets. Mark uncertainty as `UNCONFIRMED` (never guess).
-- If you notice missing recall or a compaction/summary event: refresh/rebuild the ledger from visible context, mark gaps `UNCONFIRMED`, ask up to 1–3 targeted questions, then continue.
+These rules are mandatory unless the user explicitly overrides them.
 
-### `functions.update_plan` vs the Ledger
-- `functions.update_plan` is for short-term execution scaffolding while you work (a small 3–7 step plan with pending/in_progress/completed).
-- `
-http://
-CONTINUITY.md (https://t.co/Navn22TRF7)` is for long-running continuity across compaction (the “what/why/current state”), not a step-by-step task list.
-- Keep them consistent: when the plan or state changes, update the ledger at the intent/progress level (not every micro-step).
+## 0) Canonical source of truth
+- The canonical, compaction-safe workspace ledger is: `constitution.md` (repo root unless stated otherwise).
+- Treat `constitution.md` as the only trusted memory across long sessions.
+- If something is not written in `constitution.md`, treat it as UNKNOWN and ask (at most) 1–3 targeted questions.
 
-### In replies
-- Begin with a brief “Ledger Snapshot” (Goal + Now/Next + Open Questions). Print the full ledger only when it materially changes or when the user asks.
+## 1) Mandatory start-of-turn routine (ALWAYS)
+Before doing any work (planning, coding, running commands):
+1) Open and read `constitution.md`.
+2) Update it if needed (see Section 2).
+3) Only then proceed.
 
-### `
-http://
-CONTINUITY.md (https://t.co/Navn22TRF7)` format (keep headings)
+If `constitution.md` does not exist:
+- Create it in the repository root with the template in Section 4, then continue.
+
+## 2) When to update `constitution.md` (ALWAYS)
+Update `constitution.md` immediately when any of the following changes:
+- Goal or success criteria
+- Constraints / assumptions
+- Key decisions / tradeoffs
+- Current progress state
+- Important tool outcomes (tests, builds, migrations, deployments, benchmarks)
+
+Update discipline:
+- Keep it SHORT, factual, stable.
+- Use bullets.
+- Mark unknowns as `UNCONFIRMED` (do not guess).
+- Do NOT paste chat transcripts.
+- Do NOT include secrets or tokens.
+
+## 3) Execution behavior
+- Prefer concrete, verifiable actions over speculation.
+- When editing code: keep changes minimal, aligned with repo conventions.
+- Run the most relevant checks/tests after changes when feasible.
+- If a step is risky or irreversible, ask for approval first.
+
+## 4) Required `constitution.md` format (keep headings)
+Use exactly these headings:
+
 - Goal (incl. success criteria):
 - Constraints/Assumptions:
 - Key decisions:
@@ -35,3 +49,10 @@ CONTINUITY.md (https://t.co/Navn22TRF7)` format (keep headings)
 - Next:
 - Open questions (UNCONFIRMED if needed):
 - Working set (files/ids/commands):
+
+## 5) Communication
+- In chat responses: be brief and action-oriented.
+- Do NOT add ritual preambles.
+- Only include a “Constitution Snapshot” (Goal + Now/Next + Open Questions) when:
+  a) the user asks, or
+  b) you made a material update to `constitution.md`.
