@@ -222,7 +222,7 @@ def dispatch_launch_report(bot_token: str, chat_id: str, report: str) -> bool:
         metadata={"bot_token": bot_token, "chat_id": chat_id},
     )
     try:
-        return send_telegram(payload)
+        return send_telegram(payload).success
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("launch_report_send_failed", extra={"error": str(exc)}, exc_info=True)
         return False

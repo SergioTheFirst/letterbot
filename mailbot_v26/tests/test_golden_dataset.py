@@ -86,7 +86,7 @@ def test_golden_dataset_accuracy(monkeypatch, tmp_path) -> None:
             return SimpleNamespace(
                 priority=expected.priority,
                 action_line=expected.action_line,
-                body_summary="Summary",
+                body_summary="Краткое описание письма.",
                 attachment_summaries=[],
                 llm_provider="gigachat",
                 llm_model="golden",

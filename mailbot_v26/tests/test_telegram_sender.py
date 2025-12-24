@@ -24,7 +24,8 @@ def _payload(text: str, *, token: str = "token", chat_id: str = "123") -> Telegr
 
 def test_send_telegram_empty_text_logs(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.ERROR):
-        assert telegram_sender.send_telegram(_payload("", token="token", chat_id="chat")) is False
+        result = telegram_sender.send_telegram(_payload("", token="token", chat_id="chat"))
+        assert result.success is False
     assert "empty" in caplog.text.lower()
 
 
@@ -38,7 +39,8 @@ def test_send_telegram_success(monkeypatch: pytest.MonkeyPatch) -> None:
         return DummyResponse(status_code=200, text="ok")
 
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
-    assert telegram_sender.send_telegram(_payload("hello")) is True
+    result = telegram_sender.send_telegram(_payload("hello"))
+    assert result.success is True
     assert called["json"]["text"] == "hello"
     assert called["json"]["chat_id"] == "123"
     assert called["json"]["parse_mode"] == "HTML"
@@ -52,7 +54,8 @@ def test_send_telegram_non_200_logs(monkeypatch: pytest.MonkeyPatch, caplog: pyt
         SimpleNamespace(post=lambda url, json, timeout: DummyResponse(status_code=401, text="bad")),
     )
     with caplog.at_level(logging.ERROR):
-        assert telegram_sender.send_telegram(_payload("hello")) is False
+        result = telegram_sender.send_telegram(_payload("hello"))
+        assert result.success is False
     assert "401" in caplog.text
     assert "bad" in caplog.text
 
@@ -63,14 +66,16 @@ def test_send_telegram_exception(monkeypatch: pytest.MonkeyPatch, caplog: pytest
 
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=raising_post))
     with caplog.at_level(logging.ERROR):
-        assert telegram_sender.send_telegram(_payload("hello")) is False
+        result = telegram_sender.send_telegram(_payload("hello"))
+        assert result.success is False
     assert "network error" in caplog.text
 
 
 def test_send_telegram_requests_missing(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     monkeypatch.setattr(telegram_sender, "requests", None)
     with caplog.at_level(logging.ERROR):
-        assert telegram_sender.send_telegram(_payload("hello")) is False
+        result = telegram_sender.send_telegram(_payload("hello"))
+        assert result.success is False
     assert "requests module not available" in caplog.text
 
 
@@ -83,7 +88,8 @@ def test_send_telegram_does_not_escape_html(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
     text = "HQ\\MedvevSS <b>hi</b> & \"quote\" 'single'"
-    assert telegram_sender.send_telegram(_payload(text)) is True
+    result = telegram_sender.send_telegram(_payload(text))
+    assert result.success is True
     assert captured["text"] == text
 
 
@@ -96,5 +102,6 @@ def test_worker_does_not_modify_payload(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
     text = "⏰ Сделать: <b>NO CHANGE</b> & keep \\ slashes"
-    assert telegram_sender.send_telegram(_payload(text)) is True
+    result = telegram_sender.send_telegram(_payload(text))
+    assert result.success is True
     assert captured["text"] == text

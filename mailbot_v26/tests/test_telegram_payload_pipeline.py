@@ -5,13 +5,14 @@ from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
+from mailbot_v26.worker.telegram_sender import TelegramSendResult
 
 
 def _setup_processor(monkeypatch) -> None:
     llm_result = SimpleNamespace(
         priority="🔵",
         action_line="Проверить письмо",
-        body_summary="",
+        body_summary="Краткое описание письма.",
         attachment_summaries=[],
         llm_provider="gigachat",
     )
@@ -41,6 +42,17 @@ def _setup_processor(monkeypatch) -> None:
     monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **kwargs: None)
     monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
     monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor,
+        "evaluate_signal_quality",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            entropy=1.0,
+            printable_ratio=1.0,
+            quality_score=1.0,
+            is_usable=True,
+            reason="ok",
+        ),
+    )
 
 
 def _capture_payload(monkeypatch) -> dict[str, TelegramPayload]:
@@ -48,6 +60,7 @@ def _capture_payload(monkeypatch) -> dict[str, TelegramPayload]:
 
     def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
         captured["payload"] = payload
+        return TelegramSendResult(success=True)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     return captured
@@ -125,3 +138,70 @@ def test_no_minimal_template_when_attachments_exist(monkeypatch) -> None:
     html_text = captured["payload"].html_text
     assert "ℹ️ Детали будут доступны позже." not in html_text
     assert "Вложения: 1" in html_text
+
+
+def test_empty_body_with_attachments_uses_fallback(monkeypatch) -> None:
+    _setup_processor(monkeypatch)
+    captured = _capture_payload(monkeypatch)
+    attachments = [
+        {
+            "filename": "doc1.docx",
+            "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "text": "",
+        },
+        {
+            "filename": "report.pdf",
+            "content_type": "application/pdf",
+            "text": "",
+        },
+        {
+            "filename": "table.xlsx",
+            "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "text": "",
+        },
+    ]
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=4,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 4, 12, 0),
+        body_text="",
+        attachments=attachments,
+        telegram_chat_id="chat",
+    )
+
+    html_text = captured["payload"].html_text
+    assert html_text.startswith("Получено письмо с 3 вложениями.")
+    assert "Типы файлов" in html_text
+    assert "DOC" in html_text
+    assert "PDF" in html_text
+    assert "XLS" in html_text
+
+
+def test_empty_summary_uses_fallback(monkeypatch) -> None:
+    _setup_processor(monkeypatch)
+    llm_result = SimpleNamespace(
+        priority="🔵",
+        action_line="Проверить письмо",
+        body_summary="",
+        attachment_summaries=[],
+        llm_provider="gigachat",
+    )
+    monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
+    captured = _capture_payload(monkeypatch)
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=5,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 5, 12, 0),
+        body_text="Body text that should not disappear.",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    html_text = captured["payload"].html_text
+    assert html_text.startswith("Получено письмо")

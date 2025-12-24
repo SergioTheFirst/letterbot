@@ -378,16 +378,20 @@ def stage_tg(ctx: PipelineContext) -> None:
         telegram_text = ctx.llm_result.get("text") or ctx.llm_result.get("telegram_text") or ""
     ctx.telegram_text = telegram_text
 
-    if telegram_text and telegram_text.strip():
-        payload = TelegramPayload(
-            html_text=telegram_safe(telegram_text.strip()),
-            priority="🔵",
-            metadata={
-                "bot_token": _PIPELINE_CONFIG.keys.telegram_bot_token,
-                "chat_id": account.telegram_chat_id,
-            },
-        )
-        send_telegram(payload)
+    if not telegram_text or not telegram_text.strip():
+        raise RuntimeError("telegram payload empty")
+
+    payload = TelegramPayload(
+        html_text=telegram_safe(telegram_text.strip()),
+        priority="🔵",
+        metadata={
+            "bot_token": _PIPELINE_CONFIG.keys.telegram_bot_token,
+            "chat_id": account.telegram_chat_id,
+        },
+    )
+    result = send_telegram(payload)
+    if not result.success:
+        raise RuntimeError(result.error or "telegram delivery failed")
     logger.info("[PIPELINE] email_id=%s stage=TG done", ctx.email_id)
 
     # cleanup to avoid leaks

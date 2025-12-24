@@ -7,6 +7,7 @@ from mailbot_v26.insights.aggregator import Insight
 from mailbot_v26.pipeline import processor
 from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.storage.context_layer import EntityResolution
+from mailbot_v26.worker.telegram_sender import TelegramSendResult
 
 
 def _common_flags() -> SimpleNamespace:
@@ -54,6 +55,7 @@ def test_insight_aggregator_does_not_change_telegram_payload(monkeypatch) -> Non
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         sent.append(payload)
+        return TelegramSendResult(success=True)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     monkeypatch.setattr(
