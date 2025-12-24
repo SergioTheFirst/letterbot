@@ -56,6 +56,7 @@ from .attention_gate import (
     apply_attention_gate,
     max_insight_severity,
 )
+from .daily_digest import maybe_send_daily_digest
 from .insight_arbiter import InsightArbiterInput, apply_insight_arbiter
 from .stage_llm import run_llm_stage
 from .stage_telegram import enqueue_tg, send_preview_to_telegram, send_system_notice
@@ -2137,6 +2138,23 @@ def process_message(
                 timestamp=received_at,
                 email_id=message_id,
                 payload={"render_mode": render_mode.name},
+            )
+
+    if getattr(feature_flags, "ENABLE_DAILY_DIGEST", False):
+        try:
+            maybe_send_daily_digest(
+                knowledge_db=knowledge_db,
+                analytics=analytics,
+                account_email=account_email,
+                telegram_chat_id=telegram_chat_id,
+                email_id=message_id,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "[DAILY-DIGEST] failed",
+                account_email=account_email,
+                email_id=message_id,
+                error=str(exc),
             )
 
     if feature_flags.ENABLE_PREVIEW_ACTIONS:

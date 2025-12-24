@@ -5,6 +5,7 @@ import json
 import logging
 import sqlite3
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -266,6 +267,50 @@ class KnowledgeDB:
             return True
         except Exception as exc:
             logger.error("KnowledgeDB commitments save failed: %s", exc)
+            return False
+
+    def get_last_digest_sent_at(self, *, account_email: str) -> datetime | None:
+        if not account_email:
+            return None
+        try:
+            with sqlite3.connect(self.path) as conn:
+                row = conn.execute(
+                    """
+                    SELECT last_digest_sent_at
+                    FROM digest_state
+                    WHERE account_email = ?
+                    """,
+                    (account_email,),
+                ).fetchone()
+            if not row or not row[0]:
+                return None
+            return parse_sqlite_datetime(str(row[0]))
+        except Exception as exc:
+            logger.error("KnowledgeDB digest state read failed: %s", exc)
+            return None
+
+    def set_last_digest_sent_at(
+        self,
+        *,
+        account_email: str,
+        sent_at: datetime,
+    ) -> bool:
+        if not account_email:
+            return False
+        try:
+            with sqlite3.connect(self.path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO digest_state (account_email, last_digest_sent_at)
+                    VALUES (?, ?)
+                    ON CONFLICT(account_email) DO UPDATE SET last_digest_sent_at = excluded.last_digest_sent_at
+                    """,
+                    (account_email, sent_at.isoformat()),
+                )
+                conn.commit()
+            return True
+        except Exception as exc:
+            logger.error("KnowledgeDB digest state write failed: %s", exc)
             return False
 
     def fetch_pending_commitments_by_sender(

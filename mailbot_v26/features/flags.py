@@ -31,6 +31,7 @@ class FeatureFlags:
         self.ENABLE_CRM_DIAGNOSTICS = False
         self.ENABLE_PREVIEW_ACTIONS = False
         self.ENABLE_COMMITMENT_TRACKER = False
+        self.ENABLE_DAILY_DIGEST = False
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -50,6 +51,7 @@ class FeatureFlags:
         self.ENABLE_CRM_DIAGNOSTICS = self._get_flag(parser, "enable_crm_diagnostics")
         self.ENABLE_PREVIEW_ACTIONS = self._get_flag(parser, "enable_preview_actions")
         self.ENABLE_COMMITMENT_TRACKER = self._get_flag(parser, "enable_commitment_tracker")
+        self.ENABLE_DAILY_DIGEST = self._get_flag(parser, "enable_daily_digest")
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6
         )
