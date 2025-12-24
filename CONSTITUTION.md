@@ -1,20 +1,336 @@
-- Goal (incl. success criteria):
-  - Identify why email checking stops after the first mailbox and fix the mail checking logic so it continues through all mailboxes.
-- Constraints/Assumptions:
-  - Keep changes minimal and aligned with repository conventions.
-- Key decisions:
-  - Add IMAP socket timeout and ensure connections are closed after each fetch.
-- State:
-  - Fix applied to IMAP fetch behavior.
-- Done:
-  - Read workspace operating rules and current constitution.
-  - Added IMAP timeout and logout handling to prevent blocking after the first mailbox.
-- Now:
-  - Run relevant checks if feasible.
-- Next:
-  - Commit and prepare PR.
-- Open questions (UNCONFIRMED if needed):
-  - Which executable or entry point the user runs (UNCONFIRMED).
-- Working set (files/ids/commands):
-  - CONSTITUTION.md
-  - mailbot_v26/imap_client.py
+MailBot Premium — Project Constitution
+
+Version: 2025-12
+Status: Active, binding
+Scope: Architecture, data, AI usage, scaling strategy
+
+I. Миссия проекта
+
+MailBot Premium — это не почтовый клиент и не автоответчик.
+
+MailBot — это локальный когнитивный слой поверх почты,
+который превращает письма в историю отношений, обязательств и доверия.
+
+Система должна:
+
+снижать когнитивную нагрузку пользователя,
+
+выявлять скрытые риски и паттерны,
+
+накапливать ценность со временем,
+
+работать надёжно даже при деградации внешних сервисов.
+
+II. Базовые ограничения (НЕ обсуждаются)
+
+Почти бесплатно
+
+Используются только:
+
+Cloudflare Workers AI
+
+GigaChat (Sber)
+
+Никаких платных SaaS, подписок, GPU-инфраструктуры.
+
+Локальное развёртывание — только если не нарушает простоту.
+
+Windows-first
+
+Система обязана работать на обычном Windows-ПК.
+
+Никаких Docker-only, Linux-only или Kubernetes-зависимостей.
+
+Offline-first мышление
+
+Внешние сервисы — усиление, не опора.
+
+При недоступности LLM система продолжает работать в ограниченном режиме.
+
+Данные принадлежат пользователю
+
+Локальная БД (SQLite).
+
+Прозрачный экспорт.
+
+Никакого vendor lock-in.
+
+III. Архитектурные принципы
+1. Context is King
+Мы храним не письма.
+Мы храним контекст отношений между людьми и событиями.
+
+
+Письмо = событие.
+
+Важно не «что написано», а:
+
+кем,
+
+когда,
+
+в каком контексте,
+
+как это соотносится с прошлым.
+
+Запрещено: плоское накопление фактов без связей.
+Обязательно: сущности, связи, временные окна.
+
+2. Memory Compounds
+Чем дольше работает система — тем она ценнее.
+
+
+История — стратегический актив.
+
+Конкуренты могут скопировать код, но не историю пользователя.
+
+Технически:
+
+Baselines (нормальное поведение).
+
+Deviation / anomaly detection.
+
+Скользящие временные окна (7 / 30 / 90 дней).
+
+3. Insight > Information
+Пользователь не должен анализировать.
+Он должен получать вывод.
+
+
+Пример:
+
+❌ «5 писем от клиента»
+
+✅ «Клиент стал отвечать в 4 раза медленнее — ранее это приводило к срыву сделки»
+
+Telegram — основной UX:
+
+коротко,
+
+по делу,
+
+с объяснением «почему».
+
+4. Events over Messages
+Message → Event → Pattern → Insight → Memory
+
+
+Письмо не конечный артефакт.
+
+Оно превращается в события:
+
+communication
+
+commitment
+
+fulfillment
+
+delay
+
+anomaly
+
+Event Store — фундамент будущей аналитики.
+
+5. AI Augmentation, not Replacement
+ИИ помогает думать.
+Он не принимает решения за человека.
+
+
+ИИ:
+
+предлагает,
+
+объясняет,
+
+подсвечивает риски.
+
+Человек:
+
+подтверждает,
+
+отклоняет,
+
+исправляет.
+
+Automation только после:
+
+достаточной истории,
+
+метрик,
+
+confidence-гейтов.
+
+IV. AI и LLM — строгие правила
+1. Разрешённые источники
+
+✅ Cloudflare Workers AI
+
+✅ GigaChat (Sber)
+
+Другие LLM:
+
+❌ запрещены без отдельного решения.
+
+2. Последовательность и безопасность
+
+GigaChat:
+
+строго 1 запрос за раз,
+
+глобальный lock,
+
+healthcheck при старте.
+
+Fallback обязателен:
+
+если primary недоступен → Cloudflare.
+
+3. LLM — stateless
+
+LLM не хранит память.
+
+Вся память — в локальной БД.
+
+LLM получает только нужный контекст (truncated).
+
+V. Graceful Degradation — обязательна
+
+Система никогда не падает целиком.
+
+Режимы:
+
+FULL
+
+Всё доступно.
+
+DEGRADED_NO_LLM
+
+Regex / heuristics / baselines.
+
+Без генерации, но с логикой.
+
+EMERGENCY_READ_ONLY
+
+Чтение и уведомления.
+
+Запись минимальна.
+
+Любая деградация:
+
+логируется,
+
+объясняется пользователю,
+
+автоматически восстанавливается.
+
+VI. Observability — не опция
+Если мы не можем измерить — мы не имеем права автоматизировать.
+
+
+Обязательно:
+
+structured JSON logs,
+
+metrics snapshots (7/30 дней),
+
+decision trace (recent = полный),
+
+system health events.
+
+Никаких «чёрных ящиков».
+
+VII. Trust & Relationship Intelligence
+
+Цель проекта — не сортировка писем, а измерение доверия.
+
+Trust Score:
+
+выполнение обязательств,
+
+стабильность ответов,
+
+тренд поведения,
+
+внимание vs результат.
+
+Важно:
+
+недавнее важнее старого,
+
+возможна «реабилитация» контакта,
+
+никакого наказания навсегда.
+
+VIII. Privacy as Feature
+Приватность — не ограничение, а премиум-фича.
+
+
+Минимум данных уходит в LLM.
+
+Вложения не отправляются в ИИ.
+
+Всё хранится локально.
+
+Экспорт возможен всегда.
+
+IX. Simplicity beats Power
+Сложная логика — внутри.
+Простой UX — снаружи.
+
+
+Telegram как основной интерфейс.
+
+Progressive disclosure:
+
+сначала вывод,
+
+детали — по запросу.
+
+X. Development Rules
+
+Никаких “быстрых костылей”
+
+Если фича не укладывается в архитектуру — она не делается.
+
+Side-effects изолированы
+
+Логи, Telegram, БД не ломают pipeline.
+
+Каждое решение объяснимо
+
+Почему именно так — должно быть видно из кода и логов.
+
+XI. Roadmap Alignment
+
+v26–v27 — фундамент:
+
+observability
+
+events
+
+trust/health
+
+graceful degradation
+
+v28 — поведенческие паттерны.
+
+v29 — attention economics.
+
+v30 — predictive intelligence.
+
+Никакой «магии» без данных.
+
+XII. Финальный принцип
+
+MailBot — это система, которая со временем начинает понимать
+не письма, а людей и их надёжность.
+
+Если новая фича:
+
+не усиливает контекст,
+
+не накапливает память,
+
+не повышает доверие,
+
+→ она противоречит Конституции и не принимается.
