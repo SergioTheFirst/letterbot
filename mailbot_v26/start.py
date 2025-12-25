@@ -40,6 +40,8 @@ from mailbot_v26.imap_client import ResilientIMAP
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor, event_emitter
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.pipeline import processor as processor_module
+from mailbot_v26.pipeline.digest_scheduler import DigestStorage, run_digest_tick
+from mailbot_v26.observability import get_logger
 from mailbot_v26.state_manager import StateManager
 from mailbot_v26.storage.self_check import run_self_check
 from mailbot_v26.system.startup_health import (
@@ -74,6 +76,7 @@ def _configure_logging() -> None:
 
 _configure_logging()
 logger = logging.getLogger("mailbot")
+digest_logger = get_logger("mailbot")
 
 
 def _get_account_by_login(config: BotConfig, login: str) -> Optional["AccountConfig"]:
@@ -376,6 +379,11 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         state = StateManager(CURRENT_DIR / "state.json")
         processor = MessageProcessor(config=config, state=state)
         configure_pipeline(config, processor)
+        digest_storage = DigestStorage(
+            knowledge_db=processor_module.knowledge_db,
+            analytics=processor_module.analytics,
+            event_emitter=processor_module.event_emitter,
+        )
         print("[OK] Ready to work\n")
 
         cycle = 0
@@ -479,6 +487,14 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             logger.exception("Queue dispatcher failure")
                             for ctx in list(PIPELINE_CACHE.values()):
                                 _fail_open_process(config, processor, ctx)
+
+                    run_digest_tick(
+                        now=datetime.now(timezone.utc),
+                        config=config,
+                        storage=digest_storage,
+                        telegram_sender=send_telegram,
+                        logger=digest_logger,
+                    )
                 except Exception:
                     logger.exception("Cycle %d failed", cycle)
 
