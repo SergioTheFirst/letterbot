@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 from mailbot_v26.insights.aggregator import Insight
 from mailbot_v26.pipeline import processor
-from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.storage.context_layer import EntityResolution
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
@@ -53,7 +52,7 @@ def test_insight_aggregator_does_not_change_telegram_payload(monkeypatch) -> Non
 
     sent: list[object] = []
 
-    def _enqueue_tg(*, email_id: int, payload) -> None:
+    def _enqueue_tg(*, email_id: int, payload) -> DeliveryResult:
         sent.append(payload)
         return DeliveryResult(delivered=True, retryable=False)
 
@@ -69,6 +68,17 @@ def test_insight_aggregator_does_not_change_telegram_payload(monkeypatch) -> Non
     )
     monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
     monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor,
+        "evaluate_signal_quality",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            entropy=1.0,
+            printable_ratio=1.0,
+            quality_score=1.0,
+            is_usable=True,
+            reason="ok",
+        ),
+    )
     monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: 1))
     monkeypatch.setattr(
         processor,
@@ -128,16 +138,16 @@ def test_insight_aggregator_does_not_change_telegram_payload(monkeypatch) -> Non
         action_line="Проверить письмо",
         body_summary="Body summary",
         body_text="Text",
-        attachment_summary="",
+        attachments=[],
     )
-    if "Text" not in base_text:
-        base_text = f"{base_text}\n\n{processor._trim_telegram_body('Text')}"
-    telegram_text = telegram_safe(base_text)
+    telegram_text = base_text
 
     assert len(sent) == 1
     payload = sent[0]
     assert payload.priority == "🔵"
-    assert payload.html_text == telegram_text
+    assert payload.html_text.startswith(telegram_text)
+    assert "💡 Insights" in payload.html_text
+    assert "⚠️ Reliability Degradation" in payload.html_text
     assert payload.metadata["chat_id"] == "chat"
     assert payload.metadata["account_email"] == "account@example.com"
     assert payload.metadata["action_line"] == "Проверить письмо"

@@ -53,6 +53,11 @@ def _setup_processor(monkeypatch) -> None:
             reason="ok",
         ),
     )
+    monkeypatch.setattr(
+        processor,
+        "apply_attention_gate",
+        lambda *_args, **_kwargs: SimpleNamespace(deferred=False, reason="test"),
+    )
 
 
 def _capture_payload(monkeypatch) -> dict[str, TelegramPayload]:
@@ -89,28 +94,27 @@ def test_telegram_contains_attachment_summary(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert "Вложения: 1" in html_text
-    assert "DOC" in html_text
+    assert "Вложений: 1" in html_text
+    assert "[doc1.doc]" in html_text
 
 
-def test_extracted_text_visible_in_tg(monkeypatch) -> None:
+def test_action_rendered_in_tg(monkeypatch) -> None:
     _setup_processor(monkeypatch)
     captured = _capture_payload(monkeypatch)
-    body_text = "Важно: оплатить счет до пятницы."
-
     processor.process_message(
         account_email="account@example.com",
         message_id=2,
         from_email="sender@example.com",
         subject="Subject",
         received_at=datetime(2024, 1, 2, 12, 0),
-        body_text=body_text,
+        body_text="Важно: оплатить счет до пятницы.",
         attachments=[],
         telegram_chat_id="chat",
     )
 
     html_text = captured["payload"].html_text
-    assert body_text in html_text
+    assert html_text.startswith("🔵 от sender@example.com:")
+    assert "<b><i>Проверить письмо</i></b>" in html_text
 
 
 def test_no_minimal_template_when_attachments_exist(monkeypatch) -> None:
@@ -137,7 +141,7 @@ def test_no_minimal_template_when_attachments_exist(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert "ℹ️ Детали будут доступны позже." not in html_text
-    assert "Вложения: 1" in html_text
+    assert "Вложений: 1" in html_text
 
 
 def test_empty_body_with_attachments_uses_fallback(monkeypatch) -> None:
@@ -173,11 +177,11 @@ def test_empty_body_with_attachments_uses_fallback(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert html_text.startswith("Получено письмо с 3 вложениями.")
-    assert "Типы файлов" in html_text
-    assert "DOC" in html_text
-    assert "PDF" in html_text
-    assert "XLS" in html_text
+    assert html_text.startswith("🔵 от sender@example.com:")
+    assert "Вложений: 3" in html_text
+    assert "[doc1.docx]" in html_text
+    assert "[report.pdf]" in html_text
+    assert "[table.xlsx]" in html_text
 
 
 def test_empty_summary_uses_fallback(monkeypatch) -> None:
@@ -204,4 +208,4 @@ def test_empty_summary_uses_fallback(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert html_text.startswith("Получено письмо")
+    assert html_text.startswith("🔵 от sender@example.com:")
