@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS digest_state (
     last_digest_sent_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS weekly_digest_state (
+    account_email TEXT PRIMARY KEY,
+    last_week_key TEXT,
+    last_sent_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_emails_account
     ON emails(account_email);
 

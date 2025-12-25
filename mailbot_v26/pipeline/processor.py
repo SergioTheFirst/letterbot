@@ -57,6 +57,7 @@ from .attention_gate import (
     max_insight_severity,
 )
 from .daily_digest import maybe_send_daily_digest
+from .weekly_digest import maybe_send_weekly_digest
 from .insight_arbiter import InsightArbiterInput, apply_insight_arbiter
 from .stage_llm import run_llm_stage
 from .stage_telegram import enqueue_tg, send_preview_to_telegram, send_system_notice
@@ -2449,6 +2450,24 @@ def process_message(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error(
                 "[DAILY-DIGEST] failed",
+                account_email=account_email,
+                email_id=message_id,
+                error=str(exc),
+            )
+
+    if getattr(feature_flags, "ENABLE_WEEKLY_DIGEST", False):
+        try:
+            maybe_send_weekly_digest(
+                knowledge_db=knowledge_db,
+                analytics=analytics,
+                event_emitter=event_emitter,
+                account_email=account_email,
+                telegram_chat_id=telegram_chat_id,
+                email_id=message_id,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "[WEEKLY-DIGEST] failed",
                 account_email=account_email,
                 email_id=message_id,
                 error=str(exc),
