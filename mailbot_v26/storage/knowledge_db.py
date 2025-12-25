@@ -4,10 +4,12 @@ import hashlib
 import json
 import logging
 import sqlite3
+import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable, TypeVar
 
 from mailbot_v26.insights.commitment_tracker import Commitment
 from mailbot_v26.insights.commitment_lifecycle import (
@@ -17,19 +19,26 @@ from mailbot_v26.insights.commitment_lifecycle import (
 )
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 
 class KnowledgeDB:
+    _BUSY_TIMEOUT_MS = 5000
+    _WRITE_RETRIES = 3
+    _WRITE_BASE_DELAY = 0.1
+    _WRITE_MAX_TOTAL_WAIT = 2.0
+
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
         self._init_db()
 
     def _init_db(self) -> None:
         schema_sql = self._read_sql_script("schema.sql")
         views_sql = self._read_sql_script("views.sql")
         try:
-            with sqlite3.connect(self.path) as conn:
+            with self._connect() as conn:
                 conn.execute("PRAGMA journal_mode=WAL;")
                 if schema_sql:
                     conn.executescript(schema_sql)
@@ -52,6 +61,40 @@ class KnowledgeDB:
             except Exception:
                 continue
         return None
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path)
+        conn.execute(f"PRAGMA busy_timeout={self._BUSY_TIMEOUT_MS};")
+        return conn
+
+    def write_transaction(
+        self,
+        action: Callable[[sqlite3.Connection], T],
+    ) -> T | None:
+        start = time.monotonic()
+        delay = self._WRITE_BASE_DELAY
+        attempts = 0
+        while True:
+            with self._write_lock:
+                try:
+                    with self._connect() as conn:
+                        result = action(conn)
+                        conn.commit()
+                        return result
+                except sqlite3.OperationalError as exc:
+                    if "database is locked" not in str(exc).lower():
+                        logger.error("crm_write_failed: %s", str(exc))
+                        return None
+                    attempts += 1
+                    elapsed = time.monotonic() - start
+                    if attempts > self._WRITE_RETRIES or elapsed + delay > self._WRITE_MAX_TOTAL_WAIT:
+                        logger.error(
+                            "crm_write_failed: database is locked (attempts=%s)",
+                            attempts,
+                        )
+                        return None
+            time.sleep(delay)
+            delay *= 2
 
     @staticmethod
     def _hash_text(text: str) -> str:
@@ -130,7 +173,7 @@ class KnowledgeDB:
         attachment_summaries: Iterable[tuple[str, str]],
     ) -> int | None:
         try:
-            with sqlite3.connect(self.path) as conn:
+            def _action(conn: sqlite3.Connection) -> int | None:
                 cur = conn.cursor()
 
                 raw_body_hash = self._hash_text(raw_body)
@@ -201,9 +244,9 @@ class KnowledgeDB:
                         """,
                         (email_id, filename, summary),
                     )
-
-                conn.commit()
                 return int(email_id)
+
+            return self.write_transaction(_action)
 
         except Exception as exc:
             logger.error("KnowledgeDB save failed: %s", exc)
@@ -216,7 +259,7 @@ class KnowledgeDB:
         deferred: bool = True,
     ) -> bool:
         try:
-            with sqlite3.connect(self.path) as conn:
+            def _action(conn: sqlite3.Connection) -> bool:
                 conn.execute(
                     """
                     UPDATE emails
@@ -225,8 +268,9 @@ class KnowledgeDB:
                     """,
                     (1 if deferred else 0, email_row_id),
                 )
-                conn.commit()
-            return True
+                return True
+
+            return bool(self.write_transaction(_action))
         except Exception as exc:
             logger.error("KnowledgeDB deferred update failed: %s", exc)
             return False
@@ -238,7 +282,7 @@ class KnowledgeDB:
         commitments: Iterable[Commitment],
     ) -> bool:
         try:
-            with sqlite3.connect(self.path) as conn:
+            def _action(conn: sqlite3.Connection) -> bool:
                 conn.executemany(
                     """
                     INSERT INTO commitments (
@@ -263,8 +307,9 @@ class KnowledgeDB:
                         for commitment in commitments
                     ],
                 )
-                conn.commit()
-            return True
+                return True
+
+            return bool(self.write_transaction(_action))
         except Exception as exc:
             logger.error("KnowledgeDB commitments save failed: %s", exc)
             return False
@@ -273,7 +318,7 @@ class KnowledgeDB:
         if not account_email:
             return None
         try:
-            with sqlite3.connect(self.path) as conn:
+            with self._connect() as conn:
                 row = conn.execute(
                     """
                     SELECT last_digest_sent_at
@@ -298,7 +343,7 @@ class KnowledgeDB:
         if not account_email:
             return False
         try:
-            with sqlite3.connect(self.path) as conn:
+            def _action(conn: sqlite3.Connection) -> bool:
                 conn.execute(
                     """
                     INSERT INTO digest_state (account_email, last_digest_sent_at)
@@ -307,8 +352,9 @@ class KnowledgeDB:
                     """,
                     (account_email, sent_at.isoformat()),
                 )
-                conn.commit()
-            return True
+                return True
+
+            return bool(self.write_transaction(_action))
         except Exception as exc:
             logger.error("KnowledgeDB digest state write failed: %s", exc)
             return False
@@ -321,7 +367,7 @@ class KnowledgeDB:
         if not from_email:
             return []
         try:
-            with sqlite3.connect(self.path) as conn:
+            with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
                 cur = conn.execute(
                     """
@@ -369,7 +415,7 @@ class KnowledgeDB:
         if not update_list:
             return True
         try:
-            with sqlite3.connect(self.path) as conn:
+            def _action(conn: sqlite3.Connection) -> bool:
                 conn.executemany(
                     """
                     UPDATE commitments
@@ -381,8 +427,9 @@ class KnowledgeDB:
                         for update in update_list
                     ],
                 )
-                conn.commit()
-            return True
+                return True
+
+            return bool(self.write_transaction(_action))
         except Exception as exc:
             logger.error("KnowledgeDB commitments update failed: %s", exc)
             return False
@@ -398,7 +445,10 @@ class KnowledgeDB:
         sample_size: int,
     ) -> str | None:
         try:
-            with sqlite3.connect(self.path) as conn:
+            previous_label: str | None = None
+
+            def _action(conn: sqlite3.Connection) -> str | None:
+                nonlocal previous_label
                 conn.row_factory = sqlite3.Row
                 row = conn.execute(
                     """
@@ -408,7 +458,9 @@ class KnowledgeDB:
                     """,
                     (entity_id, signal_type),
                 ).fetchone()
-                previous_label = str(row["label"]) if row and row["label"] is not None else None
+                previous_label = (
+                    str(row["label"]) if row and row["label"] is not None else None
+                )
                 conn.execute(
                     """
                     INSERT INTO entity_signals (
@@ -435,8 +487,9 @@ class KnowledgeDB:
                         sample_size,
                     ),
                 )
-                conn.commit()
                 return previous_label
+
+            return self.write_transaction(_action)
         except Exception as exc:
             logger.error("KnowledgeDB entity signal upsert failed: %s", exc)
             return None
@@ -456,7 +509,7 @@ class KnowledgeDB:
             payload = str(proposed_action)
 
         try:
-            with sqlite3.connect(self.path) as conn:
+            def _action(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     """
                     INSERT INTO preview_actions (
@@ -468,7 +521,8 @@ class KnowledgeDB:
                     """,
                     (email_id, payload, confidence),
                 )
-                conn.commit()
+
+            self.write_transaction(_action)
         except Exception as exc:
             logger.error("KnowledgeDB preview action save failed: %s", exc)
 
@@ -489,7 +543,7 @@ class KnowledgeDB:
                 payload = str(proposed_action)
 
         try:
-            with sqlite3.connect(self.path) as conn:
+            def _action(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     """
                     INSERT INTO action_feedback (
@@ -503,7 +557,8 @@ class KnowledgeDB:
                     """,
                     (feedback_id, email_id, payload, decision, user_note),
                 )
-                conn.commit()
+
+            self.write_transaction(_action)
         except Exception as exc:
             logger.error("KnowledgeDB feedback save failed: %s", exc)
         return feedback_id

@@ -30,7 +30,11 @@ def _make_config(tmp_path) -> BotConfig:
     return BotConfig(
         general=GeneralConfig(
             check_interval=10,
+            max_email_mb=15,
             max_attachment_mb=10,
+            max_zip_uncompressed_mb=80,
+            max_extracted_chars=50_000,
+            max_extracted_total_chars=120_000,
             admin_chat_id="",
         ),
         accounts=[
