@@ -102,7 +102,7 @@ def test_tg_payload_with_attachments(monkeypatch) -> None:
         account_email="account@example.com",
         message_id=1,
         from_email="sender@example.com",
-        subject="Subject",
+        subject="Subject <mail@host>",
         received_at=datetime(2024, 1, 1, 12, 0),
         body_text="Body text with enough content to pass validation.",
         attachments=attachments,
@@ -110,10 +110,10 @@ def test_tg_payload_with_attachments(monkeypatch) -> None:
     )
 
     telegram_text = sent["payload"].html_text
-    assert "Вложения: 4" in telegram_text
-    assert "DOC" in telegram_text
-    assert "XLS" in telegram_text
-    assert "PDF" in telegram_text
+    assert "Вложений: 4" in telegram_text
+    assert "[one.doc]" in telegram_text
+    assert "[two.xls]" in telegram_text
+    assert "[three.pdf]" in telegram_text
 
 
 def test_tg_payload_never_subject_only(monkeypatch) -> None:
@@ -132,14 +132,14 @@ def test_tg_payload_never_subject_only(monkeypatch) -> None:
         account_email="account@example.com",
         message_id=2,
         from_email="sender@example.com",
-        subject="Subject",
+        subject="Subject <mail@host>",
         received_at=datetime(2024, 1, 1, 12, 0),
         body_text="",
         attachments=[],
         telegram_chat_id="chat",
     )
 
-    assert sent["payload"].html_text.startswith("Получено письмо")
+    assert sent["payload"].html_text.startswith("🔴 от sender@example.com:")
 
 
 def test_tg_payload_validator_blocks_empty(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -167,7 +167,7 @@ def test_tg_payload_validator_blocks_empty(monkeypatch, caplog: pytest.LogCaptur
         )
 
     assert "payload_validation_failed" in caplog.text
-    assert sent["payload"].html_text.startswith("Получено письмо")
+    assert sent["payload"].html_text.startswith("🔴 от sender@example.com:")
 
 
 def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, tmp_path) -> None:
@@ -188,7 +188,7 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, tmp_path) -> 
         account_email="account@example.com",
         message_id=4,
         from_email="sender@example.com",
-        subject="Subject",
+        subject="Subject <mail@host>",
         received_at=datetime(2024, 1, 1, 12, 0),
         body_text="",
         attachments=[],
@@ -212,9 +212,9 @@ def test_payload_escapes_angle_brackets(monkeypatch) -> None:
         account_email="account@example.com",
         message_id=5,
         from_email="sender@example.com",
-        subject="Subject",
+        subject="Subject <mail@host>",
         received_at=datetime(2024, 1, 1, 12, 0),
-        body_text="Связаться с <mail@host> для деталей.",
+        body_text="Связаться для деталей.",
         attachments=[],
         telegram_chat_id="chat",
     )

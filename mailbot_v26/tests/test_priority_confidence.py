@@ -9,6 +9,7 @@ from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine
 from mailbot_v26.priority.auto_gates import GateDecision
 from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 # Stub missing pipeline dependencies before importing the processor
@@ -25,7 +26,6 @@ if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     sys.modules["mailbot_v26.pipeline.stage_telegram"] = stage_telegram
 
 from mailbot_v26.pipeline import processor
-from mailbot_v26.telegram_utils import telegram_safe
 
 
 class StubRuntimeFlagStore:
@@ -122,8 +122,9 @@ def test_flag_off_bypasses_auto_priority(monkeypatch):
 
     sent: dict[str, object] = {}
 
-    def _enqueue_tg(*, email_id: int, payload) -> None:
+    def _enqueue_tg(*, email_id: int, payload) -> DeliveryResult:
         sent["payload"] = payload
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     monkeypatch.setattr(
@@ -144,6 +145,17 @@ def test_flag_off_bypasses_auto_priority(monkeypatch):
         ),
     )
     monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(False))
+    monkeypatch.setattr(
+        processor,
+        "evaluate_signal_quality",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            entropy=1.0,
+            printable_ratio=1.0,
+            quality_score=1.0,
+            is_usable=True,
+            reason="ok",
+        ),
+    )
 
     processor.process_message(
         account_email="account@example.com",
@@ -176,8 +188,9 @@ def test_telegram_payload_unchanged(monkeypatch):
 
     sent: dict[str, object] = {}
 
-    def _enqueue_tg(*, email_id: int, payload) -> None:
+    def _enqueue_tg(*, email_id: int, payload) -> DeliveryResult:
         sent["payload"] = payload
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
@@ -196,6 +209,17 @@ def test_telegram_payload_unchanged(monkeypatch):
     runtime_store = StubRuntimeFlagStore(True)
     monkeypatch.setattr(processor, "runtime_flag_store", runtime_store)
     _reset_auto_priority_engine(monkeypatch, runtime_store)
+    monkeypatch.setattr(
+        processor,
+        "evaluate_signal_quality",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            entropy=1.0,
+            printable_ratio=1.0,
+            quality_score=1.0,
+            is_usable=True,
+            reason="ok",
+        ),
+    )
     monkeypatch.setattr(
         processor.auto_priority_gates,
         "evaluate",
@@ -220,15 +244,14 @@ def test_telegram_payload_unchanged(monkeypatch):
         action_line=llm_result.action_line,
         body_summary=llm_result.body_summary,
         body_text="Body",
-        attachment_summary="",
+        attachments=[],
     )
-    if "Body" not in base_text:
-        base_text = f"{base_text}\n\n{processor._trim_telegram_body('Body')}"
-    telegram_text = telegram_safe(base_text)
+    telegram_text = base_text
 
     payload = sent["payload"]
     assert payload.priority == "🟡"
-    assert payload.html_text == telegram_text
+    assert payload.html_text.startswith(telegram_text)
+    assert "💡 Insights" in payload.html_text
     assert payload.metadata["chat_id"] == "chat"
     assert payload.metadata["account_email"] == "account@example.com"
     assert payload.metadata["action_line"] == llm_result.action_line

@@ -33,7 +33,7 @@ from mailbot_v26.insights.temporal_reasoning import (
 )
 from mailbot_v26.insights.trust_score import TrustScoreCalculator
 from mailbot_v26.observability import get_logger
-from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
+from mailbot_v26.telegram_utils import escape_tg_html
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.observability.metrics import (
@@ -624,20 +624,18 @@ def _build_telegram_text(
     action_line: str,
     body_summary: str,
     body_text: str,
-    attachment_summary: str,
+    attachments: list[dict[str, Any]],
 ) -> str:
-    safe_subject = subject or "(без темы)"
-    safe_sender = from_email or "неизвестно"
-    clean_action_line = _resolve_action_line(action_line)
-    lines = [f"{priority} Новое письмо", f"Тема: {safe_subject}", f"От: {safe_sender}"]
-    lines.append(f"Действие: {clean_action_line}")
-    content = body_summary.strip() or body_text.strip()
-    if content:
+    resolved_action = _resolve_action_line(action_line)
+    lines = [
+        format_priority_line(priority, from_email),
+        format_subject(subject),
+        format_main_action(resolved_action),
+    ]
+    attachments_block = format_attachments_block(attachments)
+    if attachments_block:
         lines.append("")
-        lines.append(_trim_telegram_body(content))
-    if attachment_summary:
-        lines.append("")
-        lines.append(attachment_summary)
+        lines.append(attachments_block)
     return "\n".join(lines)
 
 
@@ -721,49 +719,47 @@ def validate_tg_payload(text: str, ctx: EmailContext) -> str:
 
 def _build_tg_fallback(
     *,
+    priority: str,
     subject: str,
     from_email: str,
-    attachment_summary: str,
-    attachment_details: list[dict[str, Any]] | None = None,
+    attachments: list[dict[str, Any]],
 ) -> str:
-    safe_subject = subject or "(без темы)"
-    safe_sender = from_email or "неизвестно"
-    details = attachment_details or []
-    attachment_count = len(details)
-    attachment_kinds = sorted({detail["kind"] for detail in details if detail.get("kind")})
-    attachment_types = ", ".join(attachment_kinds)
-    header = f"Получено письмо с {attachment_count} вложениями."
     lines = [
-        header,
-        "",
-        f"Тема: {safe_subject}",
-        f"От: {safe_sender}",
-        "Действий не требуется",
+        format_priority_line(priority, from_email),
+        format_subject(subject),
+        format_main_action(None),
     ]
-    if attachment_count > 0:
+    attachments_block = format_attachments_block(attachments)
+    if attachments_block:
         lines.append("")
-        lines.append("Вложения требуют просмотра.")
-        if attachment_types:
-            lines.append(f"Типы файлов: {attachment_types}")
-    if attachment_summary:
-        lines.append("")
-        lines.append(attachment_summary)
+        lines.append(attachments_block)
     return "\n".join(lines)
 
 
-def _build_tg_short_template(*, subject: str, from_email: str) -> str:
-    safe_subject = subject or "(без темы)"
-    safe_sender = from_email or "неизвестно"
-    lines = [
-        "📧 Письмо получено",
-        "",
-        f"Тема: {safe_subject}",
-        f"От: {safe_sender}",
-        "",
-        "Действий не требуется",
-        "",
-        "ℹ️ Детали будут доступны позже.",
-    ]
+def _build_tg_short_template(*, priority: str, subject: str, from_email: str) -> str:
+    return "\n".join(
+        [
+            format_priority_line(priority, from_email),
+            format_subject(subject),
+            format_main_action(None),
+        ]
+    )
+
+
+def _build_tg_plain_text(
+    *,
+    priority: str,
+    subject: str,
+    from_email: str,
+    action_line: str,
+    attachments: list[dict[str, Any]],
+) -> str:
+    safe_subject = escape_tg_html(subject or "(без темы)")
+    safe_sender = escape_tg_html(from_email or "неизвестно")
+    resolved_action = escape_tg_html(_resolve_action_line(action_line))
+    lines = [f"{priority} от {safe_sender}:", safe_subject, resolved_action]
+    if attachments:
+        lines.append(f"Вложений: {len(attachments)}")
     return "\n".join(lines)
 
 
@@ -829,32 +825,50 @@ def build_telegram_payload(
         render_mode = TelegramRenderMode.SAFE_FALLBACK
 
     if render_mode == TelegramRenderMode.FULL:
-        telegram_text_raw = _build_telegram_text(
+        try:
+            telegram_text_raw = _build_telegram_text(
+                priority=context.priority,
+                from_email=context.from_email,
+                subject=context.subject,
+                action_line=context.action_line,
+                body_summary=context.body_summary,
+                body_text=context.body_text,
+                attachments=context.attachment_files,
+            )
+        except Exception as exc:
+            logger.error("tg_render_failed", email_id=context.email_id, error=str(exc))
+            render_mode = TelegramRenderMode.SAFE_FALLBACK
+            payload_invalid = True
+            fallback_reasons.append("render_failed")
+    if render_mode == TelegramRenderMode.SAFE_FALLBACK:
+        try:
+            telegram_text_raw = _build_tg_fallback(
+                priority=context.priority,
+                subject=context.subject,
+                from_email=context.from_email,
+                attachments=context.attachment_files,
+            )
+        except Exception as exc:
+            logger.error("tg_fallback_render_failed", email_id=context.email_id, error=str(exc))
+            telegram_text_raw = ""
+    if render_mode == TelegramRenderMode.SHORT_TEMPLATE:
+        try:
+            telegram_text_raw = _build_tg_short_template(
+                priority=context.priority,
+                subject=context.subject,
+                from_email=context.from_email,
+            )
+        except Exception as exc:
+            logger.error("tg_short_render_failed", email_id=context.email_id, error=str(exc))
+            telegram_text_raw = ""
+    if not telegram_text_raw:
+        telegram_text_raw = _build_tg_plain_text(
             priority=context.priority,
-            from_email=context.from_email,
             subject=context.subject,
+            from_email=context.from_email,
             action_line=context.action_line,
-            body_summary=context.body_summary,
-            body_text=context.body_text,
-            attachment_summary=context.attachment_summary,
+            attachments=context.attachment_files,
         )
-    elif render_mode == TelegramRenderMode.SAFE_FALLBACK:
-        telegram_text_raw = _build_tg_fallback(
-            subject=context.subject,
-            from_email=context.from_email,
-            attachment_summary=context.attachment_summary,
-            attachment_details=context.attachment_details,
-        )
-    else:
-        telegram_text_raw = _build_tg_short_template(
-            subject=context.subject,
-            from_email=context.from_email,
-        )
-
-    if render_mode == TelegramRenderMode.FULL and context.body_text:
-        trimmed_body = _trim_telegram_body(context.body_text)
-        if trimmed_body and trimmed_body not in telegram_text_raw:
-            telegram_text_raw = f"{telegram_text_raw}\n\n{trimmed_body}"
 
     no_llm_summary = ""
     if context.attachments_count > 0 and (not summary_valid or context.signal_invalid):
@@ -869,9 +883,9 @@ def build_telegram_payload(
         context.insights, context.insight_digest
     )
     if insights_section:
-        telegram_text_raw = f"{telegram_text_raw}{insights_section}"
+        telegram_text_raw = f"{telegram_text_raw}{escape_tg_html(insights_section)}"
 
-    telegram_text = telegram_safe(telegram_text_raw)
+    telegram_text = telegram_text_raw
     if render_mode == TelegramRenderMode.FULL:
         ctx = EmailContext(
             subject=context.subject,
@@ -904,12 +918,12 @@ def build_telegram_payload(
                 },
             )
             telegram_text_raw = _build_tg_fallback(
+                priority=context.priority,
                 subject=context.subject,
                 from_email=context.from_email,
-                attachment_summary=context.attachment_summary,
-                attachment_details=context.attachment_details,
+                attachments=context.attachment_files,
             )
-            telegram_text = telegram_safe(telegram_text_raw)
+            telegram_text = telegram_text_raw
     if render_mode != TelegramRenderMode.FULL or payload_invalid:
         fallback_reason = ",".join(fallback_reasons) if fallback_reasons else "payload_validation_failed"
         event_emitter.emit(
@@ -2527,3 +2541,9 @@ def process_message(
             confidence=proposed_action.get("confidence", 0.0) if proposed_action else 0.0,
             system_mode=system_health.mode.value,
         )
+from .tg_formatter import (
+    format_attachments_block,
+    format_main_action,
+    format_priority_line,
+    format_subject,
+)
