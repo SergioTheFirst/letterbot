@@ -95,7 +95,7 @@ def test_telegram_contains_attachment_summary(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert "Вложений: 1" in html_text
-    assert "[doc1.doc]" in html_text
+    assert "doc1.doc — <i>" in html_text
 
 
 def test_action_rendered_in_tg(monkeypatch) -> None:
@@ -179,9 +179,38 @@ def test_empty_body_with_attachments_uses_fallback(monkeypatch) -> None:
     html_text = captured["payload"].html_text
     assert html_text.startswith("🔵 от sender@example.com:")
     assert "Вложений: 3" in html_text
-    assert "[doc1.docx]" in html_text
-    assert "[report.pdf]" in html_text
-    assert "[table.xlsx]" in html_text
+    assert "doc1.docx" in html_text
+    assert "report.pdf" in html_text
+    assert "table.xlsx" in html_text
+
+
+def test_binary_attachment_text_is_omitted(monkeypatch) -> None:
+    _setup_processor(monkeypatch)
+    captured = _capture_payload(monkeypatch)
+    attachments = [
+        {
+            "filename": "dump.bin",
+            "content_type": "application/octet-stream",
+            "text": "b'\\x00\\x01\\x02...'",
+        }
+    ]
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=6,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 6, 12, 0),
+        body_text="Body",
+        attachments=attachments,
+        telegram_chat_id="chat",
+    )
+
+    html_text = captured["payload"].html_text
+    assert "dump.bin" in html_text
+    assert "dump.bin — <i>" not in html_text
+    assert "b'\\x00\\x01" not in html_text
+    assert "fail" not in html_text.lower()
 
 
 def test_empty_summary_uses_fallback(monkeypatch) -> None:

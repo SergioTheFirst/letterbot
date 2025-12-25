@@ -26,6 +26,24 @@ def _truncate_attachment_text(text: str) -> str:
     return f"{truncated}...."
 
 
+def _is_binary_leak(text: str) -> bool:
+    lowered = text.lower()
+    if "data=b'" in lowered or "data=b\"" in lowered:
+        return True
+    if "b'" in lowered or "b\"" in lowered:
+        return True
+    if not text:
+        return False
+    non_printable = 0
+    total = len(text)
+    for char in text:
+        if char in ("\n", "\r", "\t"):
+            continue
+        if not char.isprintable():
+            non_printable += 1
+    return total > 0 and (non_printable / total) > 0.2
+
+
 def format_priority_line(priority: str, from_email: str) -> str:
     safe_sender = _escape_dynamic(from_email or "неизвестно")
     return f"{priority} от {safe_sender}:"
@@ -48,16 +66,18 @@ def format_attachments_block(attachments: list[dict[str, Any]]) -> str:
     if not attachments:
         return ""
     lines = [f"📎 Вложений: {len(attachments)}"]
-    for index, attachment in enumerate(attachments):
+    for attachment in attachments:
         filename = _escape_dynamic(attachment.get("filename") or "attachment")
         extracted_text = _normalize_attachment_text(attachment.get("text"))
-        if not extracted_text:
-            extracted_text = "Текст не извлечён"
-        extracted_text = _truncate_attachment_text(extracted_text)
-        safe_text = _escape_dynamic(extracted_text)
-        lines.append(f"[{filename}] <i>{safe_text}</i>")
-        if index < len(attachments) - 1:
-            lines.append("")
+        if extracted_text and not _is_binary_leak(extracted_text):
+            extracted_text = _truncate_attachment_text(extracted_text)
+        else:
+            extracted_text = ""
+        if extracted_text:
+            safe_text = _escape_dynamic(extracted_text)
+            lines.append(f"{filename} — <i>{safe_text}</i>")
+        else:
+            lines.append(f"{filename}")
     return "\n".join(lines)
 
 
