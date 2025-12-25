@@ -138,7 +138,7 @@ def _fail_open_process(
         chat_id=account.telegram_chat_id,
     )
     result = send_telegram(payload)
-    ok = result.success
+    ok = result.delivered
     status = "OK" if ok else "FAIL"
     logger.error("Fail-open Telegram send status for email %s: %s", ctx.email_id, status)
 
@@ -174,14 +174,51 @@ def _process_queue(storage: Storage, config: BotConfig, processor: MessageProces
                 storage.mark_done(queue_id)
                 storage.enqueue_stage(email_id, "TG")
             elif stage == "TG":
-                stage_tg(ctx)
-                storage.mark_done(queue_id)
-                event_emitter.emit(
-                    type="telegram_delivery_succeeded",
-                    timestamp=datetime.now(timezone.utc),
-                    email_id=email_id,
-                    payload={"attempt": attempts},
-                )
+                result = stage_tg(ctx)
+                if result.delivered:
+                    storage.mark_done(queue_id)
+                    event_emitter.emit(
+                        type="telegram_delivery_succeeded",
+                        timestamp=datetime.now(timezone.utc),
+                        email_id=email_id,
+                        payload={"attempt": attempts},
+                    )
+                else:
+                    error = result.error or "telegram delivery failed"
+                    if result.retryable:
+                        raise RuntimeError(error)
+                    account = _get_account_by_login(config, ctx.account_email) if ctx else None
+                    if account:
+                        notice = "Telegram delivery failed. Check email client."
+                        payload = _build_system_payload(
+                            text=notice,
+                            bot_token=config.keys.telegram_bot_token,
+                            chat_id=account.telegram_chat_id,
+                            priority="🔴",
+                        )
+                        fallback_result = send_telegram(payload)
+                        if not fallback_result.delivered:
+                            logger.error(
+                                "telegram_delivery_failed_notice_failed email_id=%s",
+                                email_id,
+                            )
+                    storage.set_email_delivery_failed(email_id, error)
+                    storage.mark_done(queue_id)
+                    PIPELINE_INBOUND_CACHE.pop(email_id, None)
+                    PIPELINE_CACHE.pop(email_id, None)
+                    PIPELINE_RAW_CACHE.pop(email_id, None)
+                    logger.error(
+                        "telegram_delivery_failed email_id=%s attempts=%s error=%s",
+                        email_id,
+                        attempts,
+                        error,
+                    )
+                    event_emitter.emit(
+                        type="telegram_delivery_failed",
+                        timestamp=datetime.now(timezone.utc),
+                        email_id=email_id,
+                        payload={"attempts": attempts, "error": error},
+                    )
             else:
                 storage.mark_done(queue_id)
                 logger.warning("Unknown stage %s for email %s", stage, email_id)
@@ -210,7 +247,7 @@ def _process_queue(storage: Storage, config: BotConfig, processor: MessageProces
                             priority="🔴",
                         )
                         result = send_telegram(payload)
-                        if not result.success:
+                        if not result.delivered:
                             logger.error(
                                 "telegram_delivery_failed_notice_failed email_id=%s",
                                 email_id,
@@ -285,7 +322,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                         chat_id=general.admin_chat_id,
                     )
                     result = send_telegram(payload)
-                    ok = result.success
+                    ok = result.delivered
                     if not ok:
                         logger.error("Failed to send invalid account id alert")
                 else:
@@ -414,7 +451,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                                 chat_id=account.telegram_chat_id,
                                             )
                                             result = send_telegram(payload)
-                                            ok = result.success
+                                            ok = result.delivered
                                             status = "[OK] sent" if ok else "[FAIL] failed"
                                             print(f"      │  Telegram: {status}")
                                             logger.info(

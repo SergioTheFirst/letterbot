@@ -33,7 +33,7 @@ from mailbot_v26.insights.temporal_reasoning import (
 )
 from mailbot_v26.insights.trust_score import TrustScoreCalculator
 from mailbot_v26.observability import get_logger
-from mailbot_v26.telegram_utils import telegram_safe
+from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.observability.metrics import (
@@ -168,12 +168,14 @@ class TelegramBuildContext:
     body_text: str
     attachment_summary: str
     attachment_details: list[dict[str, Any]]
+    attachment_files: list[dict[str, Any]]
     attachments_count: int
     extracted_text_len: int
     llm_failed: bool
     signal_invalid: bool
     insights: list[Insight]
     insight_digest: InsightDigest | None
+    commitments_present: bool
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -256,16 +258,22 @@ class MessageProcessor:
         summary = self._summarize_body(body_text, subject)
         attachments = self._build_attachment_summaries(message.attachments or [], subject)
 
+        safe_sender = escape_tg_html(sender)
+        safe_subject = escape_tg_html(subject)
+        safe_summary = escape_tg_html(summary)
+        safe_action_line = escape_tg_html(action_line)
+        safe_account_login = escape_tg_html(account_login)
+
         lines = [
-            f"{priority} от {sender}: {subject}",
-            f"<b>{subject}</b>",
-            action_line,
+            f"{priority} от {safe_sender}: {safe_subject}",
+            f"<b>{safe_subject}</b>",
+            safe_action_line,
         ]
-        if summary:
-            lines.append(f"<i>{summary}</i>")
+        if safe_summary:
+            lines.append(f"<i>{safe_summary}</i>")
         if attachments:
             lines.extend(self._render_attachments(attachments))
-        lines.append(f"<i>to: {account_login}</i>")
+        lines.append(f"<i>to: {safe_account_login}</i>")
         return "\n".join(lines)
 
     @classmethod
@@ -277,11 +285,13 @@ class MessageProcessor:
     def _render_attachments(self, attachments: list[AttachmentSummary]) -> list[str]:
         rendered: list[str] = []
         for attachment in attachments:
+            filename = escape_tg_html(attachment.filename)
             description = self._trim_attachment_snippet(attachment.description or "")
+            description = escape_tg_html(description)
             if description:
-                rendered.append(f"{attachment.filename} — {description}")
+                rendered.append(f"{filename} — {description}")
             else:
-                rendered.append(attachment.filename)
+                rendered.append(filename)
         return rendered
 
     def _build_attachment_summaries(
@@ -556,6 +566,36 @@ def _build_attachment_summary(details: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _attachment_size_bytes(attachment: dict[str, Any]) -> int:
+    for key in ("size_bytes", "size"):
+        value = attachment.get(key)
+        if isinstance(value, int):
+            return int(value)
+    content = attachment.get("content")
+    if isinstance(content, (bytes, bytearray)):
+        return len(content)
+    return 0
+
+
+def _build_no_llm_summary(
+    attachments: list[dict[str, Any]],
+    commitments_present: bool,
+) -> str:
+    if not attachments:
+        return ""
+    lines = ["No-LLM Summary", "Attachments:"]
+    for attachment in attachments:
+        filename = escape_tg_html(str(attachment.get("filename") or "attachment"))
+        extracted_chars = _attachment_text_length(attachment)
+        status = "Extraction OK" if extracted_chars > 0 else "Extraction Failed"
+        size_bytes = _attachment_size_bytes(attachment)
+        size_label = f"{size_bytes} bytes" if size_bytes else "unknown"
+        lines.append(f"- {filename} — Status: {status}, Size: {size_label}")
+    if not commitments_present:
+        lines.append("Manual Review: Important attachments found.")
+    return "\n".join(lines)
+
+
 def _trim_telegram_body(text: str) -> str:
     cleaned = text.strip()
     if len(cleaned) <= _TELEGRAM_BODY_LIMIT:
@@ -815,6 +855,15 @@ def build_telegram_payload(
         trimmed_body = _trim_telegram_body(context.body_text)
         if trimmed_body and trimmed_body not in telegram_text_raw:
             telegram_text_raw = f"{telegram_text_raw}\n\n{trimmed_body}"
+
+    no_llm_summary = ""
+    if context.attachments_count > 0 and (not summary_valid or context.signal_invalid):
+        no_llm_summary = _build_no_llm_summary(
+            context.attachment_files,
+            context.commitments_present,
+        )
+    if no_llm_summary:
+        telegram_text_raw = f"{telegram_text_raw}\n\n{no_llm_summary}"
 
     insights_section = _build_insights_section(
         context.insights, context.insight_digest
@@ -1790,6 +1839,7 @@ def _render_notification(
         body_text=body_text or "",
         attachment_summary=attachment_summary,
         attachment_details=attachment_details,
+        attachment_files=attachments,
         attachments_count=len(attachments),
         extracted_text_len=extracted_text_len,
         llm_failed=bool(_read_llm_field(llm_result, "failed", False))
@@ -1797,6 +1847,7 @@ def _render_notification(
         signal_invalid=not signal_quality.is_usable,
         insights=aggregated_insights,
         insight_digest=insight_digest,
+        commitments_present=bool(commitments),
         metadata={
             "chat_id": telegram_chat_id,
             "account_email": account_email,
@@ -2281,37 +2332,65 @@ def process_message(
             reason=attention_reason,
         )
     else:
+        telegram_delivered = False
         try:
             result = enqueue_tg(email_id=message_id, payload=payload)
-            if result is None:
-                logger.warning("telegram_delivery_unchecked", email_id=message_id)
-                result_success = True
-                result_error = None
-            else:
-                result_success = result.success
-                result_error = result.error
-            if not result_success:
-                raise RuntimeError(result_error or "Telegram delivery failed")
-            change = system_health.update_component("Telegram", True)
-            _notify_system_mode_change(
-                change=change,
-                chat_id=telegram_chat_id,
-                account_email=account_email,
-            )
-            if render_mode != TelegramRenderMode.FULL or payload_invalid:
-                logger.warning(
-                    "telegram_fallback_sent",
+            if not result.delivered:
+                if result.retryable:
+                    raise RuntimeError(result.error or "Telegram delivery failed")
+                logger.error(
+                    "telegram_delivery_non_retryable",
                     email_id=message_id,
                     chat_id=telegram_chat_id,
-                    success=True,
+                    error=result.error or "unknown error",
+                )
+                change = system_health.update_component(
+                    "Telegram",
+                    False,
+                    reason=result.error or "Telegram send failed",
+                )
+                _notify_system_mode_change(
+                    change=change,
+                    chat_id=telegram_chat_id,
+                    account_email=account_email,
+                )
+                fallback_metadata = dict(payload.metadata)
+                fallback_metadata.setdefault("chat_id", telegram_chat_id)
+                fallback_metadata.setdefault("account_email", account_email)
+                fallback_payload = TelegramPayload(
+                    html_text="Telegram delivery failed. Check email client.",
+                    priority="🔴",
+                    metadata=fallback_metadata,
+                )
+                enqueue_tg(email_id=message_id, payload=fallback_payload)
+                event_emitter.emit(
+                    type="telegram_delivery_failed",
+                    timestamp=received_at,
+                    email_id=message_id,
+                    payload={"error": result.error or "non-retryable failure"},
                 )
             else:
-                logger.info(
-                    "telegram_sent",
-                    email_id=message_id,
+                telegram_delivered = True
+                change = system_health.update_component("Telegram", True)
+                _notify_system_mode_change(
+                    change=change,
                     chat_id=telegram_chat_id,
-                    success=True,
+                    account_email=account_email,
                 )
+                if render_mode != TelegramRenderMode.FULL or payload_invalid:
+                    logger.warning(
+                        "telegram_fallback_sent",
+                        email_id=message_id,
+                        chat_id=telegram_chat_id,
+                        success=True,
+                    )
+                else:
+                    logger.info(
+                        "telegram_sent",
+                        email_id=message_id,
+                        chat_id=telegram_chat_id,
+                        success=True,
+                    )
         except Exception as exc:
             change = system_health.update_component(
                 "Telegram",
@@ -2336,7 +2415,7 @@ def process_message(
                 error=str(exc),
             )
             raise
-        else:
+        if telegram_delivered:
             event_emitter.emit(
                 type="telegram_delivery_succeeded",
                 timestamp=received_at,

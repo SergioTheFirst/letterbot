@@ -3,7 +3,7 @@ from __future__ import annotations
 from .telegram_payload import TelegramPayload
 
 from mailbot_v26.observability import get_logger
-from mailbot_v26.worker.telegram_sender import TelegramSendResult, send_telegram
+from mailbot_v26.worker.telegram_sender import DeliveryResult, send_telegram
 
 logger = get_logger("mailbot")
 
@@ -12,7 +12,7 @@ def enqueue_tg(
     *,
     email_id: int,
     payload: TelegramPayload,
-) -> TelegramSendResult:
+) -> DeliveryResult:
     """
     Telegram stage entrypoint for the legacy pipeline.
 
@@ -30,9 +30,13 @@ def enqueue_tg(
             account_email=payload.metadata.get("account_email"),
             error="missing telegram credentials",
         )
-        return TelegramSendResult(success=False, error="missing telegram credentials")
+        return DeliveryResult(
+            delivered=False,
+            retryable=False,
+            error="missing telegram credentials",
+        )
     result = send_telegram(payload)
-    if result.success:
+    if result.delivered:
         logger.info(
             "telegram_delivery_succeeded",
             email_id=email_id,
@@ -46,6 +50,7 @@ def enqueue_tg(
             chat_id=chat_id,
             account_email=payload.metadata.get("account_email"),
             error=result.error or "unknown error",
+            retryable=result.retryable,
         )
     return result
 

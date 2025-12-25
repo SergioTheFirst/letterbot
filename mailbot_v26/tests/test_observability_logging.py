@@ -11,7 +11,7 @@ from mailbot_v26.observability import logger as observability_logger
 from mailbot_v26.pipeline import processor
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine
 from mailbot_v26.priority.auto_gates import CircuitBreakerStatus, GateDecision
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 def _capture_plain_json_logs() -> tuple[io.StringIO, logging.Handler, logging.Logger]:
@@ -67,7 +67,7 @@ def _setup_processor(monkeypatch, processor_module) -> None:
     monkeypatch.setattr(
         processor_module,
         "enqueue_tg",
-        lambda **kwargs: TelegramSendResult(success=True),
+        lambda **kwargs: DeliveryResult(delivered=True, retryable=False),
     )
     monkeypatch.setattr(
         processor_module,
@@ -157,7 +157,7 @@ def test_telegram_payload_stability(monkeypatch) -> None:
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         captured["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
@@ -269,7 +269,7 @@ def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
     monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: saved_payload.update(kwargs)))
     def _capture_payload(*, email_id: int, payload) -> None:
         payload_store["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     payload_store: dict[str, object] = {}
     monkeypatch.setattr(processor, "enqueue_tg", _capture_payload)
@@ -303,7 +303,7 @@ def test_system_health_snapshot_logging_does_not_break(monkeypatch) -> None:
 
     def _capture_payload(*, email_id: int, payload) -> None:
         payload_store["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _capture_payload)
 

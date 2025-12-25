@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 def _setup_processor(monkeypatch) -> None:
@@ -60,7 +60,7 @@ def _capture_payload(monkeypatch) -> dict[str, TelegramPayload]:
 
     def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
         captured["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
     return captured

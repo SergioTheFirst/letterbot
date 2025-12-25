@@ -25,7 +25,7 @@ def _payload(text: str, *, token: str = "token", chat_id: str = "123") -> Telegr
 def test_send_telegram_empty_text_logs(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.ERROR):
         result = telegram_sender.send_telegram(_payload("", token="token", chat_id="chat"))
-        assert result.success is False
+        assert result.delivered is False
     assert "empty" in caplog.text.lower()
 
 
@@ -40,7 +40,7 @@ def test_send_telegram_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
     result = telegram_sender.send_telegram(_payload("hello"))
-    assert result.success is True
+    assert result.delivered is True
     assert called["json"]["text"] == "hello"
     assert called["json"]["chat_id"] == "123"
     assert called["json"]["parse_mode"] == "HTML"
@@ -55,7 +55,7 @@ def test_send_telegram_non_200_logs(monkeypatch: pytest.MonkeyPatch, caplog: pyt
     )
     with caplog.at_level(logging.ERROR):
         result = telegram_sender.send_telegram(_payload("hello"))
-        assert result.success is False
+        assert result.delivered is False
     assert "401" in caplog.text
     assert "bad" in caplog.text
 
@@ -67,7 +67,7 @@ def test_send_telegram_exception(monkeypatch: pytest.MonkeyPatch, caplog: pytest
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=raising_post))
     with caplog.at_level(logging.ERROR):
         result = telegram_sender.send_telegram(_payload("hello"))
-        assert result.success is False
+        assert result.delivered is False
     assert "network error" in caplog.text
 
 
@@ -75,7 +75,7 @@ def test_send_telegram_requests_missing(monkeypatch: pytest.MonkeyPatch, caplog:
     monkeypatch.setattr(telegram_sender, "requests", None)
     with caplog.at_level(logging.ERROR):
         result = telegram_sender.send_telegram(_payload("hello"))
-        assert result.success is False
+        assert result.delivered is False
     assert "requests module not available" in caplog.text
 
 
@@ -89,7 +89,7 @@ def test_send_telegram_does_not_escape_html(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
     text = "HQ\\MedvevSS <b>hi</b> & \"quote\" 'single'"
     result = telegram_sender.send_telegram(_payload(text))
-    assert result.success is True
+    assert result.delivered is True
     assert captured["text"] == text
 
 
@@ -103,5 +103,22 @@ def test_worker_does_not_modify_payload(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
     text = "⏰ Сделать: <b>NO CHANGE</b> & keep \\ slashes"
     result = telegram_sender.send_telegram(_payload(text))
-    assert result.success is True
+    assert result.delivered is True
     assert captured["text"] == text
+
+
+def test_salvage_flow(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
+        calls.append(json)
+        if len(calls) == 1:
+            return DummyResponse(status_code=400, text="Bad Request: unsupported start tag")
+        return DummyResponse(status_code=200, text="ok")
+
+    monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
+    text = "hello <b>world</b>"
+    result = telegram_sender.send_telegram(_payload(text))
+    assert result.delivered is True
+    assert calls[0]["parse_mode"] == "HTML"
+    assert "parse_mode" not in calls[1]

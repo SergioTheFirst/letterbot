@@ -22,7 +22,7 @@ from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.text.mime_utils import decode_bytes, decode_mime_header
 from mailbot_v26.text.sanitize import sanitize_text
 from mailbot_v26.telegram_utils import telegram_safe
-from mailbot_v26.worker.telegram_sender import send_telegram
+from mailbot_v26.worker.telegram_sender import DeliveryResult, send_telegram
 
 try:  # local import to avoid circular typing issues
     from mailbot_v26.config_loader import AccountConfig, BotConfig
@@ -426,7 +426,7 @@ def stage_llm(ctx: PipelineContext) -> None:
     }
 
 
-def stage_tg(ctx: PipelineContext) -> None:
+def stage_tg(ctx: PipelineContext) -> DeliveryResult:
     inbound = PIPELINE_INBOUND_CACHE.get(ctx.email_id)
     if inbound is None:
         raise RuntimeError("No parsed email for TG stage")
@@ -454,14 +454,15 @@ def stage_tg(ctx: PipelineContext) -> None:
         },
     )
     result = send_telegram(payload)
-    if not result.success:
-        raise RuntimeError(result.error or "telegram delivery failed")
+    if not result.delivered:
+        return result
     logger.info("[PIPELINE] email_id=%s stage=TG done", ctx.email_id)
 
     # cleanup to avoid leaks
     PIPELINE_INBOUND_CACHE.pop(ctx.email_id, None)
     PIPELINE_CACHE.pop(ctx.email_id, None)
     PIPELINE_RAW_CACHE.pop(ctx.email_id, None)
+    return result
 
 
 __all__ = [
