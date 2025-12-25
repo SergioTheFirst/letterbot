@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mailbot_v26.pipeline.tg_formatter import (
+from mailbot_v26.pipeline.tg_renderer import (
     format_attachments_block,
     format_main_action,
     format_subject,

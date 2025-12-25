@@ -60,6 +60,7 @@ from .insight_arbiter import InsightArbiterInput, apply_insight_arbiter
 from .stage_llm import run_llm_stage
 from .stage_telegram import enqueue_tg, send_preview_to_telegram, send_system_notice
 from .telegram_payload import TelegramPayload
+from . import tg_renderer
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.context_layer import ContextStore
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
@@ -580,19 +581,7 @@ def _build_no_llm_summary(
     attachments: list[dict[str, Any]],
     commitments_present: bool,
 ) -> str:
-    if not attachments:
-        return ""
-    lines = ["No-LLM Summary", "Attachments:"]
-    for attachment in attachments:
-        filename = escape_tg_html(str(attachment.get("filename") or "attachment"))
-        extracted_chars = _attachment_text_length(attachment)
-        status = "Extraction OK" if extracted_chars > 0 else "Extraction Failed"
-        size_bytes = _attachment_size_bytes(attachment)
-        size_label = f"{size_bytes} bytes" if size_bytes else "unknown"
-        lines.append(f"- {filename} — Status: {status}, Size: {size_label}")
-    if not commitments_present:
-        lines.append("Manual Review: Important attachments found.")
-    return "\n".join(lines)
+    return ""
 
 
 def _trim_telegram_body(text: str) -> str:
@@ -626,16 +615,13 @@ def _build_telegram_text(
     attachments: list[dict[str, Any]],
 ) -> str:
     resolved_action = _resolve_action_line(action_line)
-    lines = [
-        format_priority_line(priority, from_email),
-        format_subject(subject),
-        format_main_action(resolved_action),
-    ]
-    attachments_block = format_attachments_block(attachments)
-    if attachments_block:
-        lines.append("")
-        lines.append(attachments_block)
-    return "\n".join(lines)
+    return tg_renderer.build_telegram_text(
+        priority=priority,
+        from_email=from_email,
+        subject=subject,
+        action_line=resolved_action,
+        attachments=attachments,
+    )
 
 
 def _normalize_action_line(action_line: str) -> str:
@@ -723,25 +709,19 @@ def _build_tg_fallback(
     from_email: str,
     attachments: list[dict[str, Any]],
 ) -> str:
-    lines = [
-        format_priority_line(priority, from_email),
-        format_subject(subject),
-        format_main_action(None),
-    ]
-    attachments_block = format_attachments_block(attachments)
-    if attachments_block:
-        lines.append("")
-        lines.append(attachments_block)
-    return "\n".join(lines)
+    return tg_renderer.build_tg_fallback(
+        priority=priority,
+        subject=subject,
+        from_email=from_email,
+        attachments=attachments,
+    )
 
 
 def _build_tg_short_template(*, priority: str, subject: str, from_email: str) -> str:
-    return "\n".join(
-        [
-            format_priority_line(priority, from_email),
-            format_subject(subject),
-            format_main_action(None),
-        ]
+    return tg_renderer.build_tg_short_template(
+        priority=priority,
+        subject=subject,
+        from_email=from_email,
     )
 
 
@@ -2522,9 +2502,3 @@ def process_message(
             confidence=proposed_action.get("confidence", 0.0) if proposed_action else 0.0,
             system_mode=system_health.mode.value,
         )
-from .tg_formatter import (
-    format_attachments_block,
-    format_main_action,
-    format_priority_line,
-    format_subject,
-)
