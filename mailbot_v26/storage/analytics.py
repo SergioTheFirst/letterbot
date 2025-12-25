@@ -334,6 +334,250 @@ class KnowledgeAnalytics:
                 values.append(number)
         return values
 
+    def get_avg_response_time(
+        self,
+        *,
+        entity_id: str,
+        window: int = 30,
+        end_dt: datetime | None = None,
+    ) -> dict[str, float | int | None]:
+        if not entity_id:
+            return {"avg_hours": None, "sample_size": 0}
+        params: list[object] = [entity_id, "response_time"]
+        query = """
+        SELECT metadata
+        FROM interaction_events
+        WHERE entity_id = ?
+          AND event_type = ?
+          AND event_time >= datetime(?, ?)
+        """
+        anchor = end_dt or datetime.utcnow()
+        params.extend([anchor.isoformat(), f"-{window} days"])
+        if end_dt is not None:
+            query += " AND event_time < ?"
+            params.append(end_dt.isoformat())
+        rows = self._execute_select(query, params)
+        values: list[float] = []
+        for row in rows:
+            raw = row.get("metadata")
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            value = payload.get("response_time_hours")
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if number >= 0:
+                values.append(number)
+        if not values:
+            return {"avg_hours": None, "sample_size": 0}
+        avg = sum(values) / len(values)
+        return {"avg_hours": avg, "sample_size": len(values)}
+
+    def get_latest_response_time(
+        self,
+        *,
+        entity_id: str,
+        now_dt: datetime | None = None,
+    ) -> dict[str, object] | None:
+        if not entity_id:
+            return None
+        params: list[object] = [entity_id, "response_time"]
+        query = """
+        SELECT event_time, metadata
+        FROM interaction_events
+        WHERE entity_id = ?
+          AND event_type = ?
+        """
+        if now_dt is not None:
+            query += " AND event_time <= ?"
+            params.append(now_dt.isoformat())
+        query += " ORDER BY event_time DESC LIMIT 1"
+        rows = self._execute_select(query, params)
+        if not rows:
+            return None
+        row = rows[0]
+        event_time_raw = row.get("event_time")
+        if not event_time_raw:
+            return None
+        event_time = parse_sqlite_datetime(str(event_time_raw))
+        if event_time is None:
+            return None
+        raw = row.get("metadata")
+        if not raw:
+            return None
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        value = payload.get("response_time_hours")
+        try:
+            response_time = float(value)
+        except (TypeError, ValueError):
+            return None
+        return {"event_time": event_time, "response_time_hours": response_time}
+
+    def get_rolling_frequency(
+        self,
+        *,
+        entity_id: str,
+        window_short: int = 7,
+        window_long: int = 30,
+        now_dt: datetime | None = None,
+    ) -> dict[str, int]:
+        if not entity_id:
+            return {"count_short": 0, "count_long": 0, "history_days": 0}
+        anchor = now_dt or datetime.utcnow()
+        rows = self._execute_select(
+            """
+            SELECT
+                SUM(CASE WHEN event_time >= datetime(?, ?) THEN 1 ELSE 0 END) AS count_short,
+                SUM(CASE WHEN event_time >= datetime(?, ?) THEN 1 ELSE 0 END) AS count_long
+            FROM interaction_events
+            WHERE entity_id = ?
+              AND event_type = 'email_received'
+            """,
+            (
+                anchor.isoformat(),
+                f"-{window_short} days",
+                anchor.isoformat(),
+                f"-{window_long} days",
+                entity_id,
+            ),
+        )
+        row = rows[0] if rows else {}
+        history_rows = self._execute_select(
+            """
+            SELECT MIN(event_time) AS first_seen
+            FROM interaction_events
+            WHERE entity_id = ?
+              AND event_type = 'email_received'
+            """,
+            (entity_id,),
+        )
+        history_days = 0
+        first_seen_raw = history_rows[0].get("first_seen") if history_rows else None
+        if first_seen_raw:
+            first_seen = parse_sqlite_datetime(str(first_seen_raw))
+            if first_seen is not None:
+                history_days = max(0, int((anchor - first_seen).days))
+        return {
+            "count_short": int(row.get("count_short") or 0),
+            "count_long": int(row.get("count_long") or 0),
+            "history_days": history_days,
+        }
+
+    def get_upcoming_commitments(
+        self,
+        *,
+        entity_id: str,
+        hours: int = 48,
+        now_dt: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        if not entity_id:
+            return []
+        from_email = self._entity_from_email(entity_id)
+        if not from_email:
+            return []
+        anchor = now_dt or datetime.utcnow()
+        rows = self._execute_select(
+            """
+            SELECT
+                c.id AS commitment_id,
+                c.commitment_text,
+                c.deadline_iso,
+                c.status,
+                c.created_at
+            FROM commitments c
+            JOIN emails e ON e.id = c.email_row_id
+            WHERE lower(e.from_email) = lower(?)
+              AND c.deadline_iso IS NOT NULL
+              AND c.status NOT IN ('fulfilled', 'expired')
+              AND datetime(c.deadline_iso) >= datetime(?)
+              AND datetime(c.deadline_iso) <= datetime(?, ?)
+            ORDER BY c.deadline_iso ASC
+            """,
+            (
+                from_email,
+                anchor.isoformat(),
+                anchor.isoformat(),
+                f"+{hours} hours",
+            ),
+        )
+        return rows
+
+    def recent_entity_activity(
+        self,
+        *,
+        days: int = 7,
+        limit: int = 5,
+    ) -> list[dict[str, object]]:
+        rows = self._execute_select(
+            """
+            SELECT entity_id, COUNT(*) AS total
+            FROM interaction_events
+            WHERE event_type = 'email_received'
+              AND event_time >= datetime('now', ?)
+            GROUP BY entity_id
+            ORDER BY total DESC
+            LIMIT ?
+            """,
+            (f"-{days} days", limit),
+        )
+        return rows
+
+    def entity_label(self, *, entity_id: str) -> str | None:
+        if not entity_id:
+            return None
+        rows = self._execute_select(
+            "SELECT name, metadata FROM entities WHERE id = ? LIMIT 1",
+            (entity_id,),
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        name = str(row.get("name") or "").strip()
+        if name:
+            return name
+        raw = row.get("metadata")
+        if not raw:
+            return None
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        for key in ("from_name", "from_email"):
+            value = payload.get(key)
+            if value:
+                cleaned = str(value).strip()
+                if cleaned:
+                    return cleaned
+        return None
+
+    def _entity_from_email(self, entity_id: str) -> str | None:
+        rows = self._execute_select(
+            "SELECT metadata FROM entities WHERE id = ? LIMIT 1",
+            (entity_id,),
+        )
+        if not rows:
+            return None
+        raw = rows[0].get("metadata")
+        if not raw:
+            return None
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        email = payload.get("from_email")
+        if not email:
+            return None
+        cleaned = str(email).strip()
+        return cleaned or None
+
     def entity_baseline(
         self,
         *,

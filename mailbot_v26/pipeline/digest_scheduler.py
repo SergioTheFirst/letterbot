@@ -190,6 +190,7 @@ def run_digest_tick(
                     storage=storage,
                     telegram_sender=telegram_sender,
                     logger=logger,
+                    include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                 )
             else:
                 logger.info(
@@ -210,6 +211,7 @@ def run_digest_tick(
                     storage=storage,
                     telegram_sender=telegram_sender,
                     logger=logger,
+                    include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                 )
             else:
                 logger.info(
@@ -233,6 +235,7 @@ def _run_daily_digest(
     storage: DigestStorage,
     telegram_sender: Callable[[TelegramPayload], DeliveryResult],
     logger: LoggerLike,
+    include_anomalies: bool = False,
 ) -> None:
     if not _is_daily_due(now, config):
         logger.info(
@@ -258,6 +261,8 @@ def _run_daily_digest(
     data = daily_digest._collect_digest_data(
         analytics=storage.analytics,
         account_email=account_email,
+        include_anomalies=include_anomalies,
+        now=now,
     )
     if not daily_digest._has_digest_content(data):
         logger.info(
@@ -325,6 +330,7 @@ def _run_weekly_digest(
     storage: DigestStorage,
     telegram_sender: Callable[[TelegramPayload], DeliveryResult],
     logger: LoggerLike,
+    include_anomalies: bool = False,
 ) -> None:
     week_key = weekly_digest._iso_week_key(now)
 
@@ -387,6 +393,8 @@ def _run_weekly_digest(
         analytics=storage.analytics,
         account_email=account_email,
         week_key=week_key,
+        include_anomalies=include_anomalies,
+        now=now,
     )
     payload = _build_weekly_payload(
         account_email=account_email,

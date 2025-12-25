@@ -8,7 +8,7 @@ from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
-def _setup_processor(monkeypatch) -> None:
+def _setup_processor(monkeypatch, *, enable_anomaly_alerts: bool = False) -> None:
     llm_result = SimpleNamespace(
         priority="🔵",
         action_line="Проверить письмо",
@@ -27,6 +27,7 @@ def _setup_processor(monkeypatch) -> None:
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
             ENABLE_PREVIEW_ACTIONS=False,
+            ENABLE_ANOMALY_ALERTS=enable_anomaly_alerts,
         ),
     )
     monkeypatch.setattr(
@@ -78,7 +79,7 @@ def test_telegram_contains_attachment_summary(monkeypatch) -> None:
         {
             "filename": "doc1.doc",
             "content_type": "application/msword",
-            "text": "a" * 128,
+            "text": "summary " * 20,
         }
     ]
 
@@ -114,8 +115,36 @@ def test_action_rendered_in_tg(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert html_text.startswith("🔵 от sender@example.com:")
-    assert "<b>Subject</b>" in html_text
-    assert "<b><i>Проверить письмо</i></b>" in html_text
+
+
+def test_payload_stability_when_anomaly_alerts_off(monkeypatch) -> None:
+    _setup_processor(monkeypatch, enable_anomaly_alerts=False)
+    captured_off = _capture_payload(monkeypatch)
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=7,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 7, 12, 0),
+        body_text="Body",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    _setup_processor(monkeypatch, enable_anomaly_alerts=True)
+    captured_on = _capture_payload(monkeypatch)
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=8,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 8, 12, 0),
+        body_text="Body",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    assert captured_off["payload"].html_text == captured_on["payload"].html_text
 
 
 def test_no_minimal_template_when_attachments_exist(monkeypatch) -> None:

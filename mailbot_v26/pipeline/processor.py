@@ -23,6 +23,11 @@ from mailbot_v26.insights.commitment_lifecycle import (
     CommitmentStatusUpdate,
     evaluate_commitment_updates,
 )
+from mailbot_v26.insights.anomaly_engine import (
+    Anomaly,
+    compute_anomalies,
+    max_anomaly_severity,
+)
 from mailbot_v26.insights.aggregator import Insight, aggregate_insights
 from mailbot_v26.insights.digest import InsightDigest, build_insight_digest
 from mailbot_v26.insights.relationship_anomaly import RelationshipAnomalyDetector
@@ -1089,6 +1094,23 @@ def _append_insight_digest_preview(
             clean_line = _sanitize_preview_line(line)
             if clean_line:
                 lines.append(clean_line)
+    return "\n".join(lines)
+
+
+def _append_anomalies_preview(
+    preview_text: str,
+    anomalies: list[Anomaly],
+) -> str:
+    if not anomalies:
+        return preview_text
+    lines = [preview_text, "", "⚠️ Signals"]
+    for anomaly in anomalies:
+        title = _sanitize_preview_line(anomaly.title)
+        severity = _sanitize_preview_line(anomaly.severity)
+        details = _sanitize_preview_line(anomaly.details)
+        lines.append(f"• {title} ({severity})")
+        if details:
+            lines.append(f"  {details}")
     return "\n".join(lines)
 
 
@@ -2225,6 +2247,30 @@ def process_message(
         telegram_chat_id=telegram_chat_id,
     )
 
+    anomalies: list[Anomaly] = []
+    if getattr(feature_flags, "ENABLE_ANOMALY_ALERTS", False) and entity_resolution:
+        try:
+            anomalies = compute_anomalies(
+                entity_id=entity_resolution.entity_id,
+                analytics=analytics,
+                now_dt=received_at,
+            )
+            logger.info(
+                "anomaly_computed",
+                email_id=message_id,
+                entity_id=entity_resolution.entity_id,
+                count=len(anomalies),
+                max_severity=max_anomaly_severity(anomalies),
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "anomaly_compute_failed",
+                email_id=message_id,
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
+            anomalies = []
+
     render_result = _render_notification(
         message_id=message_id,
         received_at=received_at,
@@ -2491,6 +2537,8 @@ def process_message(
                 preview_text,
                 analytics_result.aggregated_insights,
             )
+        if anomalies:
+            preview_text = _append_anomalies_preview(preview_text, anomalies)
         send_preview_to_telegram(
             chat_id=telegram_chat_id,
             preview_text=preview_text,
