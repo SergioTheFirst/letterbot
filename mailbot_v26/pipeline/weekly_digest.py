@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from mailbot_v26.insights.anomaly_engine import compute_anomalies
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
@@ -59,6 +60,7 @@ class WeeklyDigestData:
     commitment_counts: dict[str, int]
     overdue_commitments: Sequence[dict[str, object]]
     trust_deltas: dict[str, list[dict[str, object]]]
+    anomaly_alerts: list[str]
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -163,17 +165,63 @@ def _trust_summary(trust_deltas: dict[str, list[dict[str, object]]]) -> str:
     return "; ".join(parts)
 
 
+def _collect_anomaly_alerts(
+    *, analytics: KnowledgeAnalytics, now: datetime
+) -> list[str]:
+    alerts: list[str] = []
+    try:
+        entities = analytics.recent_entity_activity(days=30, limit=8)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("anomaly_digest_activity_failed", error=str(exc))
+        return alerts
+    for row in entities:
+        entity_id = str(row.get("entity_id") or "")
+        if not entity_id:
+            continue
+        try:
+            anomalies = compute_anomalies(
+                entity_id=entity_id,
+                analytics=analytics,
+                now_dt=now,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "anomaly_digest_compute_failed",
+                entity_id=entity_id,
+                error=str(exc),
+            )
+            continue
+        if not anomalies:
+            continue
+        label = analytics.entity_label(entity_id=entity_id) or entity_id
+        safe_label = escape_tg_html(label)
+        for anomaly in anomalies:
+            title = escape_tg_html(anomaly.title)
+            severity = escape_tg_html(anomaly.severity)
+            alerts.append(f"{safe_label}: {title} ({severity})")
+    return alerts
+
+
 def _collect_weekly_data(
     *,
     analytics: KnowledgeAnalytics,
     account_email: str,
     week_key: str,
+    include_anomalies: bool = False,
+    now: datetime | None = None,
 ) -> WeeklyDigestData:
     volume = analytics.weekly_email_volume(account_email=account_email, days=7)
     attention = analytics.weekly_attention_entities(account_email=account_email, days=7)
     commitment_counts = analytics.weekly_commitment_counts(account_email=account_email, days=7)
     overdue = analytics.weekly_overdue_commitments(account_email=account_email, days=7, limit=5)
     trust_deltas = analytics.weekly_trust_score_deltas(days=7)
+
+    anomaly_alerts: list[str] = []
+    if include_anomalies:
+        anomaly_alerts = _collect_anomaly_alerts(
+            analytics=analytics,
+            now=now or datetime.now(timezone.utc),
+        )
 
     return WeeklyDigestData(
         week_key=week_key,
@@ -183,6 +231,7 @@ def _collect_weekly_data(
         commitment_counts=commitment_counts,
         overdue_commitments=overdue,
         trust_deltas=trust_deltas,
+        anomaly_alerts=anomaly_alerts,
     )
 
 
@@ -212,6 +261,9 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         "• Trust score: "
         f"{_trust_summary(data.trust_deltas)}"
     )
+    if data.anomaly_alerts:
+        lines.append("• Anomaly Alerts:")
+        lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:8])
     return "\n".join(lines)
 
 
@@ -224,6 +276,7 @@ def maybe_send_weekly_digest(
     telegram_chat_id: str,
     email_id: int,
     now: datetime | None = None,
+    include_anomalies: bool = False,
 ) -> None:
     current_time = now or datetime.now(timezone.utc)
     config = _load_weekly_digest_config()
@@ -274,6 +327,8 @@ def maybe_send_weekly_digest(
         analytics=analytics,
         account_email=account_email,
         week_key=week_key,
+        include_anomalies=include_anomalies,
+        now=current_time,
     )
 
     digest_text = _build_weekly_digest_text(data)

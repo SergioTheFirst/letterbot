@@ -18,6 +18,7 @@ State:
 - Digest scheduler module implemented and wired to the main loop.
 - Processor no longer triggers digests; scheduling is handled separately.
 - Attachment safety gates implemented with hard limits, truncation logging, and TG skip rendering.
+- Anomaly alerts v0 implemented for response delay, frequency drop, and commitment proximity (feature-flagged).
 
 Done:
 - Added weekly_digest_state table and KnowledgeDB accessors.
@@ -29,6 +30,8 @@ Done:
 - Added attachment safety gate limits and extraction truncation logs.
 - Added renderer handling for skipped attachments and binary leak suppression hardening.
 - Added attachment safety gate tests.
+- Added anomaly engine with analytics queries and preview/digest Signals blocks (feature-flagged).
+- Added anomaly alert tests for response delay, frequency drop, and payload stability.
 
 Now:
 - Proactive digest scheduler is active and gated by feature flags.
@@ -43,11 +46,15 @@ Working set (files / tables / tests):
 - mailbot_v26/pipeline/weekly_digest.py
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/pipeline/digest_scheduler.py
+- mailbot_v26/pipeline/daily_digest.py
 - mailbot_v26/storage/analytics.py
 - mailbot_v26/storage/knowledge_db.py
 - mailbot_v26/storage/schema.sql
 - mailbot_v26/features/flags.py
 - mailbot_v26/config/config.ini
+- mailbot_v26/insights/anomaly_engine.py
+- mailbot_v26/tests/test_anomaly_engine.py
+- mailbot_v26/tests/test_telegram_payload_pipeline.py
 - mailbot_v26/tests/test_weekly_digest.py
 - mailbot_v26/tests/test_digest_scheduler.py
 - mailbot_v26/bot_core/pipeline.py

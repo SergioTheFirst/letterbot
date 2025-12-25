@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from mailbot_v26.insights.anomaly_engine import compute_anomalies
 from mailbot_v26.observability import get_logger
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
-from mailbot_v26.telegram_utils import telegram_safe
+from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
 
 logger = get_logger("mailbot")
 
@@ -25,12 +26,52 @@ class DigestData:
     commitments_expired: int
     trust_delta: float | None
     health_delta: float | None
+    anomaly_alerts: list[str]
+
+
+def _collect_anomaly_alerts(
+    *, analytics: KnowledgeAnalytics, now: datetime
+) -> list[str]:
+    alerts: list[str] = []
+    try:
+        entities = analytics.recent_entity_activity(days=30, limit=5)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("anomaly_digest_activity_failed", error=str(exc))
+        return alerts
+    for row in entities:
+        entity_id = str(row.get("entity_id") or "")
+        if not entity_id:
+            continue
+        try:
+            anomalies = compute_anomalies(
+                entity_id=entity_id,
+                analytics=analytics,
+                now_dt=now,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "anomaly_digest_compute_failed",
+                entity_id=entity_id,
+                error=str(exc),
+            )
+            continue
+        if not anomalies:
+            continue
+        label = analytics.entity_label(entity_id=entity_id) or entity_id
+        safe_label = escape_tg_html(label)
+        for anomaly in anomalies:
+            title = escape_tg_html(anomaly.title)
+            severity = escape_tg_html(anomaly.severity)
+            alerts.append(f"{safe_label}: {title} ({severity})")
+    return alerts
 
 
 def _collect_digest_data(
     *,
     analytics: KnowledgeAnalytics,
     account_email: str,
+    include_anomalies: bool = False,
+    now: datetime | None = None,
 ) -> DigestData:
     deferred = analytics.deferred_digest_counts(account_email=account_email)
     commitments = analytics.commitment_status_counts(account_email=account_email)
@@ -53,6 +94,13 @@ def _collect_digest_data(
         except (TypeError, ValueError):
             health_value = None
 
+    anomaly_alerts: list[str] = []
+    if include_anomalies:
+        anomaly_alerts = _collect_anomaly_alerts(
+            analytics=analytics,
+            now=now or datetime.now(timezone.utc),
+        )
+
     return DigestData(
         deferred_total=int(deferred.get("total", 0)),
         deferred_attachments_only=int(deferred.get("attachments_only", 0)),
@@ -61,6 +109,7 @@ def _collect_digest_data(
         commitments_expired=int(commitments.get("expired", 0)),
         trust_delta=trust_value,
         health_delta=health_value,
+        anomaly_alerts=anomaly_alerts,
     )
 
 
@@ -86,6 +135,9 @@ def _build_digest_text(data: DigestData) -> str:
     if data.health_delta is not None and abs(data.health_delta) >= _RELATIONSHIP_HEALTH_DELTA_THRESHOLD:
         sign = "+" if data.health_delta >= 0 else ""
         lines.append(f"• Здоровье отношений: {sign}{data.health_delta:.0f} пунктов")
+    if data.anomaly_alerts:
+        lines.append("• Anomaly Alerts:")
+        lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:5])
     return "\n".join(lines)
 
 
@@ -98,6 +150,8 @@ def _has_digest_content(data: DigestData) -> bool:
         return True
     if data.health_delta is not None and abs(data.health_delta) >= _RELATIONSHIP_HEALTH_DELTA_THRESHOLD:
         return True
+    if data.anomaly_alerts:
+        return True
     return False
 
 
@@ -108,9 +162,15 @@ def maybe_send_daily_digest(
     account_email: str,
     telegram_chat_id: str,
     email_id: int,
+    include_anomalies: bool = False,
 ) -> None:
     now = datetime.now(timezone.utc)
-    data = _collect_digest_data(analytics=analytics, account_email=account_email)
+    data = _collect_digest_data(
+        analytics=analytics,
+        account_email=account_email,
+        include_anomalies=include_anomalies,
+        now=now,
+    )
     last_sent_at = knowledge_db.get_last_digest_sent_at(account_email=account_email)
     already_sent = bool(last_sent_at and last_sent_at.date() == now.date())
 
