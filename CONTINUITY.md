@@ -1,26 +1,30 @@
 Goal (incl. success criteria):
-- Standardize Telegram HTML renderer v1.0 with unified layout, escaping, and attachment truncation; success criteria: formatter helpers wired in processor and tests updated.
+- Deliver weekly digest v27.x with deterministic, LLM-free summary; success criteria: feature flag gating, ISO week dedupe, Telegram HTML output, event logs, and tests updated.
 
 Constraints / Assumptions:
-- Follow repo AGENTS instructions; update this ledger each turn.
-- No LLM logic or pipeline order changes; no preview/digest changes; HTML only.
-- Failures must be logged and must not interrupt mail processing.
+- No pipeline reorder; main email notifications remain untouched.
+- Digest must fail safely and never block mail processing.
+- Use SQLite weekly_digest_state with ISO year-week key.
+- Escape all dynamic Telegram HTML fields.
 
 Key decisions:
-- Introduced tg_formatter helper functions for header/subject/action/attachments.
-- Escaped dynamic fields before HTML tags via escape_tg_html.
-- Attachment snippets truncated with "...." suffix.
+- Weekly digest schedule read from [weekly_digest] config (weekday/hour/minute).
+- Attention economics computed from stored body_summary/subject word counts (200 wpm).
+- Trust deltas derived from trust_snapshots within last 7 days.
+- Emit weekly_digest_sent/skipped/failed via EventEmitter.
 
 State:
-- Unified renderer wired into processor with safe plain-text fallback.
-- Tests updated and new formatting coverage added.
+- Weekly digest module, analytics helpers, schema, and processor integration implemented.
+- Feature flag ENABLE_WEEKLY_DIGEST added (default False) with config defaults.
+- Weekly digest tests added for dedupe, empty data, and flag off.
 
 Done:
-- Implemented tg_formatter and updated processor rendering/fallback behavior.
-- Added formatting tests and updated Telegram payload expectations.
+- Added weekly_digest_state table and KnowledgeDB accessors.
+- Added weekly digest analytics queries and formatting logic.
+- Wired weekly digest into processor with safe logging.
 
 Now:
-- Unified HTML renderer v1.0 implemented and verified in tests.
+- Weekly digest feature is implemented and gated by config flag.
 
 Next:
 - None.
@@ -29,13 +33,11 @@ Open questions (UNCONFIRMED if needed):
 - None.
 
 Working set (files / tables / tests):
+- mailbot_v26/pipeline/weekly_digest.py
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/pipeline/tg_formatter.py
-- mailbot_v26/tests/test_telegram_payload_validation.py
-- mailbot_v26/tests/test_telegram_payload_pipeline.py
-- mailbot_v26/tests/test_telegram_render_modes.py
-- mailbot_v26/tests/test_insight_aggregator_pipeline.py
-- mailbot_v26/tests/test_priority_confidence.py
-- mailbot_v26/tests/test_relationship_health_pipeline.py
-- mailbot_v26/tests/test_trust_score_pipeline.py
-- mailbot_v26/tests/test_telegram_rendering_format.py
+- mailbot_v26/storage/analytics.py
+- mailbot_v26/storage/knowledge_db.py
+- mailbot_v26/storage/schema.sql
+- mailbot_v26/features/flags.py
+- mailbot_v26/config/config.ini
+- mailbot_v26/tests/test_weekly_digest.py

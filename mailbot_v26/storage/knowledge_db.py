@@ -334,6 +334,26 @@ class KnowledgeDB:
             logger.error("KnowledgeDB digest state read failed: %s", exc)
             return None
 
+    def get_last_weekly_digest_key(self, *, account_email: str) -> str | None:
+        if not account_email:
+            return None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT last_week_key
+                    FROM weekly_digest_state
+                    WHERE account_email = ?
+                    """,
+                    (account_email,),
+                ).fetchone()
+            if not row or not row[0]:
+                return None
+            return str(row[0])
+        except Exception as exc:
+            logger.error("KnowledgeDB weekly digest state read failed: %s", exc)
+            return None
+
     def set_last_digest_sent_at(
         self,
         *,
@@ -357,6 +377,34 @@ class KnowledgeDB:
             return bool(self.write_transaction(_action))
         except Exception as exc:
             logger.error("KnowledgeDB digest state write failed: %s", exc)
+            return False
+
+    def set_last_weekly_digest_state(
+        self,
+        *,
+        account_email: str,
+        week_key: str,
+        sent_at: datetime,
+    ) -> bool:
+        if not account_email:
+            return False
+        try:
+            def _action(conn: sqlite3.Connection) -> bool:
+                conn.execute(
+                    """
+                    INSERT INTO weekly_digest_state (account_email, last_week_key, last_sent_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(account_email) DO UPDATE SET
+                        last_week_key = excluded.last_week_key,
+                        last_sent_at = excluded.last_sent_at
+                    """,
+                    (account_email, week_key, sent_at.isoformat()),
+                )
+                return True
+
+            return bool(self.write_transaction(_action))
+        except Exception as exc:
+            logger.error("KnowledgeDB weekly digest state write failed: %s", exc)
             return False
 
     def fetch_pending_commitments_by_sender(
