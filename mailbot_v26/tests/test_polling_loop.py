@@ -90,7 +90,15 @@ class DummyLaunchReportBuilder:
 
 
 def _config(accounts, tmp_path):
-    general = GeneralConfig(check_interval=1, max_attachment_mb=1, admin_chat_id="admin")
+    general = GeneralConfig(
+        check_interval=1,
+        max_email_mb=15,
+        max_attachment_mb=1,
+        max_zip_uncompressed_mb=80,
+        max_extracted_chars=50_000,
+        max_extracted_total_chars=120_000,
+        admin_chat_id="admin",
+    )
     keys = KeysConfig(telegram_bot_token="token", cf_account_id="cf", cf_api_token="cf_token")
     storage = StorageConfig(db_path=tmp_path / "mailbot.sqlite")
     return BotConfig(general=general, accounts=accounts, keys=keys, storage=storage)

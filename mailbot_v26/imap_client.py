@@ -21,12 +21,45 @@ from state_manager import StateManager
 class ResilientIMAP:
     """IMAP client that combines UID and SINCE queries to avoid duplicates."""
 
-    def __init__(self, account: AccountConfig, state: StateManager, start_time: datetime | None = None) -> None:
+    def __init__(
+        self,
+        account: AccountConfig,
+        state: StateManager,
+        start_time: datetime | None = None,
+        max_email_mb: int = 15,
+    ) -> None:
         self.account = account
         self.state = state
         self.logger = logging.getLogger(__name__)
         base_time = start_time or datetime.now()
         self.start_time = base_time.replace(tzinfo=None)
+        self.max_email_bytes = max_email_mb * 1024 * 1024
+
+    def _build_oversize_warning(
+        self,
+        *,
+        headers: bytes,
+        message_size: int | None,
+    ) -> bytes:
+        size_mb = (message_size or 0) / (1024 * 1024)
+        limit_mb = self.max_email_bytes / (1024 * 1024)
+        warning_text = (
+            "⚠️ Письмо слишком большое для загрузки.\n"
+            f"Размер: {size_mb:.1f} MB (лимит {limit_mb:.1f} MB).\n"
+            "Тело и вложения пропущены."
+        )
+        warning_body = warning_text.encode("utf-8")
+        if headers.endswith(b"\r\n"):
+            return headers + b"\r\n" + warning_body
+        return headers + b"\r\n\r\n" + warning_body
+
+    @staticmethod
+    def _extract_header_payload(envelope: dict[bytes, object]) -> bytes:
+        for key in (b"BODY[HEADER]", b"BODY.PEEK[HEADER]", b"RFC822.HEADER"):
+            payload = envelope.get(key)
+            if isinstance(payload, bytes):
+                return payload
+        return b""
 
     def _build_search(self) -> List[Sequence[str]]:
         last_uid = self.state.get_last_uid(self.account.login)
@@ -63,7 +96,7 @@ class ResilientIMAP:
             new_uids = [uid for uid in uid_list if uid > last_uid]
             messages: List[tuple[int, bytes]] = []
             for uid in sorted(new_uids):
-                data = client.fetch([uid], ["RFC822", "INTERNALDATE"])
+                data = client.fetch([uid], ["RFC822.SIZE", "INTERNALDATE"])
                 envelope = data.get(uid, {})
                 internaldate = envelope.get(b"INTERNALDATE")
                 if isinstance(internaldate, datetime) and internaldate.tzinfo is not None:
@@ -72,7 +105,31 @@ class ResilientIMAP:
                     latest_seen_uid = max(latest_seen_uid, uid)
                     continue
 
-                raw: bytes = envelope[b"RFC822"]
+                message_size = envelope.get(b"RFC822.SIZE")
+                if isinstance(message_size, bytes):
+                    try:
+                        message_size = int(message_size.decode("utf-8"))
+                    except (TypeError, ValueError):
+                        message_size = None
+                raw: bytes
+                if isinstance(message_size, int) and message_size > self.max_email_bytes:
+                    header_data = client.fetch([uid], ["BODY.PEEK[HEADER]"])
+                    header_envelope = header_data.get(uid, {})
+                    headers = self._extract_header_payload(header_envelope)
+                    raw = self._build_oversize_warning(
+                        headers=headers,
+                        message_size=message_size,
+                    )
+                    self.logger.warning(
+                        "imap_message_oversize uid=%s size_bytes=%s max_bytes=%s",
+                        uid,
+                        message_size,
+                        self.max_email_bytes,
+                    )
+                else:
+                    data = client.fetch([uid], ["RFC822"])
+                    envelope = data.get(uid, {})
+                    raw = envelope[b"RFC822"]
                 messages.append((uid, raw))
                 latest_seen_uid = max(latest_seen_uid, uid)
 

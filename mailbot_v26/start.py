@@ -356,7 +356,12 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                         print(f"\n[MAIL] Checking: {login}")
 
                         try:
-                            imap = ResilientIMAP(account, state, program_start)
+                            imap = ResilientIMAP(
+                                account,
+                                state,
+                                program_start,
+                                max_email_mb=config.general.max_email_mb,
+                            )
                             new_messages = imap.fetch_new_messages()
 
                             if not new_messages:

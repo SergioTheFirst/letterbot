@@ -25,7 +25,11 @@ def build_sample_config(tmpdir: Path) -> None:
         "config.ini",
         """[general]
 check_interval = 400
+max_email_mb = 25
 max_attachment_mb = 20
+max_zip_uncompressed_mb = 90
+max_extracted_chars = 40000
+max_extracted_total_chars = 110000
 admin_chat_id = 111
 
 [storage]
@@ -62,6 +66,7 @@ def test_load_full_config(tmp_path: Path) -> None:
     cfg = load_config(tmp_path)
     assert isinstance(cfg, BotConfig)
     assert cfg.general.check_interval == 400
+    assert cfg.general.max_email_mb == 25
     assert cfg.accounts[0].account_id == "primary"
     assert cfg.accounts[0].login == "sample@example.com"
     assert cfg.keys.telegram_bot_token == "token"
@@ -108,6 +113,7 @@ admin_chat_id = 1
     )
     general = load_general_config(tmp_path)
     assert general.check_interval == 180
+    assert general.max_email_mb == 15
 
 
 def test_general_interval_explicit_value(tmp_path: Path) -> None:
@@ -122,3 +128,4 @@ admin_chat_id = 1
     )
     general = load_general_config(tmp_path)
     assert general.check_interval == 180
+    assert general.max_zip_uncompressed_mb == 80

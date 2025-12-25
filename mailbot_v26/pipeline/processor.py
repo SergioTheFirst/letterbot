@@ -177,6 +177,37 @@ class TelegramBuildContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class LlmContext:
+    entity_resolution: Any | None
+    signal_quality: Any
+    llm_body_text: str
+    fallback_used: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AnalyticsResult:
+    email_row_id: int | None
+    commitment_status_updates: list[CommitmentStatusUpdate]
+    commitment_signal_preview: dict[str, object] | None
+    trust_result: Any | None
+    health_snapshot: Any | None
+    temporal_insights: list[TemporalState]
+    aggregated_insights: list[Insight]
+    insight_digest: InsightDigest | None
+
+
+@dataclass(frozen=True, slots=True)
+class RenderResult:
+    payload: TelegramPayload
+    render_mode: TelegramRenderMode
+    payload_invalid: bool
+    attachment_details: list[dict[str, Any]]
+    attachment_summary: str
+    extracted_text_len: int
+    body_summary: str
+
+
 class TelegramRenderMode(Enum):
     FULL = "full"
     SAFE_FALLBACK = "safe_fallback"
@@ -1066,61 +1097,109 @@ def _check_crm_available() -> bool:
         return False
 
 
-def process_message(
+def _build_context(
+    *,
+    message_id: int,
+    from_email: str,
+    from_name: str | None,
+    subject: str,
+    received_at: datetime,
+    body_text: str,
+) -> LlmContext:
+    entity_resolution = None
+    try:
+        entity_resolution = context_store.resolve_sender_entity(
+            from_email=from_email,
+            from_name=from_name,
+            entity_type="person",
+            event_time=received_at,
+        )
+        if entity_resolution:
+            logger.info(
+                "entity_resolved",
+                entity_id=entity_resolution.entity_id,
+                entity_type=entity_resolution.entity_type,
+                confidence=entity_resolution.confidence,
+            )
+            try:
+                context_store.resolve_entity_relationships(
+                    entity_id=entity_resolution.entity_id,
+                    from_email=from_email,
+                    from_name=from_name,
+                    event_time=received_at,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("entity_relationship_resolution_failed", error=str(exc))
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("entity_resolution_failed", error=str(exc))
+    signal_quality = evaluate_signal_quality(body_text or "")
+    fallback_used = False
+    llm_body_text = body_text
+    if not signal_quality.is_usable:
+        llm_body_text = _build_signal_fallback(subject, from_email)
+        fallback_used = True
+        logger.info("signal_fallback_used", reason=signal_quality.reason)
+    logger.info(
+        "signal_evaluated",
+        email_id=message_id,
+        entropy=signal_quality.entropy,
+        printable_ratio=signal_quality.printable_ratio,
+        quality_score=signal_quality.quality_score,
+        is_usable=signal_quality.is_usable,
+        fallback_used=fallback_used,
+    )
+    return LlmContext(
+        entity_resolution=entity_resolution,
+        signal_quality=signal_quality,
+        llm_body_text=llm_body_text,
+        fallback_used=fallback_used,
+    )
+
+
+def _record_analytics(
     *,
     account_email: str,
     message_id: int,
     from_email: str,
-    from_name: str | None = None,
+    from_name: str | None,
     subject: str,
     received_at: datetime,
     body_text: str,
-    attachments: list[dict[str, Any]],
+    llm_result: Any,
+    llm_provider: str | None,
+    priority: str,
+    original_priority: str | None,
+    priority_reason: str | None,
+    shadow_priority_to_persist: str | None,
+    shadow_priority_reason_to_persist: str | None,
+    shadow_action_line_to_persist: str | None,
+    shadow_action_reason_to_persist: str | None,
+    confidence_score_to_persist: float | None,
+    confidence_decision_to_persist: str | None,
+    proposed_action_type_to_persist: str | None,
+    proposed_action_text_to_persist: str | None,
+    proposed_action_confidence_to_persist: float | None,
+    confidence_score: float | None,
+    shadow_priority: str,
+    action_line: str,
+    body_summary: str,
+    attachment_summaries: list[dict[str, Any]],
+    commitments: list[Commitment],
+    enable_commitments: bool,
+    entity_resolution: Any | None,
+    signal_quality: Any,
+    fallback_used: bool,
     telegram_chat_id: str,
-) -> None:
-    """
-    Главный pipeline:
-    PARSE → LLM → (SAVE TO DB) → TELEGRAM
-
-    ⚠️ Поведение Telegram и LLM НЕ МЕНЯЕМ
-    """
-
-    try:
-        system_snapshotter.maybe_log()
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("system_health_snapshot_failed", error=str(exc))
-
-    # ---------- Stage PARSE (Commitment Tracker) ----------
-    logger.info(
-        "email_received",
-        email_id=message_id,
-        account=account_email,
-        from_email=from_email,
-        subject=subject,
-        received_at=received_at.isoformat(),
-    )
-    commitments: list[Commitment] = []
-    enable_commitments = getattr(feature_flags, "ENABLE_COMMITMENT_TRACKER", False)
-    if enable_commitments:
-        try:
-            commitments = detect_commitments(body_text or "")
-            if commitments:
-                logger.info(
-                    "commitment_detected",
-                    email_id=message_id,
-                    account=account_email,
-                    sender=from_email,
-                    count=len(commitments),
-                    has_deadlines=any(c.deadline_iso for c in commitments),
-                )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error(
-                "commitment_detection_failed",
-                email_id=message_id,
-                error=str(exc),
-            )
-
+) -> AnalyticsResult:
     commitment_status_updates: list[CommitmentStatusUpdate] = []
+    commitment_signal_preview: dict[str, object] | None = None
+    email_row_id: int | None = None
+    trust_result = None
+    health_snapshot = None
+    temporal_insights: list[TemporalState] = []
+    aggregated_insights: list[Insight] = []
+    insight_digest: InsightDigest | None = None
+
     if enable_commitments and from_email:
         if system_health.mode == OperationalMode.EMERGENCY_READ_ONLY:
             logger.error(
@@ -1207,60 +1286,618 @@ def process_message(
                     error=str(exc),
                 )
 
-    event_emitter.emit(
-        type="email_received",
-        timestamp=received_at,
-        email_id=message_id,
-        payload={
-            "account_email": account_email,
-            "from_email": from_email,
-            "subject": subject,
-        },
-    )
-
-    # ---------- Stage LLM ----------
-    entity_resolution = None
     try:
-        entity_resolution = context_store.resolve_sender_entity(
-            from_email=from_email,
-            from_name=from_name,
-            entity_type="person",
-            event_time=received_at,
+        prompt_full = _read_llm_field(llm_result, "prompt_full", "") or ""
+        response_full = (
+            _read_llm_field(llm_result, "response_full", "")
+            or _read_llm_field(llm_result, "llm_response", "")
+            or ""
         )
-        if entity_resolution:
-            logger.info(
-                "entity_resolved",
-                entity_id=entity_resolution.entity_id,
-                entity_type=entity_resolution.entity_type,
-                confidence=entity_resolution.confidence,
+        llm_model = _read_llm_field(llm_result, "llm_model", "") or ""
+
+        decision_trace_writer.write(
+            email_id=str(message_id),
+            account_email=account_email,
+            signal_entropy=signal_quality.entropy,
+            signal_printable_ratio=signal_quality.printable_ratio,
+            signal_quality_score=signal_quality.quality_score,
+            signal_fallback_used=fallback_used,
+            prompt_full=prompt_full,
+            llm_provider=llm_provider or "unknown",
+            llm_model=llm_model,
+            response_full=response_full,
+            confidence=confidence_score,
+            priority=priority,
+            action_line=action_line,
+            shadow_priority=shadow_priority,
+        )
+        logger.info(
+            "decision_traced",
+            email_id=message_id,
+            provider=llm_provider or "unknown",
+            entropy=signal_quality.entropy,
+            fallback_used=fallback_used,
+            priority=priority,
+            confidence=confidence_score or 0.0,
+        )
+    except Exception as exc:
+        logger.error(
+            "TRACE_WRITE_FAILED",
+            email_id=message_id,
+            error=str(exc),
+        )
+
+    try:
+        if not _check_crm_available():
+            change = system_health.update_component(
+                "CRM",
+                False,
+                reason="CRM unavailable",
             )
+            _notify_system_mode_change(
+                change=change,
+                chat_id=telegram_chat_id,
+                account_email=account_email,
+            )
+        email_row_id = knowledge_db.save_email(
+            account_email=account_email,
+            from_email=from_email,
+            subject=subject,
+            received_at=received_at.isoformat(),
+            priority=priority,
+            original_priority=original_priority,
+            priority_reason=priority_reason,
+            shadow_priority=shadow_priority_to_persist,
+            shadow_priority_reason=shadow_priority_reason_to_persist,
+            shadow_action_line=shadow_action_line_to_persist,
+            shadow_action_reason=shadow_action_reason_to_persist,
+            confidence_score=confidence_score_to_persist,
+            confidence_decision=confidence_decision_to_persist,
+            proposed_action_type=proposed_action_type_to_persist,
+            proposed_action_text=proposed_action_text_to_persist,
+            proposed_action_confidence=proposed_action_confidence_to_persist,
+            llm_provider=llm_provider,
+            action_line=action_line,
+            body_summary=body_summary,
+            raw_body=body_text,
+            attachment_summaries=[
+                (a["filename"], a["summary"])
+                for a in attachment_summaries
+            ],
+        )
+        if feature_flags.ENABLE_SHADOW_PERSISTENCE:
+            logger.info(
+                "shadow_persist_saved",
+                email_id=message_id,
+                account_email=account_email,
+            )
+        change = system_health.update_component("CRM", True)
+        _notify_system_mode_change(
+            change=change,
+            chat_id=telegram_chat_id,
+            account_email=account_email,
+        )
+    except Exception as exc:
+        change = system_health.update_component(
+            "CRM",
+            False,
+            reason=str(exc) or "CRM write failed",
+        )
+        _notify_system_mode_change(
+            change=change,
+            chat_id=telegram_chat_id,
+            account_email=account_email,
+        )
+        logger.error("knowledge_db_failed", error=str(exc))
+        logger.error(
+            "processing_error",
+            stage="crm",
+            email_id=message_id,
+            error=str(exc),
+        )
+
+    if enable_commitments and commitments:
+        if system_health.mode == OperationalMode.EMERGENCY_READ_ONLY:
+            logger.error(
+                "commitments_persist_failed",
+                email_id=message_id,
+                error="crm_unavailable",
+            )
+        elif email_row_id is None:
+            logger.error(
+                "commitments_persist_failed",
+                email_id=message_id,
+                error="missing_email_row_id",
+            )
+        else:
             try:
-                context_store.resolve_entity_relationships(
-                    entity_id=entity_resolution.entity_id,
-                    from_email=from_email,
-                    from_name=from_name,
-                    event_time=received_at,
+                saved = knowledge_db.save_commitments(
+                    email_row_id=email_row_id,
+                    commitments=commitments,
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
-                logger.error("entity_relationship_resolution_failed", error=str(exc))
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("entity_resolution_failed", error=str(exc))
-    signal_quality = evaluate_signal_quality(body_text or "")
-    fallback_used = False
-    llm_body_text = body_text
-    if not signal_quality.is_usable:
-        llm_body_text = _build_signal_fallback(subject, from_email)
-        fallback_used = True
-        logger.info("signal_fallback_used", reason=signal_quality.reason)
-    logger.info(
-        "signal_evaluated",
-        email_id=message_id,
-        entropy=signal_quality.entropy,
-        printable_ratio=signal_quality.printable_ratio,
-        quality_score=signal_quality.quality_score,
-        is_usable=signal_quality.is_usable,
-        fallback_used=fallback_used,
+                logger.error(
+                    "commitments_persist_failed",
+                    email_id=message_id,
+                    error=str(exc),
+                )
+            else:
+                if saved:
+                    logger.info(
+                        "commitments_persisted",
+                        email_id=message_id,
+                        count=len(commitments),
+                    )
+                    for commitment in commitments:
+                        try:
+                            event_emitter.emit(
+                                type="commitment_created",
+                                timestamp=received_at,
+                                entity_id=(
+                                    entity_resolution.entity_id
+                                    if entity_resolution
+                                    else None
+                                ),
+                                email_id=message_id,
+                                payload={
+                                    "commitment_text": commitment.commitment_text,
+                                    "deadline_iso": commitment.deadline_iso,
+                                    "status": commitment.status,
+                                    "source": commitment.source,
+                                    "confidence": commitment.confidence,
+                                },
+                            )
+                        except Exception as exc:  # pragma: no cover - defensive logging
+                            logger.error(
+                                "commitment_event_failed",
+                                email_id=message_id,
+                                error=str(exc),
+                            )
+                else:
+                    logger.error(
+                        "commitments_persist_failed",
+                        email_id=message_id,
+                        error="commitments_save_failed",
+                    )
+
+    if enable_commitments and entity_resolution and from_email:
+        try:
+            stats = analytics.commitment_stats_by_sender(
+                from_email=from_email,
+                days=30,
+            )
+            metrics = CommitmentReliabilityMetrics(
+                total_commitments=stats["total_commitments"],
+                fulfilled_count=stats["fulfilled_count"],
+                expired_count=stats["expired_count"],
+                unknown_count=stats["unknown_count"],
+            )
+            signal = compute_commitment_reliability(metrics)
+            previous_label = knowledge_db.upsert_entity_signal(
+                entity_id=entity_resolution.entity_id,
+                signal_type="commitment_reliability",
+                score=signal.score,
+                label=signal.label,
+                computed_at=datetime.now(timezone.utc).isoformat(),
+                sample_size=signal.sample_size,
+            )
+            logger.info(
+                "entity_signal_computed",
+                entity_id=entity_resolution.entity_id,
+                signal_type="commitment_reliability",
+                score=signal.score,
+                label=signal.label,
+                sample_size=signal.sample_size,
+            )
+            if previous_label and previous_label != signal.label:
+                logger.info(
+                    "entity_signal_changed",
+                    entity_id=entity_resolution.entity_id,
+                    signal_type="commitment_reliability",
+                    old_label=previous_label,
+                    new_label=signal.label,
+                    score=signal.score,
+                    sample_size=signal.sample_size,
+                )
+            if signal.sample_size > 0:
+                commitment_signal_preview = {
+                    "score": signal.score,
+                    "label": signal.label,
+                    "fulfilled_count": metrics.fulfilled_count,
+                    "expired_count": metrics.expired_count,
+                }
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "entity_signal_compute_failed",
+                entity_id=entity_resolution.entity_id,
+                signal_type="commitment_reliability",
+                error=str(exc),
+            )
+
+    if entity_resolution:
+        try:
+            last_received = context_store.latest_interaction_event_time(
+                entity_id=entity_resolution.entity_id,
+                event_type="email_received",
+            )
+            if last_received and received_at > last_received:
+                response_time_hours = (
+                    received_at - last_received
+                ).total_seconds() / 3600.0
+                context_store.record_interaction_event(
+                    entity_id=entity_resolution.entity_id,
+                    event_type="response_time",
+                    event_time=received_at,
+                    metadata={
+                        "response_time_hours": round(response_time_hours, 4),
+                        "previous_received_at": last_received.isoformat(),
+                    },
+                )
+            context_store.record_interaction_event(
+                entity_id=entity_resolution.entity_id,
+                event_type="email_received",
+                event_time=received_at,
+                metadata={
+                    "email_id": message_id,
+                    "from_email": from_email,
+                    "subject": subject,
+                },
+            )
+            baseline_value, _ = context_store.recompute_email_frequency(
+                entity_id=entity_resolution.entity_id
+            )
+            logger.info(
+                "baseline_updated",
+                entity_id=entity_resolution.entity_id,
+                metric="email_frequency",
+                value=baseline_value,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("context_layer_failed", error=str(exc))
+
+    if entity_resolution and from_email:
+        try:
+            trust_result = trust_score_calculator.compute(
+                entity_id=entity_resolution.entity_id,
+                from_email=from_email,
+            )
+            trust_snapshot_writer.write(trust_result.snapshot)
+            logger.info(
+                "trust_score_computed",
+                entity_id=entity_resolution.entity_id,
+                trust_score=trust_result.snapshot.score,
+                components={
+                    "commitment": trust_result.components.commitment_reliability,
+                    "response": trust_result.components.response_consistency,
+                    "trend": trust_result.components.trend,
+                },
+                sample_size=trust_result.snapshot.sample_size,
+                data_window_days=trust_result.data_window_days,
+            )
+            event_emitter.emit(
+                type="trust_score_updated",
+                timestamp=datetime.now(timezone.utc),
+                entity_id=entity_resolution.entity_id,
+                email_id=message_id,
+                payload={
+                    "trust_score": trust_result.snapshot.score,
+                    "sample_size": trust_result.snapshot.sample_size,
+                    "data_window_days": trust_result.data_window_days,
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "trust_score_compute_failed",
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
+
+    if entity_resolution and from_email and trust_result is not None:
+        try:
+            health_snapshot = relationship_health_calculator.compute(
+                entity_id=entity_resolution.entity_id,
+                from_email=from_email,
+                trust_score_result=trust_result,
+            )
+            relationship_health_snapshot_writer.write(health_snapshot)
+            logger.info(
+                "relationship_health_computed",
+                entity_id=entity_resolution.entity_id,
+                health_score=health_snapshot.health_score,
+                trust_score=health_snapshot.components_breakdown.get("trust_score"),
+                commitments_expired_30d=health_snapshot.components_breakdown.get(
+                    "commitments_expired_30d"
+                ),
+                response_time_delta=health_snapshot.components_breakdown.get(
+                    "response_time_delta"
+                ),
+                trend=health_snapshot.components_breakdown.get("trend_delta"),
+                data_window_days=health_snapshot.data_window_days,
+            )
+            event_emitter.emit(
+                type="relationship_health_updated",
+                timestamp=datetime.now(timezone.utc),
+                entity_id=entity_resolution.entity_id,
+                email_id=message_id,
+                payload={
+                    "health_score": health_snapshot.health_score,
+                    "reason": health_snapshot.reason,
+                    "components": health_snapshot.components_breakdown,
+                    "data_window_days": health_snapshot.data_window_days,
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "relationship_health_compute_failed",
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
+        else:
+            try:
+                anomalies = relationship_anomaly_detector.detect(
+                    entity_id=entity_resolution.entity_id,
+                    from_email=from_email,
+                    trust_score_result=trust_result,
+                    health_snapshot=health_snapshot,
+                )
+                if anomalies:
+                    for anomaly in anomalies:
+                        logger.info(
+                            "relationship_anomaly_detected",
+                            entity_id=anomaly.entity_id,
+                            anomaly_type=anomaly.anomaly_type,
+                            severity=anomaly.severity,
+                            rhs_current=health_snapshot.health_score,
+                            trust_score=trust_result.snapshot.score,
+                            evidence=anomaly.evidence,
+                        )
+                else:
+                    logger.info(
+                        "relationship_anomaly_none",
+                        entity_id=entity_resolution.entity_id,
+                        rhs_current=health_snapshot.health_score,
+                        trust_score=trust_result.snapshot.score,
+                    )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "relationship_anomaly_detection_failed",
+                    entity_id=entity_resolution.entity_id,
+                    error=str(exc),
+                )
+
+    if entity_resolution:
+        try:
+            temporal_insights = temporal_reasoning_engine.evaluate(
+                entity_id=entity_resolution.entity_id,
+                from_email=from_email,
+                now=datetime.now(timezone.utc),
+            )
+            if temporal_insights:
+                logger.info(
+                    "temporal_insights_detected",
+                    entity_id=entity_resolution.entity_id,
+                    insight_types=[state.state_type for state in temporal_insights],
+                    severities=[state.severity for state in temporal_insights],
+                )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "temporal_insight_failed",
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
+
+    if entity_resolution:
+        try:
+            aggregated_insights = aggregate_insights(
+                temporal_insights,
+                trust_result.snapshot.score if trust_result else None,
+                health_snapshot,
+            )
+            if aggregated_insights:
+                logger.info(
+                    "insights_aggregated",
+                    entity_id=entity_resolution.entity_id,
+                    insight_types=[insight.type for insight in aggregated_insights],
+                    severities=[insight.severity for insight in aggregated_insights],
+                )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "insight_aggregation_failed",
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
+
+        try:
+            insight_digest = build_insight_digest(
+                aggregated_insights,
+                trust_result.snapshot.score if trust_result else None,
+                health_snapshot,
+            )
+            logger.info(
+                "insight_digest_built",
+                entity_id=entity_resolution.entity_id,
+                status_label=insight_digest.status_label,
+                headline=insight_digest.headline,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "insight_digest_failed",
+                entity_id=entity_resolution.entity_id,
+                error=str(exc),
+            )
+
+    return AnalyticsResult(
+        email_row_id=email_row_id,
+        commitment_status_updates=commitment_status_updates,
+        commitment_signal_preview=commitment_signal_preview,
+        trust_result=trust_result,
+        health_snapshot=health_snapshot,
+        temporal_insights=temporal_insights,
+        aggregated_insights=aggregated_insights,
+        insight_digest=insight_digest,
     )
+
+
+def _render_notification(
+    *,
+    message_id: int,
+    received_at: datetime,
+    priority: str,
+    from_email: str,
+    subject: str,
+    action_line: str,
+    body_summary: str,
+    body_text: str,
+    attachments: list[dict[str, Any]],
+    llm_result: Any,
+    signal_quality: Any,
+    aggregated_insights: list[Insight],
+    insight_digest: InsightDigest | None,
+    telegram_chat_id: str,
+    account_email: str,
+    attachment_summaries: list[dict[str, Any]],
+    commitments: list[Commitment],
+) -> RenderResult:
+    attachment_details = _build_attachment_details(attachments)
+    attachment_summary = _build_attachment_summary(attachment_details)
+    extracted_text_len = len(body_text or "")
+    try:
+        arbiter_result = apply_insight_arbiter(
+            InsightArbiterInput(
+                llm_summary=body_summary,
+                extracted_text_len=extracted_text_len,
+                attachment_details=attachment_details,
+                commitments=commitments,
+                email_id=message_id,
+            )
+        )
+    except Exception as exc:  # pragma: no cover - safety net
+        logger.error(
+            "[INSIGHT-ARBITER] failed",
+            email_id=message_id,
+            error=str(exc),
+        )
+    else:
+        body_summary = arbiter_result.summary
+    build_context = TelegramBuildContext(
+        email_id=message_id,
+        received_at=received_at,
+        priority=priority,
+        from_email=from_email,
+        subject=subject,
+        action_line=action_line,
+        body_summary=body_summary,
+        body_text=body_text or "",
+        attachment_summary=attachment_summary,
+        attachment_details=attachment_details,
+        attachments_count=len(attachments),
+        extracted_text_len=extracted_text_len,
+        llm_failed=bool(_read_llm_field(llm_result, "failed", False))
+        or bool(_read_llm_field(llm_result, "error", False)),
+        signal_invalid=not signal_quality.is_usable,
+        insights=aggregated_insights,
+        insight_digest=insight_digest,
+        metadata={
+            "chat_id": telegram_chat_id,
+            "account_email": account_email,
+            "action_line": action_line,
+            "body_summary": body_summary,
+            "attachment_summaries": attachment_summaries,
+        },
+    )
+    payload, render_mode, payload_invalid = build_telegram_payload(build_context)
+    return RenderResult(
+        payload=payload,
+        render_mode=render_mode,
+        payload_invalid=payload_invalid,
+        attachment_details=attachment_details,
+        attachment_summary=attachment_summary,
+        extracted_text_len=extracted_text_len,
+        body_summary=body_summary,
+    )
+
+
+def process_message(
+    *,
+    account_email: str,
+    message_id: int,
+    from_email: str,
+    from_name: str | None = None,
+    subject: str,
+    received_at: datetime,
+    body_text: str,
+    attachments: list[dict[str, Any]],
+    telegram_chat_id: str,
+) -> None:
+    """
+    Главный pipeline:
+    PARSE → LLM → (SAVE TO DB) → TELEGRAM
+
+    ⚠️ Поведение Telegram и LLM НЕ МЕНЯЕМ
+    """
+
+    try:
+        system_snapshotter.maybe_log()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("system_health_snapshot_failed", error=str(exc))
+
+    # ---------- Stage PARSE (Commitment Tracker) ----------
+    logger.info(
+        "email_received",
+        email_id=message_id,
+        account=account_email,
+        from_email=from_email,
+        subject=subject,
+        received_at=received_at.isoformat(),
+    )
+    commitments: list[Commitment] = []
+    enable_commitments = getattr(feature_flags, "ENABLE_COMMITMENT_TRACKER", False)
+    if enable_commitments:
+        try:
+            commitments = detect_commitments(body_text or "")
+            if commitments:
+                logger.info(
+                    "commitment_detected",
+                    email_id=message_id,
+                    account=account_email,
+                    sender=from_email,
+                    count=len(commitments),
+                    has_deadlines=any(c.deadline_iso for c in commitments),
+                )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "commitment_detection_failed",
+                email_id=message_id,
+                error=str(exc),
+            )
+
+    try:
+        event_emitter.emit(
+            type="email_received",
+            timestamp=received_at,
+            email_id=message_id,
+            payload={
+                "account_email": account_email,
+                "from_email": from_email,
+                "subject": subject,
+            },
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("event_emit_failed", error=str(exc))
+
+    # ---------- Stage LLM ----------
+    llm_context = _build_context(
+        message_id=message_id,
+        from_email=from_email,
+        from_name=from_name,
+        subject=subject,
+        received_at=received_at,
+        body_text=body_text or "",
+    )
+    entity_resolution = llm_context.entity_resolution
+    signal_quality = llm_context.signal_quality
+    llm_body_text = llm_context.llm_body_text
+    fallback_used = llm_context.fallback_used
     llm_start = time.perf_counter()
     try:
         llm_result = run_llm_stage(
@@ -1508,474 +2145,43 @@ def process_message(
             proposed_action.get("confidence") if proposed_action else None
         )
 
-    # ---------- Stage 1.2: WRITE-ONLY CRM ----------
-    email_row_id: int | None = None
-    try:
-        if not _check_crm_available():
-            change = system_health.update_component(
-                "CRM",
-                False,
-                reason="CRM unavailable",
-            )
-            _notify_system_mode_change(
-                change=change,
-                chat_id=telegram_chat_id,
-                account_email=account_email,
-            )
-        email_row_id = knowledge_db.save_email(
-            account_email=account_email,
-            from_email=from_email,
-            subject=subject,
-            received_at=received_at.isoformat(),
-            priority=priority,
-            original_priority=original_priority,
-            priority_reason=priority_reason,
-            shadow_priority=shadow_priority_to_persist,
-            shadow_priority_reason=shadow_priority_reason_to_persist,
-            shadow_action_line=shadow_action_line_to_persist,
-            shadow_action_reason=shadow_action_reason_to_persist,
-            confidence_score=confidence_score_to_persist,
-            confidence_decision=confidence_decision_to_persist,
-            proposed_action_type=proposed_action_type_to_persist,
-            proposed_action_text=proposed_action_text_to_persist,
-            proposed_action_confidence=proposed_action_confidence_to_persist,
-            llm_provider=llm_provider,
-            action_line=action_line,
-            body_summary=body_summary,
-            raw_body=body_text,
-            attachment_summaries=[
-                (a["filename"], a["summary"])
-                for a in attachment_summaries
-            ],
-        )
-        if feature_flags.ENABLE_SHADOW_PERSISTENCE:
-            logger.info(
-                "shadow_persist_saved",
-                email_id=message_id,
-                account_email=account_email,
-            )
-        change = system_health.update_component("CRM", True)
-        _notify_system_mode_change(
-            change=change,
-            chat_id=telegram_chat_id,
-            account_email=account_email,
-        )
+    analytics_result = _record_analytics(
+        account_email=account_email,
+        message_id=message_id,
+        from_email=from_email,
+        from_name=from_name,
+        subject=subject,
+        received_at=received_at,
+        body_text=body_text,
+        llm_result=llm_result,
+        llm_provider=llm_provider,
+        priority=priority,
+        original_priority=original_priority,
+        priority_reason=priority_reason,
+        shadow_priority_to_persist=shadow_priority_to_persist,
+        shadow_priority_reason_to_persist=shadow_priority_reason_to_persist,
+        shadow_action_line_to_persist=shadow_action_line_to_persist,
+        shadow_action_reason_to_persist=shadow_action_reason_to_persist,
+        confidence_score_to_persist=confidence_score_to_persist,
+        confidence_decision_to_persist=confidence_decision_to_persist,
+        proposed_action_type_to_persist=proposed_action_type_to_persist,
+        proposed_action_text_to_persist=proposed_action_text_to_persist,
+        proposed_action_confidence_to_persist=proposed_action_confidence_to_persist,
+        confidence_score=confidence_score,
+        shadow_priority=shadow_priority,
+        action_line=action_line,
+        body_summary=body_summary,
+        attachment_summaries=attachment_summaries,
+        commitments=commitments,
+        enable_commitments=enable_commitments,
+        entity_resolution=entity_resolution,
+        signal_quality=signal_quality,
+        fallback_used=fallback_used,
+        telegram_chat_id=telegram_chat_id,
+    )
 
-    except Exception as exc:
-        # ❗ БД — side-effect only
-        change = system_health.update_component(
-            "CRM",
-            False,
-            reason=str(exc) or "CRM write failed",
-        )
-        _notify_system_mode_change(
-            change=change,
-            chat_id=telegram_chat_id,
-            account_email=account_email,
-        )
-        logger.error("knowledge_db_failed", error=str(exc))
-        logger.error(
-            "processing_error",
-            stage="crm",
-            email_id=message_id,
-            error=str(exc),
-        )
-
-    if enable_commitments and commitments:
-        if system_health.mode == OperationalMode.EMERGENCY_READ_ONLY:
-            logger.error(
-                "commitments_persist_failed",
-                email_id=message_id,
-                error="crm_unavailable",
-            )
-        elif email_row_id is None:
-            logger.error(
-                "commitments_persist_failed",
-                email_id=message_id,
-                error="missing_email_row_id",
-            )
-        else:
-            try:
-                saved = knowledge_db.save_commitments(
-                    email_row_id=email_row_id,
-                    commitments=commitments,
-                )
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.error(
-                    "commitments_persist_failed",
-                    email_id=message_id,
-                    error=str(exc),
-                )
-            else:
-                if saved:
-                    logger.info(
-                        "commitments_persisted",
-                        email_id=message_id,
-                        count=len(commitments),
-                    )
-                    for commitment in commitments:
-                        event_emitter.emit(
-                            type="commitment_created",
-                            timestamp=received_at,
-                            entity_id=(
-                                entity_resolution.entity_id
-                                if entity_resolution
-                                else None
-                            ),
-                            email_id=message_id,
-                            payload={
-                                "commitment_text": commitment.commitment_text,
-                                "deadline_iso": commitment.deadline_iso,
-                                "status": commitment.status,
-                                "source": commitment.source,
-                                "confidence": commitment.confidence,
-                            },
-                        )
-                else:
-                    logger.error(
-                        "commitments_persist_failed",
-                        email_id=message_id,
-                        error="commitments_save_failed",
-                    )
-
-    commitment_signal_preview: dict[str, object] | None = None
-    if enable_commitments and entity_resolution and from_email:
-        try:
-            stats = analytics.commitment_stats_by_sender(
-                from_email=from_email,
-                days=30,
-            )
-            metrics = CommitmentReliabilityMetrics(
-                total_commitments=stats["total_commitments"],
-                fulfilled_count=stats["fulfilled_count"],
-                expired_count=stats["expired_count"],
-                unknown_count=stats["unknown_count"],
-            )
-            signal = compute_commitment_reliability(metrics)
-            previous_label = knowledge_db.upsert_entity_signal(
-                entity_id=entity_resolution.entity_id,
-                signal_type="commitment_reliability",
-                score=signal.score,
-                label=signal.label,
-                computed_at=datetime.now(timezone.utc).isoformat(),
-                sample_size=signal.sample_size,
-            )
-            logger.info(
-                "entity_signal_computed",
-                entity_id=entity_resolution.entity_id,
-                signal_type="commitment_reliability",
-                score=signal.score,
-                label=signal.label,
-                sample_size=signal.sample_size,
-            )
-            if previous_label and previous_label != signal.label:
-                logger.info(
-                    "entity_signal_changed",
-                    entity_id=entity_resolution.entity_id,
-                    signal_type="commitment_reliability",
-                    old_label=previous_label,
-                    new_label=signal.label,
-                    score=signal.score,
-                    sample_size=signal.sample_size,
-                )
-            if signal.sample_size > 0:
-                commitment_signal_preview = {
-                    "score": signal.score,
-                    "label": signal.label,
-                    "fulfilled_count": metrics.fulfilled_count,
-                    "expired_count": metrics.expired_count,
-                }
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error(
-                "entity_signal_compute_failed",
-                entity_id=entity_resolution.entity_id,
-                signal_type="commitment_reliability",
-                error=str(exc),
-            )
-
-    if entity_resolution:
-        try:
-            last_received = context_store.latest_interaction_event_time(
-                entity_id=entity_resolution.entity_id,
-                event_type="email_received",
-            )
-            if last_received and received_at > last_received:
-                response_time_hours = (
-                    received_at - last_received
-                ).total_seconds() / 3600.0
-                context_store.record_interaction_event(
-                    entity_id=entity_resolution.entity_id,
-                    event_type="response_time",
-                    event_time=received_at,
-                    metadata={
-                        "response_time_hours": round(response_time_hours, 4),
-                        "previous_received_at": last_received.isoformat(),
-                    },
-                )
-            context_store.record_interaction_event(
-                entity_id=entity_resolution.entity_id,
-                event_type="email_received",
-                event_time=received_at,
-                metadata={
-                    "email_id": message_id,
-                    "from_email": from_email,
-                    "subject": subject,
-                },
-            )
-            baseline_value, _ = context_store.recompute_email_frequency(
-                entity_id=entity_resolution.entity_id
-            )
-            logger.info(
-                "baseline_updated",
-                entity_id=entity_resolution.entity_id,
-                metric="email_frequency",
-                value=baseline_value,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("context_layer_failed", error=str(exc))
-
-    trust_result = None
-    health_snapshot = None
-    temporal_insights: list[TemporalState] = []
-    aggregated_insights: list[Insight] = []
-    insight_digest: InsightDigest | None = None
-    if entity_resolution and from_email:
-        try:
-            trust_result = trust_score_calculator.compute(
-                entity_id=entity_resolution.entity_id,
-                from_email=from_email,
-            )
-            trust_snapshot_writer.write(trust_result.snapshot)
-            logger.info(
-                "trust_score_computed",
-                entity_id=entity_resolution.entity_id,
-                trust_score=trust_result.snapshot.score,
-                components={
-                    "commitment": trust_result.components.commitment_reliability,
-                    "response": trust_result.components.response_consistency,
-                    "trend": trust_result.components.trend,
-                },
-                sample_size=trust_result.snapshot.sample_size,
-                data_window_days=trust_result.data_window_days,
-            )
-            event_emitter.emit(
-                type="trust_score_updated",
-                timestamp=datetime.now(timezone.utc),
-                entity_id=entity_resolution.entity_id,
-                email_id=message_id,
-                payload={
-                    "trust_score": trust_result.snapshot.score,
-                    "sample_size": trust_result.snapshot.sample_size,
-                    "data_window_days": trust_result.data_window_days,
-                },
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error(
-                "trust_score_compute_failed",
-                entity_id=entity_resolution.entity_id,
-                error=str(exc),
-            )
-
-    if entity_resolution and from_email and trust_result is not None:
-        try:
-            health_snapshot = relationship_health_calculator.compute(
-                entity_id=entity_resolution.entity_id,
-                from_email=from_email,
-                trust_score_result=trust_result,
-            )
-            relationship_health_snapshot_writer.write(health_snapshot)
-            logger.info(
-                "relationship_health_computed",
-                entity_id=entity_resolution.entity_id,
-                health_score=health_snapshot.health_score,
-                trust_score=health_snapshot.components_breakdown.get("trust_score"),
-                commitments_expired_30d=health_snapshot.components_breakdown.get(
-                    "commitments_expired_30d"
-                ),
-                response_time_delta=health_snapshot.components_breakdown.get(
-                    "response_time_delta"
-                ),
-                trend=health_snapshot.components_breakdown.get("trend_delta"),
-                data_window_days=health_snapshot.data_window_days,
-            )
-            event_emitter.emit(
-                type="relationship_health_updated",
-                timestamp=datetime.now(timezone.utc),
-                entity_id=entity_resolution.entity_id,
-                email_id=message_id,
-                payload={
-                    "health_score": health_snapshot.health_score,
-                    "reason": health_snapshot.reason,
-                    "components": health_snapshot.components_breakdown,
-                    "data_window_days": health_snapshot.data_window_days,
-                },
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error(
-                "relationship_health_compute_failed",
-                entity_id=entity_resolution.entity_id,
-                error=str(exc),
-            )
-        else:
-            try:
-                anomalies = relationship_anomaly_detector.detect(
-                    entity_id=entity_resolution.entity_id,
-                    from_email=from_email,
-                    trust_score_result=trust_result,
-                    health_snapshot=health_snapshot,
-                )
-                if anomalies:
-                    for anomaly in anomalies:
-                        logger.info(
-                            "relationship_anomaly_detected",
-                            entity_id=anomaly.entity_id,
-                            anomaly_type=anomaly.anomaly_type,
-                            severity=anomaly.severity,
-                            rhs_current=health_snapshot.health_score,
-                            trust_score=trust_result.snapshot.score,
-                            evidence=anomaly.evidence,
-                        )
-                else:
-                    logger.info(
-                        "relationship_anomaly_none",
-                        entity_id=entity_resolution.entity_id,
-                        rhs_current=health_snapshot.health_score,
-                        trust_score=trust_result.snapshot.score,
-                    )
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.error(
-                    "relationship_anomaly_detection_failed",
-                    entity_id=entity_resolution.entity_id,
-                    error=str(exc),
-                )
-
-    if entity_resolution:
-        try:
-            temporal_insights = temporal_reasoning_engine.evaluate(
-                entity_id=entity_resolution.entity_id,
-                from_email=from_email,
-                now=datetime.now(timezone.utc),
-            )
-            if temporal_insights:
-                logger.info(
-                    "temporal_insights_detected",
-                    entity_id=entity_resolution.entity_id,
-                    insight_types=[state.state_type for state in temporal_insights],
-                    severities=[state.severity for state in temporal_insights],
-                )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error(
-                "temporal_insight_failed",
-                entity_id=entity_resolution.entity_id,
-                error=str(exc),
-            )
-
-    if entity_resolution:
-        try:
-            aggregated_insights = aggregate_insights(
-                temporal_insights,
-                trust_result.snapshot.score if trust_result else None,
-                health_snapshot,
-            )
-            if aggregated_insights:
-                logger.info(
-                    "insights_aggregated",
-                    entity_id=entity_resolution.entity_id,
-                    insight_types=[insight.type for insight in aggregated_insights],
-                    severities=[insight.severity for insight in aggregated_insights],
-                )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error(
-                "insight_aggregation_failed",
-                entity_id=entity_resolution.entity_id,
-                error=str(exc),
-            )
-
-        try:
-            insight_digest = build_insight_digest(
-                aggregated_insights,
-                trust_result.snapshot.score if trust_result else None,
-                health_snapshot,
-            )
-            logger.info(
-                "insight_digest_built",
-                entity_id=entity_resolution.entity_id,
-                status_label=insight_digest.status_label,
-                headline=insight_digest.headline,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error(
-                "insight_digest_failed",
-                entity_id=entity_resolution.entity_id,
-                error=str(exc),
-            )
-
-    # ---------- Stage Decision Trace ----------
-    try:
-        prompt_full = _read_llm_field(llm_result, "prompt_full", "") or ""
-        response_full = (
-            _read_llm_field(llm_result, "response_full", "")
-            or _read_llm_field(llm_result, "llm_response", "")
-            or ""
-        )
-        llm_model = _read_llm_field(llm_result, "llm_model", "") or ""
-
-        decision_trace_writer.write(
-            email_id=str(message_id),
-            account_email=account_email,
-            signal_entropy=signal_quality.entropy,
-            signal_printable_ratio=signal_quality.printable_ratio,
-            signal_quality_score=signal_quality.quality_score,
-            signal_fallback_used=fallback_used,
-            prompt_full=prompt_full,
-            llm_provider=llm_provider or "unknown",
-            llm_model=llm_model,
-            response_full=response_full,
-            confidence=confidence_score,
-            priority=priority,
-            action_line=action_line,
-            shadow_priority=shadow_priority,
-        )
-        logger.info(
-            "decision_traced",
-            email_id=message_id,
-            provider=llm_provider or "unknown",
-            entropy=signal_quality.entropy,
-            fallback_used=fallback_used,
-            priority=priority,
-            confidence=confidence_score or 0.0,
-        )
-    except Exception as exc:
-        logger.error(
-            "TRACE_WRITE_FAILED",
-            email_id=message_id,
-            error=str(exc),
-        )
-
-    # ---------- Stage Telegram ----------
-    attachment_details = _build_attachment_details(attachments)
-    attachment_summary = _build_attachment_summary(attachment_details)
-    extracted_text_len = len(body_text or "")
-    try:
-        arbiter_result = apply_insight_arbiter(
-            InsightArbiterInput(
-                llm_summary=body_summary,
-                extracted_text_len=extracted_text_len,
-                attachment_details=attachment_details,
-                commitments=commitments,
-                email_id=message_id,
-            )
-        )
-    except Exception as exc:  # pragma: no cover - safety net
-        logger.error(
-            "[INSIGHT-ARBITER] failed",
-            email_id=message_id,
-            error=str(exc),
-        )
-    else:
-        body_summary = arbiter_result.summary
-    build_context = TelegramBuildContext(
-        email_id=message_id,
+    render_result = _render_notification(
+        message_id=message_id,
         received_at=received_at,
         priority=priority,
         from_email=from_email,
@@ -1983,37 +2189,32 @@ def process_message(
         action_line=action_line,
         body_summary=body_summary,
         body_text=body_text or "",
-        attachment_summary=attachment_summary,
-        attachment_details=attachment_details,
-        attachments_count=len(attachments),
-        extracted_text_len=extracted_text_len,
-        llm_failed=bool(_read_llm_field(llm_result, "failed", False))
-        or bool(_read_llm_field(llm_result, "error", False)),
-        signal_invalid=not signal_quality.is_usable,
-        insights=aggregated_insights,
-        insight_digest=insight_digest,
-        metadata={
-            "chat_id": telegram_chat_id,
-            "account_email": account_email,
-            "action_line": action_line,
-            "body_summary": body_summary,
-            "attachment_summaries": attachment_summaries,
-        },
+        attachments=attachments,
+        llm_result=llm_result,
+        signal_quality=signal_quality,
+        aggregated_insights=analytics_result.aggregated_insights,
+        insight_digest=analytics_result.insight_digest,
+        telegram_chat_id=telegram_chat_id,
+        account_email=account_email,
+        attachment_summaries=attachment_summaries,
+        commitments=commitments,
     )
-    payload, render_mode, payload_invalid = build_telegram_payload(build_context)
+    payload = render_result.payload
+    render_mode = render_result.render_mode
+    payload_invalid = render_result.payload_invalid
     logger.info(
         "tg_render_mode_selected",
         email_id=message_id,
         mode=render_mode.name,
-        extracted_text_len=build_context.extracted_text_len,
-        attachments=build_context.attachments_count,
+        extracted_text_len=render_result.extracted_text_len,
+        attachments=len(attachments),
     )
     deadlines_count = sum(
         1 for commitment in commitments if commitment.deadline_iso
     )
     relationship_health_delta: float | None = None
-    if health_snapshot is not None:
-        value = health_snapshot.components_breakdown.get("trend_delta")
+    if analytics_result.health_snapshot is not None:
+        value = analytics_result.health_snapshot.components_breakdown.get("trend_delta")
         try:
             relationship_health_delta = float(value)
         except (TypeError, ValueError):
@@ -2026,8 +2227,11 @@ def process_message(
                 priority=priority,
                 commitments=commitments,
                 deadlines_count=deadlines_count,
-                insight_severity=max_insight_severity(aggregated_insights),
-                attachments_only=extracted_text_len <= 0 and len(attachments) > 0,
+                insight_severity=max_insight_severity(
+                    analytics_result.aggregated_insights
+                ),
+                attachments_only=render_result.extracted_text_len <= 0
+                and len(attachments) > 0,
                 relationship_health_delta=relationship_health_delta,
                 email_id=message_id,
             )
@@ -2044,7 +2248,7 @@ def process_message(
         attention_reason = "gate_failed"
 
     if deferred_for_digest:
-        if email_row_id is None:
+        if analytics_result.email_row_id is None:
             logger.error(
                 "[ATTENTION-GATE] persistence_failed",
                 email_id=message_id,
@@ -2053,7 +2257,7 @@ def process_message(
             )
         else:
             persisted = knowledge_db.mark_deferred_for_digest(
-                email_row_id=email_row_id,
+                email_row_id=analytics_result.email_row_id,
                 deferred=True,
             )
             if not persisted:
@@ -2185,7 +2389,9 @@ def process_message(
             reasons=[reason for reason in (shadow_action_reason, shadow_reason, priority_reason) if reason],
             confidence=proposed_action.get("confidence") if proposed_action else None,
         )
-        if enable_commitments and (commitments or commitment_status_updates):
+        if enable_commitments and (
+            commitments or analytics_result.commitment_status_updates
+        ):
             preview_commitments = list(commitments)
             preview_commitments.extend(
                 [
@@ -2196,7 +2402,7 @@ def process_message(
                         source="crm",
                         confidence=1.0,
                     )
-                    for update in commitment_status_updates
+                    for update in analytics_result.commitment_status_updates
                 ]
             )
             preview_text = _append_commitments_preview(
@@ -2207,24 +2413,28 @@ def process_message(
                 email_id=message_id,
                 count=len(preview_commitments),
             )
-        if commitment_signal_preview:
+        if analytics_result.commitment_signal_preview:
             preview_text = _append_commitment_signal_preview(
                 preview_text,
                 from_email=from_email,
-                score=int(commitment_signal_preview["score"]),
-                label=str(commitment_signal_preview["label"]),
-                fulfilled_count=int(commitment_signal_preview["fulfilled_count"]),
-                expired_count=int(commitment_signal_preview["expired_count"]),
+                score=int(analytics_result.commitment_signal_preview["score"]),
+                label=str(analytics_result.commitment_signal_preview["label"]),
+                fulfilled_count=int(
+                    analytics_result.commitment_signal_preview["fulfilled_count"]
+                ),
+                expired_count=int(
+                    analytics_result.commitment_signal_preview["expired_count"]
+                ),
             )
-        if insight_digest:
+        if analytics_result.insight_digest:
             preview_text = _append_insight_digest_preview(
                 preview_text,
-                insight_digest,
+                analytics_result.insight_digest,
             )
-        if aggregated_insights:
+        if analytics_result.aggregated_insights:
             preview_text = _append_insights_preview(
                 preview_text,
-                aggregated_insights,
+                analytics_result.aggregated_insights,
             )
         send_preview_to_telegram(
             chat_id=telegram_chat_id,

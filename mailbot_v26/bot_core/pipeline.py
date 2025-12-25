@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import io
 import logging
 import re
 import unicodedata
@@ -11,6 +12,7 @@ from email.message import Message as EmailMessage
 from email.utils import parseaddr
 from pathlib import Path
 from typing import Dict, List
+import zipfile
 
 from mailbot_v26.bot_core.extractors.doc import extract_docx_text
 from mailbot_v26.bot_core.extractors.excel import extract_excel_text
@@ -189,7 +191,20 @@ def _extract_body(email_obj: EmailMessage) -> str:
         return ""
 
 
-def _extract_attachment_text(att: Attachment) -> str:
+def _zip_uncompressed_size(file_bytes: bytes) -> int | None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            return sum(info.file_size for info in zf.infolist())
+    except Exception:
+        return None
+
+
+def _extract_attachment_text(
+    att: Attachment,
+    *,
+    max_chars: int,
+    max_zip_uncompressed_bytes: int,
+) -> str:
     name_lower = (att.filename or "").lower()
     content_type = (att.content_type or "").lower()
 
@@ -201,23 +216,34 @@ def _extract_attachment_text(att: Attachment) -> str:
     )
 
     try:
+        if name_lower.endswith((".zip", ".docx", ".xlsx")) and max_zip_uncompressed_bytes > 0:
+            uncompressed_size = _zip_uncompressed_size(att.content)
+            if uncompressed_size is not None and uncompressed_size > max_zip_uncompressed_bytes:
+                logger.warning(
+                    "zip_bomb_guard_triggered",
+                    filename=att.filename,
+                    uncompressed_bytes=uncompressed_size,
+                    max_bytes=max_zip_uncompressed_bytes,
+                )
+                return "[ERROR: Compressed content too large/untrusted]"
+
         if name_lower.endswith(".pdf"):
             text = sanitize_text(
-                extract_pdf_text(att.content, att.filename), max_len=5000
+                extract_pdf_text(att.content, att.filename), max_len=max_chars
             )
             logger.info("PDF extraction: %d chars from %s", len(text), att.filename)
             return text
 
         if name_lower.endswith((".doc", ".docx")):
             text = sanitize_text(
-                extract_docx_text(att.content, att.filename), max_len=5000
+                extract_docx_text(att.content, att.filename), max_len=max_chars
             )
             logger.info("DOC extraction: %d chars from %s", len(text), att.filename)
             return text
 
         if name_lower.endswith((".xls", ".xlsx")):
             text = sanitize_text(
-                extract_excel_text(att.content, att.filename), max_len=5000
+                extract_excel_text(att.content, att.filename), max_len=max_chars
             )
             logger.info("Excel extraction: %d chars from %s", len(text), att.filename)
             return text
@@ -226,7 +252,7 @@ def _extract_attachment_text(att: Attachment) -> str:
             (".txt", ".csv", ".log", ".md", ".json")
         ):
             decoded = att.content.decode("utf-8", errors="ignore")
-            text = sanitize_text(decoded, max_len=4000)
+            text = sanitize_text(decoded, max_len=max_chars)
             logger.info("Text extraction: %d chars from %s", len(text), att.filename)
             return text
 
@@ -236,9 +262,18 @@ def _extract_attachment_text(att: Attachment) -> str:
     return ""
 
 
-def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachment]:
-    byte_limit = max_mb * 1024 * 1024
-    candidates: list[tuple[str, str, bytes, int]] = []
+def _extract_attachments(
+    email_obj: EmailMessage,
+    *,
+    max_attachment_mb: int,
+    max_zip_uncompressed_mb: int,
+    max_extracted_chars: int,
+    max_extracted_total_chars: int,
+) -> List[Attachment]:
+    byte_limit = max_attachment_mb * 1024 * 1024
+    max_zip_uncompressed_bytes = max_zip_uncompressed_mb * 1024 * 1024
+    entries: list[tuple[str, str, bytes, int, bool]] = []
+    candidates: list[tuple[int, str, str, bytes, int]] = []
     for part in email_obj.walk():
         raw_filename = part.get_filename()
         filename = decode_mime_header(raw_filename or "")
@@ -257,26 +292,35 @@ def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachmen
                 payload = b""
                 continue
             if byte_limit > 0 and payload_size > byte_limit:
-                payload = b""
+                entries.append(
+                    (
+                        filename,
+                        part.get_content_type() or "",
+                        b"",
+                        payload_size,
+                        True,
+                    )
+                )
                 continue
             if not filename or filename.lower().startswith("attachment.bin"):
                 payload = b""
                 continue
-            candidates.append(
-                (
-                    filename,
-                    part.get_content_type() or "",
-                    payload,
-                    payload_size,
-                )
+            entry = (
+                filename,
+                part.get_content_type() or "",
+                payload,
+                payload_size,
+                False,
             )
+            entries.append(entry)
+            candidates.append((len(entries) - 1, *entry[:-1]))
         except Exception:
             continue
-    if not candidates:
+    if not candidates and not entries:
         return []
 
-    def _extract(candidate: tuple[str, str, bytes, int]) -> str:
-        filename, content_type, payload, payload_size = candidate
+    def _extract(candidate: tuple[int, str, str, bytes, int]) -> tuple[int, str]:
+        index, filename, content_type, payload, payload_size = candidate
         temp_attachment = Attachment(
             filename=filename,
             content=payload,
@@ -284,19 +328,33 @@ def _extract_attachments(email_obj: EmailMessage, max_mb: int) -> List[Attachmen
             text="",
             size_bytes=payload_size,
         )
-        extracted_text = _extract_attachment_text(temp_attachment)
+        extracted_text = _extract_attachment_text(
+            temp_attachment,
+            max_chars=max_extracted_chars,
+            max_zip_uncompressed_bytes=max_zip_uncompressed_bytes,
+        )
         temp_attachment.content = b""
         del temp_attachment
-        return extracted_text
+        return index, extracted_text
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(_extract, candidate) for candidate in candidates]
-        extracted_texts = [future.result() for future in futures]
+    extracted_map: dict[int, str] = {}
+    if candidates:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(_extract, candidate) for candidate in candidates]
+            for future in futures:
+                index, extracted_text = future.result()
+                extracted_map[index] = extracted_text
 
     attachments: List[Attachment] = []
-    for (filename, content_type, _payload, payload_size), extracted_text in zip(
-        candidates, extracted_texts
-    ):
+    remaining_chars = max_extracted_total_chars if max_extracted_total_chars > 0 else None
+    for index, (filename, content_type, _payload, payload_size, oversized) in enumerate(entries):
+        extracted_text = "" if oversized else extracted_map.get(index, "")
+        if remaining_chars is not None:
+            if remaining_chars <= 0:
+                extracted_text = ""
+            elif len(extracted_text) > remaining_chars:
+                extracted_text = extracted_text[:remaining_chars]
+            remaining_chars -= len(extracted_text)
         attachment = Attachment(
             filename=filename,
             content=b"",
@@ -313,7 +371,13 @@ def parse_raw_email(raw_bytes: bytes, config: BotConfig) -> InboundMessage:
     subject = _decode_subject(email_obj)
     sender = _decode_from(email_obj)
     body = _extract_body(email_obj)
-    attachments = _extract_attachments(email_obj, config.general.max_attachment_mb)
+    attachments = _extract_attachments(
+        email_obj,
+        max_attachment_mb=config.general.max_attachment_mb,
+        max_zip_uncompressed_mb=config.general.max_zip_uncompressed_mb,
+        max_extracted_chars=config.general.max_extracted_chars,
+        max_extracted_total_chars=config.general.max_extracted_total_chars,
+    )
     return InboundMessage(
         subject=subject, body=body, sender=sender, attachments=attachments
     )

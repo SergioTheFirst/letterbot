@@ -22,7 +22,11 @@ class GeneralConfig:
     """Top-level bot settings."""
 
     check_interval: int
+    max_email_mb: int
     max_attachment_mb: int
+    max_zip_uncompressed_mb: int
+    max_extracted_chars: int
+    max_extracted_total_chars: int
     admin_chat_id: str
 
 
@@ -98,7 +102,20 @@ def load_general_config(base_dir: Path = CONFIG_DIR) -> GeneralConfig:
     try:
         return GeneralConfig(
             check_interval=section.getint("check_interval", fallback=180),
+            max_email_mb=section.getint("max_email_mb", fallback=15),
             max_attachment_mb=section.getint("max_attachment_mb", fallback=15),
+            max_zip_uncompressed_mb=section.getint(
+                "max_zip_uncompressed_mb",
+                fallback=80,
+            ),
+            max_extracted_chars=section.getint(
+                "max_extracted_chars",
+                fallback=50_000,
+            ),
+            max_extracted_total_chars=section.getint(
+                "max_extracted_total_chars",
+                fallback=120_000,
+            ),
             admin_chat_id=section.get("admin_chat_id", fallback=""),
         )
     except ValueError as exc:  # invalid numbers
