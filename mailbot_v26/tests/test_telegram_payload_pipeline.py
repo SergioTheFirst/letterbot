@@ -94,7 +94,7 @@ def test_telegram_contains_attachment_summary(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert "Вложений: 1" in html_text
+    assert "📎 Вложений: 1" in html_text
     assert "doc1.doc — <i>" in html_text
 
 
@@ -114,6 +114,7 @@ def test_action_rendered_in_tg(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert html_text.startswith("🔵 от sender@example.com:")
+    assert "<b>Subject</b>" in html_text
     assert "<b><i>Проверить письмо</i></b>" in html_text
 
 

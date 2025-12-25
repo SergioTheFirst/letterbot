@@ -24,6 +24,7 @@ Done:
 - Wired weekly digest into processor with safe logging.
 - Added daily/weekly scheduler with time gating and SQLite dedupe.
 - Added scheduler tests for daily/weekly due logic and error isolation.
+- Unified TG UI Standard v27 implemented.
 
 Now:
 - Proactive digest scheduler is active and gated by feature flags.
