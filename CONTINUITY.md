@@ -17,6 +17,7 @@ Key decisions:
 State:
 - Digest scheduler module implemented and wired to the main loop.
 - Processor no longer triggers digests; scheduling is handled separately.
+- Attachment safety gates implemented with hard limits, truncation logging, and TG skip rendering.
 
 Done:
 - Added weekly_digest_state table and KnowledgeDB accessors.
@@ -25,6 +26,9 @@ Done:
 - Added daily/weekly scheduler with time gating and SQLite dedupe.
 - Added scheduler tests for daily/weekly due logic and error isolation.
 - Unified TG UI Standard v27 implemented.
+- Added attachment safety gate limits and extraction truncation logs.
+- Added renderer handling for skipped attachments and binary leak suppression hardening.
+- Added attachment safety gate tests.
 
 Now:
 - Proactive digest scheduler is active and gated by feature flags.
@@ -46,3 +50,7 @@ Working set (files / tables / tests):
 - mailbot_v26/config/config.ini
 - mailbot_v26/tests/test_weekly_digest.py
 - mailbot_v26/tests/test_digest_scheduler.py
+- mailbot_v26/bot_core/pipeline.py
+- mailbot_v26/constants.py
+- mailbot_v26/pipeline/tg_renderer.py
+- mailbot_v26/tests/test_attachment_safety_gates.py

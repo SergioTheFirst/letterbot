@@ -17,6 +17,12 @@ import zipfile
 from mailbot_v26.bot_core.extractors.doc import extract_docx_text
 from mailbot_v26.bot_core.extractors.excel import extract_excel_text
 from mailbot_v26.bot_core.extractors.pdf import extract_pdf_text
+from mailbot_v26.constants import (
+    MAX_ATTACHMENT_BYTES,
+    MAX_CHARS_PER_ATTACHMENT,
+    MAX_TOTAL_EXTRACTED_CHARS,
+    MAX_TOTAL_MAIL_BYTES,
+)
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.text.mime_utils import decode_bytes, decode_mime_header
@@ -116,7 +122,7 @@ def _decode_part_payload(part: EmailMessage) -> str:
     return _normalize_text_content(text)
 
 
-def _is_real_attachment(part: EmailMessage, filename: str, payload: bytes) -> bool:
+def _is_real_attachment(part: EmailMessage, filename: str, payload_size: int) -> bool:
     if part.is_multipart():
         return False
 
@@ -129,7 +135,7 @@ def _is_real_attachment(part: EmailMessage, filename: str, payload: bytes) -> bo
         return False
 
     if not filename:
-        small_payload = len(payload or b"") <= 2048
+        small_payload = payload_size <= 2048
         if disposition != "attachment" or small_payload:
             return False
         if content_type in {"text/html", "text/css"}:
@@ -199,6 +205,50 @@ def _zip_uncompressed_size(file_bytes: bytes) -> int | None:
         return None
 
 
+def _estimate_payload_size(part: EmailMessage) -> int:
+    header_size = part.get("Content-Length")
+    if header_size:
+        try:
+            return int(str(header_size).strip())
+        except ValueError:
+            pass
+
+    payload = part.get_payload(decode=False)
+    if payload is None:
+        return 0
+    if isinstance(payload, list):
+        return 0
+
+    payload_text = payload if isinstance(payload, str) else str(payload)
+    transfer_encoding = (part.get("Content-Transfer-Encoding") or "").lower()
+    if transfer_encoding == "base64":
+        compact = re.sub(r"\s+", "", payload_text)
+        padding = compact.count("=")
+        return max(0, (len(compact) * 3) // 4 - padding)
+    return len(payload_text)
+
+
+def _hard_truncate_extracted_text(
+    text: str,
+    *,
+    filename: str,
+    max_chars: int,
+) -> str:
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    logger.info(
+        "extraction_truncated",
+        extra={
+            "event": "extraction_truncated",
+            "attachment_filename": filename,
+            "original_chars": len(text),
+            "max_chars": max_chars,
+            "reason": "per_attachment",
+        },
+    )
+    return text[:max_chars]
+
+
 def _extract_attachment_text(
     att: Attachment,
     *,
@@ -227,24 +277,31 @@ def _extract_attachment_text(
                 )
                 return "[ERROR: Compressed content too large/untrusted]"
 
+        sanitize_limit = max(max_chars * 5, max_chars) if max_chars > 0 else 8000
         if name_lower.endswith(".pdf"):
             text = sanitize_text(
-                extract_pdf_text(att.content, att.filename), max_len=max_chars
+                extract_pdf_text(att.content, att.filename),
+                max_len=sanitize_limit,
             )
+            text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
             logger.info("PDF extraction: %d chars from %s", len(text), att.filename)
             return text
 
         if name_lower.endswith((".doc", ".docx")):
             text = sanitize_text(
-                extract_docx_text(att.content, att.filename), max_len=max_chars
+                extract_docx_text(att.content, att.filename),
+                max_len=sanitize_limit,
             )
+            text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
             logger.info("DOC extraction: %d chars from %s", len(text), att.filename)
             return text
 
         if name_lower.endswith((".xls", ".xlsx")):
             text = sanitize_text(
-                extract_excel_text(att.content, att.filename), max_len=max_chars
+                extract_excel_text(att.content, att.filename),
+                max_len=sanitize_limit,
             )
+            text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
             logger.info("Excel extraction: %d chars from %s", len(text), att.filename)
             return text
 
@@ -252,7 +309,8 @@ def _extract_attachment_text(
             (".txt", ".csv", ".log", ".md", ".json")
         ):
             decoded = att.content.decode("utf-8", errors="ignore")
-            text = sanitize_text(decoded, max_len=max_chars)
+            text = sanitize_text(decoded, max_len=sanitize_limit)
+            text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
             logger.info("Text extraction: %d chars from %s", len(text), att.filename)
             return text
 
@@ -270,10 +328,15 @@ def _extract_attachments(
     max_extracted_chars: int,
     max_extracted_total_chars: int,
 ) -> List[Attachment]:
-    byte_limit = max_attachment_mb * 1024 * 1024
+    byte_limit = min(max_attachment_mb * 1024 * 1024, MAX_ATTACHMENT_BYTES)
+    total_mail_limit = MAX_TOTAL_MAIL_BYTES
+    max_extracted_chars = min(max_extracted_chars, MAX_CHARS_PER_ATTACHMENT)
+    max_extracted_total_chars = min(max_extracted_total_chars, MAX_TOTAL_EXTRACTED_CHARS)
     max_zip_uncompressed_bytes = max_zip_uncompressed_mb * 1024 * 1024
-    entries: list[tuple[str, str, bytes, int, bool]] = []
+    entries: list[tuple[str, str, bytes, int, str | None]] = []
     candidates: list[tuple[int, str, str, bytes, int]] = []
+    total_bytes = 0
+    total_limit_reached = False
     for part in email_obj.walk():
         raw_filename = part.get_filename()
         filename = decode_mime_header(raw_filename or "")
@@ -286,31 +349,48 @@ def _extract_attachments(
             filename = fallback_name or ""
 
         try:
-            payload = part.get_payload(decode=True) or b""
-            payload_size = len(payload)
-            if not _is_real_attachment(part, filename, payload):
-                payload = b""
+            payload_size = _estimate_payload_size(part)
+            if not _is_real_attachment(part, filename, payload_size):
                 continue
-            if byte_limit > 0 and payload_size > byte_limit:
+            content_type = part.get_content_type() or ""
+            too_large = byte_limit > 0 and payload_size > byte_limit
+            total_limit_triggered = total_limit_reached or (
+                total_mail_limit > 0 and total_bytes + payload_size > total_mail_limit
+            )
+            if too_large or total_limit_triggered:
+                skipped_reason = "too_large" if too_large else "total_limit"
+                total_bytes += payload_size
+                if total_mail_limit > 0 and total_bytes > total_mail_limit:
+                    total_limit_reached = True
+                logger.info(
+                    "attachment_skipped",
+                    extra={
+                        "event": "attachment_skipped",
+                        "attachment_filename": filename,
+                        "size_bytes": payload_size,
+                        "skipped_reason": skipped_reason,
+                    },
+                )
                 entries.append(
                     (
                         filename,
-                        part.get_content_type() or "",
+                        content_type,
                         b"",
                         payload_size,
-                        True,
+                        skipped_reason,
                     )
                 )
                 continue
+            payload = part.get_payload(decode=True) or b""
             if not filename or filename.lower().startswith("attachment.bin"):
-                payload = b""
                 continue
+            total_bytes += payload_size
             entry = (
                 filename,
-                part.get_content_type() or "",
+                content_type,
                 payload,
                 payload_size,
-                False,
+                None,
             )
             entries.append(entry)
             candidates.append((len(entries) - 1, *entry[:-1]))
@@ -347,12 +427,35 @@ def _extract_attachments(
 
     attachments: List[Attachment] = []
     remaining_chars = max_extracted_total_chars if max_extracted_total_chars > 0 else None
-    for index, (filename, content_type, _payload, payload_size, oversized) in enumerate(entries):
-        extracted_text = "" if oversized else extracted_map.get(index, "")
+    for index, (filename, content_type, _payload, payload_size, skipped_reason) in enumerate(
+        entries
+    ):
+        extracted_text = "" if skipped_reason else extracted_map.get(index, "")
         if remaining_chars is not None:
             if remaining_chars <= 0:
+                if extracted_text:
+                    logger.info(
+                        "extraction_truncated",
+                        extra={
+                            "event": "extraction_truncated",
+                            "attachment_filename": filename,
+                            "original_chars": len(extracted_text),
+                            "max_chars": 0,
+                            "reason": "total_limit",
+                        },
+                    )
                 extracted_text = ""
             elif len(extracted_text) > remaining_chars:
+                logger.info(
+                    "extraction_truncated",
+                    extra={
+                        "event": "extraction_truncated",
+                        "attachment_filename": filename,
+                        "original_chars": len(extracted_text),
+                        "max_chars": remaining_chars,
+                        "reason": "total_limit",
+                    },
+                )
                 extracted_text = extracted_text[:remaining_chars]
             remaining_chars -= len(extracted_text)
         attachment = Attachment(
@@ -361,6 +464,7 @@ def _extract_attachments(
             content_type=content_type,
             text=extracted_text,
             size_bytes=payload_size,
+            metadata={"skipped_reason": skipped_reason} if skipped_reason else {},
         )
         attachments.append(attachment)
     return attachments
