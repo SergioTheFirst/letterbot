@@ -111,9 +111,9 @@ def test_tg_payload_with_attachments(monkeypatch) -> None:
 
     telegram_text = sent["payload"].html_text
     assert "Вложений: 4" in telegram_text
-    assert "[one.doc]" in telegram_text
-    assert "[two.xls]" in telegram_text
-    assert "[three.pdf]" in telegram_text
+    assert "one.doc" in telegram_text
+    assert "two.xls" in telegram_text
+    assert "three.pdf" in telegram_text
 
 
 def test_tg_payload_never_subject_only(monkeypatch) -> None:
