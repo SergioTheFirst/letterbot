@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from mailbot_v26.telegram_utils import escape_tg_html
+from mailbot_v26.text.sanitize import is_binaryish
 
 _ATTACHMENT_SNIPPET_LIMIT = 240
+_BASE64_FRAGMENT = re.compile(r"[A-Za-z0-9+/]{80,}={0,2}")
 
 
 def _escape_dynamic(text: str | None) -> str:
@@ -35,6 +38,14 @@ def _is_binary_leak(text: str) -> bool:
     stripped = text.lstrip()
     if stripped.startswith("b'") or stripped.startswith('b"'):
         return True
+    if is_binaryish(text):
+        return True
+    if _BASE64_FRAGMENT.search(text):
+        return True
+    if len(text) >= 60:
+        base64ish = sum(1 for char in text if char.isalnum() or char in "+/=")
+        if base64ish / len(text) > 0.9:
+            return True
     printable = 0
     total = len(text)
     for char in text:
@@ -46,6 +57,34 @@ def _is_binary_leak(text: str) -> bool:
         return False
     printable_ratio = printable / total
     return printable_ratio < 0.7
+
+
+def _attachment_skipped_reason(attachment: dict[str, Any]) -> str | None:
+    reason = attachment.get("skipped_reason")
+    if reason:
+        return str(reason)
+    metadata = attachment.get("metadata")
+    if isinstance(metadata, dict):
+        reason = metadata.get("skipped_reason")
+        if reason:
+            return str(reason)
+    return None
+
+
+def _attachment_size_bytes(attachment: dict[str, Any]) -> int:
+    for key in ("size_bytes", "size"):
+        value = attachment.get(key)
+        if isinstance(value, int):
+            return value
+    return 0
+
+
+def _format_size_mb(size_bytes: int) -> str:
+    if size_bytes <= 0:
+        return "0 MB"
+    size_mb = size_bytes / (1024 * 1024)
+    formatted = f"{size_mb:.1f}".rstrip("0").rstrip(".")
+    return f"{formatted} MB"
 
 
 def format_priority_line(priority: str, from_email: str) -> str:
@@ -72,6 +111,16 @@ def format_attachments_block(attachments: list[dict[str, Any]]) -> str:
     lines = [f"📎 Вложений: {len(attachments)}"]
     for attachment in attachments:
         filename = _escape_dynamic(attachment.get("filename") or "attachment")
+        skipped_reason = _attachment_skipped_reason(attachment)
+        if skipped_reason == "too_large":
+            size_display = _format_size_mb(_attachment_size_bytes(attachment))
+            lines.append(
+                f"{filename} — <i>too large ({size_display}), extraction disabled</i>"
+            )
+            continue
+        if skipped_reason == "total_limit":
+            lines.append(f"{filename} — <i>skipped due to mail size limit</i>")
+            continue
         extracted_text = _normalize_attachment_text(attachment.get("text"))
         if extracted_text and not _is_binary_leak(extracted_text):
             extracted_text = _truncate_attachment_text(extracted_text)

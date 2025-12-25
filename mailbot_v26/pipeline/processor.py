@@ -118,6 +118,7 @@ class Attachment:
     content_type: str = ""
     text: str = ""
     size_bytes: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
