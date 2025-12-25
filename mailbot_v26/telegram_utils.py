@@ -1,7 +1,15 @@
 """Utilities for safe Telegram HTML payloads."""
 from __future__ import annotations
 
-import html
+import re
+
+
+def escape_tg_html(text: str) -> str:
+    """Escape Telegram HTML entities for dynamic fields."""
+    cleaned = text or ""
+    cleaned = re.sub(r"&(?!(?:[a-zA-Z]+|#\d+);)", "&amp;", cleaned)
+    cleaned = cleaned.replace("<", "&lt;").replace(">", "&gt;")
+    return cleaned
 
 
 def telegram_safe(text: str) -> str:
@@ -15,10 +23,10 @@ def telegram_safe(text: str) -> str:
     }
     for tag, placeholder in allowed_tags.items():
         cleaned = cleaned.replace(tag, placeholder)
-    escaped = html.escape(cleaned, quote=True)
+    escaped = escape_tg_html(cleaned)
     for tag, placeholder in allowed_tags.items():
         escaped = escaped.replace(placeholder, tag)
     return escaped
 
 
-__all__ = ["telegram_safe"]
+__all__ = ["escape_tg_html", "telegram_safe"]

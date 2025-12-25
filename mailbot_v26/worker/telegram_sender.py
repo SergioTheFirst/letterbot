@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import re
 from dataclasses import dataclass
 
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
@@ -16,13 +17,43 @@ log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-class TelegramSendResult:
-    success: bool
+class DeliveryResult:
+    delivered: bool
+    retryable: bool
     error: str | None = None
-    status_code: int | None = None
 
 
-def send_telegram(payload: TelegramPayload) -> TelegramSendResult:
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code >= 500 or status_code == 429
+
+
+def _strip_html_tags(text: str) -> str:
+    return re.sub(r"<[^>]+>", "", text or "")
+
+
+def _looks_like_parse_error(error_text: str) -> bool:
+    lowered = (error_text or "").lower()
+    return "unsupported start tag" in lowered or "can't parse" in lowered
+
+
+def _post_message(
+    *,
+    url: str,
+    chat_id: str,
+    text: str,
+    parse_mode: str | None,
+) -> "requests.Response":
+    payload: dict[str, object] = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    return requests.post(url, json=payload, timeout=15)
+
+
+def send_telegram(payload: TelegramPayload) -> DeliveryResult:
     """
     Отправляет сообщение в Telegram.
     Возвращает явный результат (успех/ошибка).
@@ -32,28 +63,36 @@ def send_telegram(payload: TelegramPayload) -> TelegramSendResult:
     chat_id = payload.metadata.get("chat_id")
     if not bot_token or not chat_id or not payload.html_text:
         log.error("Telegram send failed: empty token, chat_id or text")
-        return TelegramSendResult(success=False, error="missing required fields")
+        return DeliveryResult(delivered=False, retryable=False, error="missing required fields")
 
     if requests is None:
         log.error("Telegram send failed: requests module not available")
-        return TelegramSendResult(success=False, error="requests module not available")
+        return DeliveryResult(
+            delivered=False,
+            retryable=False,
+            error="requests module not available",
+        )
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
     try:
-        resp = requests.post(
-            url,
-            json={
-                "chat_id": chat_id,
-                "text": payload.html_text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            },
-            timeout=15,
+        resp = _post_message(
+            url=url,
+            chat_id=chat_id,
+            text=payload.html_text,
+            parse_mode="HTML",
         )
     except Exception as exc:
         log.error("Telegram send exception: %s", exc)
-        return TelegramSendResult(success=False, error=str(exc))
+        log.info(
+            "tg_delivery_final",
+            extra={
+                "delivered": False,
+                "retryable": True,
+                "error": str(exc),
+            },
+        )
+        return DeliveryResult(delivered=False, retryable=True, error=str(exc))
 
     if resp.status_code != 200:
         log.error(
@@ -61,13 +100,86 @@ def send_telegram(payload: TelegramPayload) -> TelegramSendResult:
             resp.status_code,
             resp.text,
         )
-        return TelegramSendResult(
-            success=False,
+        if resp.status_code == 400 and _looks_like_parse_error(resp.text):
+            log.warning(
+                "[TG-SALVAGE] parse error, retrying as plain text",
+            )
+            stripped_text = _strip_html_tags(payload.html_text)
+            try:
+                salvage_resp = _post_message(
+                    url=url,
+                    chat_id=chat_id,
+                    text=stripped_text,
+                    parse_mode=None,
+                )
+            except Exception as exc:
+                log.error("Telegram salvage exception: %s", exc)
+                log.info(
+                    "tg_delivery_final",
+                    extra={
+                        "delivered": False,
+                        "retryable": True,
+                        "error": str(exc),
+                    },
+                )
+                return DeliveryResult(delivered=False, retryable=True, error=str(exc))
+            if salvage_resp.status_code == 200:
+                log.info(
+                    "tg_salvage_sent",
+                    extra={"chat_id": chat_id},
+                )
+                log.info(
+                    "tg_delivery_final",
+                    extra={
+                        "delivered": True,
+                        "retryable": False,
+                        "error": None,
+                    },
+                )
+                return DeliveryResult(delivered=True, retryable=False, error=None)
+            log.error(
+                "Telegram salvage HTTP error %s: %s",
+                salvage_resp.status_code,
+                salvage_resp.text,
+            )
+            retryable = _is_retryable_status(salvage_resp.status_code)
+            log.info(
+                "tg_delivery_final",
+                extra={
+                    "delivered": False,
+                    "retryable": retryable,
+                    "error": salvage_resp.text,
+                },
+            )
+            return DeliveryResult(
+                delivered=False,
+                retryable=retryable,
+                error=salvage_resp.text,
+            )
+        retryable = _is_retryable_status(resp.status_code)
+        log.info(
+            "tg_delivery_final",
+            extra={
+                "delivered": False,
+                "retryable": retryable,
+                "error": resp.text,
+            },
+        )
+        return DeliveryResult(
+            delivered=False,
+            retryable=retryable,
             error=resp.text,
-            status_code=resp.status_code,
         )
 
-    return TelegramSendResult(success=True)
+    log.info(
+        "tg_delivery_final",
+        extra={
+            "delivered": True,
+            "retryable": False,
+            "error": None,
+        },
+    )
+    return DeliveryResult(delivered=True, retryable=False, error=None)
 
 
 def ping_telegram(bot_token: str) -> tuple[bool, str]:

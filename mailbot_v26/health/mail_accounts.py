@@ -13,7 +13,7 @@ from mailbot_v26.observability import logger as observability_logger
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.system_health import system_health
 from mailbot_v26.telegram_utils import telegram_safe
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 @dataclass
@@ -163,7 +163,7 @@ def format_account_failure_message(result: MailAccountHealth) -> str:
 
 def run_startup_mail_account_healthcheck(
     config: BotConfig,
-    send_telegram_func: Callable[[TelegramPayload], TelegramSendResult],
+    send_telegram_func: Callable[[TelegramPayload], DeliveryResult],
 ) -> List[AccountConfig]:
     logger = logging.getLogger("mailbot")
     observability = observability_logger.get_logger("mailbot")
@@ -200,7 +200,7 @@ def run_startup_mail_account_healthcheck(
                 },
             )
             send_result = send_telegram_func(payload)
-            if not send_result.success:
+            if not send_result.delivered:
                 logger.error(
                     "Mail account warning failed to send for %s", result.account_id
                 )

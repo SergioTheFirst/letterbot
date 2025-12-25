@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from mailbot_v26.pipeline import daily_digest
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 def _seed_deferred_email(db: KnowledgeDB) -> None:
@@ -31,9 +31,9 @@ def test_daily_digest_sent_once_per_day(monkeypatch, tmp_path) -> None:
 
     sent: list[dict[str, object]] = []
 
-    def _enqueue_tg(*, email_id: int, payload) -> TelegramSendResult:
+    def _enqueue_tg(*, email_id: int, payload) -> DeliveryResult:
         sent.append({"email_id": email_id, "payload": payload})
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(daily_digest, "enqueue_tg", _enqueue_tg)
 
@@ -65,9 +65,9 @@ def test_daily_digest_not_sent_without_content(monkeypatch, tmp_path) -> None:
 
     sent: list[dict[str, object]] = []
 
-    def _enqueue_tg(*, email_id: int, payload) -> TelegramSendResult:
+    def _enqueue_tg(*, email_id: int, payload) -> DeliveryResult:
         sent.append({"email_id": email_id, "payload": payload})
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(daily_digest, "enqueue_tg", _enqueue_tg)
 
@@ -91,9 +91,9 @@ def test_daily_digest_sent_with_deferred_items(monkeypatch, tmp_path) -> None:
 
     sent: list[dict[str, object]] = []
 
-    def _enqueue_tg(*, email_id: int, payload) -> TelegramSendResult:
+    def _enqueue_tg(*, email_id: int, payload) -> DeliveryResult:
         sent.append({"email_id": email_id, "payload": payload})
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(daily_digest, "enqueue_tg", _enqueue_tg)
 

@@ -11,7 +11,7 @@ from mailbot_v26.config_loader import (
     StorageConfig,
 )
 from mailbot_v26.health import mail_accounts
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 class FakeIMAPClient:
@@ -67,9 +67,9 @@ def test_all_accounts_ok_no_telegram_warning(monkeypatch, tmp_path: Path) -> Non
     )
     messages: list[str] = []
 
-    def _send_telegram(payload) -> TelegramSendResult:
+    def _send_telegram(payload) -> DeliveryResult:
         messages.append(payload.html_text)
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     accounts_to_poll = mail_accounts.run_startup_mail_account_healthcheck(config, _send_telegram)
 
@@ -104,9 +104,9 @@ def test_failed_account_sends_warning(monkeypatch, tmp_path: Path) -> None:
     )
     messages: list[str] = []
 
-    def _send_telegram(payload) -> TelegramSendResult:
+    def _send_telegram(payload) -> DeliveryResult:
         messages.append(payload.html_text)
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     mail_accounts.run_startup_mail_account_healthcheck(config, _send_telegram)
 
@@ -145,7 +145,7 @@ def test_failed_account_excluded_from_polling(monkeypatch, tmp_path: Path) -> No
 
     accounts_to_poll = mail_accounts.run_startup_mail_account_healthcheck(
         config,
-        lambda *_args, **_kwargs: TelegramSendResult(success=True),
+        lambda *_args, **_kwargs: DeliveryResult(delivered=True, retryable=False),
     )
 
     assert [account.login for account in accounts_to_poll] == ["ok@example.com"]

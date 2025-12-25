@@ -4,7 +4,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 from mailbot_v26.pipeline.signal_quality import (
     MIN_ENTROPY,
     MIN_LENGTH,
@@ -66,7 +66,7 @@ def _configure_minimal_processor(monkeypatch, llm_result) -> dict[str, str]:
     monkeypatch.setattr(
         processor,
         "enqueue_tg",
-        lambda **kwargs: TelegramSendResult(success=True),
+        lambda **kwargs: DeliveryResult(delivered=True, retryable=False),
     )
     return captured
 

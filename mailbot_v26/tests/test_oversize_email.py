@@ -16,7 +16,7 @@ from mailbot_v26.imap_client import ResilientIMAP
 from mailbot_v26.pipeline import processor
 from mailbot_v26.bot_core.pipeline import parse_raw_email
 from mailbot_v26.state_manager import StateManager
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 class _OversizeIMAPClient:
@@ -77,7 +77,7 @@ def test_oversize_email_warns_in_telegram(monkeypatch, tmp_path: Path) -> None:
         message_size=2 * 1024 * 1024,
         raw_header=raw_header,
     )
-    monkeypatch.setattr(processor, "enqueue_tg", lambda **_: TelegramSendResult(success=True))
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **_: DeliveryResult(delivered=True, retryable=False))
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: SimpleNamespace(
         priority="🔵",
         action_line="Проверить письмо",
@@ -161,7 +161,7 @@ def test_oversize_email_warns_in_telegram(monkeypatch, tmp_path: Path) -> None:
 
     def _capture_payload(*, email_id: int, payload):
         captured["html"] = payload.html_text
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _capture_payload)
 

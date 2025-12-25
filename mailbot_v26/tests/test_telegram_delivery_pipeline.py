@@ -23,7 +23,7 @@ from mailbot_v26.config_loader import (
 )
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
 from mailbot_v26.start import _process_queue
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 def _make_config(tmp_path) -> BotConfig:
@@ -106,7 +106,7 @@ def test_telegram_retry_on_http_failure(monkeypatch, tmp_path, caplog: pytest.Lo
     processor = _configure_pipeline(config)
 
     def fake_send(_payload):
-        return TelegramSendResult(success=False, error="bad request", status_code=400)
+        return DeliveryResult(delivered=False, retryable=True, error="server error")
 
     monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
     monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
@@ -139,8 +139,8 @@ def test_telegram_delivery_failed_after_max_attempts(monkeypatch, tmp_path) -> N
     def fake_send(payload):
         calls.append({"payload": payload})
         if len(calls) == 1:
-            return TelegramSendResult(success=False, error="bad request", status_code=400)
-        return TelegramSendResult(success=True)
+            return DeliveryResult(delivered=False, retryable=True, error="server error")
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
     monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
@@ -157,6 +157,7 @@ def test_telegram_delivery_failed_after_max_attempts(monkeypatch, tmp_path) -> N
     assert status == "DELIVERY_FAILED"
     assert remaining == 0
     assert any(
-        "TELEGRAM DELIVERY FAILED" in entry["payload"].html_text for entry in calls[1:]
+        "TELEGRAM DELIVERY FAILED" in entry["payload"].html_text
+        for entry in calls[1:]
     )
     _cleanup_pipeline(email_id)

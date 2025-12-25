@@ -9,7 +9,7 @@ import pytest
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.pipeline import processor
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 def _setup_processor(monkeypatch) -> None:
@@ -71,7 +71,7 @@ def test_tg_payload_with_attachments(monkeypatch) -> None:
 
     def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
         sent["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
@@ -124,7 +124,7 @@ def test_tg_payload_never_subject_only(monkeypatch) -> None:
 
     def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
         sent["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
@@ -150,7 +150,7 @@ def test_tg_payload_validator_blocks_empty(monkeypatch, caplog: pytest.LogCaptur
 
     def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
         sent["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
@@ -180,7 +180,7 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, tmp_path) -> 
 
     def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
         sent["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
@@ -204,7 +204,7 @@ def test_payload_escapes_angle_brackets(monkeypatch) -> None:
 
     def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
         sent["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
@@ -222,3 +222,79 @@ def test_payload_escapes_angle_brackets(monkeypatch) -> None:
     html_text = sent["payload"].html_text
     assert "<mail@host>" not in html_text
     assert "&lt;mail@host&gt;" in html_text
+
+
+def test_attachment_visibility(monkeypatch) -> None:
+    _setup_processor(monkeypatch)
+    llm_result = SimpleNamespace(
+        priority="🔴",
+        action_line="Проверить письмо",
+        body_summary="Check email",
+        attachment_summaries=[],
+        llm_provider="gigachat",
+    )
+    monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
+    monkeypatch.setattr(
+        processor,
+        "evaluate_signal_quality",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            entropy=0.0,
+            printable_ratio=0.0,
+            quality_score=0.0,
+            is_usable=False,
+            reason="low_signal",
+        ),
+    )
+    sent: dict[str, object] = {}
+
+    def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
+        sent["payload"] = payload
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
+
+    attachments = [
+        {
+            "filename": "report.pdf",
+            "content_type": "application/pdf",
+            "text": "attachment text",
+            "size_bytes": 2048,
+        }
+    ]
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=6,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 1, 12, 0),
+        body_text="Body text with enough content to pass validation.",
+        attachments=attachments,
+        telegram_chat_id="chat",
+    )
+
+    telegram_text = sent["payload"].html_text
+    assert "Attachments:" in telegram_text
+    assert "report.pdf" in telegram_text
+    assert "Manual Review: Important attachments found." in telegram_text
+
+
+def test_retry_trigger(monkeypatch) -> None:
+    _setup_processor(monkeypatch)
+
+    def _enqueue_tg(*, email_id: int, payload: TelegramPayload) -> None:
+        return DeliveryResult(delivered=False, retryable=True, error="http 500")
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
+
+    with pytest.raises(RuntimeError):
+        processor.process_message(
+            account_email="account@example.com",
+            message_id=7,
+            from_email="sender@example.com",
+            subject="Subject",
+            received_at=datetime(2024, 1, 1, 12, 0),
+            body_text="Body text with enough content to pass validation.",
+            attachments=[],
+            telegram_chat_id="chat",
+        )

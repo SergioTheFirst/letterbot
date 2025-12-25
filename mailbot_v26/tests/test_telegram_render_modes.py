@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from mailbot_v26.pipeline import processor
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 def _setup_processor(monkeypatch) -> None:
@@ -76,7 +76,7 @@ def test_attachments_visible_without_llm(monkeypatch) -> None:
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         sent["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
@@ -112,7 +112,7 @@ def test_safe_fallback_still_shows_attachments(monkeypatch) -> None:
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         sent["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
@@ -146,7 +146,7 @@ def test_renderer_mode_logged(monkeypatch, caplog: pytest.LogCaptureFixture) -> 
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         sent["payload"] = payload
-        return TelegramSendResult(success=True)
+        return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 

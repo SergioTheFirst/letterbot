@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.pipeline import processor
-from mailbot_v26.worker.telegram_sender import TelegramSendResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult
 from mailbot_v26.system_health import OperationalMode, system_health
 
 
@@ -60,7 +60,7 @@ def _setup_pipeline(monkeypatch, *, llm_result) -> None:
     monkeypatch.setattr(
         processor,
         "enqueue_tg",
-        lambda **kwargs: TelegramSendResult(success=True),
+        lambda **kwargs: DeliveryResult(delivered=True, retryable=False),
     )
     monkeypatch.setattr(processor, "send_system_notice", lambda **kwargs: None)
 

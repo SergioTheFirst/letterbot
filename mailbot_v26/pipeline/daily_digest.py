@@ -166,7 +166,7 @@ def maybe_send_daily_digest(
             )
             sent = True
         else:
-            sent = result.success
+            sent = result.delivered
             if not sent:
                 raise RuntimeError(result.error or "Telegram digest send failed")
         if sent:
