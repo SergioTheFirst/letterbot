@@ -37,6 +37,7 @@ from mailbot_v26.config_loader import (
 )
 from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthcheck
 from mailbot_v26.imap_client import ResilientIMAP
+from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor, event_emitter
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.pipeline import processor as processor_module
@@ -306,6 +307,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         logger.error("system_health_snapshot_failed", error=str(exc))
 
     storage: Storage | None = None
+    runtime_health = AccountRuntimeHealthManager(CURRENT_DIR / "data" / "runtime_health.json")
     try:
         try:
             base_config_dir = config_dir or CURRENT_DIR / "config"
@@ -341,6 +343,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             return
 
         accounts_to_poll = run_startup_mail_account_healthcheck(config, send_telegram)
+        for account in config.accounts:
+            runtime_health.register_account(account)
 
         try:
             health_checker = StartupHealthChecker(base_config_dir, config)
@@ -398,7 +402,33 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 try:
                     for account in accounts_to_poll:
                         login = account.login or "no_login"
+                        now_utc = datetime.now(timezone.utc)
+                        state_snapshot = runtime_health.get_state(account.account_id)
+                        if not runtime_health.should_attempt(account.account_id, now_utc):
+                            digest_logger.warning(
+                                "imap_account_skipped_backoff",
+                                account_id=account.account_id,
+                                login=login,
+                                host=account.host,
+                                port=account.port,
+                                use_ssl=account.use_ssl,
+                                next_retry_at=runtime_health.format_timestamp(
+                                    state_snapshot.next_retry_at_utc
+                                ),
+                                consecutive_failures=state_snapshot.consecutive_failures,
+                            )
+                            continue
+
                         print(f"\n[MAIL] Checking: {login}")
+                        digest_logger.info(
+                            "imap_account_attempt",
+                            account_id=account.account_id,
+                            login=login,
+                            host=account.host,
+                            port=account.port,
+                            use_ssl=account.use_ssl,
+                            consecutive_failures=state_snapshot.consecutive_failures,
+                        )
 
                         try:
                             imap = ResilientIMAP(
@@ -408,6 +438,18 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 max_email_mb=config.general.max_email_mb,
                             )
                             new_messages = imap.fetch_new_messages()
+                            runtime_health.on_success(
+                                account.account_id, datetime.now(timezone.utc)
+                            )
+                            digest_logger.info(
+                                "imap_account_success",
+                                account_id=account.account_id,
+                                login=login,
+                                host=account.host,
+                                port=account.port,
+                                use_ssl=account.use_ssl,
+                                messages=len(new_messages),
+                            )
 
                             if not new_messages:
                                 print("   └─ no new messages")
@@ -477,8 +519,63 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             state.save()
 
                         except Exception as e:
+                            now_utc = datetime.now(timezone.utc)
+                            should_alert, alert_text = runtime_health.on_failure(
+                                account.account_id, e, now_utc
+                            )
+                            state_snapshot = runtime_health.get_state(account.account_id)
                             print(f"   └─ [IMAP ERROR] {e}")
-                            logger.exception("IMAP error for %s", login)
+                            backoff_minutes = 0
+                            if state_snapshot.next_retry_at_utc:
+                                backoff_minutes = int(
+                                    max(
+                                        (state_snapshot.next_retry_at_utc - now_utc).total_seconds()
+                                        // 60,
+                                        0,
+                                    )
+                                )
+                            digest_logger.error(
+                                "imap_account_failure",
+                                account_id=account.account_id,
+                                login=login,
+                                host=account.host,
+                                port=account.port,
+                                use_ssl=account.use_ssl,
+                                error_class=e.__class__.__name__,
+                                error_message=str(e),
+                                consecutive_failures=state_snapshot.consecutive_failures,
+                                next_retry_at=runtime_health.format_timestamp(
+                                    state_snapshot.next_retry_at_utc
+                                ),
+                                backoff_minutes=backoff_minutes,
+                            )
+                            digest_logger.warning(
+                                "imap_account_backoff_set",
+                                account_id=account.account_id,
+                                login=login,
+                                host=account.host,
+                                port=account.port,
+                                use_ssl=account.use_ssl,
+                                consecutive_failures=state_snapshot.consecutive_failures,
+                                next_retry_at=runtime_health.format_timestamp(
+                                    state_snapshot.next_retry_at_utc
+                                ),
+                                backoff_minutes=backoff_minutes,
+                            )
+                            if should_alert:
+                                payload = _build_system_payload(
+                                    text=alert_text,
+                                    bot_token=config.keys.telegram_bot_token,
+                                    chat_id=account.telegram_chat_id,
+                                    priority="🔴",
+                                )
+                                result = send_telegram(payload)
+                                digest_logger.warning(
+                                    "imap_account_alert_sent",
+                                    account_id=account.account_id,
+                                    login=login,
+                                    delivered=result.delivered,
+                                )
 
                     if storage:
                         try:
