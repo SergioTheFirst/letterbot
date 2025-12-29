@@ -41,10 +41,13 @@ def _is_binary_leak(text: str) -> bool:
     if is_binaryish(text):
         return True
     if _BASE64_FRAGMENT.search(text):
-        return True
+        if any(char in text for char in "+/=") or any(char.isdigit() for char in text):
+            return True
     if len(text) >= 60:
         base64ish = sum(1 for char in text if char.isalnum() or char in "+/=")
-        if base64ish / len(text) > 0.9:
+        if base64ish / len(text) > 0.9 and any(
+            char.isdigit() or char in "+/=" for char in text
+        ):
             return True
     printable = 0
     total = len(text)

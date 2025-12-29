@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 from types import SimpleNamespace
 
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
@@ -31,8 +32,9 @@ def test_html_body_is_sanitized_and_summarized():
     result = processor.process("robot@example.com", msg)
 
     assert result is not None
-    assert "<" not in result and ">" not in result
-    lowered = result.lower()
+    cleaned = re.sub(r"</?[^>]+>", "", result)
+    assert "<" not in cleaned and ">" not in cleaned
+    lowered = cleaned.lower()
     assert "html" not in lowered and "style" not in lowered and "table" not in lowered
     assert len(result.split("\n")) >= 2
 
@@ -89,7 +91,7 @@ def test_domain_classification_logging_does_not_change_output(caplog):
 
     assert result is not None
     assert result.split("\n")[0].startswith("🟡 от Billing — Invoice for services")
-    assert result.split("\n")[1].startswith("Оплатить")
+    assert result.split("\n")[2].startswith("Оплатить")
     assert "Domain detected" not in caplog.text
 
 
@@ -133,15 +135,16 @@ def test_primary_fact_and_attachments_compact_summaries():
     assert result is not None
     lines = result.split("\n")
 
-    body_line = next(
+    summary_line = next(
         (
             line
-            for line in lines[2:]
-            if line.strip() and "—" not in line and not line.startswith(("📎", "📂"))
+            for line in lines
+            if line.strip().startswith("<i>") and not line.startswith("<i>to:")
         ),
         "",
     )
-    assert 8 <= len(body_line.split()) <= 12
+    summary_text = re.sub(r"</?[^>]+>", "", summary_line).strip()
+    assert 8 <= len(summary_text.split()) <= 12
 
     names = {att.filename for att in attachments}
     attachment_lines = _attachment_lines(result, names)

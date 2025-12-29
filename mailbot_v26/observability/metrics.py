@@ -82,24 +82,36 @@ class MetricsAggregator:
                 llm_total = int(llm_stats["total"] or 0)
                 llm_failed = int(llm_stats["failed_count"] or 0)
 
-                event_stats = conn.execute(
-                    """
-                    SELECT
-                        SUM(CASE WHEN type = 'telegram_payload_validated' THEN 1 ELSE 0 END) AS payload_validated,
-                        SUM(CASE WHEN type = 'telegram_payload_fallback_used' THEN 1 ELSE 0 END) AS fallback_used,
-                        SUM(CASE WHEN type = 'telegram_delivery_succeeded' THEN 1 ELSE 0 END) AS delivery_ok,
-                        SUM(CASE WHEN type = 'telegram_delivery_failed' THEN 1 ELSE 0 END) AS delivery_failed,
-                        SUM(CASE WHEN type = 'telegram_empty_summary' THEN 1 ELSE 0 END) AS empty_summary
-                    FROM events
-                    WHERE timestamp >= datetime('now', ?)
-                    """,
-                    (window,),
-                ).fetchone()
-                payload_validated = int(event_stats["payload_validated"] or 0)
-                fallback_used = int(event_stats["fallback_used"] or 0)
-                delivery_ok = int(event_stats["delivery_ok"] or 0)
-                delivery_failed = int(event_stats["delivery_failed"] or 0)
-                empty_summary = int(event_stats["empty_summary"] or 0)
+                try:
+                    event_stats = conn.execute(
+                        """
+                        SELECT
+                            SUM(CASE WHEN type = 'telegram_payload_validated' THEN 1 ELSE 0 END) AS payload_validated,
+                            SUM(CASE WHEN type = 'telegram_payload_fallback_used' THEN 1 ELSE 0 END) AS fallback_used,
+                            SUM(CASE WHEN type = 'telegram_delivery_succeeded' THEN 1 ELSE 0 END) AS delivery_ok,
+                            SUM(CASE WHEN type = 'telegram_delivery_failed' THEN 1 ELSE 0 END) AS delivery_failed,
+                            SUM(CASE WHEN type = 'telegram_empty_summary' THEN 1 ELSE 0 END) AS empty_summary
+                        FROM events
+                        WHERE timestamp >= datetime('now', ?)
+                        """,
+                        (window,),
+                    ).fetchone()
+                    payload_validated = int(event_stats["payload_validated"] or 0)
+                    fallback_used = int(event_stats["fallback_used"] or 0)
+                    delivery_ok = int(event_stats["delivery_ok"] or 0)
+                    delivery_failed = int(event_stats["delivery_failed"] or 0)
+                    empty_summary = int(event_stats["empty_summary"] or 0)
+                except sqlite3.Error as exc:
+                    logger.error(
+                        "metrics_event_table_missing",
+                        error=str(exc),
+                        window_days=days,
+                    )
+                    payload_validated = 0
+                    fallback_used = 0
+                    delivery_ok = 0
+                    delivery_failed = 0
+                    empty_summary = 0
         except Exception as exc:
             logger.error("metrics_aggregation_failed", error=str(exc), window_days=days)
             return {

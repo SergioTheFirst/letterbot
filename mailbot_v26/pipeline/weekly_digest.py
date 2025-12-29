@@ -285,7 +285,7 @@ def _collect_weekly_data(
 
 
 def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
-    lines = ["<b>📊 Weekly Digest (7 дней)</b>"]
+    lines = ["<b>Weekly Digest (7 дней)</b>"]
     lines.append(
         "• Объём: "
         f"всего {data.total_emails}, "

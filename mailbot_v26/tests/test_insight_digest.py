@@ -35,7 +35,7 @@ def test_digest_attention_for_weak_insights_and_slight_drop() -> None:
     digest = build_insight_digest(
         insights=[
             Insight(
-                type="⚠️ Reliability Degradation",
+                type="Reliability Degradation",
                 severity="MEDIUM",
                 explanation="",
                 recommendation="",
@@ -53,13 +53,13 @@ def test_digest_risk_zone_for_serious_signals_and_health_drop() -> None:
     digest = build_insight_digest(
         insights=[
             Insight(
-                type="🚨 High-Risk Window",
+                type="High-Risk Window",
                 severity="HIGH",
                 explanation="",
                 recommendation="",
             ),
             Insight(
-                type="⚠️ Reliability Degradation",
+                type="Reliability Degradation",
                 severity="HIGH",
                 explanation="",
                 recommendation="",

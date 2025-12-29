@@ -159,12 +159,12 @@ def test_preview_enabled_preview_generated(monkeypatch, caplog) -> None:
     assert payload["payload"].metadata.get("chat_id") == "chat"
     assert preview_payload.get("chat_id") == "chat"
     preview_text = str(preview_payload.get("preview_text") or "")
-    assert preview_text.startswith("🤖 AI Preview")
+    assert preview_text.startswith("AI Preview")
     assert "Предлагаемое действие:" in preview_text
     assert "• Оплатить счет" in preview_text
     assert "Причина:" in preview_text
     assert "Confidence: 0.90" in preview_text
-    assert preview_text.endswith("[✅ Принять] [❌ Отклонить]")
+    assert preview_text.endswith("[Принять] [Отклонить]")
     for forbidden in ("<", ">", "*", "_", "</"):
         assert forbidden not in preview_text
 
@@ -350,7 +350,7 @@ def test_commitments_preview_flag_off(monkeypatch) -> None:
     )
 
     preview_text = str(preview_payload.get("preview_text") or "")
-    assert "📝 Обязательства" not in preview_text
+    assert "Обязательства" not in preview_text
 
 
 def test_commitments_preview_block_and_payload_unchanged(monkeypatch) -> None:
@@ -422,8 +422,8 @@ def test_commitments_preview_block_and_payload_unchanged(monkeypatch) -> None:
     )
 
     preview_text = str(preview_payload.get("preview_text") or "")
-    assert "📝 Обязательства" in preview_text
-    assert "• \"Пришлю отчет до 25.12.2025\" — ⏳ ожидается" in preview_text
+    assert "Обязательства" in preview_text
+    assert "• \"Пришлю отчет до 25.12.2025\" — ожидается" in preview_text
     assert baseline_payload["payload"] == commitment_payload["payload"]
 
 
@@ -500,7 +500,7 @@ def test_commitment_signal_preview_block(monkeypatch) -> None:
     )
 
     preview_text = str(preview_payload.get("preview_text") or "")
-    assert "🔎 Контекст отношений:" in preview_text
+    assert "Контекст отношений:" in preview_text
     assert "Контрагент: client@company.com" in preview_text
     assert "Надёжность обязательств: 🟡 Нестабилен 75/100" in preview_text
     assert "(выполнено: 3, просрочено: 1 за 30 дней)" in preview_text

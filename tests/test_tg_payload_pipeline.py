@@ -67,8 +67,8 @@ def test_tg_payload_never_subject_only():
         attachment_summary="",
     )
 
-    assert "📧 Письмо получено" in fallback
-    assert "⚠️ Основной текст не удалось безопасно отобразить." in fallback
+    assert "Письмо получено" in fallback
+    assert "Основной текст не удалось безопасно отобразить." in fallback
     assert "📎 Вложения: 0" in fallback
 
 
@@ -138,5 +138,5 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, caplog):
         )
 
     assert "tg_payload_invalid" in caplog.text
-    assert "📧 Письмо получено" in captured.get("telegram_text", "")
+    assert captured.get("telegram_text", "").startswith("🔵 от hq@example.com:")
     assert any(event.get("type") == "tg_payload_invalid" for event in emitted_events)

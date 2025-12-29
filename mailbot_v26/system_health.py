@@ -55,12 +55,12 @@ class SystemHealth:
 
     def system_notice(self, change: ModeChange) -> str:
         if change.current == OperationalMode.FULL:
-            return "✅ System mode: FULL\nВозможности восстановлены."
+            return "System mode: FULL\nВозможности восстановлены."
         if change.current == OperationalMode.DEGRADED_NO_LLM:
-            return "⚠️ System mode: DEGRADED_NO_LLM\nAI-анализ временно недоступен."
+            return "System mode: DEGRADED_NO_LLM\nAI-анализ временно недоступен."
         if change.current == OperationalMode.DEGRADED_NO_TELEGRAM:
-            return "⚠️ System mode: DEGRADED_NO_TELEGRAM\nTelegram временно недоступен."
-        return "⚠️ System mode: EMERGENCY_READ_ONLY\nCRM временно недоступен."
+            return "System mode: DEGRADED_NO_TELEGRAM\nTelegram временно недоступен."
+        return "System mode: EMERGENCY_READ_ONLY\nCRM временно недоступен."
 
     def _evaluate_mode(self) -> ModeChange | None:
         new_mode, reason = self._determine_mode()

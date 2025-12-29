@@ -37,9 +37,15 @@ Done:
 - Added Event Contract v1 emitter/table with idempotent fingerprinting and basic pipeline integration.
 - Added global GigaChat serialization lock via LLMRouter and regression guard tests.
 - Introduced SystemOrchestrator v0 for policy logging and mode snapshots.
+- Telegram delivery contract hardened to coerce DeliveryResult in legacy pipeline paths.
+- Attachment extraction entrypoints aligned (defaults, exports) with safe error returns.
+- Preview/telegram fallback text normalized to remove disallowed emoji while preserving priorities.
+- MessageProcessor output formatting aligned with tests and summary contracts.
+- pytest -q green after telegram/attachment contract fixes.
 
 Now:
 - Proactive digest scheduler is active and gated by feature flags.
+- Test suite green after telegram/attachment contract fixes.
 
 Next:
 - None.

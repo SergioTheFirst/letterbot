@@ -162,7 +162,7 @@ class LaunchReportBuilder:
         index = {item["component"]: item for item in results}
         lines = [
             "---",
-            f"🚀 {self._version_label} started",
+            f"{self._version_label} started",
             "",
             "System:",
             self._format_line("Python", index.get("Python")),

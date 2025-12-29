@@ -42,7 +42,7 @@ def test_insight_aggregator_does_not_change_telegram_payload(monkeypatch) -> Non
         "aggregate_insights",
         lambda *args, **kwargs: [
             Insight(
-                type="⚠️ Reliability Degradation",
+                type="Reliability Degradation",
                 severity="LOW",
                 explanation="Контрагент начал хуже выполнять обещания.",
                 recommendation="Сверьте текущие договорённости и подготовьте мягкий follow-up.",
@@ -146,8 +146,8 @@ def test_insight_aggregator_does_not_change_telegram_payload(monkeypatch) -> Non
     payload = sent[0]
     assert payload.priority == "🔵"
     assert payload.html_text.startswith(telegram_text)
-    assert "💡 Insights" in payload.html_text
-    assert "⚠️ Reliability Degradation" in payload.html_text
+    assert "Insights" in payload.html_text
+    assert "Reliability Degradation" in payload.html_text
     assert payload.metadata["chat_id"] == "chat"
     assert payload.metadata["account_email"] == "account@example.com"
     assert payload.metadata["action_line"] == "Проверить письмо"

@@ -47,7 +47,12 @@ def is_binaryish(text: str) -> bool:
     if any(marker in lowered for marker in BINARY_MARKERS):
         return True
 
-    if BASE64_RUN.search(data) or ENCODED_HEADER.search(data):
+    match = BASE64_RUN.search(data)
+    if match:
+        segment = match.group(0)
+        if any(ch.isupper() or ch.isdigit() or ch in "+/=" for ch in segment):
+            return True
+    if ENCODED_HEADER.search(data):
         return True
 
     non_printable = sum(1 for ch in data if not (ch.isprintable() or ch in "\n\r\t"))
