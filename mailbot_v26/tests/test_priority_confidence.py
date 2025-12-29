@@ -251,7 +251,7 @@ def test_telegram_payload_unchanged(monkeypatch):
     payload = sent["payload"]
     assert payload.priority == "🟡"
     assert payload.html_text.startswith(telegram_text)
-    assert "💡 Insights" in payload.html_text
+    assert "Insights" in payload.html_text
     assert payload.metadata["chat_id"] == "chat"
     assert payload.metadata["account_email"] == "account@example.com"
     assert payload.metadata["action_line"] == llm_result.action_line

@@ -17,6 +17,8 @@ from mailbot_v26.bot_core.pipeline import (
     PIPELINE_INBOUND_CACHE,
     PIPELINE_RAW_CACHE,
     PipelineContext,
+    _extract_body,
+    _extract_attachments,
     _extract_attachment_text,
     configure_pipeline,
     parse_raw_email,

@@ -296,9 +296,9 @@ def _format_best(entities: Sequence[AttentionEntity]) -> list[str]:
 def format_attention_block(result: AttentionEconomicsResult) -> list[str]:
     lines = ["<b>⏱ Куда ушло внимание</b>"]
     lines.extend(_format_top_sinks(result.top_sinks))
-    lines.append("<b>⚠️ Риски</b>")
+    lines.append("<b>Риски</b>")
     lines.extend(_format_risks(result.at_risk))
-    lines.append("<b>✅ Лучшие контрагенты</b>")
+    lines.append("<b>Лучшие контрагенты</b>")
     lines.extend(_format_best(result.best_counterparties))
     return lines
 

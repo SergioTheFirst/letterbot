@@ -174,7 +174,7 @@ def test_trust_score_does_not_change_telegram_payload(monkeypatch) -> None:
     payload = sent[0]
     assert payload.priority == "🔵"
     assert payload.html_text.startswith(telegram_text)
-    assert "💡 Insights" in payload.html_text
+    assert "Insights" in payload.html_text
     assert payload.metadata["chat_id"] == "chat"
     assert payload.metadata["account_email"] == "account@example.com"
     assert payload.metadata["action_line"] == "Проверить письмо"

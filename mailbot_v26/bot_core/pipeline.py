@@ -252,9 +252,18 @@ def _hard_truncate_extracted_text(
 def _extract_attachment_text(
     att: Attachment,
     *,
-    max_chars: int,
-    max_zip_uncompressed_bytes: int,
+    max_chars: int | None = None,
+    max_zip_uncompressed_bytes: int | None = None,
 ) -> str:
+    """
+    Extract text from a single attachment.
+
+    Contract: returns a string (possibly empty) and never raises.
+    """
+    if max_chars is None:
+        max_chars = MAX_CHARS_PER_ATTACHMENT
+    if max_zip_uncompressed_bytes is None:
+        max_zip_uncompressed_bytes = 80 * 1024 * 1024
     name_lower = (att.filename or "").lower()
     content_type = (att.content_type or "").lower()
 
@@ -322,12 +331,29 @@ def _extract_attachment_text(
 
 def _extract_attachments(
     email_obj: EmailMessage,
+    max_attachment_mb: int | None = None,
     *,
-    max_attachment_mb: int,
-    max_zip_uncompressed_mb: int,
-    max_extracted_chars: int,
-    max_extracted_total_chars: int,
+    max_mb: int | None = None,
+    max_zip_uncompressed_mb: int | None = None,
+    max_extracted_chars: int | None = None,
+    max_extracted_total_chars: int | None = None,
 ) -> List[Attachment]:
+    """
+    Extract attachments from an email message.
+
+    Contract: returns Attachment objects with text (possibly empty), content cleared,
+    and per-attachment limits applied.
+    """
+    if max_attachment_mb is None:
+        max_attachment_mb = max_mb
+    if max_attachment_mb is None:
+        max_attachment_mb = max(1, MAX_ATTACHMENT_BYTES // (1024 * 1024))
+    if max_zip_uncompressed_mb is None:
+        max_zip_uncompressed_mb = 80
+    if max_extracted_chars is None:
+        max_extracted_chars = MAX_CHARS_PER_ATTACHMENT
+    if max_extracted_total_chars is None:
+        max_extracted_total_chars = MAX_TOTAL_EXTRACTED_CHARS
     byte_limit = min(max_attachment_mb * 1024 * 1024, MAX_ATTACHMENT_BYTES)
     total_mail_limit = MAX_TOTAL_MAIL_BYTES
     max_extracted_chars = min(max_extracted_chars, MAX_CHARS_PER_ATTACHMENT)

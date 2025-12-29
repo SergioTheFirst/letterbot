@@ -44,7 +44,7 @@ class ResilientIMAP:
         size_mb = (message_size or 0) / (1024 * 1024)
         limit_mb = self.max_email_bytes / (1024 * 1024)
         warning_text = (
-            "⚠️ Письмо слишком большое для загрузки.\n"
+            "Письмо слишком большое для загрузки.\n"
             f"Размер: {size_mb:.1f} MB (лимит {limit_mb:.1f} MB).\n"
             "Тело и вложения пропущены."
         )

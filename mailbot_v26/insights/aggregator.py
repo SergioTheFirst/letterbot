@@ -44,7 +44,7 @@ def aggregate_insights(
             explanation = "Фиксируются просрочки, но данных о доверии пока недостаточно."
         insights.append(
             Insight(
-                type="⚠️ Reliability Degradation",
+                type="Reliability Degradation",
                 severity=severity,
                 explanation=explanation,
                 recommendation="Сверьте текущие договорённости и подготовьте мягкий follow-up.",
@@ -57,7 +57,7 @@ def aggregate_insights(
     ):
         insights.append(
             Insight(
-                type="⏳ Follow-up Recommended",
+                type="Follow-up Recommended",
                 severity="MEDIUM",
                 explanation="Долгая пауза совпала с окном эскалации.",
                 recommendation="Сейчас уместно напомнить и уточнить статус.",
@@ -80,7 +80,7 @@ def aggregate_insights(
         if severity:
             insights.append(
                 Insight(
-                    type="🚨 High-Risk Window",
+                    type="High-Risk Window",
                     severity=severity,
                     explanation=explanation,
                     recommendation="Держите ситуацию под контролем и согласуйте следующий шаг.",

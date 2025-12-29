@@ -6,9 +6,9 @@ from typing import Sequence
 from mailbot_v26.insights.aggregator import Insight
 from mailbot_v26.insights.relationship_health import HealthSnapshot
 
-STATUS_STABLE = "🟢 Stable"
-STATUS_ATTENTION = "🟡 Attention Needed"
-STATUS_RISK = "🔴 Risk Zone"
+STATUS_STABLE = "Stable"
+STATUS_ATTENTION = "Attention Needed"
+STATUS_RISK = "Risk Zone"
 
 SLIGHT_TREND_DROP_THRESHOLD = -0.05
 SIGNIFICANT_TREND_DROP_THRESHOLD = -0.15
