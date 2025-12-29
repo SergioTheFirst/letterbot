@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from mailbot_v26.llm.providers import CloudflareProvider, CloudflareProviderConfig
+from mailbot_v26.llm.router import LLMRouter, LLMRouterConfig
 
 @dataclass
 class CloudflareConfig:
@@ -23,17 +23,21 @@ class CloudflareLLMClient:
 
     def __init__(self, config: CloudflareConfig) -> None:
         self.config = config
-        self._provider = CloudflareProvider(
-            CloudflareProviderConfig(
-                account_id=config.account_id,
-                api_token=config.api_token,
-                model=config.model,
+        self._router = LLMRouter(
+            LLMRouterConfig(
+                primary="cloudflare",
+                fallback="cloudflare",
+                cloudflare_enabled=True,
+                cloudflare_account_id=config.account_id,
+                cloudflare_api_key=config.api_token,
+                cloudflare_model=config.model,
+                gigachat_enabled=False,
             )
         )
 
     def generate(self, prompt: str, data: str) -> str:
         """Return model output or empty string on failure."""
-        return self._provider.complete(
+        return self._router.complete(
             [
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": data},
