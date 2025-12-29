@@ -8,14 +8,18 @@ from typing import Any
 
 
 class EventType(str, Enum):
-    EMAIL_RECEIVED = "EMAIL_RECEIVED"
-    COMMITMENT_CREATED = "COMMITMENT_CREATED"
-    COMMITMENT_STATUS_CHANGED = "COMMITMENT_STATUS_CHANGED"
-    TRUST_SCORE_UPDATED = "TRUST_SCORE_UPDATED"
-    RELATIONSHIP_HEALTH_UPDATED = "RELATIONSHIP_HEALTH_UPDATED"
-    TG_DELIVERY_FINAL = "TG_DELIVERY_FINAL"
-    LLM_PROVIDER_SELECTED = "LLM_PROVIDER_SELECTED"
-    SYSTEM_MODE_CHANGED = "SYSTEM_MODE_CHANGED"
+    EMAIL_RECEIVED = "email_received"
+    ATTACHMENT_EXTRACTED = "attachment_extracted"
+    TELEGRAM_DELIVERED = "telegram_delivered"
+    TELEGRAM_FAILED = "telegram_failed"
+    COMMITMENT_CREATED = "commitment_created"
+    COMMITMENT_STATUS_CHANGED = "commitment_status_changed"
+    TRUST_SCORE_UPDATED = "trust_score_updated"
+    RELATIONSHIP_HEALTH_UPDATED = "relationship_health_updated"
+    ATTENTION_DEFERRED_FOR_DIGEST = "attention_deferred_for_digest"
+    DAILY_DIGEST_SENT = "daily_digest_sent"
+    WEEKLY_DIGEST_SENT = "weekly_digest_sent"
+    ANOMALY_DETECTED = "anomaly_detected"
 
 
 @dataclass(frozen=True, slots=True)

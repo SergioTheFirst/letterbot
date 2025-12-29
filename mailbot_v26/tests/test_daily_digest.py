@@ -3,13 +3,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from mailbot_v26.pipeline import daily_digest
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
-def _seed_deferred_email(db: KnowledgeDB) -> None:
-    db.save_email(
+def _seed_deferred_email(db: KnowledgeDB, emitter: ContractEventEmitter) -> None:
+    email_id = db.save_email(
         account_email="account@example.com",
         from_email="sender@example.com",
         subject="Subject",
@@ -21,11 +23,42 @@ def _seed_deferred_email(db: KnowledgeDB) -> None:
         attachment_summaries=[("report.pdf", "summary")],
         deferred_for_digest=True,
     )
+    assert email_id is not None
+    now_ts = datetime.now(timezone.utc).timestamp()
+    emitter.emit(
+        EventV1(
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=now_ts,
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=email_id,
+            payload={
+                "from_email": "sender@example.com",
+                "subject": "Subject",
+                "body_summary": "",
+                "attachments_count": 1,
+            },
+        )
+    )
+    emitter.emit(
+        EventV1(
+            event_type=EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+            ts_utc=now_ts,
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=email_id,
+            payload={
+                "reason": "test",
+                "attachments_only": True,
+                "attachments_count": 1,
+            },
+        )
+    )
 
 
-def _seed_attention_emails(db: KnowledgeDB) -> None:
+def _seed_attention_emails(db: KnowledgeDB, emitter: ContractEventEmitter) -> None:
     for idx in range(5):
-        db.save_email(
+        email_id = db.save_email(
             account_email="account@example.com",
             from_email="client@example.com" if idx < 3 else "vendor@example.com",
             subject=f"Subject {idx}",
@@ -36,13 +69,32 @@ def _seed_attention_emails(db: KnowledgeDB) -> None:
             raw_body="",
             attachment_summaries=[],
         )
+        assert email_id is not None
+        emitter.emit(
+            EventV1(
+                event_type=EventType.EMAIL_RECEIVED,
+                ts_utc=datetime.now(timezone.utc).timestamp(),
+                account_id="account@example.com",
+                entity_id=None,
+                email_id=email_id,
+                payload={
+                    "from_email": "client@example.com"
+                    if idx < 3
+                    else "vendor@example.com",
+                    "subject": f"Subject {idx}",
+                    "body_summary": f"Текст письма {idx} для метрик внимания",
+                    "attachments_count": 0,
+                },
+            )
+        )
 
 
 def test_daily_digest_sent_once_per_day(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "digest.sqlite"
     db = KnowledgeDB(db_path)
     analytics = KnowledgeAnalytics(db_path)
-    _seed_deferred_email(db)
+    contract_emitter = ContractEventEmitter(db_path)
+    _seed_deferred_email(db, contract_emitter)
 
     sent: list[dict[str, object]] = []
 
@@ -58,6 +110,7 @@ def test_daily_digest_sent_once_per_day(monkeypatch, tmp_path) -> None:
         account_email="account@example.com",
         telegram_chat_id="chat",
         email_id=101,
+        contract_event_emitter=contract_emitter,
     )
 
     daily_digest.maybe_send_daily_digest(
@@ -66,6 +119,7 @@ def test_daily_digest_sent_once_per_day(monkeypatch, tmp_path) -> None:
         account_email="account@example.com",
         telegram_chat_id="chat",
         email_id=102,
+        contract_event_emitter=contract_emitter,
     )
 
     assert len(sent) == 1
@@ -77,6 +131,7 @@ def test_daily_digest_not_sent_without_content(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "digest.sqlite"
     db = KnowledgeDB(db_path)
     analytics = KnowledgeAnalytics(db_path)
+    contract_emitter = ContractEventEmitter(db_path)
 
     sent: list[dict[str, object]] = []
 
@@ -92,6 +147,7 @@ def test_daily_digest_not_sent_without_content(monkeypatch, tmp_path) -> None:
         account_email="account@example.com",
         telegram_chat_id="chat",
         email_id=201,
+        contract_event_emitter=contract_emitter,
     )
 
     assert sent == []
@@ -102,7 +158,8 @@ def test_daily_digest_sent_with_deferred_items(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "digest.sqlite"
     db = KnowledgeDB(db_path)
     analytics = KnowledgeAnalytics(db_path)
-    _seed_deferred_email(db)
+    contract_emitter = ContractEventEmitter(db_path)
+    _seed_deferred_email(db, contract_emitter)
 
     sent: list[dict[str, object]] = []
 
@@ -118,6 +175,7 @@ def test_daily_digest_sent_with_deferred_items(monkeypatch, tmp_path) -> None:
         account_email="account@example.com",
         telegram_chat_id="chat",
         email_id=301,
+        contract_event_emitter=contract_emitter,
     )
 
     assert len(sent) == 1
@@ -129,7 +187,8 @@ def test_daily_digest_attention_block(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "digest.sqlite"
     db = KnowledgeDB(db_path)
     analytics = KnowledgeAnalytics(db_path)
-    _seed_attention_emails(db)
+    contract_emitter = ContractEventEmitter(db_path)
+    _seed_attention_emails(db, contract_emitter)
 
     sent: list[dict[str, object]] = []
 
@@ -146,6 +205,7 @@ def test_daily_digest_attention_block(monkeypatch, tmp_path) -> None:
         telegram_chat_id="chat",
         email_id=401,
         include_attention_economics=True,
+        contract_event_emitter=contract_emitter,
     )
 
     assert len(sent) == 1

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from mailbot_v26.events.contract import EventV1, fingerprint
@@ -28,15 +29,18 @@ class EventEmitter:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         event_type TEXT NOT NULL,
                         ts_utc REAL NOT NULL,
+                        ts TEXT,
                         account_id TEXT NOT NULL,
                         entity_id TEXT,
                         email_id INTEGER,
                         payload JSON,
+                        payload_json JSON,
                         schema_version INTEGER NOT NULL,
                         fingerprint TEXT NOT NULL UNIQUE
                     );
                     """
                 )
+                self._ensure_columns(conn)
                 conn.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts
@@ -55,11 +59,51 @@ class EventEmitter:
                     ON events_v1(entity_id, ts_utc);
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_events_v1_email_id
+                    ON events_v1(email_id);
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts_iso
+                    ON events_v1(event_type, ts);
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts_iso
+                    ON events_v1(account_id, ts);
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_events_v1_entity_ts_iso
+                    ON events_v1(entity_id, ts);
+                    """
+                )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("event_store_init_failed", error=str(exc))
 
+    def _ensure_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(events_v1)")
+        }
+        if "ts" not in columns:
+            conn.execute("ALTER TABLE events_v1 ADD COLUMN ts TEXT;")
+        if "payload" not in columns:
+            conn.execute("ALTER TABLE events_v1 ADD COLUMN payload JSON;")
+        if "payload_json" not in columns:
+            conn.execute("ALTER TABLE events_v1 ADD COLUMN payload_json JSON;")
+
     def emit(self, event: EventV1) -> bool:
         fp = fingerprint(event)
+        ts_iso = datetime.fromtimestamp(
+            event.ts_utc, tz=timezone.utc
+        ).isoformat()
+        payload = json.dumps(event.payload, ensure_ascii=False)
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
@@ -67,21 +111,25 @@ class EventEmitter:
                     INSERT OR IGNORE INTO events_v1 (
                         event_type,
                         ts_utc,
+                        ts,
                         account_id,
                         entity_id,
                         email_id,
                         payload,
+                        payload_json,
                         schema_version,
                         fingerprint
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event.event_type.value,
                         event.ts_utc,
+                        ts_iso,
                         event.account_id,
                         event.entity_id,
                         event.email_id,
-                        json.dumps(event.payload, ensure_ascii=False),
+                        payload,
+                        payload,
                         event.schema_version,
                         fp,
                     ),

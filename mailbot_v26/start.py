@@ -45,6 +45,7 @@ from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.pipeline import processor as processor_module
 from mailbot_v26.pipeline.digest_scheduler import DigestStorage, run_digest_tick
 from mailbot_v26.observability import get_logger
+from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.state_manager import StateManager
 from mailbot_v26.storage.self_check import run_self_check
 from mailbot_v26.system.startup_health import (
@@ -55,6 +56,7 @@ from mailbot_v26.system.startup_health import (
 from mailbot_v26.text.mime_utils import decode_mime_header
 from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.worker.telegram_sender import send_telegram
+from mailbot_v26.tools.backfill_events import maybe_backfill_events
 
 LOG_PATH = CURRENT_DIR / "mailbot.log"
 
@@ -149,6 +151,34 @@ def _fail_open_process(
     logger.error("Fail-open Telegram send status for email %s: %s", ctx.email_id, status)
 
 
+def _emit_contract_event(
+    *,
+    event_type: EventType,
+    ts_utc: float,
+    account_id: str,
+    email_id: int,
+    payload: dict[str, object],
+    entity_id: str | None = None,
+) -> None:
+    try:
+        processor_module.contract_event_emitter.emit(
+            EventV1(
+                event_type=event_type,
+                ts_utc=ts_utc,
+                account_id=account_id,
+                entity_id=entity_id,
+                email_id=email_id,
+                payload=payload,
+            )
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error(
+            "contract_event_emit_failed",
+            event_type=event_type.value,
+            error=str(exc),
+        )
+
+
 def _process_queue(storage: Storage, config: BotConfig, processor: MessageProcessor) -> None:
     max_tg_attempts = 3
     while True:
@@ -189,6 +219,14 @@ def _process_queue(storage: Storage, config: BotConfig, processor: MessageProces
                         email_id=email_id,
                         payload={"attempt": attempts},
                     )
+                    if ctx:
+                        _emit_contract_event(
+                            event_type=EventType.TELEGRAM_DELIVERED,
+                            ts_utc=datetime.now(timezone.utc).timestamp(),
+                            account_id=ctx.account_email,
+                            email_id=email_id,
+                            payload={"attempt": attempts},
+                        )
                 else:
                     error = result.error or "telegram delivery failed"
                     if result.retryable:
@@ -270,6 +308,14 @@ def _process_queue(storage: Storage, config: BotConfig, processor: MessageProces
                         email_id=email_id,
                         payload={"attempts": attempts, "error": str(queue_exc)},
                     )
+                    if ctx:
+                        _emit_contract_event(
+                            event_type=EventType.TELEGRAM_FAILED,
+                            ts_utc=datetime.now(timezone.utc).timestamp(),
+                            account_id=ctx.account_email,
+                            email_id=email_id,
+                            payload={"attempts": attempts, "error": str(queue_exc)},
+                        )
                 else:
                     try:
                         storage.mark_error(queue_id, str(queue_exc), backoff)
@@ -382,6 +428,11 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         except Exception:
             logger.exception("Self-check execution failure")
 
+        try:
+            maybe_backfill_events(processor_module.DB_PATH)
+        except Exception:
+            logger.exception("events_backfill_failed")
+
         state = StateManager(CURRENT_DIR / "state.json")
         processor = MessageProcessor(config=config, state=state)
         configure_pipeline(config, processor)
@@ -389,6 +440,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             knowledge_db=processor_module.knowledge_db,
             analytics=processor_module.analytics,
             event_emitter=processor_module.event_emitter,
+            contract_event_emitter=processor_module.contract_event_emitter,
         )
         print("[OK] Ready to work\n")
 

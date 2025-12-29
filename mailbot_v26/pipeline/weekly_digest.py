@@ -14,6 +14,8 @@ from mailbot_v26.insights.attention_economics import (
 )
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.event_emitter import EventEmitter
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
@@ -172,7 +174,11 @@ def _trust_summary(trust_deltas: dict[str, list[dict[str, object]]]) -> str:
 
 
 def _collect_anomaly_alerts(
-    *, analytics: KnowledgeAnalytics, now: datetime
+    *,
+    analytics: KnowledgeAnalytics,
+    now: datetime,
+    contract_event_emitter: ContractEventEmitter | None = None,
+    account_email: str | None = None,
 ) -> list[str]:
     alerts: list[str] = []
     try:
@@ -205,6 +211,29 @@ def _collect_anomaly_alerts(
             title = escape_tg_html(anomaly.title)
             severity = escape_tg_html(anomaly.severity)
             alerts.append(f"{safe_label}: {title} ({severity})")
+            if contract_event_emitter is not None and account_email:
+                try:
+                    contract_event_emitter.emit(
+                        EventV1(
+                            event_type=EventType.ANOMALY_DETECTED,
+                            ts_utc=now.timestamp(),
+                            account_id=account_email,
+                            entity_id=entity_id,
+                            email_id=None,
+                            payload={
+                                "title": anomaly.title,
+                                "severity": anomaly.severity,
+                                "details": anomaly.details,
+                                "type": anomaly.type,
+                            },
+                        )
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error(
+                        "contract_event_emit_failed",
+                        event_type=EventType.ANOMALY_DETECTED.value,
+                        error=str(exc),
+                    )
     return alerts
 
 
@@ -237,6 +266,7 @@ def _collect_weekly_data(
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     event_emitter: EventEmitter | None = None,
+    contract_event_emitter: ContractEventEmitter | None = None,
     now: datetime | None = None,
 ) -> WeeklyDigestData:
     volume = analytics.weekly_email_volume(account_email=account_email, days=7)
@@ -269,6 +299,8 @@ def _collect_weekly_data(
         anomaly_alerts = _collect_anomaly_alerts(
             analytics=analytics,
             now=now or datetime.now(timezone.utc),
+            contract_event_emitter=contract_event_emitter,
+            account_email=account_email,
         )
 
     return WeeklyDigestData(
@@ -325,6 +357,7 @@ def maybe_send_weekly_digest(
     knowledge_db: KnowledgeDB,
     analytics: KnowledgeAnalytics,
     event_emitter: EventEmitter,
+    contract_event_emitter: ContractEventEmitter | None = None,
     account_email: str,
     telegram_chat_id: str,
     email_id: int,
@@ -356,8 +389,10 @@ def maybe_send_weekly_digest(
         )
         return
 
-    last_week_key = knowledge_db.get_last_weekly_digest_key(account_email=account_email)
-    if last_week_key == week_key:
+    if analytics.has_weekly_digest_sent(
+        account_email=account_email,
+        week_key=week_key,
+    ):
         logger.info(
             "[WEEKLY-DIGEST] decision",
             decision="skipped",
@@ -384,6 +419,7 @@ def maybe_send_weekly_digest(
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
         event_emitter=event_emitter,
+        contract_event_emitter=contract_event_emitter,
         now=current_time,
     )
 
@@ -442,6 +478,29 @@ def maybe_send_weekly_digest(
                     "deferred_emails": data.deferred_emails,
                 },
             )
+            if contract_event_emitter is not None:
+                try:
+                    contract_event_emitter.emit(
+                        EventV1(
+                            event_type=EventType.WEEKLY_DIGEST_SENT,
+                            ts_utc=current_time.timestamp(),
+                            account_id=account_email,
+                            entity_id=None,
+                            email_id=email_id,
+                            payload={
+                                "week_key": week_key,
+                                "account_email": account_email,
+                                "total_emails": data.total_emails,
+                                "deferred_emails": data.deferred_emails,
+                            },
+                        )
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error(
+                        "contract_event_emit_failed",
+                        event_type=EventType.WEEKLY_DIGEST_SENT.value,
+                        error=str(exc),
+                    )
     except Exception as exc:
         logger.error(
             "[WEEKLY-DIGEST] failed",
