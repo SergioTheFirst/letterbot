@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from mailbot_v26.insights.anomaly_engine import compute_anomalies
+from mailbot_v26.insights.attention_economics import (
+    AttentionEconomicsResult,
+    compute_attention_economics,
+    format_attention_block,
+)
 from mailbot_v26.observability import get_logger
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
@@ -27,6 +32,7 @@ class DigestData:
     trust_delta: float | None
     health_delta: float | None
     anomaly_alerts: list[str]
+    attention_economics: AttentionEconomicsResult | None
 
 
 def _collect_anomaly_alerts(
@@ -71,6 +77,7 @@ def _collect_digest_data(
     analytics: KnowledgeAnalytics,
     account_email: str,
     include_anomalies: bool = False,
+    include_attention_economics: bool = False,
     now: datetime | None = None,
 ) -> DigestData:
     deferred = analytics.deferred_digest_counts(account_email=account_email)
@@ -101,6 +108,24 @@ def _collect_digest_data(
             now=now or datetime.now(timezone.utc),
         )
 
+    attention_economics: AttentionEconomicsResult | None = None
+    if include_attention_economics:
+        attention_economics = compute_attention_economics(
+            analytics=analytics,
+            account_email=account_email,
+            window_days=7,
+            include_anomalies=include_anomalies,
+            now=now or datetime.now(timezone.utc),
+        )
+
+        compute_attention_economics(
+            analytics=analytics,
+            account_email=account_email,
+            window_days=30,
+            include_anomalies=include_anomalies,
+            now=now or datetime.now(timezone.utc),
+        )
+
     return DigestData(
         deferred_total=int(deferred.get("total", 0)),
         deferred_attachments_only=int(deferred.get("attachments_only", 0)),
@@ -110,6 +135,7 @@ def _collect_digest_data(
         trust_delta=trust_value,
         health_delta=health_value,
         anomaly_alerts=anomaly_alerts,
+        attention_economics=attention_economics,
     )
 
 
@@ -138,6 +164,9 @@ def _build_digest_text(data: DigestData) -> str:
     if data.anomaly_alerts:
         lines.append("• Anomaly Alerts:")
         lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:5])
+    if data.attention_economics is not None:
+        lines.append("")
+        lines.extend(format_attention_block(data.attention_economics))
     return "\n".join(lines)
 
 
@@ -152,6 +181,8 @@ def _has_digest_content(data: DigestData) -> bool:
         return True
     if data.anomaly_alerts:
         return True
+    if data.attention_economics is not None:
+        return True
     return False
 
 
@@ -163,12 +194,14 @@ def maybe_send_daily_digest(
     telegram_chat_id: str,
     email_id: int,
     include_anomalies: bool = False,
+    include_attention_economics: bool = False,
 ) -> None:
     now = datetime.now(timezone.utc)
     data = _collect_digest_data(
         analytics=analytics,
         account_email=account_email,
         include_anomalies=include_anomalies,
+        include_attention_economics=include_attention_economics,
         now=now,
     )
     last_sent_at = knowledge_db.get_last_digest_sent_at(account_email=account_email)

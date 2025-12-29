@@ -23,6 +23,21 @@ def _seed_deferred_email(db: KnowledgeDB) -> None:
     )
 
 
+def _seed_attention_emails(db: KnowledgeDB) -> None:
+    for idx in range(5):
+        db.save_email(
+            account_email="account@example.com",
+            from_email="client@example.com" if idx < 3 else "vendor@example.com",
+            subject=f"Subject {idx}",
+            received_at=datetime.now(timezone.utc).isoformat(),
+            priority="🔵",
+            action_line="Проверить",
+            body_summary=f"Текст письма {idx} для метрик внимания",
+            raw_body="",
+            attachment_summaries=[],
+        )
+
+
 def test_daily_digest_sent_once_per_day(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "digest.sqlite"
     db = KnowledgeDB(db_path)
@@ -108,3 +123,32 @@ def test_daily_digest_sent_with_deferred_items(monkeypatch, tmp_path) -> None:
     assert len(sent) == 1
     payload = sent[0]["payload"]
     assert "Отложено писем" in payload.html_text
+
+
+def test_daily_digest_attention_block(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "digest.sqlite"
+    db = KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    _seed_attention_emails(db)
+
+    sent: list[dict[str, object]] = []
+
+    def _enqueue_tg(*, email_id: int, payload) -> DeliveryResult:
+        sent.append({"email_id": email_id, "payload": payload})
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(daily_digest, "enqueue_tg", _enqueue_tg)
+
+    daily_digest.maybe_send_daily_digest(
+        knowledge_db=db,
+        analytics=analytics,
+        account_email="account@example.com",
+        telegram_chat_id="chat",
+        email_id=401,
+        include_attention_economics=True,
+    )
+
+    assert len(sent) == 1
+    payload = sent[0]["payload"]
+    assert "Куда ушло внимание" in payload.html_text
+    assert "Лучшие контрагенты" in payload.html_text
