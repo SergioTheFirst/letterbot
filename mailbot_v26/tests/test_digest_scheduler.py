@@ -12,6 +12,8 @@ from mailbot_v26.config_loader import (
 )
 from mailbot_v26.pipeline import digest_scheduler
 from mailbot_v26.observability.event_emitter import EventEmitter
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.worker.telegram_sender import DeliveryResult
@@ -31,8 +33,8 @@ class DummyLogger:
         self.events.append(("error", event, fields))
 
 
-def _seed_deferred_email(db: KnowledgeDB) -> None:
-    db.save_email(
+def _seed_deferred_email(db: KnowledgeDB, emitter: ContractEventEmitter) -> None:
+    email_id = db.save_email(
         account_email="account@example.com",
         from_email="sender@example.com",
         subject="Subject",
@@ -43,6 +45,37 @@ def _seed_deferred_email(db: KnowledgeDB) -> None:
         raw_body="",
         attachment_summaries=[("report.pdf", "summary")],
         deferred_for_digest=True,
+    )
+    assert email_id is not None
+    now_ts = datetime.now(timezone.utc).timestamp()
+    emitter.emit(
+        EventV1(
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=now_ts,
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=email_id,
+            payload={
+                "from_email": "sender@example.com",
+                "subject": "Subject",
+                "body_summary": "",
+                "attachments_count": 1,
+            },
+        )
+    )
+    emitter.emit(
+        EventV1(
+            event_type=EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+            ts_utc=now_ts,
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=email_id,
+            payload={
+                "reason": "test",
+                "attachments_only": True,
+                "attachments_count": 1,
+            },
+        )
     )
 
 
@@ -105,6 +138,7 @@ def _build_storage(tmp_path: Path) -> digest_scheduler.DigestStorage:
         knowledge_db=KnowledgeDB(db_path),
         analytics=KnowledgeAnalytics(db_path),
         event_emitter=EventEmitter(tmp_path / "events.sqlite"),
+        contract_event_emitter=ContractEventEmitter(db_path),
     )
 
 
@@ -115,7 +149,7 @@ def test_scheduler_daily_due_no_mail(monkeypatch, tmp_path) -> None:
 
     config = _build_config(tmp_path)
     storage = _build_storage(tmp_path)
-    _seed_deferred_email(storage.knowledge_db)
+    _seed_deferred_email(storage.knowledge_db, storage.contract_event_emitter)
 
     sent: list[dict[str, object]] = []
 
@@ -147,7 +181,7 @@ def test_scheduler_idempotency(monkeypatch, tmp_path) -> None:
 
     config = _build_config(tmp_path)
     storage = _build_storage(tmp_path)
-    _seed_deferred_email(storage.knowledge_db)
+    _seed_deferred_email(storage.knowledge_db, storage.contract_event_emitter)
 
     sent: list[dict[str, object]] = []
 
@@ -214,7 +248,7 @@ def test_scheduler_error_isolation(monkeypatch, tmp_path) -> None:
 
     config = _build_config(tmp_path)
     storage = _build_storage(tmp_path)
-    _seed_deferred_email(storage.knowledge_db)
+    _seed_deferred_email(storage.knowledge_db, storage.contract_event_emitter)
 
     def _sender(_payload) -> DeliveryResult:
         raise RuntimeError("telegram down")

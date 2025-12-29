@@ -1507,6 +1507,22 @@ def _record_analytics(
                                 new_status=update.new_status,
                                 reason=update.reason,
                             )
+                            _emit_contract_event(
+                                EventType.COMMITMENT_STATUS_CHANGED,
+                                ts_utc=received_at.timestamp(),
+                                account_id=account_email,
+                                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                                email_id=message_id,
+                                payload={
+                                    "commitment_id": update.commitment_id,
+                                    "old_status": update.old_status,
+                                    "new_status": update.new_status,
+                                    "reason": update.reason,
+                                    "deadline_iso": update.deadline_iso,
+                                    "commitment_text": update.commitment_text,
+                                    "from_email": from_email,
+                                },
+                            )
                             if update.new_status == "fulfilled":
                                 logger.info(
                                     "commitment_fulfilled_detected",
@@ -1714,6 +1730,21 @@ def _record_analytics(
                                     "confidence": commitment.confidence,
                                 },
                             )
+                            _emit_contract_event(
+                                EventType.COMMITMENT_CREATED,
+                                ts_utc=received_at.timestamp(),
+                                account_id=account_email,
+                                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                                email_id=message_id,
+                                payload={
+                                    "commitment_text": commitment.commitment_text,
+                                    "deadline_iso": commitment.deadline_iso,
+                                    "status": commitment.status,
+                                    "source": commitment.source,
+                                    "confidence": commitment.confidence,
+                                    "from_email": from_email,
+                                },
+                            )
                         except Exception as exc:  # pragma: no cover - defensive logging
                             logger.error(
                                 "commitment_event_failed",
@@ -1852,6 +1883,18 @@ def _record_analytics(
                     "data_window_days": trust_result.data_window_days,
                 },
             )
+            _emit_contract_event(
+                EventType.TRUST_SCORE_UPDATED,
+                ts_utc=datetime.now(timezone.utc).timestamp(),
+                account_id=account_email,
+                entity_id=entity_resolution.entity_id,
+                email_id=message_id,
+                payload={
+                    "trust_score": trust_result.snapshot.score,
+                    "sample_size": trust_result.snapshot.sample_size,
+                    "data_window_days": trust_result.data_window_days,
+                },
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error(
                 "trust_score_compute_failed",
@@ -1884,6 +1927,19 @@ def _record_analytics(
             event_emitter.emit(
                 type="relationship_health_updated",
                 timestamp=datetime.now(timezone.utc),
+                entity_id=entity_resolution.entity_id,
+                email_id=message_id,
+                payload={
+                    "health_score": health_snapshot.health_score,
+                    "reason": health_snapshot.reason,
+                    "components": health_snapshot.components_breakdown,
+                    "data_window_days": health_snapshot.data_window_days,
+                },
+            )
+            _emit_contract_event(
+                EventType.RELATIONSHIP_HEALTH_UPDATED,
+                ts_utc=datetime.now(timezone.utc).timestamp(),
+                account_id=account_email,
                 entity_id=entity_resolution.entity_id,
                 email_id=message_id,
                 payload={
@@ -2178,6 +2234,20 @@ def process_message(
             "attachments_count": len(attachments),
         },
     )
+    for attachment in attachments:
+        _emit_contract_event(
+            EventType.ATTACHMENT_EXTRACTED,
+            ts_utc=received_at.timestamp(),
+            account_id=account_email,
+            entity_id=entity_resolution.entity_id if entity_resolution else None,
+            email_id=message_id,
+            payload={
+                "filename": attachment.get("filename"),
+                "content_type": attachment.get("content_type") or attachment.get("type"),
+                "size_bytes": _attachment_size_bytes(attachment),
+                "text_length": _attachment_text_length(attachment),
+            },
+        )
     llm_body_text = llm_context.llm_body_text
     fallback_used = llm_context.fallback_used
     llm_start = time.perf_counter()
@@ -2619,6 +2689,18 @@ def process_message(
             email_id=message_id,
             reason=attention_reason,
         )
+        _emit_contract_event(
+            EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+            ts_utc=received_at.timestamp(),
+            account_id=account_email,
+            entity_id=entity_resolution.entity_id if entity_resolution else None,
+            email_id=message_id,
+            payload={
+                "reason": attention_reason,
+                "attachments_only": render_result.extracted_text_len <= 0 and len(attachments) > 0,
+                "attachments_count": len(attachments),
+            },
+        )
     else:
         telegram_delivered = False
         try:
@@ -2660,6 +2742,14 @@ def process_message(
                     email_id=message_id,
                     payload={"error": result.error or "non-retryable failure"},
                 )
+                _emit_contract_event(
+                    EventType.TELEGRAM_FAILED,
+                    ts_utc=received_at.timestamp(),
+                    account_id=account_email,
+                    entity_id=entity_resolution.entity_id if entity_resolution else None,
+                    email_id=message_id,
+                    payload={"error": result.error or "non-retryable failure"},
+                )
             else:
                 telegram_delivered = True
                 change = system_health.update_component("Telegram", True)
@@ -2698,6 +2788,14 @@ def process_message(
                 email_id=message_id,
                 payload={"error": str(exc)},
             )
+            _emit_contract_event(
+                EventType.TELEGRAM_FAILED,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                email_id=message_id,
+                payload={"error": str(exc)},
+            )
             logger.error(
                 "processing_error",
                 stage="telegram",
@@ -2709,6 +2807,14 @@ def process_message(
             event_emitter.emit(
                 type="telegram_delivery_succeeded",
                 timestamp=received_at,
+                email_id=message_id,
+                payload={"render_mode": render_mode.name},
+            )
+            _emit_contract_event(
+                EventType.TELEGRAM_DELIVERED,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=entity_resolution.entity_id if entity_resolution else None,
                 email_id=message_id,
                 payload={"render_mode": render_mode.name},
             )

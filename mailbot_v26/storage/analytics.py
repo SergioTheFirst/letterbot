@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -25,6 +25,43 @@ class KnowledgeAnalytics:
             conn.row_factory = sqlite3.Row
             cur = conn.execute(query, tuple(params or ()))
             return [dict(row) for row in cur.fetchall()]
+
+    def _event_payload(self, row: dict[str, object]) -> dict[str, object]:
+        raw = row.get("payload_json") or row.get("payload")
+        if not raw:
+            return {}
+        try:
+            return json.loads(str(raw))
+        except (TypeError, ValueError):
+            return {}
+
+    def _window_start_ts(self, days: int) -> float:
+        anchor = datetime.now(timezone.utc).timestamp()
+        return anchor - (days * 24 * 60 * 60)
+
+    def _event_rows(
+        self,
+        *,
+        account_id: str | None,
+        event_type: str,
+        since_ts: float | None = None,
+    ) -> list[dict[str, object]]:
+        query = """
+        SELECT event_type, ts_utc, account_id, entity_id, email_id, payload, payload_json
+        FROM events_v1
+        WHERE event_type = ?
+        """
+        params: list[object] = [event_type]
+        if account_id:
+            query += " AND account_id = ?"
+            params.append(account_id)
+        if since_ts is not None:
+            query += " AND ts_utc >= ?"
+            params.append(since_ts)
+        try:
+            return self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return []
 
     def sender_stats(self, limit: int | None = None) -> list[dict[str, object]]:
         query = """
@@ -628,39 +665,26 @@ class KnowledgeAnalytics:
         query += " ORDER BY c.deadline_iso ASC"
         return self._execute_select(query, params)
 
-    def deferred_digest_counts(self, *, account_email: str) -> dict[str, int]:
+    def deferred_digest_counts(self, *, account_email: str, days: int = 1) -> dict[str, int]:
         if not account_email:
             return {
                 "total": 0,
                 "attachments_only": 0,
                 "informational": 0,
             }
-        total_rows = self._execute_select(
-            """
-            SELECT COUNT(*) AS total
-            FROM emails
-            WHERE deferred_for_digest = 1
-              AND account_email = ?
-            """,
-            (account_email,),
+        since_ts = self._window_start_ts(days)
+        rows = self._event_rows(
+            account_id=account_email,
+            event_type="attention_deferred_for_digest",
+            since_ts=since_ts,
         )
-        total = int(total_rows[0].get("total") or 0) if total_rows else 0
-        attachments_rows = self._execute_select(
-            """
-            SELECT COUNT(DISTINCT e.id) AS attachments_only
-            FROM emails e
-            JOIN attachments a ON a.email_id = e.id
-            WHERE e.deferred_for_digest = 1
-              AND e.account_email = ?
-              AND COALESCE(e.raw_body_hash, '') = ''
-            """,
-            (account_email,),
-        )
-        attachments_only = (
-            int(attachments_rows[0].get("attachments_only") or 0)
-            if attachments_rows
-            else 0
-        )
+        total = 0
+        attachments_only = 0
+        for row in rows:
+            total += 1
+            payload = self._event_payload(row)
+            if payload.get("attachments_only") is True:
+                attachments_only += 1
         informational = max(total - attachments_only, 0)
         return {
             "total": total,
@@ -671,38 +695,97 @@ class KnowledgeAnalytics:
     def commitment_status_counts(self, *, account_email: str) -> dict[str, int]:
         if not account_email:
             return {"pending": 0, "expired": 0}
-        rows = self._execute_select(
-            """
-            SELECT
-                SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
-                SUM(CASE WHEN c.status = 'expired' THEN 1 ELSE 0 END) AS expired_count
-            FROM commitments c
-            JOIN emails e ON e.id = c.email_row_id
-            WHERE e.account_email = ?
-            """,
-            (account_email,),
+        created_rows = self._event_rows(
+            account_id=account_email,
+            event_type="commitment_created",
         )
-        row = rows[0] if rows else {}
+        status_rows = self._event_rows(
+            account_id=account_email,
+            event_type="commitment_status_changed",
+        )
+        created_count = len(created_rows)
+        expired_count = 0
+        fulfilled_count = 0
+        for row in status_rows:
+            payload = self._event_payload(row)
+            status = str(payload.get("new_status") or payload.get("status") or "").lower()
+            if status == "expired":
+                expired_count += 1
+            elif status == "fulfilled":
+                fulfilled_count += 1
+        pending_count = max(created_count - expired_count - fulfilled_count, 0)
+        row = {"pending_count": pending_count, "expired_count": expired_count}
         return {
             "pending": int(row.get("pending_count") or 0),
             "expired": int(row.get("expired_count") or 0),
         }
 
+    def has_daily_digest_sent(self, *, account_email: str, day: datetime) -> bool:
+        if not account_email:
+            return False
+        start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp()
+        end = start + 24 * 60 * 60
+        try:
+            rows = self._execute_select(
+                """
+                SELECT 1
+                FROM events_v1
+                WHERE account_id = ?
+                  AND event_type = 'daily_digest_sent'
+                  AND ts_utc >= ?
+                  AND ts_utc < ?
+                LIMIT 1
+                """,
+                (account_email, start, end),
+            )
+        except sqlite3.OperationalError:
+            return False
+        return bool(rows)
+
+    def has_weekly_digest_sent(self, *, account_email: str, week_key: str) -> bool:
+        if not account_email or not week_key:
+            return False
+        rows = self._event_rows(
+            account_id=account_email,
+            event_type="weekly_digest_sent",
+        )
+        for row in rows:
+            payload = self._event_payload(row)
+            if str(payload.get("week_key") or "") == week_key:
+                return True
+        return False
+
     def weekly_email_volume(self, *, account_email: str, days: int = 7) -> dict[str, int]:
         if not account_email:
             return {"total": 0, "deferred": 0}
-        rows = self._execute_select(
-            """
-            SELECT
-                COUNT(*) AS total,
-                SUM(CASE WHEN deferred_for_digest = 1 THEN 1 ELSE 0 END) AS deferred
-            FROM emails
-            WHERE account_email = ?
-              AND created_at >= datetime('now', ?)
-            """,
-            (account_email, f"-{days} days"),
-        )
-        row = rows[0] if rows else {}
+        since_ts = self._window_start_ts(days)
+        try:
+            total_rows = self._execute_select(
+                """
+                SELECT COUNT(*) AS total
+                FROM events_v1
+                WHERE account_id = ?
+                  AND event_type = 'email_received'
+                  AND ts_utc >= ?
+                """,
+                (account_email, since_ts),
+            )
+            deferred_rows = self._execute_select(
+                """
+                SELECT COUNT(*) AS total
+                FROM events_v1
+                WHERE account_id = ?
+                  AND event_type = 'attention_deferred_for_digest'
+                  AND ts_utc >= ?
+                """,
+                (account_email, since_ts),
+            )
+        except sqlite3.OperationalError:
+            return {"total": 0, "deferred": 0}
+        row = {
+            "total": int(total_rows[0].get("total") or 0) if total_rows else 0,
+            "deferred": int(deferred_rows[0].get("total") or 0) if deferred_rows else 0,
+        }
         return {
             "total": int(row.get("total") or 0),
             "deferred": int(row.get("deferred") or 0),
@@ -713,22 +796,20 @@ class KnowledgeAnalytics:
     ) -> list[dict[str, object]]:
         if not account_email:
             return []
-        rows = self._execute_select(
-            """
-            SELECT from_email, subject, body_summary
-            FROM emails
-            WHERE account_email = ?
-              AND created_at >= datetime('now', ?)
-            """,
-            (account_email, f"-{days} days"),
+        since_ts = self._window_start_ts(days)
+        rows = self._event_rows(
+            account_id=account_email,
+            event_type="email_received",
+            since_ts=since_ts,
         )
         totals: dict[str, int] = {}
         for row in rows:
-            sender = str(row.get("from_email") or "").strip()
+            payload = self._event_payload(row)
+            sender = str(payload.get("from_email") or "").strip()
             if not sender:
                 continue
-            summary = str(row.get("body_summary") or "").strip()
-            subject = str(row.get("subject") or "").strip()
+            summary = str(payload.get("body_summary") or "").strip()
+            subject = str(payload.get("subject") or "").strip()
             text = summary or subject
             if not text:
                 continue
@@ -746,74 +827,66 @@ class KnowledgeAnalytics:
     ) -> list[dict[str, object]]:
         if not account_email:
             return []
-
-        rows = self._execute_select(
-            """
-            WITH base AS (
-                SELECT
-                    e.id AS email_id,
-                    lower(trim(e.from_email)) AS entity_id,
-                    e.deferred_for_digest AS deferred_flag,
-                    CASE
-                        WHEN TRIM(COALESCE(e.body_summary, '')) != '' THEN TRIM(e.body_summary)
-                        WHEN TRIM(COALESCE(e.subject, '')) != '' THEN TRIM(e.subject)
-                        ELSE ''
-                    END AS text_content
-                FROM emails e
-                WHERE e.account_email = ?
-                  AND e.created_at >= datetime('now', ?)
-                  AND TRIM(COALESCE(e.from_email, '')) != ''
-            ), attachments_per_email AS (
-                SELECT email_id, COUNT(*) AS attachment_count
-                FROM attachments
-                WHERE email_id IN (SELECT email_id FROM base)
-                GROUP BY email_id
-            ), per_email AS (
-                SELECT
-                    b.entity_id,
-                    b.deferred_flag,
-                    COALESCE(a.attachment_count, 0) AS attachment_count,
-                    CASE
-                        WHEN LENGTH(TRIM(b.text_content)) <= 0 THEN 0
-                        ELSE LENGTH(TRIM(b.text_content)) - LENGTH(REPLACE(TRIM(b.text_content), ' ', '')) + 1
-                    END AS word_count
-                FROM base b
-                LEFT JOIN attachments_per_email a ON a.email_id = b.email_id
-            )
-            SELECT
-                entity_id,
-                COUNT(*) AS message_count,
-                SUM(CASE WHEN deferred_flag = 1 THEN 1 ELSE 0 END) AS deferred_count,
-                SUM(attachment_count) AS attachment_count,
-                SUM(
-                    CASE
-                        WHEN word_count <= 0 THEN 1.0
-                        WHEN (word_count / 200.0) < 1.0 THEN 1.0
-                        ELSE (word_count / 200.0)
-                    END
-                    + (attachment_count * 1.5)
-                ) AS estimated_read_minutes
-            FROM per_email
-            GROUP BY entity_id
-            ORDER BY estimated_read_minutes DESC, entity_id ASC
-            """,
-            (account_email, f"-{days} days"),
+        since_ts = self._window_start_ts(days)
+        deferred_rows = self._event_rows(
+            account_id=account_email,
+            event_type="attention_deferred_for_digest",
+            since_ts=since_ts,
         )
+        deferred_ids = {
+            str(row.get("email_id"))
+            for row in deferred_rows
+            if row.get("email_id") is not None
+        }
+        rows = self._event_rows(
+            account_id=account_email,
+            event_type="email_received",
+            since_ts=since_ts,
+        )
+        aggregates: dict[str, dict[str, float]] = {}
+        for row in rows:
+            payload = self._event_payload(row)
+            sender = str(payload.get("from_email") or "").strip()
+            if not sender:
+                continue
+            entity_id = sender.lower()
+            text_content = str(payload.get("body_summary") or payload.get("subject") or "").strip()
+            word_count = len(re.findall(r"\b\w+\b", text_content)) if text_content else 0
+            attachment_count = int(payload.get("attachments_count") or 0)
+            read_minutes = 1.0 if word_count <= 0 else max(1.0, word_count / 200.0)
+            read_minutes += attachment_count * 1.5
+            entry = aggregates.setdefault(
+                entity_id,
+                {
+                    "message_count": 0.0,
+                    "deferred_count": 0.0,
+                    "attachment_count": 0.0,
+                    "estimated_read_minutes": 0.0,
+                },
+            )
+            entry["message_count"] += 1.0
+            entry["attachment_count"] += float(attachment_count)
+            entry["estimated_read_minutes"] += float(read_minutes)
+            if row.get("email_id") is not None and str(row.get("email_id")) in deferred_ids:
+                entry["deferred_count"] += 1.0
 
         results: list[dict[str, object]] = []
-        for row in rows:
-            entity_id = str(row.get("entity_id") or "").strip()
+        for entity_id, totals in aggregates.items():
+            entity_id = str(entity_id or "").strip()
             if not entity_id:
                 continue
             results.append(
                 {
                     "entity_id": entity_id,
-                    "message_count": int(row.get("message_count") or 0),
-                    "deferred_count": int(row.get("deferred_count") or 0),
-                    "attachment_count": int(row.get("attachment_count") or 0),
-                    "estimated_read_minutes": float(row.get("estimated_read_minutes") or 0.0),
+                    "message_count": int(totals.get("message_count") or 0),
+                    "deferred_count": int(totals.get("deferred_count") or 0),
+                    "attachment_count": int(totals.get("attachment_count") or 0),
+                    "estimated_read_minutes": float(totals.get("estimated_read_minutes") or 0.0),
                 }
             )
+        results.sort(
+            key=lambda item: (-float(item["estimated_read_minutes"]), str(item["entity_id"]).lower())
+        )
         return results
 
     def weekly_commitment_counts(
@@ -821,20 +894,31 @@ class KnowledgeAnalytics:
     ) -> dict[str, int]:
         if not account_email:
             return {"created": 0, "fulfilled": 0, "overdue": 0}
-        rows = self._execute_select(
-            """
-            SELECT
-                COUNT(*) AS created_count,
-                SUM(CASE WHEN c.status = 'fulfilled' THEN 1 ELSE 0 END) AS fulfilled_count,
-                SUM(CASE WHEN c.status = 'expired' THEN 1 ELSE 0 END) AS expired_count
-            FROM commitments c
-            JOIN emails e ON e.id = c.email_row_id
-            WHERE e.account_email = ?
-              AND c.created_at >= datetime('now', ?)
-            """,
-            (account_email, f"-{days} days"),
+        since_ts = self._window_start_ts(days)
+        created_rows = self._event_rows(
+            account_id=account_email,
+            event_type="commitment_created",
+            since_ts=since_ts,
         )
-        row = rows[0] if rows else {}
+        status_rows = self._event_rows(
+            account_id=account_email,
+            event_type="commitment_status_changed",
+            since_ts=since_ts,
+        )
+        fulfilled_count = 0
+        expired_count = 0
+        for row in status_rows:
+            payload = self._event_payload(row)
+            status = str(payload.get("new_status") or payload.get("status") or "").lower()
+            if status == "fulfilled":
+                fulfilled_count += 1
+            elif status == "expired":
+                expired_count += 1
+        row = {
+            "created_count": len(created_rows),
+            "fulfilled_count": fulfilled_count,
+            "expired_count": expired_count,
+        }
         return {
             "created": int(row.get("created_count") or 0),
             "fulfilled": int(row.get("fulfilled_count") or 0),
@@ -846,59 +930,73 @@ class KnowledgeAnalytics:
     ) -> list[dict[str, object]]:
         if not account_email:
             return []
-        rows = self._execute_select(
-            """
-            SELECT e.from_email, c.commitment_text, c.deadline_iso
-            FROM commitments c
-            JOIN emails e ON e.id = c.email_row_id
-            WHERE e.account_email = ?
-              AND c.status = 'expired'
-              AND c.deadline_iso IS NOT NULL
-              AND date(c.deadline_iso) >= date('now', ?)
-            ORDER BY date(c.deadline_iso) ASC, lower(e.from_email) ASC
-            LIMIT ?
-            """,
-            (account_email, f"-{days} days", limit),
+        since_ts = self._window_start_ts(days)
+        rows = self._event_rows(
+            account_id=account_email,
+            event_type="commitment_status_changed",
+            since_ts=since_ts,
         )
-        return rows
+        overdue: list[dict[str, object]] = []
+        for row in rows:
+            payload = self._event_payload(row)
+            status = str(payload.get("new_status") or payload.get("status") or "").lower()
+            if status != "expired":
+                continue
+            overdue.append(
+                {
+                    "from_email": payload.get("from_email") or "",
+                    "commitment_text": payload.get("commitment_text") or "",
+                    "deadline_iso": payload.get("deadline_iso") or "",
+                }
+            )
+        overdue.sort(
+            key=lambda item: (
+                str(item.get("deadline_iso") or ""),
+                str(item.get("from_email") or "").lower(),
+            )
+        )
+        return overdue[:limit]
 
     def weekly_trust_score_deltas(
         self, *, days: int = 7
     ) -> dict[str, list[dict[str, object]]]:
+        since_ts = self._window_start_ts(days)
         try:
             rows = self._execute_select(
                 """
                 SELECT
-                    t.entity_id,
-                    t.trust_score,
-                    t.created_at,
+                    ev.entity_id,
+                    ev.ts_utc,
+                    ev.payload,
+                    ev.payload_json,
                     e.name AS entity_name
-                FROM trust_snapshots t
-                LEFT JOIN entities e ON e.id = t.entity_id
-                WHERE t.trust_score IS NOT NULL
-                  AND t.created_at >= datetime('now', ?)
-                ORDER BY t.entity_id ASC, t.created_at ASC
+                FROM events_v1 ev
+                LEFT JOIN entities e ON e.id = ev.entity_id
+                WHERE ev.event_type = 'trust_score_updated'
+                  AND ev.ts_utc >= ?
+                ORDER BY ev.entity_id ASC, ev.ts_utc ASC
                 """,
-                (f"-{days} days",),
+                (since_ts,),
             )
         except sqlite3.OperationalError:
             return {"up": [], "down": []}
 
-        per_entity: dict[str, list[tuple[datetime, float, str]]] = {}
+        per_entity: dict[str, list[tuple[float, float, str]]] = {}
         for row in rows:
             entity_id = str(row.get("entity_id") or "")
             if not entity_id:
                 continue
-            score_raw = row.get("trust_score")
+            payload = self._event_payload(row)
+            score_raw = payload.get("trust_score")
             try:
                 score = float(score_raw)
             except (TypeError, ValueError):
                 continue
-            created_at = parse_sqlite_datetime(str(row.get("created_at") or ""))
-            if created_at is None:
+            ts_utc = float(row.get("ts_utc") or 0.0)
+            if ts_utc <= 0:
                 continue
             name = str(row.get("entity_name") or entity_id)
-            per_entity.setdefault(entity_id, []).append((created_at, score, name))
+            per_entity.setdefault(entity_id, []).append((ts_utc, score, name))
 
         deltas: list[dict[str, object]] = []
         for entity_id, entries in per_entity.items():
@@ -922,55 +1020,20 @@ class KnowledgeAnalytics:
         downs = [item for item in down_sorted if float(item["delta"]) < 0][:3]
         return {"up": ups, "down": downs}
 
-    def _snapshot_deltas(
-        self, *, table: str, value_field: str, days: int
-    ) -> dict[str, float]:
-        try:
-            rows = self._execute_select(
-                f"""
-                SELECT entity_id, {value_field} AS value, created_at
-                FROM {table}
-                WHERE {value_field} IS NOT NULL
-                  AND created_at >= datetime('now', ?)
-                ORDER BY entity_id ASC, created_at ASC
-                """,
-                (f"-{days} days",),
-            )
-        except sqlite3.OperationalError:
-            return {}
-
-        per_entity: dict[str, list[tuple[datetime, float]]] = {}
-        for row in rows:
-            entity_id = str(row.get("entity_id") or "").strip()
-            if not entity_id:
-                continue
-            raw_value = row.get("value")
-            try:
-                value = float(raw_value)
-            except (TypeError, ValueError):
-                continue
-            created_at = parse_sqlite_datetime(str(row.get("created_at") or ""))
-            if created_at is None:
-                continue
-            per_entity.setdefault(entity_id, []).append((created_at, value))
-
-        deltas: dict[str, float] = {}
-        for entity_id, entries in per_entity.items():
-            if len(entries) < 2:
-                continue
-            entries.sort(key=lambda item: item[0])
-            deltas[entity_id] = entries[-1][1] - entries[0][1]
-        return deltas
-
     def trust_and_health_deltas(self, *, days: int = 7) -> dict[str, dict[str, float]]:
-        trust_deltas = self._snapshot_deltas(
-            table="trust_snapshots", value_field="trust_score", days=days
+        since_ts = self._window_start_ts(days)
+        trust_rows = self._event_rows(
+            account_id=None,
+            event_type="trust_score_updated",
+            since_ts=since_ts,
         )
-        health_deltas = self._snapshot_deltas(
-            table="relationship_health_snapshots",
-            value_field="health_score",
-            days=days,
+        health_rows = self._event_rows(
+            account_id=None,
+            event_type="relationship_health_updated",
+            since_ts=since_ts,
         )
+        trust_deltas = self._event_deltas(trust_rows, "trust_score")
+        health_deltas = self._event_deltas(health_rows, "health_score")
 
         all_entities = set(trust_deltas.keys()) | set(health_deltas.keys())
         combined: dict[str, dict[str, float]] = {}
@@ -987,10 +1050,10 @@ class KnowledgeAnalytics:
         try:
             rows = self._execute_select(
                 """
-                SELECT entity_id, trust_score, created_at
-                FROM trust_snapshots
-                WHERE trust_score IS NOT NULL
-                ORDER BY created_at DESC
+                SELECT entity_id, ts_utc, payload, payload_json
+                FROM events_v1
+                WHERE event_type = 'trust_score_updated'
+                ORDER BY ts_utc DESC
                 LIMIT ?
                 """,
                 (limit,),
@@ -1002,14 +1065,17 @@ class KnowledgeAnalytics:
             entity_id = str(row.get("entity_id") or "")
             if not entity_id:
                 continue
-            score_value = row.get("trust_score")
+            payload = self._event_payload(row)
+            score_value = payload.get("trust_score")
             if score_value is None:
                 continue
             try:
                 score = float(score_value)
             except (TypeError, ValueError):
                 continue
-            created_at = parse_sqlite_datetime(str(row.get("created_at") or "")) or None
+            created_at = datetime.fromtimestamp(
+                float(row.get("ts_utc") or 0.0), tz=timezone.utc
+            )
             if entity_id not in latest_by_entity:
                 latest_by_entity[entity_id] = {
                     "current_score": score,
@@ -1034,10 +1100,10 @@ class KnowledgeAnalytics:
         try:
             rows = self._execute_select(
                 """
-                SELECT entity_id, health_score, created_at
-                FROM relationship_health_snapshots
-                WHERE health_score IS NOT NULL
-                ORDER BY created_at DESC
+                SELECT entity_id, ts_utc, payload, payload_json
+                FROM events_v1
+                WHERE event_type = 'relationship_health_updated'
+                ORDER BY ts_utc DESC
                 LIMIT ?
                 """,
                 (limit,),
@@ -1049,14 +1115,17 @@ class KnowledgeAnalytics:
             entity_id = str(row.get("entity_id") or "")
             if not entity_id:
                 continue
-            score_value = row.get("health_score")
+            payload = self._event_payload(row)
+            score_value = payload.get("health_score")
             if score_value is None:
                 continue
             try:
                 score = float(score_value)
             except (TypeError, ValueError):
                 continue
-            created_at = parse_sqlite_datetime(str(row.get("created_at") or "")) or None
+            created_at = datetime.fromtimestamp(
+                float(row.get("ts_utc") or 0.0), tz=timezone.utc
+            )
             if entity_id not in latest_by_entity:
                 latest_by_entity[entity_id] = {
                     "current_score": score,
@@ -1074,3 +1143,32 @@ class KnowledgeAnalytics:
                 "current_at": created_at,
             }
         return None
+
+    def _event_deltas(
+        self,
+        rows: list[dict[str, object]],
+        field: str,
+    ) -> dict[str, float]:
+        per_entity: dict[str, list[tuple[float, float]]] = {}
+        for row in rows:
+            entity_id = str(row.get("entity_id") or "").strip()
+            if not entity_id:
+                continue
+            payload = self._event_payload(row)
+            raw_value = payload.get(field)
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            ts_utc = float(row.get("ts_utc") or 0.0)
+            if ts_utc <= 0:
+                continue
+            per_entity.setdefault(entity_id, []).append((ts_utc, value))
+
+        deltas: dict[str, float] = {}
+        for entity_id, entries in per_entity.items():
+            if len(entries) < 2:
+                continue
+            entries.sort(key=lambda item: item[0])
+            deltas[entity_id] = entries[-1][1] - entries[0][1]
+        return deltas

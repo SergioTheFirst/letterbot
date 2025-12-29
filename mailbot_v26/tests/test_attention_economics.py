@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from mailbot_v26.insights.attention_economics import compute_attention_economics
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
@@ -41,40 +43,17 @@ def _insert_email(
         )
 
 
-def _ensure_snapshot_tables(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS trust_snapshots (
-            id TEXT PRIMARY KEY,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            entity_id TEXT NOT NULL,
-            trust_score REAL
-        );
-        """,
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS relationship_health_snapshots (
-            id TEXT PRIMARY KEY,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            entity_id TEXT NOT NULL,
-            health_score REAL
-        );
-        """,
-    )
-
-
 def test_at_risk_only_uses_health_or_anomalies(tmp_path: Path) -> None:
     db_path = tmp_path / "attention.sqlite"
     KnowledgeDB(db_path)
     analytics = KnowledgeAnalytics(db_path)
+    emitter = ContractEventEmitter(db_path)
 
     now = datetime.utcnow()
     earlier = (now - timedelta(days=3)).isoformat()
     now_iso = now.isoformat()
 
     with sqlite3.connect(db_path) as conn:
-        _ensure_snapshot_tables(conn)
         for _ in range(3):
             _insert_email(
                 conn,
@@ -92,26 +71,73 @@ def test_at_risk_only_uses_health_or_anomalies(tmp_path: Path) -> None:
                 body_words=120,
                 created_at=now_iso,
             )
-
-        conn.execute(
-            "INSERT INTO relationship_health_snapshots (id, entity_id, health_score, created_at) VALUES (?, ?, ?, ?)",
-            ("h1", "risk@example.com", 80.0, earlier),
-        )
-        conn.execute(
-            "INSERT INTO relationship_health_snapshots (id, entity_id, health_score, created_at) VALUES (?, ?, ?, ?)",
-            ("h2", "risk@example.com", 60.0, now_iso),
-        )
-
-        conn.execute(
-            "INSERT INTO trust_snapshots (id, entity_id, trust_score, created_at) VALUES (?, ?, ?, ?)",
-            ("t1", "trust-only@example.com", 0.8, earlier),
-        )
-        conn.execute(
-            "INSERT INTO trust_snapshots (id, entity_id, trust_score, created_at) VALUES (?, ?, ?, ?)",
-            ("t2", "trust-only@example.com", 0.6, now_iso),
-        )
-
         conn.commit()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, account_email, from_email, subject, body_summary, created_at FROM emails"
+        ).fetchall()
+        for row in rows:
+            created_at = datetime.fromisoformat(str(row["created_at"]))
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            emitter.emit(
+                EventV1(
+                    event_type=EventType.EMAIL_RECEIVED,
+                    ts_utc=created_at.timestamp(),
+                    account_id=str(row["account_email"]),
+                    entity_id=None,
+                    email_id=int(row["id"]),
+                    payload={
+                        "from_email": row["from_email"],
+                        "subject": row["subject"],
+                        "body_summary": row["body_summary"],
+                        "attachments_count": 1 if row["from_email"] == "risk@example.com" else 0,
+                    },
+                )
+            )
+
+    emitter.emit(
+        EventV1(
+            event_type=EventType.RELATIONSHIP_HEALTH_UPDATED,
+            ts_utc=datetime.fromisoformat(earlier).replace(tzinfo=timezone.utc).timestamp(),
+            account_id="acc@example.com",
+            entity_id="risk@example.com",
+            email_id=None,
+            payload={"health_score": 80.0},
+        )
+    )
+    emitter.emit(
+        EventV1(
+            event_type=EventType.RELATIONSHIP_HEALTH_UPDATED,
+            ts_utc=datetime.fromisoformat(now_iso).replace(tzinfo=timezone.utc).timestamp(),
+            account_id="acc@example.com",
+            entity_id="risk@example.com",
+            email_id=None,
+            payload={"health_score": 60.0},
+        )
+    )
+    emitter.emit(
+        EventV1(
+            event_type=EventType.TRUST_SCORE_UPDATED,
+            ts_utc=datetime.fromisoformat(earlier).replace(tzinfo=timezone.utc).timestamp(),
+            account_id="acc@example.com",
+            entity_id="trust-only@example.com",
+            email_id=None,
+            payload={"trust_score": 0.8},
+        )
+    )
+    emitter.emit(
+        EventV1(
+            event_type=EventType.TRUST_SCORE_UPDATED,
+            ts_utc=datetime.fromisoformat(now_iso).replace(tzinfo=timezone.utc).timestamp(),
+            account_id="acc@example.com",
+            entity_id="trust-only@example.com",
+            email_id=None,
+            payload={"trust_score": 0.6},
+        )
+    )
 
     result = compute_attention_economics(
         analytics=analytics,
@@ -125,4 +151,3 @@ def test_at_risk_only_uses_health_or_anomalies(tmp_path: Path) -> None:
 
     at_risk_ids = {entity.entity_id for entity in result.at_risk}
     assert at_risk_ids == {"risk@example.com"}
-

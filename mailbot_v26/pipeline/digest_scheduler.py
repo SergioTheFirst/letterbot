@@ -12,6 +12,8 @@ from mailbot_v26.observability.logger import LoggerLike
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.observability.metrics import GateEvaluation, MetricsAggregator, SystemGates
 from mailbot_v26.pipeline import daily_digest, weekly_digest
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
@@ -31,6 +33,7 @@ class DigestStorage:
     knowledge_db: KnowledgeDB
     analytics: KnowledgeAnalytics
     event_emitter: EventEmitter | None = None
+    contract_event_emitter: ContractEventEmitter | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,8 +333,7 @@ def _run_daily_digest(
         )
         return
 
-    last_sent = storage.knowledge_db.get_last_digest_sent_at(account_email=account_email)
-    if last_sent and last_sent.date() == now.date():
+    if storage.analytics.has_daily_digest_sent(account_email=account_email, day=now):
         logger.info(
             "digest_tick_checked",
             digest_type="daily",
@@ -347,6 +349,7 @@ def _run_daily_digest(
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
         now=now,
+        contract_event_emitter=storage.contract_event_emitter,
     )
     has_content = daily_digest._has_digest_content(data)
     if not has_content:
@@ -411,6 +414,26 @@ def _run_daily_digest(
             digest_type="daily",
             account_email=account_email,
         )
+        if storage.contract_event_emitter is not None:
+            try:
+                storage.contract_event_emitter.emit(
+                    EventV1(
+                        event_type=EventType.DAILY_DIGEST_SENT,
+                        ts_utc=now.timestamp(),
+                        account_id=account_email,
+                        entity_id=None,
+                        email_id=0,
+                        payload={
+                            "account_email": account_email,
+                        },
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "contract_event_emit_failed",
+                    event_type=EventType.DAILY_DIGEST_SENT.value,
+                    error=str(exc),
+                )
         return
 
     logger.error(
@@ -461,10 +484,10 @@ def _run_weekly_digest(
             )
         return
 
-    last_week_key = storage.knowledge_db.get_last_weekly_digest_key(
-        account_email=account_email
-    )
-    if last_week_key == week_key:
+    if storage.analytics.has_weekly_digest_sent(
+        account_email=account_email,
+        week_key=week_key,
+    ):
         logger.info(
             "digest_tick_checked",
             digest_type="weekly",
@@ -501,6 +524,7 @@ def _run_weekly_digest(
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
         event_emitter=storage.event_emitter,
+        contract_event_emitter=storage.contract_event_emitter,
         now=now,
     )
     has_content = _has_weekly_content(data)
@@ -609,6 +633,29 @@ def _run_weekly_digest(
                     "deferred_emails": data.deferred_emails,
                 },
             )
+        if storage.contract_event_emitter is not None:
+            try:
+                storage.contract_event_emitter.emit(
+                    EventV1(
+                        event_type=EventType.WEEKLY_DIGEST_SENT,
+                        ts_utc=now.timestamp(),
+                        account_id=account_email,
+                        entity_id=None,
+                        email_id=0,
+                        payload={
+                            "week_key": week_key,
+                            "account_email": account_email,
+                            "total_emails": data.total_emails,
+                            "deferred_emails": data.deferred_emails,
+                        },
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "contract_event_emit_failed",
+                    event_type=EventType.WEEKLY_DIGEST_SENT.value,
+                    error=str(exc),
+                )
         return
 
     logger.error(

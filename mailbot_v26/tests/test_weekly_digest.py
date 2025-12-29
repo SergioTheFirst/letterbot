@@ -6,6 +6,8 @@ import sqlite3
 
 from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.observability.event_emitter import EventEmitter
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline import weekly_digest
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
@@ -14,6 +16,13 @@ from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 def _due_time() -> datetime:
     return datetime(2025, 1, 6, 9, 0, tzinfo=timezone.utc)
+
+
+def _parse_ts(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _patch_due_config(monkeypatch) -> None:
@@ -69,26 +78,31 @@ def _insert_email(
     return email_id
 
 
-def _ensure_snapshot_tables(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS trust_snapshots (
-            id TEXT PRIMARY KEY,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            entity_id TEXT NOT NULL,
-            trust_score REAL
-        );
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS relationship_health_snapshots (
-            id TEXT PRIMARY KEY,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            entity_id TEXT NOT NULL,
-            health_score REAL
-        );
-        """
+def _emit_email_event(
+    emitter: ContractEventEmitter,
+    *,
+    email_id: int,
+    account_email: str,
+    from_email: str,
+    subject: str,
+    body_summary: str,
+    attachments_count: int,
+    ts: datetime,
+) -> None:
+    emitter.emit(
+        EventV1(
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=ts.timestamp(),
+            account_id=account_email,
+            entity_id=None,
+            email_id=email_id,
+            payload={
+                "from_email": from_email,
+                "subject": subject,
+                "body_summary": body_summary,
+                "attachments_count": attachments_count,
+            },
+        )
     )
 
 
@@ -97,6 +111,7 @@ def test_weekly_digest_sent_once_per_week(monkeypatch, tmp_path) -> None:
     db = KnowledgeDB(db_path)
     analytics = KnowledgeAnalytics(db_path)
     emitter = EventEmitter(tmp_path / "events.sqlite")
+    contract_emitter = ContractEventEmitter(db_path)
 
     sent: list[dict[str, object]] = []
 
@@ -111,6 +126,7 @@ def test_weekly_digest_sent_once_per_week(monkeypatch, tmp_path) -> None:
         knowledge_db=db,
         analytics=analytics,
         event_emitter=emitter,
+        contract_event_emitter=contract_emitter,
         account_email="account@example.com",
         telegram_chat_id="chat",
         email_id=100,
@@ -120,6 +136,7 @@ def test_weekly_digest_sent_once_per_week(monkeypatch, tmp_path) -> None:
         knowledge_db=db,
         analytics=analytics,
         event_emitter=emitter,
+        contract_event_emitter=contract_emitter,
         account_email="account@example.com",
         telegram_chat_id="chat",
         email_id=101,
@@ -135,6 +152,7 @@ def test_weekly_digest_empty_content_is_deterministic(monkeypatch, tmp_path) -> 
     db = KnowledgeDB(db_path)
     analytics = KnowledgeAnalytics(db_path)
     emitter = EventEmitter(tmp_path / "events.sqlite")
+    contract_emitter = ContractEventEmitter(db_path)
 
     sent: list[dict[str, object]] = []
 
@@ -149,6 +167,7 @@ def test_weekly_digest_empty_content_is_deterministic(monkeypatch, tmp_path) -> 
         knowledge_db=db,
         analytics=analytics,
         event_emitter=emitter,
+        contract_event_emitter=contract_emitter,
         account_email="account@example.com",
         telegram_chat_id="chat",
         email_id=200,
@@ -191,9 +210,9 @@ def test_weekly_digest_attention_block_added_when_flag_on(monkeypatch, tmp_path)
     db = KnowledgeDB(db_path)
     analytics = KnowledgeAnalytics(db_path)
     emitter = EventEmitter(events_path)
+    contract_emitter = ContractEventEmitter(db_path)
 
     with sqlite3.connect(db_path) as conn:
-        _ensure_snapshot_tables(conn)
         for _ in range(3):
             _insert_email(
                 conn,
@@ -212,23 +231,82 @@ def test_weekly_digest_attention_block_added_when_flag_on(monkeypatch, tmp_path)
                 body_summary=" ".join(["note"] * 50),
                 deferred=True,
             )
-        conn.execute(
-            "INSERT INTO trust_snapshots (id, entity_id, trust_score, created_at) VALUES (?, ?, ?, ?)",
-            ("t1", "alice@example.com", 0.4, earlier),
-        )
-        conn.execute(
-            "INSERT INTO trust_snapshots (id, entity_id, trust_score, created_at) VALUES (?, ?, ?, ?)",
-            ("t2", "alice@example.com", 0.6, created_at),
-        )
-        conn.execute(
-            "INSERT INTO relationship_health_snapshots (id, entity_id, health_score, created_at) VALUES (?, ?, ?, ?)",
-            ("h1", "bob@example.com", 80.0, earlier),
-        )
-        conn.execute(
-            "INSERT INTO relationship_health_snapshots (id, entity_id, health_score, created_at) VALUES (?, ?, ?, ?)",
-            ("h2", "bob@example.com", 60.0, created_at),
-        )
         conn.commit()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, account_email, from_email, subject, body_summary, created_at FROM emails"
+        ).fetchall()
+        for row in rows:
+            _emit_email_event(
+                contract_emitter,
+                email_id=int(row["id"]),
+                account_email=str(row["account_email"]),
+                from_email=str(row["from_email"]),
+                subject=str(row["subject"] or ""),
+                body_summary=str(row["body_summary"] or ""),
+                attachments_count=1 if row["from_email"] == "alice@example.com" else 0,
+                ts=_parse_ts(str(row["created_at"])),
+            )
+        deferred_rows = conn.execute(
+            "SELECT id, account_email FROM emails WHERE deferred_for_digest = 1"
+        ).fetchall()
+        for row in deferred_rows:
+            contract_emitter.emit(
+                EventV1(
+                    event_type=EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+                    ts_utc=now.timestamp(),
+                    account_id=str(row["account_email"]),
+                    entity_id=None,
+                    email_id=int(row["id"]),
+                    payload={
+                        "reason": "test",
+                        "attachments_only": False,
+                        "attachments_count": 0,
+                    },
+                )
+            )
+        contract_emitter.emit(
+            EventV1(
+                event_type=EventType.TRUST_SCORE_UPDATED,
+                ts_utc=_parse_ts(earlier).timestamp(),
+                account_id="account@example.com",
+                entity_id="alice@example.com",
+                email_id=None,
+                payload={"trust_score": 0.4},
+            )
+        )
+        contract_emitter.emit(
+            EventV1(
+                event_type=EventType.TRUST_SCORE_UPDATED,
+                ts_utc=_parse_ts(created_at).timestamp(),
+                account_id="account@example.com",
+                entity_id="alice@example.com",
+                email_id=None,
+                payload={"trust_score": 0.6},
+            )
+        )
+        contract_emitter.emit(
+            EventV1(
+                event_type=EventType.RELATIONSHIP_HEALTH_UPDATED,
+                ts_utc=_parse_ts(earlier).timestamp(),
+                account_id="account@example.com",
+                entity_id="bob@example.com",
+                email_id=None,
+                payload={"health_score": 80.0},
+            )
+        )
+        contract_emitter.emit(
+            EventV1(
+                event_type=EventType.RELATIONSHIP_HEALTH_UPDATED,
+                ts_utc=_parse_ts(created_at).timestamp(),
+                account_id="account@example.com",
+                entity_id="bob@example.com",
+                email_id=None,
+                payload={"health_score": 60.0},
+            )
+        )
 
     sent: list[dict[str, object]] = []
 
@@ -243,6 +321,7 @@ def test_weekly_digest_attention_block_added_when_flag_on(monkeypatch, tmp_path)
         knowledge_db=db,
         analytics=analytics,
         event_emitter=emitter,
+        contract_event_emitter=contract_emitter,
         account_email="account@example.com",
         telegram_chat_id="chat",
         email_id=300,
@@ -269,9 +348,9 @@ def test_weekly_digest_attention_block_skipped_on_small_sample(monkeypatch, tmp_
     db = KnowledgeDB(db_path)
     analytics = KnowledgeAnalytics(db_path)
     emitter = EventEmitter(events_path)
+    contract_emitter = ContractEventEmitter(db_path)
 
     with sqlite3.connect(db_path) as conn:
-        _ensure_snapshot_tables(conn)
         _insert_email(
             conn,
             account_email="account@example.com",
@@ -280,6 +359,22 @@ def test_weekly_digest_attention_block_skipped_on_small_sample(monkeypatch, tmp_
             body_summary="short text",
         )
         conn.commit()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT id, account_email, from_email, subject, body_summary, created_at FROM emails"
+        ).fetchone()
+        _emit_email_event(
+            contract_emitter,
+            email_id=int(row["id"]),
+            account_email=str(row["account_email"]),
+            from_email=str(row["from_email"]),
+            subject=str(row["subject"] or ""),
+            body_summary=str(row["body_summary"] or ""),
+            attachments_count=0,
+            ts=_parse_ts(str(row["created_at"])),
+        )
 
     sent: list[dict[str, object]] = []
 
@@ -294,6 +389,7 @@ def test_weekly_digest_attention_block_skipped_on_small_sample(monkeypatch, tmp_
         knowledge_db=db,
         analytics=analytics,
         event_emitter=emitter,
+        contract_event_emitter=contract_emitter,
         account_email="account@example.com",
         telegram_chat_id="chat",
         email_id=301,

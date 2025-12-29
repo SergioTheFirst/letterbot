@@ -11,6 +11,8 @@ from mailbot_v26.insights.attention_economics import (
 )
 from mailbot_v26.observability import get_logger
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
@@ -36,7 +38,11 @@ class DigestData:
 
 
 def _collect_anomaly_alerts(
-    *, analytics: KnowledgeAnalytics, now: datetime
+    *,
+    analytics: KnowledgeAnalytics,
+    now: datetime,
+    contract_event_emitter: ContractEventEmitter | None = None,
+    account_email: str | None = None,
 ) -> list[str]:
     alerts: list[str] = []
     try:
@@ -69,6 +75,29 @@ def _collect_anomaly_alerts(
             title = escape_tg_html(anomaly.title)
             severity = escape_tg_html(anomaly.severity)
             alerts.append(f"{safe_label}: {title} ({severity})")
+            if contract_event_emitter is not None and account_email:
+                try:
+                    contract_event_emitter.emit(
+                        EventV1(
+                            event_type=EventType.ANOMALY_DETECTED,
+                            ts_utc=now.timestamp(),
+                            account_id=account_email,
+                            entity_id=entity_id,
+                            email_id=None,
+                            payload={
+                                "title": anomaly.title,
+                                "severity": anomaly.severity,
+                                "details": anomaly.details,
+                                "type": anomaly.type,
+                            },
+                        )
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error(
+                        "contract_event_emit_failed",
+                        event_type=EventType.ANOMALY_DETECTED.value,
+                        error=str(exc),
+                    )
     return alerts
 
 
@@ -79,6 +108,7 @@ def _collect_digest_data(
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     now: datetime | None = None,
+    contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
     deferred = analytics.deferred_digest_counts(account_email=account_email)
     commitments = analytics.commitment_status_counts(account_email=account_email)
@@ -106,6 +136,8 @@ def _collect_digest_data(
         anomaly_alerts = _collect_anomaly_alerts(
             analytics=analytics,
             now=now or datetime.now(timezone.utc),
+            contract_event_emitter=contract_event_emitter,
+            account_email=account_email,
         )
 
     attention_economics: AttentionEconomicsResult | None = None
@@ -195,6 +227,7 @@ def maybe_send_daily_digest(
     email_id: int,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
+    contract_event_emitter: ContractEventEmitter | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
     data = _collect_digest_data(
@@ -203,9 +236,12 @@ def maybe_send_daily_digest(
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
         now=now,
+        contract_event_emitter=contract_event_emitter,
     )
-    last_sent_at = knowledge_db.get_last_digest_sent_at(account_email=account_email)
-    already_sent = bool(last_sent_at and last_sent_at.date() == now.date())
+    already_sent = analytics.has_daily_digest_sent(
+        account_email=account_email,
+        day=now,
+    )
 
     if already_sent:
         logger.info(
@@ -267,6 +303,26 @@ def maybe_send_daily_digest(
                 account_email=account_email,
                 sent_at=now,
             )
+            if contract_event_emitter is not None:
+                try:
+                    contract_event_emitter.emit(
+                        EventV1(
+                            event_type=EventType.DAILY_DIGEST_SENT,
+                            ts_utc=now.timestamp(),
+                            account_id=account_email,
+                            entity_id=None,
+                            email_id=email_id,
+                            payload={
+                                "account_email": account_email,
+                            },
+                        )
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error(
+                        "contract_event_emit_failed",
+                        event_type=EventType.DAILY_DIGEST_SENT.value,
+                        error=str(exc),
+                    )
             logger.info(
                 "[DAILY-DIGEST] decision",
                 decision="sent",

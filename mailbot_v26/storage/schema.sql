@@ -155,10 +155,12 @@ CREATE TABLE IF NOT EXISTS events_v1 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL,
     ts_utc REAL NOT NULL,
+    ts TEXT,
     account_id TEXT NOT NULL,
     entity_id TEXT,
     email_id INTEGER,
     payload JSON,
+    payload_json JSON,
     schema_version INTEGER NOT NULL,
     fingerprint TEXT NOT NULL UNIQUE
 );
@@ -171,6 +173,24 @@ CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts
 
 CREATE INDEX IF NOT EXISTS idx_events_v1_entity_ts
     ON events_v1(entity_id, ts_utc);
+
+CREATE INDEX IF NOT EXISTS idx_events_v1_email_id
+    ON events_v1(email_id);
+
+CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts_iso
+    ON events_v1(event_type, ts);
+
+CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts_iso
+    ON events_v1(account_id, ts);
+
+CREATE INDEX IF NOT EXISTS idx_events_v1_entity_ts_iso
+    ON events_v1(entity_id, ts);
+
+CREATE TABLE IF NOT EXISTS events_backfill_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    status TEXT NOT NULL,
+    completed_at TEXT
+);
 
 CREATE TABLE IF NOT EXISTS commitments (
     id INTEGER PRIMARY KEY,

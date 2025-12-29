@@ -43,9 +43,14 @@ Done:
 - MessageProcessor output formatting aligned with tests and summary contracts.
 - pytest -q green after telegram/attachment contract fixes.
 - SystemOrchestrator v1 введён.
+- Analytics/digest switched to events_v1 as source-of-truth with email payload joins minimized.
+- Event Contract v1 types normalized and emissions extended (digest, commitments, trust/health, TG, attention defer, attachments).
+- Added idempotent events backfill tool with startup hook and observability markers.
+- Added tests for events-backed analytics/digests and backfill idempotency.
+- pytest -q green after events source-of-truth changes.
 
 Now:
-- Следующий thin-slice: Events as source-of-truth (digest/analytics read through events).
+- UNCONFIRMED.
 
 Next:
 - Global single-ingress for GigaChat + anti-bypass test.
@@ -78,8 +83,10 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_runtime_health.py
 - mailbot_v26/events/contract.py
 - mailbot_v26/events/emitter.py
+- mailbot_v26/tools/backfill_events.py
 - mailbot_v26/system/orchestrator.py
 - mailbot_v26/pipeline/digest_scheduler.py
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/tests/test_system_orchestrator.py
 - tests/test_event_contract.py
+- mailbot_v26/tests/test_events_source_of_truth.py
