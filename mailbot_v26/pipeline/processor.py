@@ -44,6 +44,7 @@ from mailbot_v26.telegram_utils import escape_tg_html
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.observability.metrics import (
+    GateEvaluation,
     MetricsAggregator,
     SystemGates,
     SystemHealthSnapshotter,
@@ -55,7 +56,7 @@ from mailbot_v26.observability.trust_snapshot import TrustSnapshotWriter
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine, AutoPriorityOutcome
 from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
-from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
+from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
 from mailbot_v26.text.clean_email import clean_email_body
 from .attention_gate import (
@@ -72,6 +73,7 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.context_layer import ContextStore
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.system_health import OperationalMode, system_health
+from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 from .signal_quality import evaluate_signal_quality
@@ -118,6 +120,14 @@ auto_priority_engine = AutoPriorityEngine(
 auto_action_engine = AutoActionEngine(
     confidence_threshold=feature_flags.AUTO_ACTION_CONFIDENCE_THRESHOLD
 )
+system_orchestrator = SystemOrchestrator()
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyInputs:
+    metrics: dict[str, dict[str, float]] | None
+    gates: GateEvaluation | None
+    runtime_flags: RuntimeFlags
 
 
 @dataclass
@@ -190,6 +200,50 @@ def _coerce_delivery_result(result: object, *, email_id: int) -> DeliveryResult:
         reason=f"unexpected_type:{type(result).__name__}",
     )
     return DeliveryResult(delivered=True, retryable=False, error=None)
+
+
+def _collect_policy_inputs() -> PolicyInputs:
+    metrics: dict[str, dict[str, float]] | None = None
+    gates: GateEvaluation | None = None
+    runtime_flags = RuntimeFlags()
+    try:
+        metrics = metrics_aggregator.snapshot()
+        gates = system_gates.evaluate(metrics)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("system_policy_metrics_failed", error=str(exc))
+    try:
+        runtime_flags, _ = runtime_flag_store.get_flags()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("system_policy_runtime_flags_failed", error=str(exc))
+    return PolicyInputs(metrics=metrics, gates=gates, runtime_flags=runtime_flags)
+
+
+def _evaluate_policy(
+    policy_inputs: PolicyInputs,
+    *,
+    has_daily_digest_content: bool = False,
+    has_weekly_digest_content: bool = False,
+) -> SystemPolicyDecision:
+    system_mode = system_health.mode
+    telegram_ok = system_mode != OperationalMode.DEGRADED_NO_TELEGRAM
+    fallback = system_orchestrator.legacy_decision(
+        system_mode=system_mode,
+        runtime_flags=policy_inputs.runtime_flags,
+        feature_flags=feature_flags,
+        has_daily_digest_content=has_daily_digest_content,
+        has_weekly_digest_content=has_weekly_digest_content,
+    )
+    return system_orchestrator.evaluate(
+        system_mode=system_mode,
+        metrics=policy_inputs.metrics,
+        gates=policy_inputs.gates,
+        runtime_flags=policy_inputs.runtime_flags,
+        feature_flags=feature_flags,
+        telegram_ok=telegram_ok,
+        has_daily_digest_content=has_daily_digest_content,
+        has_weekly_digest_content=has_weekly_digest_content,
+        fallback_decision=fallback,
+    )
 
 
 @dataclass
@@ -2055,6 +2109,7 @@ def process_message(
         system_snapshotter.maybe_log()
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("system_health_snapshot_failed", error=str(exc))
+    policy_inputs = _collect_policy_inputs()
 
     # ---------- Stage PARSE (Commitment Tracker) ----------
     logger.info(
@@ -2214,6 +2269,7 @@ def process_message(
             recent_history=_recent_history(from_email),
         )
 
+    policy_decision = _evaluate_policy(policy_inputs)
     auto_priority_outcome = AutoPriorityOutcome(
         final_priority=priority,
         original_priority=None,
@@ -2224,7 +2280,7 @@ def process_message(
         applied=False,
         skipped_reason=None,
     )
-    if feature_flags.ENABLE_AUTO_PRIORITY:
+    if policy_decision.allow_auto_priority:
         try:
             auto_priority_outcome = auto_priority_engine.evaluate(
                 llm_priority=priority,
@@ -2234,6 +2290,23 @@ def process_message(
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("auto_priority_error", error=str(exc))
+    elif feature_flags.ENABLE_AUTO_PRIORITY:
+        auto_priority_outcome = AutoPriorityOutcome(
+            final_priority=priority,
+            original_priority=None,
+            priority_reason=None,
+            confidence_score=confidence_score,
+            confidence_decision=None,
+            gate_decision=None,
+            applied=False,
+            skipped_reason="policy_denied",
+        )
+        logger.info(
+            "auto_priority_skipped",
+            reason="policy_denied",
+            email_id=message_id,
+            system_mode=policy_decision.mode.value,
+        )
 
     if auto_priority_outcome.applied:
         original_priority = auto_priority_outcome.original_priority
@@ -2243,7 +2316,7 @@ def process_message(
     elif auto_priority_outcome.confidence_decision:
         confidence_decision = auto_priority_outcome.confidence_decision
 
-    if feature_flags.ENABLE_AUTO_PRIORITY and should_score_confidence:
+    if policy_decision.allow_auto_priority and should_score_confidence:
         logger.info(
             "auto_priority_confidence_scored",
             llm_priority=llm_priority_for_confidence,
@@ -2275,7 +2348,7 @@ def process_message(
         latency_ms=llm_latency_ms,
     )
 
-    if feature_flags.ENABLE_AUTO_PRIORITY:
+    if policy_decision.allow_auto_priority or feature_flags.ENABLE_AUTO_PRIORITY:
         logger.info(
             "auto_priority_evaluated",
             email_id=message_id,
@@ -2332,12 +2405,26 @@ def process_message(
             logger.info("auto_action_skipped", reason="conditions_not_met")
 
     if getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False) and proposed_action:
-        preview_reasons = [
-            reason
-            for reason in (shadow_action_reason, shadow_reason, priority_reason)
-            if reason
-        ]
-        preview = {
+        if not policy_decision.allow_preview:
+            preview_skip_reason = (
+                "system_degraded_no_llm"
+                if policy_decision.mode == OperationalMode.DEGRADED_NO_LLM
+                else "policy_denied"
+            )
+            logger.info(
+                "preview_actions_skipped",
+                reason=preview_skip_reason,
+                email_id=message_id,
+                account_email=account_email,
+                system_mode=policy_decision.mode.value,
+            )
+        else:
+            preview_reasons = [
+                reason
+                for reason in (shadow_action_reason, shadow_reason, priority_reason)
+                if reason
+            ]
+            preview = {
             "email_id": message_id,
             "original_priority": original_priority or llm_result.priority,
             "final_priority": priority,
@@ -2345,15 +2432,15 @@ def process_message(
             "confidence": proposed_action.get("confidence", 0.0),
             "reasons": preview_reasons,
         }
-        logger.info("preview_action_generated", preview=preview)
-        try:
-            knowledge_db.save_preview_action(
-                email_id=message_id,
-                proposed_action=proposed_action,
-                confidence=proposed_action.get("confidence"),
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("preview_action_persist_failed", error=str(exc))
+            logger.info("preview_action_generated", preview=preview)
+            try:
+                knowledge_db.save_preview_action(
+                    email_id=message_id,
+                    proposed_action=proposed_action,
+                    confidence=proposed_action.get("confidence"),
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("preview_action_persist_failed", error=str(exc))
 
     if feature_flags.ENABLE_SHADOW_PERSISTENCE:
         shadow_priority_to_persist = shadow_priority
@@ -2407,8 +2494,9 @@ def process_message(
         telegram_chat_id=telegram_chat_id,
     )
 
+    policy_decision = _evaluate_policy(policy_inputs)
     anomalies: list[Anomaly] = []
-    if getattr(feature_flags, "ENABLE_ANOMALY_ALERTS", False) and entity_resolution:
+    if policy_decision.allow_anomaly_alerts and entity_resolution:
         try:
             anomalies = compute_anomalies(
                 entity_id=entity_resolution.entity_id,
@@ -2626,13 +2714,18 @@ def process_message(
             )
 
     if feature_flags.ENABLE_PREVIEW_ACTIONS:
-        if system_health.mode == OperationalMode.DEGRADED_NO_LLM:
+        if not policy_decision.allow_preview:
+            preview_skip_reason = (
+                "system_degraded_no_llm"
+                if policy_decision.mode == OperationalMode.DEGRADED_NO_LLM
+                else "policy_denied"
+            )
             logger.info(
                 "preview_actions_skipped",
-                reason="system_degraded_no_llm",
+                reason=preview_skip_reason,
                 email_id=message_id,
                 account_email=account_email,
-                system_mode=system_health.mode.value,
+                system_mode=policy_decision.mode.value,
             )
             return
 
@@ -2644,7 +2737,7 @@ def process_message(
                 reason="no_proposals",
                 email_id=message_id,
                 account_email=account_email,
-                system_mode=system_health.mode.value,
+                system_mode=policy_decision.mode.value,
             )
             return
 
@@ -2700,5 +2793,5 @@ def process_message(
             email_id=message_id,
             action_type=proposed_action.get("type", "") if proposed_action else "",
             confidence=proposed_action.get("confidence", 0.0) if proposed_action else 0.0,
-            system_mode=system_health.mode.value,
+            system_mode=policy_decision.mode.value,
         )

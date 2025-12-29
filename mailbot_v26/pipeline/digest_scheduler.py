@@ -7,16 +7,23 @@ from pathlib import Path
 from typing import Callable
 
 from mailbot_v26.features.flags import FeatureFlags
+from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.observability.logger import LoggerLike
 from mailbot_v26.observability.event_emitter import EventEmitter
+from mailbot_v26.observability.metrics import GateEvaluation, MetricsAggregator, SystemGates
 from mailbot_v26.pipeline import daily_digest, weekly_digest
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
+from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
+from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.ini"
+_runtime_flag_store = RuntimeFlagStore()
+_system_orchestrator = SystemOrchestrator()
+_system_gates = SystemGates()
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +31,13 @@ class DigestStorage:
     knowledge_db: KnowledgeDB
     analytics: KnowledgeAnalytics
     event_emitter: EventEmitter | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyInputs:
+    metrics: dict[str, dict[str, float]] | None
+    gates: GateEvaluation | None
+    runtime_flags: RuntimeFlags
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +111,65 @@ def _is_weekly_due(now: datetime, config: WeeklyDigestConfig) -> bool:
     return True
 
 
+def _collect_policy_inputs(storage: DigestStorage, logger: LoggerLike) -> PolicyInputs:
+    metrics: dict[str, dict[str, float]] | None = None
+    gates: GateEvaluation | None = None
+    runtime_flags = RuntimeFlags()
+    try:
+        aggregator = MetricsAggregator(storage.knowledge_db.path)
+        metrics = aggregator.snapshot()
+        gates = _system_gates.evaluate(metrics)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("system_policy_metrics_failed", error=str(exc))
+    try:
+        runtime_flags, _ = _runtime_flag_store.get_flags()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("system_policy_runtime_flags_failed", error=str(exc))
+    return PolicyInputs(metrics=metrics, gates=gates, runtime_flags=runtime_flags)
+
+
+def _evaluate_policy(
+    *,
+    policy_inputs: PolicyInputs,
+    flags: FeatureFlags,
+    has_daily_digest_content: bool,
+    has_weekly_digest_content: bool,
+) -> SystemPolicyDecision:
+    system_mode = system_health.mode
+    telegram_ok = system_mode != OperationalMode.DEGRADED_NO_TELEGRAM
+    fallback = _system_orchestrator.legacy_decision(
+        system_mode=system_mode,
+        runtime_flags=policy_inputs.runtime_flags,
+        feature_flags=flags,
+        has_daily_digest_content=has_daily_digest_content,
+        has_weekly_digest_content=has_weekly_digest_content,
+    )
+    return _system_orchestrator.evaluate(
+        system_mode=system_mode,
+        metrics=policy_inputs.metrics,
+        gates=policy_inputs.gates,
+        runtime_flags=policy_inputs.runtime_flags,
+        feature_flags=flags,
+        telegram_ok=telegram_ok,
+        has_daily_digest_content=has_daily_digest_content,
+        has_weekly_digest_content=has_weekly_digest_content,
+        fallback_decision=fallback,
+    )
+
+
+def _has_weekly_content(data: weekly_digest.WeeklyDigestData) -> bool:
+    return bool(
+        data.total_emails
+        or data.deferred_emails
+        or data.attention_entities
+        or data.commitment_counts
+        or data.overdue_commitments
+        or data.trust_deltas
+        or data.anomaly_alerts
+        or data.attention_economics is not None
+    )
+
+
 def _build_daily_payload(
     *,
     account_email: str,
@@ -157,6 +230,7 @@ def run_digest_tick(
         flags = FeatureFlags(base_dir=_CONFIG_PATH.parent)
         daily_config = _load_daily_digest_config()
         weekly_config = _load_weekly_digest_config()
+        policy_inputs = _collect_policy_inputs(storage, logger)
 
         for account in config.accounts:
             account_email = account.login
@@ -190,6 +264,8 @@ def run_digest_tick(
                     storage=storage,
                     telegram_sender=telegram_sender,
                     logger=logger,
+                    policy_inputs=policy_inputs,
+                    flags=flags,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                     include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
                 )
@@ -212,6 +288,8 @@ def run_digest_tick(
                     storage=storage,
                     telegram_sender=telegram_sender,
                     logger=logger,
+                    policy_inputs=policy_inputs,
+                    flags=flags,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                     include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
                 )
@@ -237,6 +315,8 @@ def _run_daily_digest(
     storage: DigestStorage,
     telegram_sender: Callable[[TelegramPayload], DeliveryResult],
     logger: LoggerLike,
+    policy_inputs: PolicyInputs,
+    flags: FeatureFlags,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
 ) -> None:
@@ -268,13 +348,31 @@ def _run_daily_digest(
         include_attention_economics=include_attention_economics,
         now=now,
     )
-    if not daily_digest._has_digest_content(data):
+    has_content = daily_digest._has_digest_content(data)
+    if not has_content:
         logger.info(
             "digest_tick_checked",
             digest_type="daily",
             decision="skipped",
             reason="no_content",
             account_email=account_email,
+        )
+        return
+
+    policy_decision = _evaluate_policy(
+        policy_inputs=policy_inputs,
+        flags=flags,
+        has_daily_digest_content=has_content,
+        has_weekly_digest_content=False,
+    )
+    if not policy_decision.allow_daily_digest:
+        logger.info(
+            "digest_tick_checked",
+            digest_type="daily",
+            decision="skipped",
+            reason="policy_denied",
+            account_email=account_email,
+            system_mode=policy_decision.mode.value,
         )
         return
 
@@ -334,6 +432,8 @@ def _run_weekly_digest(
     storage: DigestStorage,
     telegram_sender: Callable[[TelegramPayload], DeliveryResult],
     logger: LoggerLike,
+    policy_inputs: PolicyInputs,
+    flags: FeatureFlags,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
 ) -> None:
@@ -403,6 +503,57 @@ def _run_weekly_digest(
         event_emitter=storage.event_emitter,
         now=now,
     )
+    has_content = _has_weekly_content(data)
+    if not has_content:
+        logger.info(
+            "digest_tick_checked",
+            digest_type="weekly",
+            decision="skipped",
+            reason="no_content",
+            account_email=account_email,
+            week_key=week_key,
+        )
+        if storage.event_emitter:
+            storage.event_emitter.emit(
+                type="weekly_digest_skipped",
+                timestamp=now,
+                email_id=0,
+                payload={
+                    "reason": "no_content",
+                    "week_key": week_key,
+                    "account_email": account_email,
+                },
+            )
+        return
+
+    policy_decision = _evaluate_policy(
+        policy_inputs=policy_inputs,
+        flags=flags,
+        has_daily_digest_content=False,
+        has_weekly_digest_content=has_content,
+    )
+    if not policy_decision.allow_weekly_digest:
+        logger.info(
+            "digest_tick_checked",
+            digest_type="weekly",
+            decision="skipped",
+            reason="policy_denied",
+            account_email=account_email,
+            week_key=week_key,
+            system_mode=policy_decision.mode.value,
+        )
+        if storage.event_emitter:
+            storage.event_emitter.emit(
+                type="weekly_digest_skipped",
+                timestamp=now,
+                email_id=0,
+                payload={
+                    "reason": "policy_denied",
+                    "week_key": week_key,
+                    "account_email": account_email,
+                },
+            )
+        return
     payload = _build_weekly_payload(
         account_email=account_email,
         chat_id=chat_id,

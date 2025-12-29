@@ -42,13 +42,15 @@ Done:
 - Preview/telegram fallback text normalized to remove disallowed emoji while preserving priorities.
 - MessageProcessor output formatting aligned with tests and summary contracts.
 - pytest -q green after telegram/attachment contract fixes.
+- SystemOrchestrator v1 введён.
 
 Now:
-- Proactive digest scheduler is active and gated by feature flags.
-- Test suite green after telegram/attachment contract fixes.
+- Следующий thin-slice: Events as source-of-truth (digest/analytics read through events).
 
 Next:
-- None.
+- Global single-ingress for GigaChat + anti-bypass test.
+- Trust v2 decay/redemption.
+- Integration degradation tests.
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -77,4 +79,7 @@ Working set (files / tables / tests):
 - mailbot_v26/events/contract.py
 - mailbot_v26/events/emitter.py
 - mailbot_v26/system/orchestrator.py
+- mailbot_v26/pipeline/digest_scheduler.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/tests/test_system_orchestrator.py
 - tests/test_event_contract.py

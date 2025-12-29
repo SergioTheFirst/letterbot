@@ -8,6 +8,7 @@ from mailbot_v26.events.emitter import EventEmitter
 from mailbot_v26.llm.router import LLMRouter, LLMRouterConfig
 from mailbot_v26.llm.providers import GigaChatProvider
 from mailbot_v26.pipeline import processor
+from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.system.orchestrator import SystemMode, SystemOrchestrator
 
 
@@ -109,18 +110,26 @@ def test_no_direct_gigachat_usage(tmp_path):
 
 def test_orchestrator_policy_does_not_change_pipeline():
     orchestrator = SystemOrchestrator()
-    orchestrator.update_component("llm", healthy=False, reason="timeout")
-    allowed, reason = orchestrator.decide_llm_allowed()
-    assert allowed is False
-    assert reason == "llm_disabled_by_mode"
-    digest_allowed, _ = orchestrator.decide_digest_send_allowed()
-    assert digest_allowed is True
-    snap = orchestrator.snapshot()
-    assert snap["mode"] == orchestrator.mode.value
-    orchestrator.update_component("llm", healthy=True, reason=None)
-    assert orchestrator.mode in {
-        SystemMode.FULL,
-        SystemMode.DEGRADED_NO_TELEGRAM,
-        SystemMode.DEGRADED_NO_LLM,
-        SystemMode.EMERGENCY_READ_ONLY,
-    }
+    decision = orchestrator.evaluate(
+        system_mode=SystemMode.DEGRADED_NO_LLM,
+        metrics=None,
+        gates=None,
+        runtime_flags=RuntimeFlags(),
+        feature_flags=type(
+            "Flags",
+            (),
+            {
+                "ENABLE_AUTO_PRIORITY": False,
+                "ENABLE_PREVIEW_ACTIONS": False,
+                "ENABLE_DAILY_DIGEST": True,
+                "ENABLE_WEEKLY_DIGEST": True,
+                "ENABLE_ANOMALY_ALERTS": True,
+            },
+        )(),
+        telegram_ok=True,
+        has_daily_digest_content=True,
+        has_weekly_digest_content=True,
+    )
+    assert decision.allow_llm is False
+    assert decision.allow_daily_digest is True
+    assert decision.mode == SystemMode.DEGRADED_NO_LLM
