@@ -11,9 +11,6 @@ from pathlib import Path
 from typing import List, Optional
 
 CURRENT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = CURRENT_DIR.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from mailbot_v26.bot_core.pipeline import (
     PIPELINE_CACHE,
