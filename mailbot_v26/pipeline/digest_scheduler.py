@@ -212,6 +212,7 @@ def run_digest_tick(
                     telegram_sender=telegram_sender,
                     logger=logger,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
+                    include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
                 )
             else:
                 logger.info(
@@ -331,6 +332,7 @@ def _run_weekly_digest(
     telegram_sender: Callable[[TelegramPayload], DeliveryResult],
     logger: LoggerLike,
     include_anomalies: bool = False,
+    include_attention_economics: bool = False,
 ) -> None:
     week_key = weekly_digest._iso_week_key(now)
 
@@ -394,6 +396,8 @@ def _run_weekly_digest(
         account_email=account_email,
         week_key=week_key,
         include_anomalies=include_anomalies,
+        include_attention_economics=include_attention_economics,
+        event_emitter=storage.event_emitter,
         now=now,
     )
     payload = _build_weekly_payload(

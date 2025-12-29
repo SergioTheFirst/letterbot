@@ -741,6 +741,81 @@ class KnowledgeAnalytics:
         results.sort(key=lambda item: (-int(item["words"]), str(item["entity"]).lower()))
         return results
 
+    def attention_entity_metrics(
+        self, *, account_email: str, days: int = 7
+    ) -> list[dict[str, object]]:
+        if not account_email:
+            return []
+
+        rows = self._execute_select(
+            """
+            WITH base AS (
+                SELECT
+                    e.id AS email_id,
+                    lower(trim(e.from_email)) AS entity_id,
+                    e.deferred_for_digest AS deferred_flag,
+                    CASE
+                        WHEN TRIM(COALESCE(e.body_summary, '')) != '' THEN TRIM(e.body_summary)
+                        WHEN TRIM(COALESCE(e.subject, '')) != '' THEN TRIM(e.subject)
+                        ELSE ''
+                    END AS text_content
+                FROM emails e
+                WHERE e.account_email = ?
+                  AND e.created_at >= datetime('now', ?)
+                  AND TRIM(COALESCE(e.from_email, '')) != ''
+            ), attachments_per_email AS (
+                SELECT email_id, COUNT(*) AS attachment_count
+                FROM attachments
+                WHERE email_id IN (SELECT email_id FROM base)
+                GROUP BY email_id
+            ), per_email AS (
+                SELECT
+                    b.entity_id,
+                    b.deferred_flag,
+                    COALESCE(a.attachment_count, 0) AS attachment_count,
+                    CASE
+                        WHEN LENGTH(TRIM(b.text_content)) <= 0 THEN 0
+                        ELSE LENGTH(TRIM(b.text_content)) - LENGTH(REPLACE(TRIM(b.text_content), ' ', '')) + 1
+                    END AS word_count
+                FROM base b
+                LEFT JOIN attachments_per_email a ON a.email_id = b.email_id
+            )
+            SELECT
+                entity_id,
+                COUNT(*) AS message_count,
+                SUM(CASE WHEN deferred_flag = 1 THEN 1 ELSE 0 END) AS deferred_count,
+                SUM(attachment_count) AS attachment_count,
+                SUM(
+                    CASE
+                        WHEN word_count <= 0 THEN 1.0
+                        WHEN (word_count / 200.0) < 1.0 THEN 1.0
+                        ELSE (word_count / 200.0)
+                    END
+                    + (attachment_count * 1.5)
+                ) AS estimated_read_minutes
+            FROM per_email
+            GROUP BY entity_id
+            ORDER BY estimated_read_minutes DESC, entity_id ASC
+            """,
+            (account_email, f"-{days} days"),
+        )
+
+        results: list[dict[str, object]] = []
+        for row in rows:
+            entity_id = str(row.get("entity_id") or "").strip()
+            if not entity_id:
+                continue
+            results.append(
+                {
+                    "entity_id": entity_id,
+                    "message_count": int(row.get("message_count") or 0),
+                    "deferred_count": int(row.get("deferred_count") or 0),
+                    "attachment_count": int(row.get("attachment_count") or 0),
+                    "estimated_read_minutes": float(row.get("estimated_read_minutes") or 0.0),
+                }
+            )
+        return results
+
     def weekly_commitment_counts(
         self, *, account_email: str, days: int = 7
     ) -> dict[str, int]:
@@ -846,6 +921,67 @@ class KnowledgeAnalytics:
         down_sorted = sorted(deltas, key=lambda item: float(item["delta"]))
         downs = [item for item in down_sorted if float(item["delta"]) < 0][:3]
         return {"up": ups, "down": downs}
+
+    def _snapshot_deltas(
+        self, *, table: str, value_field: str, days: int
+    ) -> dict[str, float]:
+        try:
+            rows = self._execute_select(
+                f"""
+                SELECT entity_id, {value_field} AS value, created_at
+                FROM {table}
+                WHERE {value_field} IS NOT NULL
+                  AND created_at >= datetime('now', ?)
+                ORDER BY entity_id ASC, created_at ASC
+                """,
+                (f"-{days} days",),
+            )
+        except sqlite3.OperationalError:
+            return {}
+
+        per_entity: dict[str, list[tuple[datetime, float]]] = {}
+        for row in rows:
+            entity_id = str(row.get("entity_id") or "").strip()
+            if not entity_id:
+                continue
+            raw_value = row.get("value")
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            created_at = parse_sqlite_datetime(str(row.get("created_at") or ""))
+            if created_at is None:
+                continue
+            per_entity.setdefault(entity_id, []).append((created_at, value))
+
+        deltas: dict[str, float] = {}
+        for entity_id, entries in per_entity.items():
+            if len(entries) < 2:
+                continue
+            entries.sort(key=lambda item: item[0])
+            deltas[entity_id] = entries[-1][1] - entries[0][1]
+        return deltas
+
+    def trust_and_health_deltas(self, *, days: int = 7) -> dict[str, dict[str, float]]:
+        trust_deltas = self._snapshot_deltas(
+            table="trust_snapshots", value_field="trust_score", days=days
+        )
+        health_deltas = self._snapshot_deltas(
+            table="relationship_health_snapshots",
+            value_field="health_score",
+            days=days,
+        )
+
+        all_entities = set(trust_deltas.keys()) | set(health_deltas.keys())
+        combined: dict[str, dict[str, float]] = {}
+        for entity_id in all_entities:
+            entry: dict[str, float] = {}
+            if entity_id in trust_deltas:
+                entry["trust_delta"] = float(trust_deltas[entity_id])
+            if entity_id in health_deltas:
+                entry["health_delta"] = float(health_deltas[entity_id])
+            combined[entity_id] = entry
+        return combined
 
     def latest_trust_score_delta(self, *, limit: int = 50) -> dict[str, object] | None:
         try:
