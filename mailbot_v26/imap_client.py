@@ -14,8 +14,8 @@ try:  # pragma: no cover - import guard
 except ModuleNotFoundError:  # pragma: no cover - handled at runtime
     IMAPClient = None  # type: ignore
 
-from config_loader import AccountConfig
-from state_manager import StateManager
+from mailbot_v26.config_loader import AccountConfig
+from mailbot_v26.state_manager import StateManager
 
 
 class ResilientIMAP:
