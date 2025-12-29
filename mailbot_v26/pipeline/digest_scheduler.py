@@ -191,6 +191,7 @@ def run_digest_tick(
                     telegram_sender=telegram_sender,
                     logger=logger,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
+                    include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
                 )
             else:
                 logger.info(
@@ -237,6 +238,7 @@ def _run_daily_digest(
     telegram_sender: Callable[[TelegramPayload], DeliveryResult],
     logger: LoggerLike,
     include_anomalies: bool = False,
+    include_attention_economics: bool = False,
 ) -> None:
     if not _is_daily_due(now, config):
         logger.info(
@@ -263,6 +265,7 @@ def _run_daily_digest(
         analytics=storage.analytics,
         account_email=account_email,
         include_anomalies=include_anomalies,
+        include_attention_economics=include_attention_economics,
         now=now,
     )
     if not daily_digest._has_digest_content(data):
