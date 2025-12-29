@@ -198,15 +198,13 @@ def compute_attention_economics(
         for entity in entities
         if (
             (entity.health_delta is not None and entity.health_delta < 0)
-            or (entity.trust_delta is not None and entity.trust_delta < 0)
             or entity.anomalies
         )
     ]
     at_risk.sort(
         key=lambda item: (
-            (item.health_delta or 0.0)
-            + ((item.trust_delta or 0.0) * 100.0)
-            - (1.0 if item.anomalies else 0.0),
+            item.health_delta if item.health_delta is not None else 0.0,
+            0 if item.anomalies else 1,
             -float(item.estimated_read_minutes or 0.0),
             item.label.lower(),
         )
