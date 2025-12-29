@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Sequence
 
 from mailbot_v26.insights.anomaly_engine import compute_anomalies
+from mailbot_v26.insights.attention_economics import (
+    AttentionEconomicsResult,
+    compute_attention_economics,
+    format_attention_block,
+)
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
@@ -61,6 +66,7 @@ class WeeklyDigestData:
     overdue_commitments: Sequence[dict[str, object]]
     trust_deltas: dict[str, list[dict[str, object]]]
     anomaly_alerts: list[str]
+    attention_economics: AttentionEconomicsResult | None = None
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -202,12 +208,35 @@ def _collect_anomaly_alerts(
     return alerts
 
 
+def _emit_attention_block_event(
+    *, event_emitter: EventEmitter | None, week_key: str, result: AttentionEconomicsResult
+) -> None:
+    if event_emitter is None or result is None:
+        return
+    try:
+        event_emitter.emit(
+            type="weekly_digest_attention_block_added",
+            timestamp=datetime.now(timezone.utc),
+            payload={
+                "week_key": week_key,
+                "window_days": result.window_days,
+                "top_sinks": [entity.entity_id for entity in result.top_sinks],
+                "at_risk": [entity.entity_id for entity in result.at_risk],
+                "best": [entity.entity_id for entity in result.best_counterparties],
+            },
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("attention_block_event_failed", error=str(exc))
+
+
 def _collect_weekly_data(
     *,
     analytics: KnowledgeAnalytics,
     account_email: str,
     week_key: str,
     include_anomalies: bool = False,
+    include_attention_economics: bool = False,
+    event_emitter: EventEmitter | None = None,
     now: datetime | None = None,
 ) -> WeeklyDigestData:
     volume = analytics.weekly_email_volume(account_email=account_email, days=7)
@@ -215,6 +244,25 @@ def _collect_weekly_data(
     commitment_counts = analytics.weekly_commitment_counts(account_email=account_email, days=7)
     overdue = analytics.weekly_overdue_commitments(account_email=account_email, days=7, limit=5)
     trust_deltas = analytics.weekly_trust_score_deltas(days=7)
+
+    attention_economics: AttentionEconomicsResult | None = None
+    if include_attention_economics:
+        attention_economics = compute_attention_economics(
+            analytics=analytics,
+            account_email=account_email,
+            window_days=7,
+            include_anomalies=include_anomalies,
+            event_emitter=event_emitter,
+            now=now or datetime.now(timezone.utc),
+        )
+        compute_attention_economics(
+            analytics=analytics,
+            account_email=account_email,
+            window_days=30,
+            include_anomalies=include_anomalies,
+            event_emitter=event_emitter,
+            now=now or datetime.now(timezone.utc),
+        )
 
     anomaly_alerts: list[str] = []
     if include_anomalies:
@@ -232,6 +280,7 @@ def _collect_weekly_data(
         overdue_commitments=overdue,
         trust_deltas=trust_deltas,
         anomaly_alerts=anomaly_alerts,
+        attention_economics=attention_economics,
     )
 
 
@@ -242,10 +291,11 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         f"всего {data.total_emails}, "
         f"в дайджест {data.deferred_emails}"
     )
-    lines.append(
-        "• Attention economics: "
-        f"{_attention_summary(data.attention_entities)}"
-    )
+    if data.attention_economics is None:
+        lines.append(
+            "• Attention economics: "
+            f"{_attention_summary(data.attention_entities)}"
+        )
     commitments = data.commitment_counts
     lines.append(
         "• Обязательства: "
@@ -264,6 +314,9 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
     if data.anomaly_alerts:
         lines.append("• Anomaly Alerts:")
         lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:8])
+    if data.attention_economics is not None:
+        lines.append("")
+        lines.extend(format_attention_block(data.attention_economics))
     return "\n".join(lines)
 
 
@@ -277,6 +330,7 @@ def maybe_send_weekly_digest(
     email_id: int,
     now: datetime | None = None,
     include_anomalies: bool = False,
+    include_attention_economics: bool = False,
 ) -> None:
     current_time = now or datetime.now(timezone.utc)
     config = _load_weekly_digest_config()
@@ -328,8 +382,15 @@ def maybe_send_weekly_digest(
         account_email=account_email,
         week_key=week_key,
         include_anomalies=include_anomalies,
+        include_attention_economics=include_attention_economics,
+        event_emitter=event_emitter,
         now=current_time,
     )
+
+    if data.attention_economics is not None:
+        _emit_attention_block_event(
+            event_emitter=event_emitter, week_key=week_key, result=data.attention_economics
+        )
 
     digest_text = _build_weekly_digest_text(data)
     payload = TelegramPayload(

@@ -34,6 +34,7 @@ class FeatureFlags:
         self.ENABLE_DAILY_DIGEST = False
         self.ENABLE_WEEKLY_DIGEST = False
         self.ENABLE_ANOMALY_ALERTS = False
+        self.ENABLE_ATTENTION_ECONOMICS = False
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -56,6 +57,9 @@ class FeatureFlags:
         self.ENABLE_DAILY_DIGEST = self._get_flag(parser, "enable_daily_digest")
         self.ENABLE_WEEKLY_DIGEST = self._get_flag(parser, "enable_weekly_digest")
         self.ENABLE_ANOMALY_ALERTS = self._get_flag(parser, "enable_anomaly_alerts")
+        self.ENABLE_ATTENTION_ECONOMICS = self._get_flag(
+            parser, "enable_attention_economics"
+        )
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6
         )

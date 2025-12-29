@@ -32,6 +32,7 @@ Done:
 - Added attachment safety gate tests.
 - Added anomaly engine with analytics queries and preview/digest Signals blocks (feature-flagged).
 - Added anomaly alert tests for response delay, frequency drop, and payload stability.
+- Added attention economics analytics, weekly digest block, events, and tests under feature flag.
 
 Now:
 - Proactive digest scheduler is active and gated by feature flags.
