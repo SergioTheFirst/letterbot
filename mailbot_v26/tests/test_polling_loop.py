@@ -115,13 +115,20 @@ def _install_common_patches(monkeypatch, accounts, tmp_path):
     monkeypatch.setattr(start_module, "StartupHealthChecker", DummyHealthChecker)
     monkeypatch.setattr(start_module, "LaunchReportBuilder", DummyLaunchReportBuilder)
     monkeypatch.setattr(start_module, "dispatch_launch_report", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(start_module, "send_telegram", lambda *_args, **_kwargs: type("R", (), {"delivered": True})())
+    original_runtime_health = start_module.AccountRuntimeHealthManager
+    monkeypatch.setattr(
+        start_module,
+        "AccountRuntimeHealthManager",
+        lambda *args, **kwargs: original_runtime_health(tmp_path / "runtime_health.json"),
+    )
     monkeypatch.setattr(start_module, "time", start_module.time)
     monkeypatch.setattr(start_module.time, "sleep", lambda *_args, **_kwargs: None)
 
 
 def _build_imap(responses, call_log=None):
     class FakeIMAP:
-        def __init__(self, account, state, start_time):
+        def __init__(self, account, state, start_time, **_kwargs):
             self.login = account.login
 
         def fetch_new_messages(self):

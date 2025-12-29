@@ -33,6 +33,7 @@ Done:
 - Added anomaly engine with analytics queries and preview/digest Signals blocks (feature-flagged).
 - Added anomaly alert tests for response delay, frequency drop, and payload stability.
 - Added attention economics analytics, weekly digest block, events, and tests under feature flag.
+- Added runtime IMAP health manager with per-account backoff, alert dedupe, and persisted state.
 
 Now:
 - Proactive digest scheduler is active and gated by feature flags.
@@ -62,3 +63,5 @@ Working set (files / tables / tests):
 - mailbot_v26/constants.py
 - mailbot_v26/pipeline/tg_renderer.py
 - mailbot_v26/tests/test_attachment_safety_gates.py
+- mailbot_v26/mail_health/runtime_health.py
+- mailbot_v26/tests/test_runtime_health.py
