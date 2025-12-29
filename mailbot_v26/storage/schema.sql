@@ -151,6 +151,27 @@ CREATE TABLE IF NOT EXISTS events (
     payload JSON
 );
 
+CREATE TABLE IF NOT EXISTS events_v1 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    ts_utc REAL NOT NULL,
+    account_id TEXT NOT NULL,
+    entity_id TEXT,
+    email_id INTEGER,
+    payload JSON,
+    schema_version INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL UNIQUE
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts
+    ON events_v1(event_type, ts_utc);
+
+CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts
+    ON events_v1(account_id, ts_utc);
+
+CREATE INDEX IF NOT EXISTS idx_events_v1_entity_ts
+    ON events_v1(entity_id, ts_utc);
+
 CREATE TABLE IF NOT EXISTS commitments (
     id INTEGER PRIMARY KEY,
     email_row_id INTEGER NOT NULL,

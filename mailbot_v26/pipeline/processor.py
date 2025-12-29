@@ -37,6 +37,8 @@ from mailbot_v26.insights.temporal_reasoning import (
     TemporalState,
 )
 from mailbot_v26.insights.trust_score import TrustScoreCalculator
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.observability import get_logger
 from mailbot_v26.telegram_utils import escape_tg_html
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
@@ -84,6 +86,7 @@ trust_snapshot_writer = TrustSnapshotWriter(DB_PATH)
 relationship_health_snapshot_writer = RelationshipHealthSnapshotWriter(DB_PATH)
 context_store = ContextStore(DB_PATH)
 event_emitter = EventEmitter(DB_PATH)
+contract_event_emitter = ContractEventEmitter(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
@@ -133,6 +136,29 @@ class AttachmentSummary:
     kind: str = ""
     priority: int = 0
     text_length: int = 0
+
+
+def _emit_contract_event(
+    event_type: EventType,
+    *,
+    ts_utc: float,
+    account_id: str,
+    entity_id: str | None,
+    email_id: int | None,
+    payload: dict[str, Any],
+) -> None:
+    try:
+        event = EventV1(
+            event_type=event_type,
+            ts_utc=ts_utc,
+            account_id=account_id,
+            entity_id=entity_id,
+            email_id=email_id,
+            payload=payload,
+        )
+        contract_event_emitter.emit(event)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("contract_event_emit_failed", event_type=event_type.value, error=str(exc))
 
 
 @dataclass
@@ -1963,6 +1989,18 @@ def process_message(
     )
     entity_resolution = llm_context.entity_resolution
     signal_quality = llm_context.signal_quality
+    _emit_contract_event(
+        EventType.EMAIL_RECEIVED,
+        ts_utc=received_at.timestamp(),
+        account_id=account_email,
+        entity_id=entity_resolution.entity_id if entity_resolution else None,
+        email_id=message_id,
+        payload={
+            "from_email": from_email,
+            "subject": subject,
+            "attachments_count": len(attachments),
+        },
+    )
     llm_body_text = llm_context.llm_body_text
     fallback_used = llm_context.fallback_used
     llm_start = time.perf_counter()

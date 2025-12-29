@@ -11,12 +11,6 @@ from typing import Iterable, Sequence
 
 from mailbot_v26.config_loader import BotConfig
 from mailbot_v26.llm import router as llm_router
-from mailbot_v26.llm.providers import (
-    CloudflareProvider,
-    CloudflareProviderConfig,
-    GigaChatProvider,
-    GigaChatProviderConfig,
-)
 from mailbot_v26.system_health import OperationalMode, SystemHealth
 from mailbot_v26.worker.telegram_sender import ping_telegram
 
@@ -127,20 +121,15 @@ class StartupHealthChecker:
     def _check_gigachat(self) -> list[HealthCheckResult]:
         try:
             config = llm_router._load_llm_config(self._config_dir)
+            router = llm_router.LLMRouter(config)
         except Exception as exc:
             return [HealthCheckResult("GigaChat", HealthStatus.FAILED, f"config error: {exc}")]
+        provider = router._providers.get("gigachat")
         enabled = bool(config.gigachat_enabled or config.gigachat_api_key)
-        if not enabled:
+        if not enabled or not provider:
             return [HealthCheckResult("GigaChat", HealthStatus.DEGRADED, "disabled")]
         if not config.gigachat_api_key:
             return [HealthCheckResult("GigaChat", HealthStatus.FAILED, "missing api key")]
-        provider = GigaChatProvider(
-            GigaChatProviderConfig(
-                api_key=config.gigachat_api_key,
-                base_url=config.gigachat_base_url,
-                model=config.gigachat_model,
-            )
-        )
         ok = provider.healthcheck()
         status = HealthStatus.OK if ok else HealthStatus.FAILED
         details = "active" if ok else "healthcheck failed"
@@ -149,21 +138,16 @@ class StartupHealthChecker:
     def _check_cloudflare(self) -> list[HealthCheckResult]:
         try:
             config = llm_router._load_llm_config(self._config_dir)
+            router = llm_router.LLMRouter(config)
         except Exception as exc:
             return [
                 HealthCheckResult("Cloudflare", HealthStatus.FAILED, f"config error: {exc}")
             ]
-        if not config.cloudflare_enabled:
+        provider = router._providers.get("cloudflare")
+        if not config.cloudflare_enabled or not provider:
             return [HealthCheckResult("Cloudflare", HealthStatus.DEGRADED, "disabled")]
         if not config.cloudflare_account_id or not config.cloudflare_api_key:
             return [HealthCheckResult("Cloudflare", HealthStatus.FAILED, "missing credentials")]
-        provider = CloudflareProvider(
-            CloudflareProviderConfig(
-                account_id=config.cloudflare_account_id,
-                api_token=config.cloudflare_api_key,
-                model=config.cloudflare_model,
-            )
-        )
         ok = provider.healthcheck()
         status = HealthStatus.OK if ok else HealthStatus.FAILED
         details = "active" if ok else "healthcheck failed"

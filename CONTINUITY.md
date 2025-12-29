@@ -34,6 +34,9 @@ Done:
 - Added anomaly alert tests for response delay, frequency drop, and payload stability.
 - Added attention economics analytics, weekly digest block, events, and tests under feature flag.
 - Added runtime IMAP health manager with per-account backoff, alert dedupe, and persisted state.
+- Added Event Contract v1 emitter/table with idempotent fingerprinting and basic pipeline integration.
+- Added global GigaChat serialization lock via LLMRouter and regression guard tests.
+- Introduced SystemOrchestrator v0 for policy logging and mode snapshots.
 
 Now:
 - Proactive digest scheduler is active and gated by feature flags.
@@ -65,3 +68,7 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_attachment_safety_gates.py
 - mailbot_v26/mail_health/runtime_health.py
 - mailbot_v26/tests/test_runtime_health.py
+- mailbot_v26/events/contract.py
+- mailbot_v26/events/emitter.py
+- mailbot_v26/system/orchestrator.py
+- tests/test_event_contract.py
