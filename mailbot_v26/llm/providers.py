@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
-import threading
+import logging
+import time
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
+from mailbot_v26.llm.global_lock import gigachat_lock
+
+logger = logging.getLogger(__name__)
+_GIGACHAT_LOCK_WAIT_LOG_THRESHOLD_MS = 200
 
 class LLMProviderError(RuntimeError):
     """Provider-level exception raised on LLM failures."""
@@ -95,9 +100,6 @@ class CloudflareProvider(LLMProvider):
         return bool(self.config.account_id and self.config.api_token)
 
 
-_GIGACHAT_LOCK = threading.Lock()
-
-
 @dataclass(frozen=True)
 class GigaChatProviderConfig:
     api_key: str
@@ -107,7 +109,7 @@ class GigaChatProviderConfig:
 
 
 class GigaChatProvider(LLMProvider):
-    """GigaChat provider with strict serialization."""
+    """GigaChat provider with strict serialization (internal-only; use LLMRouter)."""
 
     def __init__(self, config: GigaChatProviderConfig) -> None:
         self.config = config
@@ -148,8 +150,18 @@ class GigaChatProvider(LLMProvider):
         if temperature is not None:
             payload["temperature"] = temperature
 
-        with _GIGACHAT_LOCK:
+        lock = gigachat_lock()
+        start_wait = time.monotonic()
+        lock.acquire()
+        wait_ms = int((time.monotonic() - start_wait) * 1000)
+        if wait_ms >= _GIGACHAT_LOCK_WAIT_LOG_THRESHOLD_MS:
+            logger.info("llm_gigachat_lock_wait_ms=%d", wait_ms)
+        else:
+            logger.debug("llm_gigachat_lock_acquired wait_ms=%d", wait_ms)
+        try:
             return self._request(payload)
+        finally:
+            lock.release()
 
     def healthcheck(self) -> bool:
         return bool(self.config.api_key and self.config.base_url)

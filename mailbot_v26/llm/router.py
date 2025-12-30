@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import configparser
 import logging
-import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -19,9 +18,6 @@ from mailbot_v26.llm.providers import (
 from mailbot_v26.llm.runtime_flags import DEFAULT_RUNTIME_FLAGS_PATH, RuntimeFlagStore
 
 logger = logging.getLogger(__name__)
-
-
-_GIGACHAT_GLOBAL_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -139,12 +135,6 @@ class LLMRouter:
         max_tokens: int | None,
         temperature: float | None,
     ) -> tuple[str, float, bool]:
-        start_wait = time.monotonic()
-        acquired = False
-        if isinstance(provider, GigaChatProvider):
-            acquired = _GIGACHAT_GLOBAL_LOCK.acquire()
-            wait_ms = int((time.monotonic() - start_wait) * 1000)
-            logger.info("gigachat_lock_acquired wait_ms=%d", wait_ms)
         start = time.monotonic()
         try:
             result = provider.complete(
@@ -154,9 +144,6 @@ class LLMRouter:
         except Exception:
             result = ""
             ok = False
-        finally:
-            if acquired:
-                _GIGACHAT_GLOBAL_LOCK.release()
         latency = time.monotonic() - start
         return result, latency, ok
 
