@@ -50,12 +50,13 @@ Done:
 - pytest -q green after events source-of-truth changes.
 - Enforced GigaChat global lock in provider with wait logging and single-ingress guard tests.
 - Trust v2 decay/redemption implemented from events_v1 with versioned snapshots, v2-preferred analytics, and tests added.
+- Added integration degradation tests A–G and single-cycle harness (mailbot_v26/tests/integration).
 
 Now:
 - UNCONFIRMED.
 
 Next:
-- Integration degradation tests.
+- UNCONFIRMED.
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -103,3 +104,5 @@ Working set (files / tables / tests):
 - mailbot_v26/config/config.ini
 - mailbot_v26/tests/test_trust_score.py
 - mailbot_v26/tests/test_daily_digest.py
+- mailbot_v26/tests/integration/harness.py
+- mailbot_v26/tests/integration/test_degradation_scenarios.py
