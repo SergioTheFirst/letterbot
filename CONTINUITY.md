@@ -48,12 +48,12 @@ Done:
 - Added idempotent events backfill tool with startup hook and observability markers.
 - Added tests for events-backed analytics/digests and backfill idempotency.
 - pytest -q green after events source-of-truth changes.
+- Enforced GigaChat global lock in provider with wait logging and single-ingress guard tests.
 
 Now:
 - UNCONFIRMED.
 
 Next:
-- Global single-ingress for GigaChat + anti-bypass test.
 - Trust v2 decay/redemption.
 - Integration degradation tests.
 
@@ -90,3 +90,8 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_system_orchestrator.py
 - tests/test_event_contract.py
 - mailbot_v26/tests/test_events_source_of_truth.py
+- mailbot_v26/llm/global_lock.py
+- mailbot_v26/llm/providers.py
+- mailbot_v26/llm/router.py
+- mailbot_v26/tests/test_llm_single_ingress.py
+- mailbot_v26/tests/test_gigachat_global_lock.py

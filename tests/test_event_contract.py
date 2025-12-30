@@ -6,24 +6,10 @@ from threading import Thread
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter
 from mailbot_v26.llm.router import LLMRouter, LLMRouterConfig
-from mailbot_v26.llm.providers import GigaChatProvider
+from mailbot_v26.llm.providers import GigaChatProvider, GigaChatProviderConfig
 from mailbot_v26.pipeline import processor
 from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.system.orchestrator import SystemMode, SystemOrchestrator
-
-
-class _FakeGigaChat(GigaChatProvider):
-    def __init__(self) -> None:
-        # bypass parent init
-        self.calls: list[float] = []
-
-    def complete(self, messages, *, max_tokens=None, temperature=None):  # type: ignore[override]
-        self.calls.append(time.time())
-        time.sleep(0.2)
-        return "ok"
-
-    def healthcheck(self) -> bool:  # type: ignore[override]
-        return True
 
 
 def test_event_contract_emission_idempotent(tmp_path):
@@ -62,8 +48,16 @@ def test_event_emitter_fail_does_not_break_pipeline(monkeypatch):
     assert calls["called"] is True
 
 
-def test_gigachat_global_serialization():
-    provider = _FakeGigaChat()
+def test_gigachat_global_serialization(monkeypatch):
+    provider = GigaChatProvider(GigaChatProviderConfig(api_key="x"))
+    calls: list[float] = []
+
+    def fake_request(self, payload):  # type: ignore[no-untyped-def]
+        calls.append(time.time())
+        time.sleep(0.2)
+        return "ok"
+
+    monkeypatch.setattr(GigaChatProvider, "_request", fake_request, raising=True)
     router = LLMRouter(
         LLMRouterConfig(
             primary="gigachat",
@@ -91,7 +85,7 @@ def test_gigachat_global_serialization():
     duration = time.time() - start
     assert len(outputs) == 2
     assert duration >= 0.35
-    assert provider.calls[0] <= provider.calls[1]
+    assert calls[0] <= calls[1]
 
 
 def test_no_direct_gigachat_usage(tmp_path):
