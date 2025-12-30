@@ -29,8 +29,13 @@ from mailbot_v26.insights.anomaly_engine import (
     compute_anomalies,
     max_anomaly_severity,
 )
-from mailbot_v26.insights.aggregator import Insight, aggregate_insights
+from mailbot_v26.insights.aggregator import (
+    Insight,
+    aggregate_insights,
+    append_narrative_insight,
+)
 from mailbot_v26.insights.digest import InsightDigest, build_insight_digest
+from mailbot_v26.insights.narrative_composer import NarrativeResult, compose_narrative
 from mailbot_v26.insights.relationship_anomaly import RelationshipAnomalyDetector
 from mailbot_v26.insights.relationship_health import RelationshipHealthCalculator
 from mailbot_v26.insights.temporal_reasoning import (
@@ -951,6 +956,28 @@ def _build_insights_section(
     return "\n".join(lines)
 
 
+def _extract_narrative_insight(
+    insights: list[Insight],
+) -> tuple[NarrativeResult | None, list[Insight]]:
+    narrative: NarrativeResult | None = None
+    remaining: list[Insight] = []
+    for insight in insights:
+        if insight.type == "Narrative":
+            fact = insight.metadata.get("fact") if insight.metadata else insight.explanation
+            pattern = insight.metadata.get("pattern") if insight.metadata else None
+            action = insight.metadata.get("action") if insight.metadata else insight.recommendation
+            if fact:
+                narrative = NarrativeResult(
+                    fact=fact,
+                    pattern=pattern,
+                    action=action,
+                    reasons=tuple(),
+                )
+            continue
+        remaining.append(insight)
+    return narrative, remaining
+
+
 def build_telegram_payload(
     context: TelegramBuildContext,
 ) -> tuple[TelegramPayload, TelegramRenderMode, bool]:
@@ -1058,11 +1085,7 @@ def build_telegram_payload(
     if no_llm_summary:
         telegram_text_raw = f"{telegram_text_raw}\n\n{no_llm_summary}"
 
-    insights_section = _build_insights_section(
-        context.insights, context.insight_digest
-    )
-    if insights_section:
-        telegram_text_raw = f"{telegram_text_raw}{escape_tg_html(insights_section)}"
+    narrative, remaining_insights = _extract_narrative_insight(context.insights)
 
     if render_mode == TelegramRenderMode.FULL:
         ctx = EmailContext(
@@ -1120,6 +1143,19 @@ def build_telegram_payload(
                 attachment_summary=context.attachment_summary,
             )
     telegram_text = telegram_text_raw
+    if render_mode == TelegramRenderMode.FULL and not payload_invalid:
+        if narrative:
+            narrative_block = tg_renderer.format_narrative_block(
+                fact=narrative.fact,
+                context=narrative.pattern,
+                action=narrative.action,
+            )
+            telegram_text = f"{telegram_text}\n\n{narrative_block}"
+        insights_section = _build_insights_section(
+            remaining_insights, context.insight_digest
+        )
+        if insights_section:
+            telegram_text = f"{telegram_text}{escape_tg_html(insights_section)}"
     if render_mode != TelegramRenderMode.FULL or payload_invalid:
         fallback_reason = ",".join(fallback_reasons) if fallback_reasons else "payload_validation_failed"
         event_emitter.emit(
@@ -1288,6 +1324,26 @@ def _append_insights_preview(
         lines.append(f"• {title} ({severity})")
         lines.append(f"  {explanation}")
         lines.append(f"  Рекомендация: {recommendation}")
+    return "\n".join(lines)
+
+
+def _append_narrative_preview(
+    preview_text: str,
+    narrative: NarrativeResult | None,
+) -> str:
+    if narrative is None:
+        return preview_text
+    lines = preview_text.split("\n")
+    insert_at = len(lines)
+    if lines and lines[-1].strip() == "[Принять] [Отклонить]":
+        insert_at = len(lines) - 1
+    narrative_lines = ["", "Narrative"]
+    narrative_lines.append(f"Факт: {_sanitize_preview_line(narrative.fact)}")
+    if narrative.pattern:
+        narrative_lines.append(f"Контекст: {_sanitize_preview_line(narrative.pattern)}")
+    if narrative.action:
+        narrative_lines.append(f"Действие: {_sanitize_preview_line(narrative.action)}")
+    lines[insert_at:insert_at] = narrative_lines
     return "\n".join(lines)
 
 
@@ -2668,6 +2724,29 @@ def process_message(
         telegram_chat_id=telegram_chat_id,
     )
 
+    narrative: NarrativeResult | None = None
+    if getattr(feature_flags, "ENABLE_NARRATIVE_BINDING", True):
+        narrative = compose_narrative(
+            email_id=message_id,
+            subject=subject,
+            body_text=body_text or "",
+            from_email=from_email,
+            mail_type=mail_type or "",
+            received_at=received_at,
+            attachments=attachments or [],
+            entity_id=entity_resolution.entity_id if entity_resolution else None,
+            analytics=analytics,
+            commitments=commitments,
+            enable_patterns=getattr(feature_flags, "ENABLE_NARRATIVE_PATTERNS", True),
+        )
+        if narrative:
+            append_narrative_insight(
+                analytics_result.aggregated_insights,
+                fact=narrative.fact,
+                pattern=narrative.pattern,
+                action=narrative.action,
+            )
+
     policy_decision = _evaluate_policy(policy_inputs)
     anomalies: list[Anomaly] = []
     if policy_decision.allow_anomaly_alerts and entity_resolution:
@@ -2993,6 +3072,7 @@ def process_message(
                     analytics_result.commitment_signal_preview["expired_count"]
                 ),
             )
+        preview_text = _append_narrative_preview(preview_text, narrative)
         send_preview_to_telegram(
             chat_id=telegram_chat_id,
             preview_text=preview_text,

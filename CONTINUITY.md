@@ -65,6 +65,8 @@ Done:
 - Premium Telegram View v1 rendering: attachment type summary line, bold-italic body summary, and premium attachment snippet formatting.
 - Mail Type Hierarchy v2: deterministic subtype refinement with reason codes, feature flag, pipeline logs, and tests.
 - PriorityEngineV2 rule-based scoring wired in shadow mode with vip sender config, structured logs, and unit tests; pytest -q green.
+- Narrative Binding v1 implemented: deterministic composer, Telegram/preview integration, feature flags, and structured logs.
+- Added narrative composer tests and telegram payload stability coverage; pytest -q green.
 
 Now:
 - UNCONFIRMED.
@@ -124,3 +126,8 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_mail_type_hierarchy.py
 - mailbot_v26/priority/priority_engine_v2.py
 - mailbot_v26/tests/test_priority_engine_v2.py
+- mailbot_v26/insights/narrative_composer.py
+- mailbot_v26/insights/aggregator.py
+- mailbot_v26/pipeline/tg_renderer.py
+- mailbot_v26/tests/test_narrative_composer.py
+- mailbot_v26/tests/test_telegram_payload_pipeline.py

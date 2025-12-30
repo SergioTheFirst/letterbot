@@ -269,3 +269,25 @@ def test_empty_summary_uses_fallback(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert html_text.startswith("🔵 от sender@example.com:")
+
+
+def test_narrative_block_keeps_payload_safe(monkeypatch) -> None:
+    _setup_processor(monkeypatch)
+    captured = _capture_payload(monkeypatch)
+    base64_blob = "QUJD" * 40
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=9,
+        from_email="sender@example.com",
+        subject="Счет на оплату",
+        received_at=datetime(2024, 1, 9, 12, 0),
+        body_text=f"Оплатить до 15.01.2024. {base64_blob}",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    html_text = captured["payload"].html_text
+    assert "<b>Факт:</b>" in html_text
+    assert base64_blob not in html_text
+    assert "data=b'" not in html_text
