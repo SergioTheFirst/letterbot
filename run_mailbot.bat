@@ -11,7 +11,7 @@ if not exist .git (
 )
 
 echo =============================================
-echo   MailBot Premium v26 - Run
+echo   MailBot Premium - Run
 echo =============================================
 
 echo Checking Python 3.10+...
@@ -20,25 +20,19 @@ if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Python is not available in PATH.
     exit /b 1
 )
-python - <<"PYVER"
-import sys
-major, minor = sys.version_info[:2]
-print(f"Python version detected: {major}.{minor}")
-if (major, minor) < (3, 10):
-    sys.exit(1)
-PYVER
+python -c "import sys; major, minor = sys.version_info[:2]; print(f'Python version detected: {major}.{minor}'); sys.exit(0 if (major, minor) >= (3, 10) else 1)"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Python 3.10 or higher is required.
     exit /b 1
 )
 
 echo Checking virtual environment...
-if not exist "%REPO_ROOT%venv\Scripts\activate.bat" (
-    echo ERROR: venv not found. Please run install_and_run.bat first.
+if not exist "%REPO_ROOT%.venv\Scripts\activate.bat" (
+    echo ERROR: .venv not found. Please run install_and_run.bat first.
     exit /b 1
 )
 
-call "%REPO_ROOT%venv\Scripts\activate.bat"
+call "%REPO_ROOT%.venv\Scripts\activate.bat"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Failed to activate virtual environment.
     exit /b 1

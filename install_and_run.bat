@@ -12,7 +12,7 @@ if not exist .git (
 )
 
 echo =============================================
-echo   MailBot Premium v26 - Install and Run
+echo   MailBot Premium - Install and Run
 echo =============================================
 
 echo Checking Python 3.10+...
@@ -21,28 +21,22 @@ if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Python is not available in PATH.
     exit /b 1
 )
-python - <<"PYVER"
-import sys
-major, minor = sys.version_info[:2]
-print(f"Python version detected: {major}.{minor}")
-if (major, minor) < (3, 10):
-    sys.exit(1)
-PYVER
+python -c "import sys; major, minor = sys.version_info[:2]; print(f'Python version detected: {major}.{minor}'); sys.exit(0 if (major, minor) >= (3, 10) else 1)"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Python 3.10 or higher is required.
     exit /b 1
 )
 
 echo Creating virtual environment if missing...
-if not exist "%REPO_ROOT%venv\Scripts\activate.bat" (
-    python -m venv "%REPO_ROOT%venv"
+if not exist "%REPO_ROOT%.venv\Scripts\activate.bat" (
+    python -m venv "%REPO_ROOT%.venv"
     if %ERRORLEVEL% NEQ 0 (
         echo ERROR: Failed to create virtual environment.
         exit /b 1
     )
 )
 
-call "%REPO_ROOT%venv\Scripts\activate.bat"
+call "%REPO_ROOT%.venv\Scripts\activate.bat"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Failed to activate virtual environment.
     exit /b 1
@@ -65,8 +59,8 @@ if exist "%REPO_ROOT%mailbot_v26\requirements.txt" (
     exit /b 1
 )
 
-echo Installing dependencies from %REQ_FILE% ...
-pip install -r "%REQ_FILE%"
+echo Installing dependencies from "%REQ_FILE%"...
+python -m pip install -r "%REQ_FILE%"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Dependency installation failed.
     exit /b 1

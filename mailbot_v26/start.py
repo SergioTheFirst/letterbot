@@ -57,6 +57,7 @@ from mailbot_v26.text.mime_utils import decode_mime_header
 from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.worker.telegram_sender import send_telegram
 from mailbot_v26.tools.backfill_events import maybe_backfill_events
+from mailbot_v26.version import __version__
 
 LOG_PATH = CURRENT_DIR / "mailbot.log"
 
@@ -343,11 +344,11 @@ def _process_queue(storage: Storage, config: BotConfig, processor: MessageProces
 
 def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> None:
     print("\n" + "=" * 60)
-    print("MAILBOT PREMIUM v26 - STARTING")
+    print(f"MAILBOT PREMIUM {__version__} - STARTING")
     print("=" * 60)
     print(f"Log file: {LOG_PATH}\n")
 
-    logger.info("=== MailBot v26 started ===")
+    logger.info("=== MailBot %s started ===", __version__)
     program_start = datetime.now()
     try:
         processor_module.system_snapshotter.log_startup()
@@ -398,7 +399,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             health_checker = StartupHealthChecker(base_config_dir, config)
             results = health_checker.run()
             mode = health_checker.evaluate_mode(results)
-            report = LaunchReportBuilder().build(results, mode)
+            report = LaunchReportBuilder(
+                version_label=f"MailBot Premium {__version__}"
+            ).build(results, mode)
             launch_chat_id = config.general.admin_chat_id
             if not launch_chat_id and config.accounts:
                 launch_chat_id = config.accounts[0].telegram_chat_id
