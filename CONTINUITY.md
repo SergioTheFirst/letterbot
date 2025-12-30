@@ -71,7 +71,7 @@ Done:
 - Added priority correction events_v1 emission with idempotency, deterministic quality metrics from events, digest quality blocks under flag, and export of metrics.
 
 Now:
-- Priority correction events v1 emitted with deduplication; deterministic priority quality metrics added with digest/export surfacing under feature flag.
+- Priority correction contract events and quality metrics are implemented and gated; monitoring for follow-up requests.
 
 Next:
 - Telegram inbound correction handler or auto-priority gate adjustments based on measured accuracy (UNCONFIRMED).

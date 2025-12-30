@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import sqlite3
 
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
@@ -11,29 +10,22 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 
-def _emit_delivered(
+def _emit_received(
     emitter: ContractEventEmitter,
     *,
     ts: datetime,
     account_id: str,
     email_id: int,
     priority: str,
-    mail_type: str,
-    from_email: str,
 ) -> None:
     emitter.emit(
         EventV1(
-            event_type=EventType.TELEGRAM_DELIVERED,
+            event_type=EventType.EMAIL_RECEIVED,
             ts_utc=ts.timestamp(),
             account_id=account_id,
             entity_id=None,
             email_id=email_id,
-            payload={
-                "priority": priority,
-                "mail_type": mail_type,
-                "from_email": from_email,
-                "render_mode": "FULL",
-            },
+            payload={"priority": priority, "from_email": "a@example.com"},
         )
     )
 
@@ -46,6 +38,7 @@ def _emit_correction(
     email_id: int,
     old_priority: str,
     new_priority: str,
+    engine: str,
 ) -> None:
     emitter.emit(
         EventV1(
@@ -57,9 +50,11 @@ def _emit_correction(
             payload={
                 "old_priority": old_priority,
                 "new_priority": new_priority,
-                "engine": "priority_v2_shadow",
-                "model_version": "v2.0",
-                "reason_codes": ["rule"],
+                "engine": engine,
+                "source": "preview_buttons",
+                "account_email": account_id,
+                "sender_email": "a@example.com",
+                "system_mode": "FULL",
             },
         )
     )
@@ -72,23 +67,26 @@ def test_quality_metrics_weekly_summary_deterministic(tmp_path) -> None:
     contract_emitter = ContractEventEmitter(db_path)
     now = datetime(2024, 1, 7, tzinfo=timezone.utc)
 
-    _emit_delivered(
+    _emit_received(
         contract_emitter,
         ts=now,
         account_id="acc",
         email_id=1,
         priority="🟡",
-        mail_type="invoice.final",
-        from_email="a@example.com",
     )
-    _emit_delivered(
+    _emit_received(
         contract_emitter,
         ts=now,
         account_id="acc",
         email_id=2,
         priority="🔵",
-        mail_type="update",
-        from_email="b@example.com",
+    )
+    _emit_received(
+        contract_emitter,
+        ts=now,
+        account_id="acc",
+        email_id=3,
+        priority="🔴",
     )
     _emit_correction(
         contract_emitter,
@@ -97,6 +95,16 @@ def test_quality_metrics_weekly_summary_deterministic(tmp_path) -> None:
         email_id=1,
         old_priority="🟡",
         new_priority="🔴",
+        engine="priority_v2",
+    )
+    _emit_correction(
+        contract_emitter,
+        ts=now,
+        account_id="acc",
+        email_id=2,
+        old_priority="🔵",
+        new_priority="🔴",
+        engine="auto",
     )
 
     metrics = compute_quality_metrics(
@@ -106,12 +114,13 @@ def test_quality_metrics_weekly_summary_deterministic(tmp_path) -> None:
         now=now,
     )
 
-    assert metrics.corrections_total == 1
-    assert metrics.evaluated_total == 2
-    assert metrics.accuracy == 0.5
-    assert metrics.by_mail_type[0].key == "invoice.final"
-    assert metrics.by_mail_type[0].corrections == 1
-    assert metrics.top_errors[0]["mail_type"] == "invoice.final"
+    assert metrics.corrections_total == 2
+    assert metrics.emails_received == 3
+    assert metrics.correction_rate == 2 / 3
+    assert metrics.by_new_priority[0].key == "🔴"
+    assert metrics.by_new_priority[0].count == 2
+    assert metrics.by_engine[0].key == "auto"
+    assert metrics.by_engine[0].count == 1
 
 
 def test_weekly_digest_includes_quality_block_when_flag_on(tmp_path) -> None:
@@ -122,14 +131,12 @@ def test_weekly_digest_includes_quality_block_when_flag_on(tmp_path) -> None:
     now = datetime(2024, 1, 7, tzinfo=timezone.utc)
     week_key = weekly_digest._iso_week_key(now)
 
-    _emit_delivered(
+    _emit_received(
         contract_emitter,
         ts=now,
         account_id="acc",
         email_id=10,
         priority="🟡",
-        mail_type="invoice.final",
-        from_email="a@example.com",
     )
     _emit_correction(
         contract_emitter,
@@ -138,6 +145,7 @@ def test_weekly_digest_includes_quality_block_when_flag_on(tmp_path) -> None:
         email_id=10,
         old_priority="🟡",
         new_priority="🔴",
+        engine="priority_v2",
     )
 
     data_with_block = weekly_digest._collect_weekly_data(
@@ -159,6 +167,5 @@ def test_weekly_digest_includes_quality_block_when_flag_on(tmp_path) -> None:
     text_without = weekly_digest._build_weekly_digest_text(data_without_block)
 
     assert "Качество" in text_with
-    assert "Топ-ошибки" in text_with
+    assert "Исправления по приоритету" in text_with
     assert "Качество" not in text_without
-    assert "Топ-ошибки" not in text_without

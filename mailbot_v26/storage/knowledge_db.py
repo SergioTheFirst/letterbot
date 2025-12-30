@@ -43,6 +43,7 @@ class KnowledgeDB:
                 if schema_sql:
                     conn.executescript(schema_sql)
                 self._ensure_optional_columns(conn)
+                self._ensure_priority_feedback_index(conn)
                 if views_sql:
                     conn.executescript(views_sql)
                     logger.debug("[CRM-ANALYTICS] views OK")
@@ -145,6 +146,28 @@ class KnowledgeDB:
                 conn.commit()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("KnowledgeDB migration failed: %s", exc)
+
+    def _ensure_priority_feedback_index(self, conn: sqlite3.Connection) -> None:
+        try:
+            conn.execute(
+                """
+                DELETE FROM priority_feedback
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid)
+                    FROM priority_feedback
+                    GROUP BY email_id, kind, value
+                );
+                """
+            )
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_priority_feedback_email_kind_value
+                    ON priority_feedback(email_id, kind, value);
+                """
+            )
+            conn.commit()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("KnowledgeDB priority_feedback_index_failed: %s", exc)
 
     def save_email(
         self,
@@ -620,14 +643,15 @@ class KnowledgeDB:
         entity_id: str | None = None,
         sender_email: str | None = None,
         account_email: str | None = None,
-    ) -> str:
+    ) -> tuple[str, bool]:
         feedback_id = uuid.uuid4().hex
         email_value = str(email_id)
+
         try:
-            def _action(conn: sqlite3.Connection) -> None:
+            def _action(conn: sqlite3.Connection) -> tuple[str, bool]:
                 conn.execute(
                     """
-                    INSERT INTO priority_feedback (
+                    INSERT OR IGNORE INTO priority_feedback (
                         id,
                         email_id,
                         kind,
@@ -648,8 +672,26 @@ class KnowledgeDB:
                         account_email,
                     ),
                 )
+                inserted = conn.total_changes > 0
+                if not inserted:
+                    row = conn.execute(
+                        """
+                        SELECT id
+                        FROM priority_feedback
+                        WHERE email_id = ? AND kind = ? AND value = ?
+                        ORDER BY datetime(created_at) ASC, id ASC
+                        LIMIT 1
+                        """,
+                        (email_value, kind, value),
+                    ).fetchone()
+                    existing_id = row[0] if row else feedback_id
+                    return existing_id, False
+                return feedback_id, True
 
-            self.write_transaction(_action)
+            result = self.write_transaction(_action)
+            if result is None:
+                return feedback_id, False
+            return result
         except Exception as exc:
             logger.error("KnowledgeDB priority feedback save failed: %s", exc)
-        return feedback_id
+            return feedback_id, False
