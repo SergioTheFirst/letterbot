@@ -13,6 +13,7 @@ from typing import Any
 
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
+from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
 from mailbot_v26.features import FeatureFlags
 from mailbot_v26.insights.commitment_signals import (
     CommitmentReliabilityMetrics,
@@ -148,6 +149,12 @@ class AttachmentSummary:
     kind: str = ""
     priority: int = 0
     text_length: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class MailTypeAttachment:
+    filename: str | None
+    content_type: str
 
 
 def _emit_contract_event(
@@ -2200,6 +2207,43 @@ def process_message(
         subject=subject,
         received_at=received_at.isoformat(),
     )
+    mail_type: str | None = None
+    mail_type_reasons: list[str] = []
+    hierarchy_enabled = getattr(feature_flags, "ENABLE_HIERARCHICAL_MAIL_TYPES", False)
+    mail_type_attachments = [
+        MailTypeAttachment(
+            filename=attachment.get("filename"),
+            content_type=attachment.get("content_type") or attachment.get("type") or "",
+        )
+        for attachment in attachments or []
+    ]
+    try:
+        mail_type, mail_type_reasons = MailTypeClassifier.classify_detailed(
+            subject=subject,
+            body=body_text or "",
+            attachments=mail_type_attachments,
+            enable_hierarchy=hierarchy_enabled,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error(
+            "mail_type_classification_failed",
+            email_id=message_id,
+            error=str(exc),
+        )
+        mail_type = MailTypeClassifier.classify(
+            subject=subject,
+            body=body_text or "",
+            attachments=mail_type_attachments,
+        )
+        mail_type_reasons = ["mt.base=fallback"]
+    if mail_type:
+        logger.info(
+            "mail_type_classified",
+            email_id=message_id,
+            mail_type=mail_type,
+            reason_codes=mail_type_reasons,
+            hierarchy_enabled=hierarchy_enabled,
+        )
     commitments: list[Commitment] = []
     enable_commitments = getattr(feature_flags, "ENABLE_COMMITMENT_TRACKER", False)
     if enable_commitments:
@@ -2230,6 +2274,8 @@ def process_message(
                 "account_email": account_email,
                 "from_email": from_email,
                 "subject": subject,
+                "mail_type": mail_type,
+                "mail_type_reasons": mail_type_reasons,
             },
         )
     except Exception as exc:  # pragma: no cover - defensive logging

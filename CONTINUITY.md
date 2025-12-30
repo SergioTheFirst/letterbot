@@ -62,6 +62,7 @@ Done:
 - Deprecated legacy Windows bat scripts with wrappers.
 - Added tests for config bootstrap, validation rules, and deprecated bat wrapper.
 - Premium Telegram View v1 rendering: attachment type summary line, bold-italic body summary, and premium attachment snippet formatting.
+- Mail Type Hierarchy v2: deterministic subtype refinement with reason codes, feature flag, pipeline logs, and tests.
 
 Now:
 - UNCONFIRMED.
@@ -113,3 +114,9 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_telegram_payload_validation.py
 - mailbot_v26/tests/test_telegram_render_modes.py
 - tests/test_tg_payload_pipeline.py
+- mailbot_v26/domain/mail_type_classifier.py
+- mailbot_v26/features/flags.py
+- mailbot_v26/config/config.ini
+- mailbot_v26/tools/config_bootstrap.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/tests/test_mail_type_hierarchy.py
