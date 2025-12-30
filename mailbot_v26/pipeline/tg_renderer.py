@@ -85,20 +85,20 @@ def _attachment_size_bytes(attachment: dict[str, Any]) -> int:
 
 def _format_size_mb(size_bytes: int) -> str:
     if size_bytes <= 0:
-        return "0 MB"
+        return "0 МБ"
     size_mb = size_bytes / (1024 * 1024)
     formatted = f"{size_mb:.1f}".rstrip("0").rstrip(".")
-    return f"{formatted} MB"
+    return f"{formatted} МБ"
 
 
 def _attachment_type_label(filename: str) -> str:
     cleaned = (filename or "").strip()
     if "." not in cleaned:
-        return "OTHER"
+        return "ДРУГОЕ"
     ext = cleaned.rsplit(".", 1)[-1].lower()
     ext = re.sub(r"[^a-z0-9]+", "", ext)
     if not ext:
-        return "OTHER"
+        return "ДРУГОЕ"
     normalized = {
         "jpeg": "JPG",
         "jpg": "JPG",
@@ -155,16 +155,16 @@ def format_attachments_block(attachments: list[dict[str, Any]]) -> str:
         return ""
     lines = [_attachment_type_summary(attachments)]
     for attachment in attachments:
-        filename = _escape_dynamic(attachment.get("filename") or "attachment")
+        filename = _escape_dynamic(attachment.get("filename") or "вложение")
         skipped_reason = _attachment_skipped_reason(attachment)
         if skipped_reason == "too_large":
             size_display = _format_size_mb(_attachment_size_bytes(attachment))
             lines.append(
-                f"{filename} — <i>too large ({size_display}), extraction disabled</i>"
+                f"{filename} — <i>слишком большой файл ({size_display}), извлечение отключено</i>"
             )
             continue
         if skipped_reason == "total_limit":
-            lines.append(f"{filename} — <i>skipped due to mail size limit</i>")
+            lines.append(f"{filename} — <i>пропущен из-за ограничения размера письма</i>")
             continue
         extracted_text = _normalize_attachment_text(attachment.get("text"))
         if extracted_text and not _is_binary_leak(extracted_text):

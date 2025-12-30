@@ -142,7 +142,7 @@ def _attention_summary(attention: Sequence[dict[str, object]]) -> str:
     top = attention[:3]
     parts: list[str] = []
     for item in top:
-        name = _safe_text(str(item.get("entity") or "unknown"), max_len=40)
+        name = _safe_text(str(item.get("entity") or "неизвестно"), max_len=40)
         words = int(item.get("words") or 0)
         minutes = words / 200.0
         minutes_display = 0.1 if minutes > 0 and minutes < 0.1 else minutes
@@ -155,7 +155,7 @@ def _overdue_summary(items: Sequence[dict[str, object]]) -> str:
         return "нет"
     parts: list[str] = []
     for item in items[:5]:
-        name = _safe_text(str(item.get("from_email") or "unknown"), max_len=24)
+        name = _safe_text(str(item.get("from_email") or "неизвестно"), max_len=24)
         text = _safe_text(str(item.get("commitment_text") or ""), max_len=48)
         deadline = _safe_text(str(item.get("deadline_iso") or ""), max_len=16)
         parts.append(f"{name} → {text} → {deadline}")
@@ -370,7 +370,7 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
     )
     if data.attention_economics is None:
         lines.append(
-            "• Attention economics: "
+            "• Внимание: "
             f"{_attention_summary(data.attention_entities)}"
         )
     commitments = data.commitment_counts
@@ -385,7 +385,7 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         f"{_overdue_summary(data.overdue_commitments)}"
     )
     lines.append(
-        "• Trust score: "
+        "• Уровень доверия: "
         f"{_trust_summary(data.trust_deltas)}"
     )
     if data.quality_metrics is not None:
@@ -419,7 +419,7 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
             delta = p90 - prev.p90_latency_7d
             trend = f" (Δ {delta:+.0f}с)"
         lines.append(
-            "• Delivery SLA: "
+            "• Надёжность уведомлений: "
             f"p90 {p90:.0f}с{trend}, p99 {p99:.0f}с"
         )
     if data.anomaly_alerts:

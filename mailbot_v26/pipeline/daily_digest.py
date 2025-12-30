@@ -225,7 +225,7 @@ def _build_digest_text(data: DigestData) -> str:
     if data.trust_delta is not None and abs(data.trust_delta) > _TRUST_DELTA_THRESHOLD:
         delta_pp = data.trust_delta * 100.0
         sign = "+" if delta_pp >= 0 else ""
-        lines.append(f"• Trust score: {sign}{delta_pp:.1f} п.п.")
+        lines.append(f"• Уровень доверия: {sign}{delta_pp:.1f} п.п.")
     if data.health_delta is not None and abs(data.health_delta) >= _RELATIONSHIP_HEALTH_DELTA_THRESHOLD:
         sign = "+" if data.health_delta >= 0 else ""
         lines.append(f"• Здоровье отношений: {sign}{data.health_delta:.0f} пунктов")
@@ -253,8 +253,8 @@ def _build_digest_text(data: DigestData) -> str:
         salvage_pct = sla.salvage_rate_24h * 100
         p90 = sla.p90_latency_24h or 0
         lines.append(
-            "• Delivery SLA 24ч: "
-            f"доставлено {delivered_pct:.1f}%, p90 {p90:.0f}с, salvage {salvage_pct:.1f}%"
+            "• Надёжность уведомлений 24ч: "
+            f"доставлено {delivered_pct:.1f}%, p90 {p90:.0f}с, резерв {salvage_pct:.1f}%"
         )
         if sla.top_error_reasons_24h:
             top = sla.top_error_reasons_24h[0]
