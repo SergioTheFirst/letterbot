@@ -16,7 +16,7 @@ def test_tg_render_standard() -> None:
         attachments=attachments,
     )
 
-    assert "📎 Вложений: 1" in rendered
+    assert "Вложения: 1 (PDF×1)" in rendered
     assert "<b><i>Проверить письмо</i></b>" in rendered
 
 

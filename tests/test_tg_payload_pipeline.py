@@ -69,7 +69,7 @@ def test_tg_payload_never_subject_only():
 
     assert "Письмо получено" in fallback
     assert "Основной текст не удалось безопасно отобразить." in fallback
-    assert "📎 Вложения: 0" in fallback
+    assert "Вложения: 0" in fallback
 
 
 def test_tg_payload_validator_blocks_empty():

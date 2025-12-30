@@ -95,7 +95,7 @@ def test_telegram_contains_attachment_summary(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert "📎 Вложений: 1" in html_text
+    assert "Вложения: 1 (DOC×1)" in html_text
     assert "doc1.doc — <i>" in html_text
 
 
@@ -115,6 +115,7 @@ def test_action_rendered_in_tg(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert html_text.startswith("🔵 от sender@example.com:")
+    assert "<b><i>Краткое описание письма.</i></b>" in html_text
 
 
 def test_payload_stability_when_anomaly_alerts_off(monkeypatch) -> None:
@@ -171,7 +172,7 @@ def test_no_minimal_template_when_attachments_exist(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert "ℹ️ Детали будут доступны позже." not in html_text
-    assert "Вложений: 1" in html_text
+    assert "Вложения: 1 (PDF×1)" in html_text
 
 
 def test_empty_body_with_attachments_uses_fallback(monkeypatch) -> None:
@@ -208,7 +209,7 @@ def test_empty_body_with_attachments_uses_fallback(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert html_text.startswith("🔵 от sender@example.com:")
-    assert "Вложений: 3" in html_text
+    assert "Вложения: 3 (DOCX×1, PDF×1, XLSX×1)" in html_text
     assert "doc1.docx" in html_text
     assert "report.pdf" in html_text
     assert "table.xlsx" in html_text

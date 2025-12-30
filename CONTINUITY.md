@@ -61,6 +61,7 @@ Done:
 - Added acceptance checklist and run_acceptance.bat.
 - Deprecated legacy Windows bat scripts with wrappers.
 - Added tests for config bootstrap, validation rules, and deprecated bat wrapper.
+- Premium Telegram View v1 rendering: attachment type summary line, bold-italic body summary, and premium attachment snippet formatting.
 
 Now:
 - UNCONFIRMED.
@@ -104,3 +105,11 @@ Working set (files / tables / tests):
 - tests/test_init_config_creates_templates.py
 - tests/test_validate_config_account_id_rules.py
 - tests/test_deprecated_bat_wrapper_docs_only.py
+- mailbot_v26/pipeline/tg_renderer.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/tests/test_tg_renderer.py
+- mailbot_v26/tests/test_telegram_rendering_format.py
+- mailbot_v26/tests/test_telegram_payload_pipeline.py
+- mailbot_v26/tests/test_telegram_payload_validation.py
+- mailbot_v26/tests/test_telegram_render_modes.py
+- tests/test_tg_payload_pipeline.py
