@@ -59,6 +59,7 @@ from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
 from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
+from mailbot_v26.priority.priority_engine_v2 import PriorityEngineV2
 from mailbot_v26.text.clean_email import clean_email_body
 from .attention_gate import (
     AttentionGateInput,
@@ -92,6 +93,7 @@ context_store = ContextStore(DB_PATH)
 event_emitter = EventEmitter(DB_PATH)
 contract_event_emitter = ContractEventEmitter(DB_PATH)
 shadow_priority_engine = ShadowPriorityEngine(analytics)
+priority_engine_v2 = PriorityEngineV2(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
 auto_priority_gates = AutoPriorityGates(analytics)
@@ -2381,10 +2383,42 @@ def process_message(
         llm_provider = llm_result.get("llm_provider")
 
     # ---------- Shadow Priority (read-only, dry run) ----------
+    priority_v2_result = None
+    priority_v2_enabled = bool(getattr(feature_flags, "ENABLE_PRIORITY_V2", False))
+    if priority_v2_enabled:
+        try:
+            priority_v2_result = priority_engine_v2.compute(
+                subject=subject,
+                body_text=body_text or "",
+                from_email=from_email,
+                mail_type=mail_type or "",
+                received_at=received_at,
+                commitments=commitments,
+            )
+            logger.info(
+                "priority_v2_computed",
+                email_id=message_id,
+                score=priority_v2_result.score,
+                priority=priority_v2_result.priority,
+                reasons=priority_v2_result.reason_codes[:5],
+                model_version=priority_v2_result.model_version,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("priority_v2_failed", error=str(exc))
+            priority_v2_result = None
+
     shadow_priority, shadow_reason = shadow_priority_engine.compute(
         llm_priority=priority,
         from_email=from_email,
     )
+    if priority_v2_result and _is_shadow_higher(
+        priority_v2_result.priority,
+        shadow_priority,
+    ):
+        shadow_priority = priority_v2_result.priority
+        shadow_reason = "Priority v2: " + ", ".join(
+            priority_v2_result.reason_codes[:5]
+        )
     if shadow_priority != priority:
         logger.info(
             "shadow_priority_computed",
