@@ -263,12 +263,33 @@ def _load_trust_events(conn: sqlite3.Connection) -> list[EventV1]:
     try:
         rows = conn.execute(
             """
-            SELECT entity_id, trust_score, reason, sample_size, created_at
+            SELECT entity_id, trust_score, reason, sample_size, data_quality, model_version, created_at
             FROM trust_snapshots
             """
         ).fetchall()
     except sqlite3.OperationalError:
-        return []
+        try:
+            rows = conn.execute(
+                """
+                SELECT entity_id, trust_score, reason, sample_size, created_at
+                FROM trust_snapshots
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        else:
+            rows = [
+                {
+                    "entity_id": row["entity_id"],
+                    "trust_score": row["trust_score"],
+                    "reason": row["reason"],
+                    "sample_size": row["sample_size"],
+                    "data_quality": None,
+                    "model_version": None,
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
     for row in rows:
         created_at = _parse_ts(row["created_at"])
         events.append(
@@ -282,6 +303,8 @@ def _load_trust_events(conn: sqlite3.Connection) -> list[EventV1]:
                     "trust_score": row["trust_score"],
                     "reason": row["reason"],
                     "sample_size": row["sample_size"],
+                    "data_quality": row["data_quality"],
+                    "model_version": row["model_version"] or "v1",
                 },
             )
         )

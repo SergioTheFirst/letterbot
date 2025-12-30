@@ -35,6 +35,9 @@ class KnowledgeAnalytics:
         except (TypeError, ValueError):
             return {}
 
+    def event_payload(self, row: dict[str, object]) -> dict[str, object]:
+        return self._event_payload(row)
+
     def _window_start_ts(self, days: int) -> float:
         anchor = datetime.now(timezone.utc).timestamp()
         return anchor - (days * 24 * 60 * 60)
@@ -62,6 +65,27 @@ class KnowledgeAnalytics:
             return self._execute_select(query, params)
         except sqlite3.OperationalError:
             return []
+
+    def event_rows_for_entity(
+        self,
+        *,
+        entity_id: str,
+        event_type: str,
+        since_ts: float | None = None,
+    ) -> list[dict[str, object]]:
+        if not entity_id:
+            return []
+        rows = self._event_rows(
+            account_id=None,
+            event_type=event_type,
+            since_ts=since_ts,
+        )
+        entity_id = entity_id.strip()
+        return [
+            row
+            for row in rows
+            if str(row.get("entity_id") or "").strip() == entity_id
+        ]
 
     def sender_stats(self, limit: int | None = None) -> list[dict[str, object]]:
         query = """
@@ -981,7 +1005,7 @@ class KnowledgeAnalytics:
         except sqlite3.OperationalError:
             return {"up": [], "down": []}
 
-        per_entity: dict[str, list[tuple[float, float, str]]] = {}
+        per_entity: dict[str, dict[str, list[tuple[float, float, str]]]] = {}
         for row in rows:
             entity_id = str(row.get("entity_id") or "")
             if not entity_id:
@@ -996,10 +1020,14 @@ class KnowledgeAnalytics:
             if ts_utc <= 0:
                 continue
             name = str(row.get("entity_name") or entity_id)
-            per_entity.setdefault(entity_id, []).append((ts_utc, score, name))
+            version = self._trust_version(payload)
+            per_entity.setdefault(entity_id, {}).setdefault(version, []).append(
+                (ts_utc, score, name)
+            )
 
         deltas: list[dict[str, object]] = []
-        for entity_id, entries in per_entity.items():
+        for entity_id, versioned in per_entity.items():
+            entries = versioned.get("v2") or versioned.get("v1") or []
             if len(entries) < 2:
                 continue
             entries.sort(key=lambda item: item[0])
@@ -1032,7 +1060,7 @@ class KnowledgeAnalytics:
             event_type="relationship_health_updated",
             since_ts=since_ts,
         )
-        trust_deltas = self._event_deltas(trust_rows, "trust_score")
+        trust_deltas = self._trust_event_deltas(trust_rows, "trust_score")
         health_deltas = self._event_deltas(health_rows, "health_score")
 
         all_entities = set(trust_deltas.keys()) | set(health_deltas.keys())
@@ -1060,7 +1088,7 @@ class KnowledgeAnalytics:
             )
         except sqlite3.OperationalError:
             return None
-        latest_by_entity: dict[str, dict[str, object]] = {}
+        versioned: dict[str, dict[str, list[tuple[float, float]]]] = {}
         for row in rows:
             entity_id = str(row.get("entity_id") or "")
             if not entity_id:
@@ -1073,26 +1101,31 @@ class KnowledgeAnalytics:
                 score = float(score_value)
             except (TypeError, ValueError):
                 continue
-            created_at = datetime.fromtimestamp(
-                float(row.get("ts_utc") or 0.0), tz=timezone.utc
-            )
-            if entity_id not in latest_by_entity:
-                latest_by_entity[entity_id] = {
-                    "current_score": score,
-                    "current_at": created_at,
-                }
+            ts_utc = float(row.get("ts_utc") or 0.0)
+            if ts_utc <= 0:
                 continue
-            previous = latest_by_entity[entity_id]
-            previous_score = float(previous["current_score"])
-            delta = score - previous_score
-            return {
-                "entity_id": entity_id,
-                "current_score": score,
-                "previous_score": previous_score,
-                "delta": delta,
-                "current_at": created_at,
-            }
-        return None
+            version = self._trust_version(payload)
+            versioned.setdefault(entity_id, {}).setdefault(version, []).append(
+                (ts_utc, score)
+            )
+
+        delta_candidates = self._latest_trust_delta(versioned, version="v2")
+        if not delta_candidates:
+            delta_candidates = self._latest_trust_delta(versioned, version="v1")
+        if not delta_candidates:
+            return None
+
+        entity_id, current_score, previous_score, current_ts = max(
+            delta_candidates,
+            key=lambda item: item[3],
+        )
+        return {
+            "entity_id": entity_id,
+            "current_score": current_score,
+            "previous_score": previous_score,
+            "delta": current_score - previous_score,
+            "current_at": datetime.fromtimestamp(current_ts, tz=timezone.utc),
+        }
 
     def latest_relationship_health_delta(
         self, *, limit: int = 50
@@ -1172,3 +1205,57 @@ class KnowledgeAnalytics:
             entries.sort(key=lambda item: item[0])
             deltas[entity_id] = entries[-1][1] - entries[0][1]
         return deltas
+
+    def _trust_version(self, payload: dict[str, object]) -> str:
+        version = payload.get("model_version") or payload.get("version") or "v1"
+        return str(version).lower()
+
+    def _trust_event_deltas(
+        self,
+        rows: list[dict[str, object]],
+        field: str,
+    ) -> dict[str, float]:
+        versioned: dict[str, dict[str, list[tuple[float, float]]]] = {}
+        for row in rows:
+            entity_id = str(row.get("entity_id") or "").strip()
+            if not entity_id:
+                continue
+            payload = self._event_payload(row)
+            raw_value = payload.get(field)
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            ts_utc = float(row.get("ts_utc") or 0.0)
+            if ts_utc <= 0:
+                continue
+            version = self._trust_version(payload)
+            versioned.setdefault(entity_id, {}).setdefault(version, []).append(
+                (ts_utc, value)
+            )
+
+        deltas: dict[str, float] = {}
+        for entity_id, versions in versioned.items():
+            entries = versions.get("v2") or versions.get("v1") or []
+            if len(entries) < 2:
+                continue
+            entries.sort(key=lambda item: item[0])
+            deltas[entity_id] = entries[-1][1] - entries[0][1]
+        return deltas
+
+    def _latest_trust_delta(
+        self,
+        versioned: dict[str, dict[str, list[tuple[float, float]]]],
+        *,
+        version: str,
+    ) -> list[tuple[str, float, float, float]]:
+        candidates: list[tuple[str, float, float, float]] = []
+        for entity_id, versions in versioned.items():
+            entries = versions.get(version) or []
+            if len(entries) < 2:
+                continue
+            entries.sort(key=lambda item: item[0], reverse=True)
+            current_ts, current_score = entries[0]
+            previous_ts, previous_score = entries[1]
+            candidates.append((entity_id, current_score, previous_score, current_ts))
+        return candidates
