@@ -35,6 +35,7 @@ class FeatureFlags:
         self.ENABLE_WEEKLY_DIGEST = False
         self.ENABLE_ANOMALY_ALERTS = False
         self.ENABLE_ATTENTION_ECONOMICS = False
+        self.ENABLE_HIERARCHICAL_MAIL_TYPES = False
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -59,6 +60,9 @@ class FeatureFlags:
         self.ENABLE_ANOMALY_ALERTS = self._get_flag(parser, "enable_anomaly_alerts")
         self.ENABLE_ATTENTION_ECONOMICS = self._get_flag(
             parser, "enable_attention_economics"
+        )
+        self.ENABLE_HIERARCHICAL_MAIL_TYPES = self._get_flag(
+            parser, "enable_hierarchical_mail_types"
         )
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6

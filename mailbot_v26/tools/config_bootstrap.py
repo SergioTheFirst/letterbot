@@ -39,6 +39,7 @@ enable_daily_digest = true
 enable_weekly_digest = false
 enable_anomaly_alerts = false
 enable_attention_economics = false
+enable_hierarchical_mail_types = false
 
 [daily_digest]
 hour = 9
