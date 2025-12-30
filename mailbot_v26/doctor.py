@@ -67,6 +67,12 @@ REQUIRED_TABLES = {
 
 CRITICAL_COMPONENTS = {"SQLite", "Telegram", "IMAP"}
 
+_STATUS_LABELS_RU = {
+    "OK": "ОК",
+    "WARN": "ПРЕДУПРЕЖДЕНИЕ",
+    "FAIL": "ОШИБКА",
+}
+
 
 def run_doctor(config_dir: Path | None = None) -> DoctorReport:
     base_dir = config_dir or CONFIG_DIR
@@ -99,10 +105,10 @@ def run_doctor(config_dir: Path | None = None) -> DoctorReport:
     )
 
     if telegram_sent:
-        print("[OK] Doctor report sent to Telegram")
+        print("[ОК] Отчёт доктора отправлен в Telegram")
     else:
         print(
-            "[WARN] Doctor report was not sent to Telegram"
+            "[ПРЕДУПРЕЖДЕНИЕ] Отчёт доктора не отправлен в Telegram"
             + (f" ({telegram_error})" if telegram_error else "")
         )
 
@@ -126,14 +132,14 @@ def _check_python() -> DoctorEntry:
     status = "OK" if ok else "FAIL"
     details = f"{version.major}.{version.minor}.{version.micro}"
     if not ok:
-        details = f"{details} (requires >=3.10)"
+        details = f"{details} (требуется >=3.10)"
     return DoctorEntry("Python", status, details)
 
 
 def _check_venv() -> DoctorEntry:
     in_venv = sys.prefix != sys.base_prefix or bool(os.environ.get("VIRTUAL_ENV"))
     status = "OK" if in_venv else "WARN"
-    details = "active" if in_venv else "not detected"
+    details = "активирован" if in_venv else "не обнаружен"
     return DoctorEntry("Virtualenv", status, details)
 
 
@@ -145,8 +151,10 @@ def _check_dependencies() -> DoctorEntry:
         except Exception:
             missing.append(module)
     if missing:
-        return DoctorEntry("Dependencies", "FAIL", f"missing: {', '.join(sorted(missing))}")
-    return DoctorEntry("Dependencies", "OK", "all imports succeeded")
+        return DoctorEntry(
+            "Dependencies", "FAIL", f"отсутствуют: {', '.join(sorted(missing))}"
+        )
+    return DoctorEntry("Dependencies", "OK", "импорты успешны")
 
 
 def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, object]]:
@@ -155,14 +163,14 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
 
     try:
         general = load_general_config(base_dir)
-        entries.append(DoctorEntry("config.ini", "OK", "loaded"))
+        entries.append(DoctorEntry("config.ini", "OK", "загружен"))
         data["admin_chat_id"] = general.admin_chat_id
     except ConfigError as exc:
         entries.append(DoctorEntry("config.ini", "FAIL", str(exc)))
 
     try:
         keys = load_keys_config(base_dir)
-        entries.append(DoctorEntry("keys.ini", "OK", "loaded"))
+        entries.append(DoctorEntry("keys.ini", "OK", "загружен"))
         data["telegram_bot_token"] = keys.telegram_bot_token
     except ConfigError as exc:
         entries.append(DoctorEntry("keys.ini", "FAIL", str(exc)))
@@ -191,7 +199,7 @@ def _validate_accounts_ini(base_dir: Path) -> tuple[DoctorEntry, list[dict[str, 
     path = base_dir / "accounts.ini"
     parser = configparser.ConfigParser()
     if not path.exists():
-        return DoctorEntry("accounts.ini", "FAIL", f"Config file not found: {path}"), []
+        return DoctorEntry("accounts.ini", "FAIL", f"Файл не найден: {path}"), []
 
     parser.read(path, encoding="utf-8")
     accounts: list[dict[str, object]] = []
@@ -200,7 +208,7 @@ def _validate_accounts_ini(base_dir: Path) -> tuple[DoctorEntry, list[dict[str, 
 
     for section_name in parser.sections():
         if not ACCOUNT_ID_PATTERN.fullmatch(section_name):
-            issues.append(f"invalid section id: {section_name}")
+            issues.append(f"некорректный id секции: {section_name}")
             has_critical = True
             continue
         section = parser[section_name]
@@ -211,28 +219,28 @@ def _validate_accounts_ini(base_dir: Path) -> tuple[DoctorEntry, list[dict[str, 
         chat_id = section.get("telegram_chat_id", "").strip()
 
         if not login:
-            account_issues.append("missing login")
+            account_issues.append("нет login")
         if not password:
-            account_issues.append("missing password")
+            account_issues.append("нет password")
         if not host:
-            account_issues.append("missing host")
+            account_issues.append("нет host")
 
         try:
             port = section.getint("port", fallback=993)
             if not (1 <= port <= 65535):
-                account_issues.append("port out of range")
+                account_issues.append("порт вне диапазона")
         except ValueError:
             port = None
-            account_issues.append("invalid port")
+            account_issues.append("некорректный port")
 
         try:
             use_ssl = section.getboolean("use_ssl", fallback=True)
         except ValueError:
             use_ssl = None
-            account_issues.append("invalid use_ssl")
+            account_issues.append("некорректный use_ssl")
 
         if not chat_id:
-            account_issues.append("missing telegram_chat_id")
+            account_issues.append("нет telegram_chat_id")
 
         if any(
             issue in account_issues
@@ -262,14 +270,14 @@ def _validate_accounts_ini(base_dir: Path) -> tuple[DoctorEntry, list[dict[str, 
         )
 
     if not accounts:
-        issues.append("no accounts defined")
+        issues.append("учётные записи не заданы")
         has_critical = True
 
     if not issues:
         status = "OK"
     else:
         status = "FAIL" if has_critical else "WARN"
-    details = "valid" if not issues else "; ".join(issues)
+    details = "валидно" if not issues else "; ".join(issues)
     return DoctorEntry("accounts.ini", status, details), accounts
 
 
@@ -287,7 +295,7 @@ def _resolve_report_chat_id(data: dict[str, object]) -> str | None:
 
 def _check_sqlite(db_path: object) -> DoctorEntry:
     if not db_path:
-        return DoctorEntry("SQLite", "FAIL", "db_path not configured")
+        return DoctorEntry("SQLite", "FAIL", "db_path не указан")
     path = Path(db_path)
     try:
         with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
@@ -298,7 +306,7 @@ def _check_sqlite(db_path: object) -> DoctorEntry:
 
     missing = sorted(REQUIRED_TABLES - tables)
     if missing:
-        return DoctorEntry("SQLite", "WARN", f"missing tables: {', '.join(missing)}")
+        return DoctorEntry("SQLite", "WARN", f"нет таблиц: {', '.join(missing)}")
     return DoctorEntry("SQLite", "OK", str(path))
 
 
@@ -315,7 +323,7 @@ def _check_llm(base_dir: Path) -> list[DoctorEntry]:
         config = llm_router._load_llm_config(base_dir)
         router = llm_router.LLMRouter(config)
     except Exception as exc:
-        return [DoctorEntry("LLM", "FAIL", f"config error: {exc}")]
+        return [DoctorEntry("LLM", "FAIL", f"ошибка конфигурации: {exc}")]
 
     entries.append(_check_provider(router, "gigachat", config.gigachat_enabled, config.gigachat_api_key))
     entries.append(
@@ -337,26 +345,26 @@ def _check_provider(
 ) -> DoctorEntry:
     provider = router._providers.get(name)
     if not enabled_flag and not has_credentials:
-        return DoctorEntry(name.capitalize(), "WARN", "disabled")
+        return DoctorEntry(name.capitalize(), "WARN", "отключен")
     if not has_credentials:
-        return DoctorEntry(name.capitalize(), "FAIL", "missing credentials")
+        return DoctorEntry(name.capitalize(), "FAIL", "нет учётных данных")
     if not provider:
-        return DoctorEntry(name.capitalize(), "FAIL", "provider unavailable")
+        return DoctorEntry(name.capitalize(), "FAIL", "провайдер недоступен")
     ok = provider.healthcheck()
     status = "OK" if ok else "FAIL"
-    details = "active" if ok else "healthcheck failed"
+    details = "активен" if ok else "проверка не пройдена"
     return DoctorEntry(name.capitalize(), status, details)
 
 
 def _check_imap(accounts: object, *, timeout_sec: float = 10.0) -> list[DoctorEntry]:
     if not accounts:
-        return [DoctorEntry("IMAP", "FAIL", "no accounts configured")]
+        return [DoctorEntry("IMAP", "FAIL", "нет настроенных аккаунтов")]
 
     results = check_mail_accounts(accounts, timeout_sec=timeout_sec)
 
     failures = [result for result in results if result.status != "OK"]
     if not failures:
-        return [DoctorEntry("IMAP", "OK", f"{len(results)} account(s) OK")]
+        return [DoctorEntry("IMAP", "OK", f"{len(results)} аккаунтов в порядке")]
 
     if len(failures) == len(results):
         status = "FAIL"
@@ -364,21 +372,22 @@ def _check_imap(accounts: object, *, timeout_sec: float = 10.0) -> list[DoctorEn
         status = "WARN"
 
     details = "; ".join(
-        f"{result.account_id}: {result.error or 'failed'}" for result in failures
+        f"{result.account_id}: {result.error or 'ошибка'}" for result in failures
     )
     return [DoctorEntry("IMAP", status, details)]
 
 
 def _format_report(entries: list[DoctorEntry], base_dir: Path) -> str:
     lines = [
-        "=== MAILBOT DOCTOR REPORT ===",
-        f"Version: {__version__}",
-        f"Config dir: {base_dir}",
+        "=== ОТЧЁТ ДОКТОРА MAILBOT ===",
+        f"Версия: {__version__}",
+        f"Каталог конфигурации: {base_dir}",
         "",
     ]
     for entry in entries:
         detail = f" ({entry.details})" if entry.details else ""
-        lines.append(f"- {entry.component}: {entry.status}{detail}")
+        status_display = _STATUS_LABELS_RU.get(entry.status, entry.status)
+        lines.append(f"- {entry.component}: {status_display}{detail}")
     return "\n".join(lines)
 
 

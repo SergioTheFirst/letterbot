@@ -163,7 +163,7 @@ def get_locale(config: configparser.ConfigParser | dict | None) -> str:
 
 def t(key: str, *, locale: str = DEFAULT_LOCALE, **kwargs) -> str:
     catalog = _STRINGS_RU if locale.startswith("ru") else {}
-    template = catalog.get(key, key)
+    template = catalog.get(key, f"(нет перевода: {key})")
     try:
         return template.format(**kwargs)
     except Exception:
@@ -185,28 +185,28 @@ def humanize_mail_type(code: str | None, locale: str = DEFAULT_LOCALE) -> str:
         if label:
             return label
         parts = parts[:-1]
-    return code
+    return f"Тип: {code}"
 
 
 def humanize_domain(code: str | None, locale: str = DEFAULT_LOCALE) -> str:
     if not code:
         return ""
     normalized = _normalize_code(code).replace("_", "")
-    return _DOMAIN_LABELS_RU.get(normalized, code)
+    return _DOMAIN_LABELS_RU.get(normalized, f"Домен: {code}")
 
 
 def humanize_mode(code: str | None, locale: str = DEFAULT_LOCALE) -> str:
     if not code:
         return ""
     normalized = _normalize_code(code)
-    return _MODE_LABELS_RU.get(normalized, code)
+    return _MODE_LABELS_RU.get(normalized, f"Режим: {code}")
 
 
 def humanize_severity(code: str | None, locale: str = DEFAULT_LOCALE) -> str:
     if not code:
         return ""
     normalized = _normalize_code(code)
-    return _ANOMALY_SEVERITY_RU.get(normalized, code)
+    return _ANOMALY_SEVERITY_RU.get(normalized, f"Уровень: {code}")
 
 
 def _humanize_attachment_hint(detail: str | None) -> str:
@@ -244,7 +244,7 @@ def humanize_reason_codes(
         if label:
             labels.append(label)
             continue
-        labels.append(normalized)
+        labels.append(f"неизвестный маркер ({normalized})")
     return labels
 
 

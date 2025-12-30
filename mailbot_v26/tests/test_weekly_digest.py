@@ -178,7 +178,7 @@ def test_weekly_digest_empty_content_is_deterministic(monkeypatch, tmp_path) -> 
     html_text = sent[0]["payload"].html_text
     assert "Объём: всего 0, в дайджест 0" in html_text
     assert "Просроченные (топ-5): нет" in html_text
-    assert "Trust score: недостаточно истории" in html_text
+    assert "Уровень доверия: недостаточно истории" in html_text
 
 
 def test_weekly_digest_flag_disabled_in_config(tmp_path) -> None:
@@ -400,7 +400,7 @@ def test_weekly_digest_attention_block_skipped_on_small_sample(monkeypatch, tmp_
     assert sent, "digest should still be delivered"
     html_text = sent[0]["payload"].html_text
     assert "⏱ Куда ушло внимание" not in html_text
-    assert "Attention economics:" in html_text
+    assert "Внимание:" in html_text
 
     with sqlite3.connect(events_path) as conn:
         cur = conn.execute("SELECT type, payload FROM events WHERE type LIKE 'attention_economics_%'")

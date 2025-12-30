@@ -377,16 +377,16 @@ def _maybe_alert_notification_sla(
     ):
         return
     delivery_pct = (
-        f"{sla_result.delivery_rate_24h * 100:.1f}%" if sla_result else "n/a"
+        f"{sla_result.delivery_rate_24h * 100:.1f}%" if sla_result else "н/д"
     )
     p90_latency = (
-        f"{int(sla_result.p90_latency_24h)}с" if sla_result and sla_result.p90_latency_24h is not None else "n/a"
+        f"{int(sla_result.p90_latency_24h)}с" if sla_result and sla_result.p90_latency_24h is not None else "н/д"
     )
-    top_error = "n/a"
+    top_error = "н/д"
     if sla_result and sla_result.top_error_reasons_24h:
         top = sla_result.top_error_reasons_24h[0]
         top_error = f"{top.reason} ({top.share * 100:.1f}%)"
-    action_hint = "plaintext fallback" if consecutive_failures >= 3 else "повторяем"
+    action_hint = "текст без форматирования" if consecutive_failures >= 3 else "повторяем"
     alert_prefix = t("sla.alert.title", locale=_UI_LOCALE)
     alert_text = (
         f"{alert_prefix}\n"
