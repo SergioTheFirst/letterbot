@@ -18,6 +18,7 @@ State:
 - Release wrapper implemented: doctor diagnostics, version/changelog, Windows scripts, acceptance docs, and config bootstrap/validation.
 
 Done:
+- added Fast First Principle to Constitution
 - Added weekly_digest_state table and KnowledgeDB accessors.
 - Added weekly digest analytics queries and formatting logic.
 - Wired weekly digest into processor with safe logging.
