@@ -71,6 +71,17 @@ CREATE TABLE IF NOT EXISTS action_feedback (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS priority_feedback (
+    id TEXT PRIMARY KEY,
+    email_id TEXT,
+    kind TEXT,
+    value TEXT,
+    entity_id TEXT,
+    sender_email TEXT,
+    account_email TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS decision_traces (
     id TEXT PRIMARY KEY,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

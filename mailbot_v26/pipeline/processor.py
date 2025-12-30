@@ -64,7 +64,11 @@ from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
 from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
-from mailbot_v26.priority.priority_engine_v2 import PriorityEngineV2
+from mailbot_v26.priority.priority_engine_v2 import (
+    PriorityBreakdownItem,
+    PriorityEngineV2,
+    PriorityResultV2,
+)
 from mailbot_v26.text.clean_email import clean_email_body
 from .attention_gate import (
     AttentionGateInput,
@@ -1241,11 +1245,140 @@ def _read_llm_field(llm_result: Any, key: str, default: Any = None) -> Any:
     return getattr(llm_result, key, default)
 
 
+_PREVIEW_DECISION_LINE = "[Принять] [Отклонить]"
+_PREVIEW_PRIORITY_LINE = "[Сделать Высокий] [Сделать Средний] [Сделать Низкий]"
+
+
+def _normalize_reason_code(reason: str) -> str:
+    cleaned = reason.strip()
+    if not cleaned:
+        return ""
+    cleaned = cleaned.replace("_", ".")
+    return cleaned.lower()
+
+
+def _format_mail_type_label(mail_type: str) -> str:
+    cleaned = mail_type.strip().lower().replace("_", ".")
+    return cleaned or "unknown"
+
+
+def _format_amount_value(value: int) -> str:
+    return f"{value:,}".replace(",", " ")
+
+
+def _format_deadline_days(days_out: int) -> str:
+    if days_out < 0:
+        return "просрочено"
+    if days_out == 0:
+        return "сегодня"
+    if days_out == 1:
+        return "через 1 день"
+    if 2 <= days_out <= 4:
+        return f"через {days_out} дня"
+    return f"через {days_out} дней"
+
+
+def _parse_deadline_iso(deadline_iso: str | None) -> datetime | None:
+    if not deadline_iso:
+        return None
+    try:
+        return datetime.fromisoformat(deadline_iso)
+    except ValueError:
+        return None
+
+
+def _select_breakdown_item(
+    breakdown: tuple[PriorityBreakdownItem, ...],
+    signal: str,
+) -> PriorityBreakdownItem | None:
+    candidates = [item for item in breakdown if item.signal == signal]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item.points)
+
+
+def _build_priority_explain_lines(
+    *,
+    mail_type: str | None,
+    mail_type_reasons: list[str],
+    priority_v2_result: PriorityResultV2 | None,
+    commitments: list[Commitment],
+    received_at: datetime,
+) -> list[str]:
+    lines: list[str] = []
+    breakdown = priority_v2_result.breakdown if priority_v2_result else tuple()
+
+    if mail_type:
+        reason = mail_type_reasons[0] if mail_type_reasons else None
+        if not reason:
+            mail_type_item = _select_breakdown_item(breakdown, "mail_type")
+            reason = mail_type_item.reason_code if mail_type_item else None
+        reason_label = _normalize_reason_code(reason or "")
+        line = f"Тип: {_format_mail_type_label(mail_type)}"
+        if reason_label:
+            line = f"{line} (reason: {reason_label})"
+        lines.append(line)
+
+    deadline_item = _select_breakdown_item(breakdown, "deadline")
+    if deadline_item and deadline_item.detail:
+        try:
+            days_out = int(deadline_item.detail)
+        except ValueError:
+            days_out = 0
+        line = f"Дедлайн: {_format_deadline_days(days_out)}"
+        reason_label = _normalize_reason_code(deadline_item.reason_code)
+        if reason_label:
+            line = f"{line} (reason: {reason_label})"
+        lines.append(line)
+    elif commitments:
+        parsed_deadlines = [
+            _parse_deadline_iso(commitment.deadline_iso)
+            for commitment in commitments
+            if commitment.deadline_iso
+        ]
+        parsed_deadlines = [deadline for deadline in parsed_deadlines if deadline]
+        if parsed_deadlines:
+            nearest = min(parsed_deadlines)
+            days_out = (nearest.date() - received_at.date()).days
+            line = f"Дедлайн: {_format_deadline_days(days_out)}"
+            lines.append(line)
+
+    amount_item = _select_breakdown_item(breakdown, "amount")
+    if amount_item and amount_item.detail:
+        try:
+            amount_value = int(float(amount_item.detail))
+        except ValueError:
+            amount_value = 0
+        if amount_value > 0:
+            amount_label = _format_amount_value(amount_value)
+            line = f"Сумма: {amount_label}"
+            reason_label = _normalize_reason_code(amount_item.reason_code)
+            if reason_label:
+                line = f"{line} (reason: {reason_label})"
+            lines.append(line)
+
+    if len(lines) < 3:
+        urgency_item = _select_breakdown_item(breakdown, "urgency")
+        if urgency_item and urgency_item.detail:
+            detail = _sanitize_preview_line(str(urgency_item.detail))
+            line = f"Срочность: {detail}"
+            reason_label = _normalize_reason_code(urgency_item.reason_code)
+            if reason_label:
+                line = f"{line} (reason: {reason_label})"
+            lines.append(line)
+
+    if not lines:
+        lines.append("нет данных")
+
+    return [_sanitize_preview_line(line) for line in lines[:3]]
+
+
 def _build_preview_message(
     *,
     action_text: str,
     reasons: list[str],
     confidence: float | None,
+    priority_explain_lines: list[str],
 ) -> str:
     action_line = _sanitize_preview_line(action_text)
     safe_reasons = [_sanitize_preview_line(reason) for reason in reasons if reason]
@@ -1260,9 +1393,14 @@ def _build_preview_message(
         "Причина:",
     ]
     lines.extend(f"• {reason}" for reason in safe_reasons)
+    if priority_explain_lines:
+        lines.append("")
+        lines.append("ПОЧЕМУ ТАК:")
+        lines.extend(f"- {line}" for line in priority_explain_lines)
     lines.append(f"Confidence: {confidence_value:.2f}")
     lines.append("")
-    lines.append("[Принять] [Отклонить]")
+    lines.append(_PREVIEW_DECISION_LINE)
+    lines.append(_PREVIEW_PRIORITY_LINE)
     return "\n".join(lines)
 
 
@@ -1335,8 +1473,11 @@ def _append_narrative_preview(
         return preview_text
     lines = preview_text.split("\n")
     insert_at = len(lines)
-    if lines and lines[-1].strip() == "[Принять] [Отклонить]":
-        insert_at = len(lines) - 1
+    for idx, line in enumerate(lines):
+        cleaned = line.strip()
+        if cleaned.startswith("[") and cleaned.endswith("]"):
+            insert_at = idx
+            break
     narrative_lines = ["", "Narrative"]
     narrative_lines.append(f"Факт: {_sanitize_preview_line(narrative.fact)}")
     if narrative.pattern:
@@ -3030,10 +3171,23 @@ def process_message(
             )
             return
 
+        priority_explain_lines: list[str] = []
+        try:
+            priority_explain_lines = _build_priority_explain_lines(
+                mail_type=mail_type,
+                mail_type_reasons=mail_type_reasons,
+                priority_v2_result=priority_v2_result,
+                commitments=commitments,
+                received_at=received_at,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("preview_priority_explain_failed", error=str(exc))
+            priority_explain_lines = []
         preview_text = _build_preview_message(
             action_text=preview_actions[0],
             reasons=[reason for reason in (shadow_action_reason, shadow_reason, priority_reason) if reason],
             confidence=proposed_action.get("confidence") if proposed_action else None,
+            priority_explain_lines=priority_explain_lines,
         )
         if enable_commitments and (
             commitments or analytics_result.commitment_status_updates

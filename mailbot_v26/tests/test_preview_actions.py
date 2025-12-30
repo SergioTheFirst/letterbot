@@ -163,8 +163,10 @@ def test_preview_enabled_preview_generated(monkeypatch, caplog) -> None:
     assert "Предлагаемое действие:" in preview_text
     assert "• Оплатить счет" in preview_text
     assert "Причина:" in preview_text
+    assert "ПОЧЕМУ ТАК:" in preview_text
     assert "Confidence: 0.90" in preview_text
-    assert preview_text.endswith("[Принять] [Отклонить]")
+    assert "[Принять] [Отклонить]" in preview_text
+    assert "[Сделать Высокий] [Сделать Средний] [Сделать Низкий]" in preview_text
     for forbidden in ("<", ">", "*", "_", "</"):
         assert forbidden not in preview_text
 

@@ -610,3 +610,46 @@ class KnowledgeDB:
         except Exception as exc:
             logger.error("KnowledgeDB feedback save failed: %s", exc)
         return feedback_id
+
+    def save_priority_feedback(
+        self,
+        *,
+        email_id: int | str,
+        kind: str,
+        value: str,
+        entity_id: str | None = None,
+        sender_email: str | None = None,
+        account_email: str | None = None,
+    ) -> str:
+        feedback_id = uuid.uuid4().hex
+        email_value = str(email_id)
+        try:
+            def _action(conn: sqlite3.Connection) -> None:
+                conn.execute(
+                    """
+                    INSERT INTO priority_feedback (
+                        id,
+                        email_id,
+                        kind,
+                        value,
+                        entity_id,
+                        sender_email,
+                        account_email
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        feedback_id,
+                        email_value,
+                        kind,
+                        value,
+                        entity_id,
+                        sender_email,
+                        account_email,
+                    ),
+                )
+
+            self.write_transaction(_action)
+        except Exception as exc:
+            logger.error("KnowledgeDB priority feedback save failed: %s", exc)
+        return feedback_id
