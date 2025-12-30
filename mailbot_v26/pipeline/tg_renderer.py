@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any
 
 from mailbot_v26.telegram_utils import escape_tg_html
@@ -90,6 +91,33 @@ def _format_size_mb(size_bytes: int) -> str:
     return f"{formatted} MB"
 
 
+def _attachment_type_label(filename: str) -> str:
+    cleaned = (filename or "").strip()
+    if "." not in cleaned:
+        return "OTHER"
+    ext = cleaned.rsplit(".", 1)[-1].lower()
+    ext = re.sub(r"[^a-z0-9]+", "", ext)
+    if not ext:
+        return "OTHER"
+    normalized = {
+        "jpeg": "JPG",
+        "jpg": "JPG",
+    }.get(ext, ext.upper())
+    return normalized
+
+
+def _attachment_type_summary(attachments: list[dict[str, Any]]) -> str:
+    counts = Counter(
+        _attachment_type_label(str(attachment.get("filename") or ""))
+        for attachment in attachments
+    )
+    summary_parts = [f"{ext}×{count}" for ext, count in sorted(counts.items())]
+    summary = ", ".join(summary_parts)
+    if summary:
+        return f"Вложения: {len(attachments)} ({summary})"
+    return f"Вложения: {len(attachments)}"
+
+
 def format_priority_line(priority: str, from_email: str) -> str:
     safe_sender = _escape_dynamic(from_email or "неизвестно")
     return f"{priority} от {safe_sender}:"
@@ -111,7 +139,7 @@ def format_main_action(action_line: str | None) -> str:
 def format_attachments_block(attachments: list[dict[str, Any]]) -> str:
     if not attachments:
         return ""
-    lines = [f"📎 Вложений: {len(attachments)}"]
+    lines = [_attachment_type_summary(attachments)]
     for attachment in attachments:
         filename = _escape_dynamic(attachment.get("filename") or "attachment")
         skipped_reason = _attachment_skipped_reason(attachment)

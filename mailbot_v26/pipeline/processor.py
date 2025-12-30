@@ -693,7 +693,7 @@ def _build_attachment_summary(details: list[dict[str, Any]]) -> str:
     if not details:
         return ""
     total_chars = sum(detail["chars"] for detail in details)
-    lines = [f"📎 Вложения: {len(details)}", f"Всего текста: {total_chars} chars"]
+    lines = [f"Вложения: {len(details)}", f"Всего текста: {total_chars} chars"]
     lines.extend(f"- {detail['kind']}: {detail['chars']} chars" for detail in details)
     return "\n".join(lines)
 
@@ -758,7 +758,7 @@ def _build_telegram_text(
         summary_text = (body_summary or "").strip()
         if summary_text:
             safe_summary = escape_tg_html(summary_text)
-            return f"{base_text}\n<i>{safe_summary}</i>"
+            return f"{base_text}\n<b><i>{safe_summary}</i></b>"
         return base_text
     safe_sender = escape_tg_html(from_email or "неизвестно")
     safe_subject = escape_tg_html(subject or "(без темы)")
@@ -878,7 +878,7 @@ def _build_tg_fallback(
             _build_attachment_details(attachments or [])
         )
     if not attachment_summary:
-        attachment_summary = "📎 Вложения: 0"
+        attachment_summary = "Вложения: 0"
     lines = [
         "Письмо получено",
         f"От: {safe_sender}",
@@ -910,7 +910,7 @@ def _build_tg_plain_text(
     resolved_action = escape_tg_html(_resolve_action_line(action_line))
     lines = [f"{priority} от {safe_sender}:", safe_subject, resolved_action]
     if attachments:
-        lines.append(f"Вложений: {len(attachments)}")
+        lines.append(f"Вложения: {len(attachments)}")
     return "\n".join(lines)
 
 

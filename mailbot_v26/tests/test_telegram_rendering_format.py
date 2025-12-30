@@ -30,7 +30,7 @@ def test_attachments_block_formatting_and_truncation() -> None:
 
     rendered = format_attachments_block(attachments)
 
-    assert rendered.startswith("📎 Вложений: 3")
+    assert rendered.startswith("Вложения: 3 (PDF×1, PNG×1, TXT×1)")
     assert "report.pdf — <i>summary</i>" in rendered
     assert "<i>report.pdf" not in rendered
     assert "\nscan.png\n" in f"\n{rendered}\n"
