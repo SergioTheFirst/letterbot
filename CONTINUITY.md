@@ -69,12 +69,13 @@ Done:
 - Added narrative composer tests and telegram payload stability coverage; pytest -q green.
 - Added Preview Actions priority explainability block and priority correction feedback persistence (SQLite + logs).
 - Added priority correction events_v1 emission with idempotency, deterministic quality metrics from events, digest quality blocks under flag, and export of metrics.
+- Added auto-priority quality gate and correction-spike circuit breaker powered by events_v1 with persisted state and policy/logging integration.
 
 Now:
-- Priority correction contract events and quality metrics are implemented and gated; monitoring for follow-up requests.
+- Auto-priority gate live in codebase; monitoring quality metrics outcomes and circuit breaker behavior.
 
 Next:
-- Telegram inbound correction handler or auto-priority gate adjustments based on measured accuracy (UNCONFIRMED).
+- Telegram inbound correction handler or further auto-priority tuning based on measured accuracy (UNCONFIRMED).
 
 Open questions (UNCONFIRMED if needed):
 - None.

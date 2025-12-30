@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine
 from mailbot_v26.priority.auto_gates import CircuitBreakerStatus, GateDecision
+from mailbot_v26.insights.auto_priority_quality_gate import GateResult
+from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 
@@ -60,6 +62,33 @@ def _reset_auto_priority_engine(monkeypatch, runtime_store) -> None:
             runtime_store,
             processor.system_health,
             enabled_flag=lambda: processor.feature_flags.ENABLE_AUTO_PRIORITY,
+        ),
+    )
+
+
+def _enable_auto_priority_gate(monkeypatch) -> None:
+    monkeypatch.setattr(
+        processor,
+        "auto_priority_gate_config",
+        AutoPriorityGateConfig(
+            enabled=True,
+            window_days=30,
+            min_samples=30,
+            max_correction_rate=0.15,
+            cooldown_hours=24,
+        ),
+    )
+    monkeypatch.setattr(
+        processor.auto_priority_quality_gate,
+        "evaluate",
+        lambda **kwargs: GateResult(
+            passed=True,
+            reason="ok",
+            window_days=30,
+            samples=30,
+            corrections=1,
+            correction_rate=0.03,
+            engine=kwargs.get("engine", "priority_v2_auto"),
         ),
     )
 
@@ -144,10 +173,12 @@ def test_flag_on_applies_shadow_priority(monkeypatch):
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
             ENABLE_PREVIEW_ACTIONS=False,
+            ENABLE_QUALITY_METRICS=True,
         ),
     )
     runtime_store = StubRuntimeFlagStore(True)
     monkeypatch.setattr(processor, "runtime_flag_store", runtime_store)
+    _enable_auto_priority_gate(monkeypatch)
     _reset_auto_priority_engine(monkeypatch, runtime_store)
     monkeypatch.setattr(
         processor.auto_priority_gates,
@@ -207,10 +238,12 @@ def test_db_persistence_records_original_priority(monkeypatch, tmp_path):
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=True,
             ENABLE_PREVIEW_ACTIONS=False,
+            ENABLE_QUALITY_METRICS=True,
         ),
     )
     runtime_store = StubRuntimeFlagStore(True)
     monkeypatch.setattr(processor, "runtime_flag_store", runtime_store)
+    _enable_auto_priority_gate(monkeypatch)
     _reset_auto_priority_engine(monkeypatch, runtime_store)
     monkeypatch.setattr(
         processor.auto_priority_gates,
@@ -262,10 +295,12 @@ def test_gate_closed_skips_auto_priority(monkeypatch):
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
             ENABLE_PREVIEW_ACTIONS=False,
+            ENABLE_QUALITY_METRICS=True,
         ),
     )
     runtime_store = StubRuntimeFlagStore(True)
     monkeypatch.setattr(processor, "runtime_flag_store", runtime_store)
+    _enable_auto_priority_gate(monkeypatch)
     _reset_auto_priority_engine(monkeypatch, runtime_store)
     monkeypatch.setattr(
         processor.auto_priority_gates,
@@ -319,10 +354,12 @@ def test_runtime_flag_off_disables_auto_priority(monkeypatch):
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
             ENABLE_PREVIEW_ACTIONS=False,
+            ENABLE_QUALITY_METRICS=True,
         ),
     )
     runtime_store = StubRuntimeFlagStore(False)
     monkeypatch.setattr(processor, "runtime_flag_store", runtime_store)
+    _enable_auto_priority_gate(monkeypatch)
     _reset_auto_priority_engine(monkeypatch, runtime_store)
     monkeypatch.setattr(
         processor.priority_confidence_engine,
@@ -372,9 +409,11 @@ def test_circuit_breaker_disables_auto_priority(monkeypatch):
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
             ENABLE_PREVIEW_ACTIONS=False,
+            ENABLE_QUALITY_METRICS=True,
         ),
     )
     monkeypatch.setattr(processor, "runtime_flag_store", runtime_store)
+    _enable_auto_priority_gate(monkeypatch)
     _reset_auto_priority_engine(monkeypatch, runtime_store)
     monkeypatch.setattr(
         processor.auto_priority_breaker,
