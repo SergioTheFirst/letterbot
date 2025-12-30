@@ -82,6 +82,9 @@ CREATE TABLE IF NOT EXISTS priority_feedback (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_priority_feedback_email_kind_value
+    ON priority_feedback(email_id, kind, value);
+
 CREATE TABLE IF NOT EXISTS decision_traces (
     id TEXT PRIMARY KEY,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

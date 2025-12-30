@@ -216,10 +216,20 @@ def _build_digest_text(data: DigestData) -> str:
         lines.append("• Anomaly Alerts:")
         lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:5])
     if data.quality_metrics is not None:
+        qm = data.quality_metrics
+        rate_display = ""
+        if qm.correction_rate is not None:
+            rate_display = f" ({qm.correction_rate * 100:.1f}% писем)"
         lines.append(
             "• Качество: "
-            f"исправлений {data.quality_metrics.corrections_total} за 24ч"
+            f"исправлений {qm.corrections_total} за 24ч{rate_display}"
         )
+        priority_breakdown = ", ".join(
+            f"{escape_tg_html(item.key)}: {item.count}"
+            for item in qm.by_new_priority
+        )
+        if priority_breakdown:
+            lines.append(f"  - по приоритету: {priority_breakdown}")
     if data.attention_economics is not None:
         lines.append("")
         lines.extend(format_attention_block(data.attention_economics))

@@ -171,34 +171,17 @@ def _quality_metrics_record(db_path: Path, since_dt: datetime, *, now: datetime)
     return {
         "record_type": "quality_metrics",
         "window_days": metrics.window_days,
-        "evaluated_total": metrics.evaluated_total,
         "corrections_total": metrics.corrections_total,
-        "accuracy": metrics.accuracy,
-        "by_mail_type": [
-            {
-                "key": row.key,
-                "evaluated": row.evaluated,
-                "corrections": row.corrections,
-            }
-            for row in metrics.by_mail_type
+        "correction_rate": metrics.correction_rate,
+        "emails_received": metrics.emails_received,
+        "by_new_priority": [
+            {"key": row.key, "count": row.count}
+            for row in metrics.by_new_priority
         ],
-        "by_sender": [
-            {
-                "key": row.key,
-                "evaluated": row.evaluated,
-                "corrections": row.corrections,
-            }
-            for row in metrics.by_sender
+        "by_engine": [
+            {"key": row.key, "count": row.count}
+            for row in metrics.by_engine
         ],
-        "by_priority": [
-            {
-                "key": row.key,
-                "evaluated": row.evaluated,
-                "corrections": row.corrections,
-            }
-            for row in metrics.by_priority
-        ],
-        "top_errors": metrics.top_errors,
     }
 
 

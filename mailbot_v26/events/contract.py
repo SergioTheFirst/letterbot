@@ -13,6 +13,16 @@ class EventType(str, Enum):
     TELEGRAM_DELIVERED = "telegram_delivered"
     TELEGRAM_FAILED = "telegram_failed"
     PRIORITY_CORRECTION_RECORDED = "priority_correction_recorded"
+    # Payload (v1):
+    # {
+    #   "old_priority": "🔵|🟡|🔴" (string; may be empty if unknown),
+    #   "new_priority": "🔵|🟡|🔴" (string; required),
+    #   "engine": "priority_v2|shadow|auto|unknown" (string; best-effort),
+    #   "source": "preview_buttons|telegram_inbound|cli|unknown",
+    #   "sender_email": "...",
+    #   "account_email": "...",
+    #   "system_mode": "FULL|..." (string)
+    # }
     COMMITMENT_CREATED = "commitment_created"
     COMMITMENT_STATUS_CHANGED = "commitment_status_changed"
     TRUST_SCORE_UPDATED = "trust_score_updated"

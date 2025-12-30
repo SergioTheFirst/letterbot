@@ -82,7 +82,7 @@ def test_feedback_emits_event_v1(tmp_path) -> None:
     knowledge_db = KnowledgeDB(db_path)
     contract_emitter = ContractEventEmitter(db_path)
 
-    record_priority_correction(
+    first_id = record_priority_correction(
         knowledge_db=knowledge_db,
         email_id=101,
         correction="🔴",
@@ -93,10 +93,9 @@ def test_feedback_emits_event_v1(tmp_path) -> None:
         system_mode=OperationalMode.FULL,
         contract_event_emitter=contract_emitter,
         engine="priority_v2_shadow",
-        model_version="v2.0",
-        reason_codes=["rule_a"],
+        source="preview_buttons",
     )
-    record_priority_correction(
+    second_id = record_priority_correction(
         knowledge_db=knowledge_db,
         email_id=101,
         correction="🔴",
@@ -107,22 +106,23 @@ def test_feedback_emits_event_v1(tmp_path) -> None:
         system_mode=OperationalMode.FULL,
         contract_event_emitter=contract_emitter,
         engine="priority_v2_shadow",
-        model_version="v2.0",
-        reason_codes=["rule_a"],
+        source="preview_buttons",
     )
 
     with sqlite3.connect(db_path) as conn:
         events = conn.execute(
             "SELECT event_type, email_id, payload FROM events_v1"
         ).fetchall()
-        feedback_count = conn.execute(
-            "SELECT COUNT(*) FROM priority_feedback"
-        ).fetchone()[0]
+        feedback_rows = conn.execute(
+            "SELECT id FROM priority_feedback",
+        ).fetchall()
 
-    assert feedback_count == 2
+    assert first_id == second_id
+    assert len(feedback_rows) == 1
     assert len(events) == 1
     assert events[0][0] == "priority_correction_recorded"
     payload = json.loads(events[0][2])
     assert payload["new_priority"] == "🔴"
     assert payload["old_priority"] == "🟡"
     assert payload["engine"] == "priority_v2_shadow"
+    assert payload["source"] == "preview_buttons"

@@ -363,28 +363,26 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         f"{_trust_summary(data.trust_deltas)}"
     )
     if data.quality_metrics is not None:
-        accuracy_text = (
-            f", точность {data.quality_metrics.accuracy * 100:.0f}%"
-            if data.quality_metrics.accuracy is not None
+        qm = data.quality_metrics
+        rate_text = (
+            f" ({qm.correction_rate * 100:.1f}% писем)"
+            if qm.correction_rate is not None
             else ""
         )
         lines.append(
             "• Качество: "
-            f"исправлений {data.quality_metrics.corrections_total}"
-            f"{accuracy_text} (7 дней)"
+            f"исправлений {qm.corrections_total}{rate_text} (7 дней)"
         )
-        if data.quality_metrics.top_errors:
-            formatted_errors = []
-            for error in data.quality_metrics.top_errors:
-                mail_type = escape_tg_html(error.get("mail_type") or "unknown")
-                old_priority = escape_tg_html(error.get("old_priority") or "")
-                new_priority = escape_tg_html(error.get("new_priority") or "")
-                formatted_errors.append(
-                    f"{mail_type} → {old_priority}→{new_priority} ({int(error.get('count') or 0)})"
-                )
-            lines.append(
-                "• Топ-ошибки: " + "; ".join(formatted_errors[:5])
+        if qm.by_new_priority:
+            breakdown = ", ".join(
+                f"{escape_tg_html(item.key)}: {item.count}" for item in qm.by_new_priority
             )
+            lines.append("• Исправления по приоритету: " + breakdown)
+        if qm.by_engine:
+            breakdown = ", ".join(
+                f"{escape_tg_html(item.key)}: {item.count}" for item in qm.by_engine
+            )
+            lines.append("• Источник оценки: " + breakdown)
     if data.anomaly_alerts:
         lines.append("• Anomaly Alerts:")
         lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:8])

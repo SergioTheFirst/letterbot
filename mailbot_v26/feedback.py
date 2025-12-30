@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timezone
-from typing import Sequence
 
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
@@ -114,10 +113,9 @@ def record_priority_correction(
     contract_event_emitter: ContractEventEmitter | None = None,
     old_priority: str | None = None,
     engine: str | None = None,
-    model_version: str | None = None,
-    reason_codes: Sequence[str] | None = None,
+    source: str | None = None,
 ) -> str:
-    feedback_id = knowledge_db.save_priority_feedback(
+    feedback_id, inserted = knowledge_db.save_priority_feedback(
         email_id=email_id,
         kind="priority_correction",
         value=correction,
@@ -143,8 +141,7 @@ def record_priority_correction(
                 "account_email": account_email or "",
             },
         )
-    if contract_event_emitter is not None:
-        payload_reason_codes = list(reason_codes) if reason_codes else []
+    if contract_event_emitter is not None and inserted:
         try:
             event = EventV1(
                 event_type=EventType.PRIORITY_CORRECTION_RECORDED,
@@ -153,12 +150,13 @@ def record_priority_correction(
                 entity_id=entity_id,
                 email_id=int(str(email_id)) if str(email_id).isdigit() else None,
                 payload={
-                    "from_email": sender_email or "",
                     "old_priority": old_priority or "",
                     "new_priority": correction,
-                    "engine": engine or "",
-                    "model_version": model_version or "",
-                    "reason_codes": payload_reason_codes,
+                    "engine": engine or "unknown",
+                    "source": source or "unknown",
+                    "sender_email": sender_email or "",
+                    "account_email": account_email or "",
+                    "system_mode": system_mode.value,
                 },
             )
             contract_event_emitter.emit(event)
