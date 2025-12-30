@@ -34,6 +34,9 @@ gigachat_max_consecutive_errors = 3
 gigachat_max_latency_sec = 10
 gigachat_cooldown_sec = 600
 
+[ui]
+locale = ru
+
 [features]
 enable_auto_priority = false
 enable_daily_digest = true

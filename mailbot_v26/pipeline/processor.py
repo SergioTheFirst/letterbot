@@ -101,6 +101,14 @@ from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDeci
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 from .signal_quality import evaluate_signal_quality
+from mailbot_v26.ui.i18n import (
+    DEFAULT_LOCALE,
+    humanize_mail_type,
+    humanize_mode,
+    humanize_reason_codes,
+    humanize_severity,
+    t,
+)
 
 logger = get_logger("mailbot")
 
@@ -118,6 +126,7 @@ shadow_priority_engine = ShadowPriorityEngine(analytics)
 priority_engine_v2 = PriorityEngineV2(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
+_UI_LOCALE = DEFAULT_LOCALE
 auto_priority_gates = AutoPriorityGates(analytics)
 auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
 auto_priority_gate_config = load_auto_priority_gate_config()
@@ -348,7 +357,10 @@ def _maybe_alert_notification_sla(
     telegram_chat_id: str,
     sla_result: NotificationSLAResult | None,
     consecutive_failures: int,
+    telegram_delivered: bool | None = None,
 ) -> None:
+    if telegram_delivered is False:
+        return
     if not getattr(feature_flags, "ENABLE_NOTIFICATION_SLA", False):
         return
     reasons: list[str] = []
@@ -368,20 +380,20 @@ def _maybe_alert_notification_sla(
         f"{sla_result.delivery_rate_24h * 100:.1f}%" if sla_result else "n/a"
     )
     p90_latency = (
-        f"{int(sla_result.p90_latency_24h)}s" if sla_result and sla_result.p90_latency_24h is not None else "n/a"
+        f"{int(sla_result.p90_latency_24h)}с" if sla_result and sla_result.p90_latency_24h is not None else "n/a"
     )
     top_error = "n/a"
     if sla_result and sla_result.top_error_reasons_24h:
         top = sla_result.top_error_reasons_24h[0]
         top_error = f"{top.reason} ({top.share * 100:.1f}%)"
-    action_hint = "salvage/plaintext fallback" if consecutive_failures >= 3 else "retrying"
-    alert_prefix = "\U0001F6A8 TG DELIVERY DEGRADED"
+    action_hint = "plaintext fallback" if consecutive_failures >= 3 else "повторяем"
+    alert_prefix = t("sla.alert.title", locale=_UI_LOCALE)
     alert_text = (
         f"{alert_prefix}\n"
-        f"Delivery 24h: {delivery_pct}\n"
-        f"p90 latency: {p90_latency}\n"
-        f"Top error: {top_error}\n"
-        f"Action: {action_hint}"
+        f"{t('sla.alert.delivery', locale=_UI_LOCALE)}: {delivery_pct}\n"
+        f"{t('sla.alert.latency', locale=_UI_LOCALE)}: {p90_latency}\n"
+        f"{t('sla.alert.top_error', locale=_UI_LOCALE)}: {top_error}\n"
+        f"{t('sla.alert.action', locale=_UI_LOCALE)}: {action_hint}"
     )
     payload = TelegramPayload(
         html_text=escape_tg_html(alert_text),
@@ -1389,16 +1401,12 @@ _PREVIEW_PRIORITY_LINE = "[Сделать Высокий] [Сделать Сре
 
 
 def _normalize_reason_code(reason: str) -> str:
-    cleaned = reason.strip()
-    if not cleaned:
-        return ""
-    cleaned = cleaned.replace("_", ".")
-    return cleaned.lower()
+    labels = humanize_reason_codes((reason,), locale=_UI_LOCALE)
+    return labels[0] if labels else ""
 
 
 def _format_mail_type_label(mail_type: str) -> str:
-    cleaned = mail_type.strip().lower().replace("_", ".")
-    return cleaned or "unknown"
+    return humanize_mail_type(mail_type, locale=_UI_LOCALE) or "unknown"
 
 
 def _format_amount_value(value: int) -> str:
@@ -1455,7 +1463,7 @@ def _build_priority_explain_lines(
         reason_label = _normalize_reason_code(reason or "")
         line = f"Тип: {_format_mail_type_label(mail_type)}"
         if reason_label:
-            line = f"{line} (reason: {reason_label})"
+            line = f"{line} (причина: {reason_label})"
         lines.append(line)
 
     deadline_item = _select_breakdown_item(breakdown, "deadline")
@@ -1467,7 +1475,7 @@ def _build_priority_explain_lines(
         line = f"Дедлайн: {_format_deadline_days(days_out)}"
         reason_label = _normalize_reason_code(deadline_item.reason_code)
         if reason_label:
-            line = f"{line} (reason: {reason_label})"
+            line = f"{line} (причина: {reason_label})"
         lines.append(line)
     elif commitments:
         parsed_deadlines = [
@@ -1493,7 +1501,7 @@ def _build_priority_explain_lines(
             line = f"Сумма: {amount_label}"
             reason_label = _normalize_reason_code(amount_item.reason_code)
             if reason_label:
-                line = f"{line} (reason: {reason_label})"
+                line = f"{line} (причина: {reason_label})"
             lines.append(line)
 
     if len(lines) < 3:
@@ -1503,7 +1511,7 @@ def _build_priority_explain_lines(
             line = f"Срочность: {detail}"
             reason_label = _normalize_reason_code(urgency_item.reason_code)
             if reason_label:
-                line = f"{line} (reason: {reason_label})"
+                line = f"{line} (причина: {reason_label})"
             lines.append(line)
 
     if not lines:
@@ -1520,23 +1528,26 @@ def _build_preview_message(
     priority_explain_lines: list[str],
 ) -> str:
     action_line = _sanitize_preview_line(action_text)
-    safe_reasons = [_sanitize_preview_line(reason) for reason in reasons if reason]
+    localized_reasons = humanize_reason_codes(reasons, locale=_UI_LOCALE)
+    safe_reasons = [
+        _sanitize_preview_line(reason) for reason in (localized_reasons or reasons) if reason
+    ]
     if not safe_reasons:
         safe_reasons = ["нет данных"]
     confidence_value = confidence if confidence is not None else 0.0
     lines = [
-        "AI Preview",
+        t("preview.title", locale=_UI_LOCALE),
         "",
-        "Предлагаемое действие:",
+        t("preview.action", locale=_UI_LOCALE),
         f"• {action_line}",
-        "Причина:",
+        t("preview.reason", locale=_UI_LOCALE),
     ]
     lines.extend(f"• {reason}" for reason in safe_reasons)
     if priority_explain_lines:
         lines.append("")
-        lines.append("ПОЧЕМУ ТАК:")
+        lines.append(t("preview.why", locale=_UI_LOCALE))
         lines.extend(f"- {line}" for line in priority_explain_lines)
-    lines.append(f"Confidence: {confidence_value:.2f}")
+    lines.append(f"{t('preview.confidence', locale=_UI_LOCALE)}: {confidence_value:.2f}")
     lines.append("")
     lines.append(_PREVIEW_DECISION_LINE)
     lines.append(_PREVIEW_PRIORITY_LINE)
@@ -1592,7 +1603,7 @@ def _append_insights_preview(
 ) -> str:
     if not insights:
         return preview_text
-    lines = [preview_text, "", "Insights"]
+    lines = [preview_text, "", t("preview.insights", locale=_UI_LOCALE)]
     for insight in insights:
         title = _sanitize_preview_line(insight.type)
         severity = _sanitize_preview_line(insight.severity)
@@ -1617,7 +1628,7 @@ def _append_narrative_preview(
         if cleaned.startswith("[") and cleaned.endswith("]"):
             insert_at = idx
             break
-    narrative_lines = ["", "Narrative"]
+    narrative_lines = ["", t("preview.narrative", locale=_UI_LOCALE)]
     narrative_lines.append(f"Факт: {_sanitize_preview_line(narrative.fact)}")
     if narrative.pattern:
         narrative_lines.append(f"Контекст: {_sanitize_preview_line(narrative.pattern)}")
@@ -1635,7 +1646,7 @@ def _append_insight_digest_preview(
         return preview_text
     status = _sanitize_preview_line(digest.status_label)
     headline = _sanitize_preview_line(digest.headline)
-    lines = [preview_text, "", "Insight Digest", status, headline]
+    lines = [preview_text, "", t("preview.digest", locale=_UI_LOCALE), status, headline]
     if digest.short_explanation:
         for line in digest.short_explanation.split("\n"):
             clean_line = _sanitize_preview_line(line)
@@ -1650,10 +1661,10 @@ def _append_anomalies_preview(
 ) -> str:
     if not anomalies:
         return preview_text
-    lines = [preview_text, "", "Signals"]
+    lines = [preview_text, "", t("preview.signals", locale=_UI_LOCALE)]
     for anomaly in anomalies:
         title = _sanitize_preview_line(anomaly.title)
-        severity = _sanitize_preview_line(anomaly.severity)
+        severity = _sanitize_preview_line(humanize_severity(anomaly.severity, locale=_UI_LOCALE))
         details = _sanitize_preview_line(anomaly.details)
         lines.append(f"• {title} ({severity})")
         if details:
@@ -3342,6 +3353,7 @@ def process_message(
             telegram_chat_id=telegram_chat_id,
             sla_result=policy_decision.notification_sla,
             consecutive_failures=consecutive_tg_failures,
+            telegram_delivered=telegram_delivered,
         )
 
     if feature_flags.ENABLE_PREVIEW_ACTIONS:

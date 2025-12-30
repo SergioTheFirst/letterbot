@@ -159,12 +159,12 @@ def test_preview_enabled_preview_generated(monkeypatch, caplog) -> None:
     assert payload["payload"].metadata.get("chat_id") == "chat"
     assert preview_payload.get("chat_id") == "chat"
     preview_text = str(preview_payload.get("preview_text") or "")
-    assert preview_text.startswith("AI Preview")
+    assert preview_text.startswith("AI-превью")
     assert "Предлагаемое действие:" in preview_text
     assert "• Оплатить счет" in preview_text
     assert "Причина:" in preview_text
     assert "ПОЧЕМУ ТАК:" in preview_text
-    assert "Confidence: 0.90" in preview_text
+    assert "Уверенность: 0.90" in preview_text
     assert "[Принять] [Отклонить]" in preview_text
     assert "[Сделать Высокий] [Сделать Средний] [Сделать Низкий]" in preview_text
     for forbidden in ("<", ">", "*", "_", "</"):
