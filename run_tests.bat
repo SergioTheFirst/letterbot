@@ -7,16 +7,16 @@ set "REPO_ROOT=%~dp0"
 cd /d "%REPO_ROOT%"
 
 echo =============================================
-echo   MailBot Premium v26 - Tests
+echo   MailBot Premium - Tests
 echo =============================================
 
 echo Checking virtual environment...
-if not exist "%REPO_ROOT%venv\Scripts\activate.bat" (
-    echo ERROR: venv not found. Please run install_and_run.bat first.
+if not exist "%REPO_ROOT%.venv\Scripts\activate.bat" (
+    echo ERROR: .venv not found. Please run install_and_run.bat first.
     exit /b 1
 )
 
-call "%REPO_ROOT%venv\Scripts\activate.bat"
+call "%REPO_ROOT%.venv\Scripts\activate.bat"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Failed to activate virtual environment.
     exit /b 1

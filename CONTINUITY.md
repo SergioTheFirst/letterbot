@@ -1,24 +1,21 @@
 Goal (incl. success criteria):
-- Deliver proactive daily/weekly digests on schedule; success criteria: scheduler tick independent of new mail, config time gating, SQLite dedupe, Telegram delivery, and tests updated.
+- Release wrapper Premium v1: one-command Windows install/run/tests, doctor diagnostics, version/changelog, predictable upgrade; success criteria: doctor prints/sends report without polling, CLI --version works, .venv scripts standard, pytest -q green.
 
 Constraints / Assumptions:
 - No pipeline reorder; main email notifications remain untouched.
-- Digest must fail safely and never block mail processing.
-- Use SQLite weekly_digest_state with ISO year-week key.
-- Escape all dynamic Telegram HTML fields.
+- Telegram payload schema must not change.
+- GigaChat stays strictly single in-flight request (global lock).
+- No new paid LLM services or heavy local models.
+- Doctor mode is read-only for mail processing state.
 
 Key decisions:
-- Weekly digest schedule read from [weekly_digest] config (weekday/hour/minute).
-- Daily digest schedule read from [daily_digest] config (hour/minute).
-- Attention economics computed from stored body_summary/subject word counts (200 wpm).
-- Trust deltas derived from trust_snapshots within last 7 days.
-- Emit weekly_digest_sent/skipped/failed via EventEmitter.
+- Add mailbot_v26/version.py with __version__ and show version at start/launch report.
+- Add CLI dispatch in mailbot_v26.__main__ for doctor and --version.
+- Doctor uses read-only SQLite checks and existing healthcheck hooks.
+- Windows scripts standardized around root .venv and python -m mailbot_v26.
 
 State:
-- Digest scheduler module implemented and wired to the main loop.
-- Processor no longer triggers digests; scheduling is handled separately.
-- Attachment safety gates implemented with hard limits, truncation logging, and TG skip rendering.
-- Anomaly alerts v0 implemented for response delay, frequency drop, and commitment proximity (feature-flagged).
+- Release wrapper implemented: doctor diagnostics, version/changelog, Windows scripts, and quickstart/acceptance docs.
 
 Done:
 - Added weekly_digest_state table and KnowledgeDB accessors.
@@ -51,6 +48,10 @@ Done:
 - Enforced GigaChat global lock in provider with wait logging and single-ingress guard tests.
 - Trust v2 decay/redemption implemented from events_v1 with versioned snapshots, v2-preferred analytics, and tests added.
 - Added integration degradation tests A–G and single-cycle harness (mailbot_v26/tests/integration).
+- Added doctor diagnostics CLI and tests with read-only checks.
+- Added version module, --version CLI flag, and launch report version display.
+- Standardized Windows bootstrap scripts for .venv install/run/tests.
+- Added CHANGELOG.md, WINDOWS_QUICKSTART.md, and acceptance checklist.
 
 Now:
 - UNCONFIRMED.
@@ -62,47 +63,17 @@ Open questions (UNCONFIRMED if needed):
 - None.
 
 Working set (files / tables / tests):
-- mailbot_v26/pipeline/weekly_digest.py
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/pipeline/digest_scheduler.py
-- mailbot_v26/pipeline/daily_digest.py
-- mailbot_v26/storage/analytics.py
-- mailbot_v26/storage/knowledge_db.py
-- mailbot_v26/storage/schema.sql
-- mailbot_v26/features/flags.py
-- mailbot_v26/config/config.ini
-- mailbot_v26/insights/anomaly_engine.py
-- mailbot_v26/tests/test_anomaly_engine.py
-- mailbot_v26/tests/test_telegram_payload_pipeline.py
-- mailbot_v26/tests/test_weekly_digest.py
-- mailbot_v26/tests/test_digest_scheduler.py
-- mailbot_v26/bot_core/pipeline.py
-- mailbot_v26/constants.py
-- mailbot_v26/pipeline/tg_renderer.py
-- mailbot_v26/tests/test_attachment_safety_gates.py
-- mailbot_v26/mail_health/runtime_health.py
-- mailbot_v26/tests/test_runtime_health.py
-- mailbot_v26/events/contract.py
-- mailbot_v26/events/emitter.py
-- mailbot_v26/tools/backfill_events.py
-- mailbot_v26/system/orchestrator.py
-- mailbot_v26/pipeline/digest_scheduler.py
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/tests/test_system_orchestrator.py
-- tests/test_event_contract.py
-- mailbot_v26/tests/test_events_source_of_truth.py
-- mailbot_v26/llm/global_lock.py
-- mailbot_v26/llm/providers.py
-- mailbot_v26/llm/router.py
-- mailbot_v26/tests/test_llm_single_ingress.py
-- mailbot_v26/tests/test_gigachat_global_lock.py
-- mailbot_v26/insights/trust_score.py
-- mailbot_v26/observability/trust_snapshot.py
-- mailbot_v26/storage/analytics.py
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/tools/backfill_events.py
-- mailbot_v26/config/config.ini
-- mailbot_v26/tests/test_trust_score.py
-- mailbot_v26/tests/test_daily_digest.py
-- mailbot_v26/tests/integration/harness.py
-- mailbot_v26/tests/integration/test_degradation_scenarios.py
+- mailbot_v26/doctor.py
+- mailbot_v26/version.py
+- mailbot_v26/__main__.py
+- mailbot_v26/start.py
+- mailbot_v26/health/mail_accounts.py
+- tests/test_doctor_mode.py
+- tests/test_cli_version.py
+- mailbot_v26/tests/test_main_entrypoint.py
+- install_and_run.bat
+- run_mailbot.bat
+- run_tests.bat
+- CHANGELOG.md
+- WINDOWS_QUICKSTART.md
+- docs/ACCEPTANCE_CHECKLIST.md

@@ -24,14 +24,26 @@ class MailAccountHealth:
     error: str | None
 
 
-def check_mail_accounts(accounts: Iterable[AccountConfig]) -> List[MailAccountHealth]:
+def check_mail_accounts(
+    accounts: Iterable[AccountConfig],
+    *,
+    timeout_sec: float | None = None,
+) -> List[MailAccountHealth]:
     results: List[MailAccountHealth] = []
     observability = observability_logger.get_logger("mailbot")
     logger = logging.getLogger(__name__)
     for account in accounts:
         client: Optional[IMAPClient] = None
         try:
-            client = IMAPClient(account.host, port=account.port, ssl=account.use_ssl)
+            if timeout_sec is None:
+                client = IMAPClient(account.host, port=account.port, ssl=account.use_ssl)
+            else:
+                client = IMAPClient(
+                    account.host,
+                    port=account.port,
+                    ssl=account.use_ssl,
+                    timeout=timeout_sec,
+                )
             client.login(account.login, account.password)
             client.select_folder("INBOX")
             results.append(
