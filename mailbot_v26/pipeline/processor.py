@@ -1860,10 +1860,17 @@ def _record_analytics(
                 from_email=from_email,
             )
             trust_snapshot_writer.write(trust_result.snapshot)
+            computed_at = (
+                trust_result.snapshot.computed_at.isoformat()
+                if trust_result.snapshot.computed_at
+                else datetime.now(timezone.utc).isoformat()
+            )
             logger.info(
-                "trust_score_computed",
+                "trust_v2_computed",
                 entity_id=entity_resolution.entity_id,
                 trust_score=trust_result.snapshot.score,
+                model_version=trust_result.snapshot.model_version,
+                data_quality=trust_result.snapshot.data_quality,
                 components={
                     "commitment": trust_result.components.commitment_reliability,
                     "response": trust_result.components.response_consistency,
@@ -1871,6 +1878,7 @@ def _record_analytics(
                 },
                 sample_size=trust_result.snapshot.sample_size,
                 data_window_days=trust_result.data_window_days,
+                computed_at=computed_at,
             )
             event_emitter.emit(
                 type="trust_score_updated",
@@ -1881,6 +1889,14 @@ def _record_analytics(
                     "trust_score": trust_result.snapshot.score,
                     "sample_size": trust_result.snapshot.sample_size,
                     "data_window_days": trust_result.data_window_days,
+                    "model_version": trust_result.snapshot.model_version,
+                    "data_quality": trust_result.snapshot.data_quality,
+                    "computed_at": computed_at,
+                    "components": {
+                        "commitment": trust_result.components.commitment_reliability,
+                        "response": trust_result.components.response_consistency,
+                        "trend": trust_result.components.trend,
+                    },
                 },
             )
             _emit_contract_event(
@@ -1893,6 +1909,14 @@ def _record_analytics(
                     "trust_score": trust_result.snapshot.score,
                     "sample_size": trust_result.snapshot.sample_size,
                     "data_window_days": trust_result.data_window_days,
+                    "model_version": trust_result.snapshot.model_version,
+                    "data_quality": trust_result.snapshot.data_quality,
+                    "computed_at": computed_at,
+                    "components": {
+                        "commitment": trust_result.components.commitment_reliability,
+                        "response": trust_result.components.response_consistency,
+                        "trend": trust_result.components.trend,
+                    },
                 },
             )
         except Exception as exc:  # pragma: no cover - defensive logging

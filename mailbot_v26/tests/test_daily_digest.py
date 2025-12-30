@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from mailbot_v26.pipeline import daily_digest
 from mailbot_v26.events.contract import EventType, EventV1
@@ -87,6 +89,31 @@ def _seed_attention_emails(db: KnowledgeDB, emitter: ContractEventEmitter) -> No
                 },
             )
         )
+
+
+def _emit_trust_event(
+    emitter: ContractEventEmitter,
+    *,
+    ts_utc: float,
+    entity_id: str,
+    score: float,
+    model_version: str,
+) -> None:
+    emitter.emit(
+        EventV1(
+            event_type=EventType.TRUST_SCORE_UPDATED,
+            ts_utc=ts_utc,
+            account_id="account@example.com",
+            entity_id=entity_id,
+            email_id=None,
+            payload={
+                "trust_score": score,
+                "sample_size": 3,
+                "data_window_days": 30,
+                "model_version": model_version,
+            },
+        )
+    )
 
 
 def test_daily_digest_sent_once_per_day(monkeypatch, tmp_path) -> None:
@@ -212,3 +239,48 @@ def test_daily_digest_attention_block(monkeypatch, tmp_path) -> None:
     payload = sent[0]["payload"]
     assert "Куда ушло внимание" in payload.html_text
     assert "Лучшие контрагенты" in payload.html_text
+
+
+def test_digest_or_preview_uses_v2_when_available(tmp_path) -> None:
+    db_path = tmp_path / "digest.sqlite"
+    KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    contract_emitter = ContractEventEmitter(db_path)
+    now = datetime.now(timezone.utc)
+
+    _emit_trust_event(
+        contract_emitter,
+        ts_utc=(now - timedelta(days=10)).timestamp(),
+        entity_id="entity-1",
+        score=0.4,
+        model_version="v1",
+    )
+    _emit_trust_event(
+        contract_emitter,
+        ts_utc=(now - timedelta(days=5)).timestamp(),
+        entity_id="entity-1",
+        score=0.6,
+        model_version="v1",
+    )
+    _emit_trust_event(
+        contract_emitter,
+        ts_utc=(now - timedelta(days=3)).timestamp(),
+        entity_id="entity-1",
+        score=0.7,
+        model_version="v2",
+    )
+    _emit_trust_event(
+        contract_emitter,
+        ts_utc=(now - timedelta(days=1)).timestamp(),
+        entity_id="entity-1",
+        score=0.8,
+        model_version="v2",
+    )
+
+    data = daily_digest._collect_digest_data(
+        analytics=analytics,
+        account_email="account@example.com",
+        now=now,
+    )
+
+    assert data.trust_delta == pytest.approx(0.1)

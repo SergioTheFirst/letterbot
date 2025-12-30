@@ -49,12 +49,12 @@ Done:
 - Added tests for events-backed analytics/digests and backfill idempotency.
 - pytest -q green after events source-of-truth changes.
 - Enforced GigaChat global lock in provider with wait logging and single-ingress guard tests.
+- Trust v2 decay/redemption implemented from events_v1 with versioned snapshots, v2-preferred analytics, and tests added.
 
 Now:
 - UNCONFIRMED.
 
 Next:
-- Trust v2 decay/redemption.
 - Integration degradation tests.
 
 Open questions (UNCONFIRMED if needed):
@@ -95,3 +95,11 @@ Working set (files / tables / tests):
 - mailbot_v26/llm/router.py
 - mailbot_v26/tests/test_llm_single_ingress.py
 - mailbot_v26/tests/test_gigachat_global_lock.py
+- mailbot_v26/insights/trust_score.py
+- mailbot_v26/observability/trust_snapshot.py
+- mailbot_v26/storage/analytics.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/tools/backfill_events.py
+- mailbot_v26/config/config.ini
+- mailbot_v26/tests/test_trust_score.py
+- mailbot_v26/tests/test_daily_digest.py
