@@ -21,6 +21,8 @@ class DeliveryResult:
     delivered: bool
     retryable: bool
     error: str | None = None
+    mode: str = "html"
+    retry_count: int = 0
 
 
 def _is_retryable_status(status_code: int) -> bool:
@@ -63,7 +65,13 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
     chat_id = payload.metadata.get("chat_id")
     if not bot_token or not chat_id or not payload.html_text:
         log.error("Telegram send failed: empty token, chat_id or text")
-        return DeliveryResult(delivered=False, retryable=False, error="missing required fields")
+        return DeliveryResult(
+            delivered=False,
+            retryable=False,
+            error="missing required fields",
+            mode="html",
+            retry_count=0,
+        )
 
     if requests is None:
         log.error("Telegram send failed: requests module not available")
@@ -71,6 +79,8 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             delivered=False,
             retryable=False,
             error="requests module not available",
+            mode="html",
+            retry_count=0,
         )
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -92,7 +102,13 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                 "error": str(exc),
             },
         )
-        return DeliveryResult(delivered=False, retryable=True, error=str(exc))
+        return DeliveryResult(
+            delivered=False,
+            retryable=True,
+            error=str(exc),
+            mode="html",
+            retry_count=1,
+        )
 
     if resp.status_code != 200:
         log.error(
@@ -122,7 +138,13 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                         "error": str(exc),
                     },
                 )
-                return DeliveryResult(delivered=False, retryable=True, error=str(exc))
+                return DeliveryResult(
+                    delivered=False,
+                    retryable=True,
+                    error=str(exc),
+                    mode="plain_salvage",
+                    retry_count=1,
+                )
             if salvage_resp.status_code == 200:
                 log.info(
                     "tg_salvage_sent",
@@ -136,7 +158,13 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                         "error": None,
                     },
                 )
-                return DeliveryResult(delivered=True, retryable=False, error=None)
+                return DeliveryResult(
+                    delivered=True,
+                    retryable=False,
+                    error=None,
+                    mode="plain_salvage",
+                    retry_count=1,
+                )
             log.error(
                 "Telegram salvage HTTP error %s: %s",
                 salvage_resp.status_code,
@@ -155,6 +183,8 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                 delivered=False,
                 retryable=retryable,
                 error=salvage_resp.text,
+                mode="plain_salvage",
+                retry_count=1,
             )
         retryable = _is_retryable_status(resp.status_code)
         log.info(
@@ -169,6 +199,8 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             delivered=False,
             retryable=retryable,
             error=resp.text,
+            mode="html",
+            retry_count=0,
         )
 
     log.info(
@@ -179,7 +211,13 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             "error": None,
         },
     )
-    return DeliveryResult(delivered=True, retryable=False, error=None)
+    return DeliveryResult(
+        delivered=True,
+        retryable=False,
+        error=None,
+        mode="html",
+        retry_count=0,
+    )
 
 
 def ping_telegram(bot_token: str) -> tuple[bool, str]:

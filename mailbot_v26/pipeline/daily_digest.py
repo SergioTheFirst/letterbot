@@ -13,6 +13,10 @@ from mailbot_v26.insights.quality_metrics import (
     QualityMetricsSnapshot,
     compute_quality_metrics,
 )
+from mailbot_v26.observability.notification_sla import (
+    NotificationSLAResult,
+    compute_notification_sla,
+)
 from mailbot_v26.observability import get_logger
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
 from mailbot_v26.events.contract import EventType, EventV1
@@ -40,6 +44,7 @@ class DigestData:
     anomaly_alerts: list[str]
     attention_economics: AttentionEconomicsResult | None
     quality_metrics: QualityMetricsSnapshot | None
+    notification_sla: NotificationSLAResult | None
 
 
 def _collect_anomaly_alerts(
@@ -113,6 +118,7 @@ def _collect_digest_data(
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
+    include_notification_sla: bool = False,
     now: datetime | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
@@ -176,6 +182,13 @@ def _collect_digest_data(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("quality_metrics_daily_failed", error=str(exc))
 
+    notification_sla: NotificationSLAResult | None = None
+    if include_notification_sla:
+        try:
+            notification_sla = compute_notification_sla(analytics=analytics, now=now)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("notification_sla_digest_failed", error=str(exc))
+
     return DigestData(
         deferred_total=int(deferred.get("total", 0)),
         deferred_attachments_only=int(deferred.get("attachments_only", 0)),
@@ -187,6 +200,7 @@ def _collect_digest_data(
         anomaly_alerts=anomaly_alerts,
         attention_economics=attention_economics,
         quality_metrics=quality_metrics,
+        notification_sla=notification_sla,
     )
 
 
@@ -230,6 +244,20 @@ def _build_digest_text(data: DigestData) -> str:
         )
         if priority_breakdown:
             lines.append(f"  - по приоритету: {priority_breakdown}")
+    if data.notification_sla is not None:
+        sla = data.notification_sla
+        delivered_pct = sla.delivery_rate_24h * 100
+        salvage_pct = sla.salvage_rate_24h * 100
+        p90 = sla.p90_latency_24h or 0
+        lines.append(
+            "• Delivery SLA 24ч: "
+            f"доставлено {delivered_pct:.1f}%, p90 {p90:.0f}с, salvage {salvage_pct:.1f}%"
+        )
+        if sla.top_error_reasons_24h:
+            top = sla.top_error_reasons_24h[0]
+            lines.append(
+                f"  - главная ошибка: {escape_tg_html(top.reason)} ({top.share * 100:.1f}%)"
+            )
     if data.attention_economics is not None:
         lines.append("")
         lines.extend(format_attention_block(data.attention_economics))
@@ -264,6 +292,7 @@ def maybe_send_daily_digest(
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
+    include_notification_sla: bool = False,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
@@ -273,6 +302,7 @@ def maybe_send_daily_digest(
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
         include_quality_metrics=include_quality_metrics,
+        include_notification_sla=include_notification_sla,
         now=now,
         contract_event_emitter=contract_event_emitter,
     )

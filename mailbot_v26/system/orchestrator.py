@@ -8,6 +8,7 @@ from mailbot_v26.insights.auto_priority_quality_gate import GateResult
 from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.metrics import GateEvaluation
+from mailbot_v26.observability.notification_sla import NotificationSLAResult
 from mailbot_v26.system_health import OperationalMode as SystemMode
 
 logger = get_logger("mailbot")
@@ -25,6 +26,8 @@ class SystemPolicyDecision:
     allow_anomaly_alerts: bool
     auto_priority_gate_result: GateResult | None
     reasons: list[str]
+    notification_sla: NotificationSLAResult | None = None
+    telegram_health_degraded: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +40,7 @@ class SystemPolicyInputs:
     telegram_ok: bool
     has_daily_digest_content: bool
     has_weekly_digest_content: bool
+    notification_sla: NotificationSLAResult | None = None
 
 
 class SystemOrchestrator:
@@ -55,6 +59,7 @@ class SystemOrchestrator:
         auto_priority_gate_enabled: bool = False,
         enable_quality_metrics: bool | None = None,
         fallback_decision: SystemPolicyDecision | None = None,
+        notification_sla: NotificationSLAResult | None = None,
     ) -> SystemPolicyDecision:
         fallback = fallback_decision or self.legacy_decision(
             system_mode=system_mode,
@@ -64,6 +69,8 @@ class SystemOrchestrator:
             has_weekly_digest_content=has_weekly_digest_content,
         )
         try:
+            runtime_flags = runtime_flags or RuntimeFlags()
+            feature_flags = feature_flags or FeatureFlags()
             reasons: list[str] = []
             allow_llm = system_mode != SystemMode.DEGRADED_NO_LLM
             if not allow_llm:
@@ -146,6 +153,21 @@ class SystemOrchestrator:
             if not has_weekly_digest_content:
                 _append_reason(reasons, "weekly_digest_no_content")
 
+            telegram_health_degraded = False
+            if notification_sla is not None:
+                degraded_reasons = notification_sla.degraded_reasons()
+                telegram_health_degraded = bool(degraded_reasons)
+                for reason in degraded_reasons:
+                    _append_reason(reasons, f"notification_sla:{reason}")
+                if telegram_health_degraded:
+                    logger.warning(
+                        "notification_sla_degraded",
+                        reasons=degraded_reasons,
+                        delivery_rate_24h=notification_sla.delivery_rate_24h,
+                        p90_latency_24h=notification_sla.p90_latency_24h,
+                        error_rate_24h=notification_sla.error_rate_24h,
+                    )
+
             decision = SystemPolicyDecision(
                 mode=system_mode,
                 allow_llm=allow_llm,
@@ -157,6 +179,8 @@ class SystemOrchestrator:
                 allow_anomaly_alerts=allow_anomaly_alerts,
                 auto_priority_gate_result=auto_priority_gate_result,
                 reasons=reasons,
+                notification_sla=notification_sla,
+                telegram_health_degraded=telegram_health_degraded,
             )
             self._log_evaluated(
                 decision=decision,
@@ -221,6 +245,8 @@ class SystemOrchestrator:
             allow_anomaly_alerts=allow_anomaly_alerts,
             auto_priority_gate_result=None,
             reasons=["legacy_fallback"],
+            notification_sla=None,
+            telegram_health_degraded=False,
         )
 
     def _log_evaluated(
@@ -245,6 +271,7 @@ class SystemOrchestrator:
                 if decision.auto_priority_gate_result
                 else None
             ),
+            telegram_health_degraded=decision.telegram_health_degraded,
             reasons=decision.reasons,
             gates_passed=gates.passed if gates else None,
             gates_failed=list(gates.failed_reasons) if gates else None,

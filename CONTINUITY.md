@@ -70,6 +70,7 @@ Done:
 - Added Preview Actions priority explainability block and priority correction feedback persistence (SQLite + logs).
 - Added priority correction events_v1 emission with idempotency, deterministic quality metrics from events, digest quality blocks under flag, and export of metrics.
 - Added auto-priority quality gate and correction-spike circuit breaker powered by events_v1 with persisted state and policy/logging integration.
+- Added Notification SLA layer from events_v1 with delivery/latency analytics, policy degradation signals, alert dedupe, digest/export surfacing, and tests.
 
 Now:
 - Auto-priority gate live in codebase; monitoring quality metrics outcomes and circuit breaker behavior.
