@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Sequence
 
@@ -14,6 +14,7 @@ class Insight:
     severity: str
     explanation: str
     recommendation: str
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 RELIABILITY_OVERDUE_THRESHOLD = 2
@@ -90,6 +91,29 @@ def aggregate_insights(
     return insights
 
 
+def append_narrative_insight(
+    insights: list[Insight],
+    *,
+    fact: str,
+    pattern: str | None,
+    action: str | None,
+) -> None:
+    metadata: dict[str, str] = {"fact": fact}
+    if pattern:
+        metadata["pattern"] = pattern
+    if action:
+        metadata["action"] = action
+    insights.append(
+        Insight(
+            type="Narrative",
+            severity="INFO",
+            explanation=fact,
+            recommendation=action or "",
+            metadata=metadata,
+        )
+    )
+
+
 def _latest_detected_at(temporal_insights: Sequence[TemporalState]) -> datetime | None:
     timestamps = [
         timestamp
@@ -154,4 +178,4 @@ def _parse_iso(value: str | None) -> datetime | None:
     return parsed
 
 
-__all__ = ["Insight", "aggregate_insights"]
+__all__ = ["Insight", "aggregate_insights", "append_narrative_insight"]

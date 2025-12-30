@@ -37,6 +37,8 @@ class FeatureFlags:
         self.ENABLE_ATTENTION_ECONOMICS = False
         self.ENABLE_HIERARCHICAL_MAIL_TYPES = False
         self.ENABLE_PRIORITY_V2 = True
+        self.ENABLE_NARRATIVE_BINDING = True
+        self.ENABLE_NARRATIVE_PATTERNS = True
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -65,6 +67,14 @@ class FeatureFlags:
         self.ENABLE_HIERARCHICAL_MAIL_TYPES = self._get_flag(
             parser, "enable_hierarchical_mail_types"
         )
+        if parser.has_option("features", "enable_narrative_binding"):
+            self.ENABLE_NARRATIVE_BINDING = self._get_flag(
+                parser, "enable_narrative_binding"
+            )
+        if parser.has_option("features", "enable_narrative_patterns"):
+            self.ENABLE_NARRATIVE_PATTERNS = self._get_flag(
+                parser, "enable_narrative_patterns"
+            )
         if parser.has_option("features", "enable_priority_v2"):
             self.ENABLE_PRIORITY_V2 = self._get_flag(parser, "enable_priority_v2")
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(

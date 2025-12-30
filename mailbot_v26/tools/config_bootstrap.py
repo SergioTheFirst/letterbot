@@ -40,6 +40,8 @@ enable_weekly_digest = false
 enable_anomaly_alerts = false
 enable_attention_economics = false
 enable_hierarchical_mail_types = false
+enable_narrative_binding = true
+enable_narrative_patterns = true
 
 [daily_digest]
 hour = 9

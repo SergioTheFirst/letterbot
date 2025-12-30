@@ -136,6 +136,20 @@ def format_main_action(action_line: str | None) -> str:
     return f"<b><i>{safe_action}</i></b>"
 
 
+def format_narrative_block(
+    *,
+    fact: str,
+    context: str | None,
+    action: str | None,
+) -> str:
+    lines = [f"<b>Факт:</b> <i>{_escape_dynamic(fact)}</i>"]
+    if context:
+        lines.append(f"<b>Контекст:</b> <i>{_escape_dynamic(context)}</i>")
+    if action:
+        lines.append(f"<b>Действие:</b> <i>{_escape_dynamic(action)}</i>")
+    return "\n".join(lines)
+
+
 def format_attachments_block(attachments: list[dict[str, Any]]) -> str:
     if not attachments:
         return ""
@@ -221,5 +235,6 @@ __all__ = [
     "format_priority_line",
     "format_subject",
     "format_main_action",
+    "format_narrative_block",
     "format_attachments_block",
 ]
