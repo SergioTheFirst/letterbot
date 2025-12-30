@@ -52,6 +52,10 @@ Done:
 - Added version module, --version CLI flag, and launch report version display.
 - Standardized Windows bootstrap scripts for .venv install/run/tests.
 - Added CHANGELOG.md, WINDOWS_QUICKSTART.md, and acceptance checklist.
+- Added update_and_run.bat with doctor gate before polling loop.
+- Added backup/restore/export CLI and Windows wrappers.
+- Added backup/restore/export tooling with retention and redaction.
+- Added tests for backup/restore smoke, doctor gate, and export determinism.
 
 Now:
 - UNCONFIRMED.
@@ -77,3 +81,12 @@ Working set (files / tables / tests):
 - CHANGELOG.md
 - WINDOWS_QUICKSTART.md
 - docs/ACCEPTANCE_CHECKLIST.md
+- update_and_run.bat
+- backup.bat
+- restore.bat
+- mailbot_v26/tools/backup.py
+- mailbot_v26/tools/restore.py
+- mailbot_v26/tools/export_data.py
+- tests/test_backup_restore_smoke.py
+- tests/test_update_guard_doctor_gate.py
+- tests/test_export_determinism.py

@@ -65,6 +65,8 @@ REQUIRED_TABLES = {
     "commitments",
 }
 
+CRITICAL_COMPONENTS = {"SQLite", "Telegram", "IMAP"}
+
 
 def run_doctor(config_dir: Path | None = None) -> DoctorReport:
     base_dir = config_dir or CONFIG_DIR
@@ -105,6 +107,17 @@ def run_doctor(config_dir: Path | None = None) -> DoctorReport:
         )
 
     return DoctorReport(entries=entries, telegram_sent=telegram_sent, telegram_error=telegram_error)
+
+
+def has_critical_issues(report: DoctorReport) -> bool:
+    for entry in report.entries:
+        if entry.component in CRITICAL_COMPONENTS and entry.status == "FAIL":
+            return True
+    return False
+
+
+def report_exit_code(report: DoctorReport) -> int:
+    return 2 if has_critical_issues(report) else 0
 
 
 def _check_python() -> DoctorEntry:
@@ -345,10 +358,15 @@ def _check_imap(accounts: object, *, timeout_sec: float = 10.0) -> list[DoctorEn
     if not failures:
         return [DoctorEntry("IMAP", "OK", f"{len(results)} account(s) OK")]
 
+    if len(failures) == len(results):
+        status = "FAIL"
+    else:
+        status = "WARN"
+
     details = "; ".join(
         f"{result.account_id}: {result.error or 'failed'}" for result in failures
     )
-    return [DoctorEntry("IMAP", "WARN", details)]
+    return [DoctorEntry("IMAP", status, details)]
 
 
 def _format_report(entries: list[DoctorEntry], base_dir: Path) -> str:
@@ -389,4 +407,11 @@ def main() -> None:
     run_doctor()
 
 
-__all__ = ["DoctorEntry", "DoctorReport", "run_doctor", "main"]
+__all__ = [
+    "DoctorEntry",
+    "DoctorReport",
+    "has_critical_issues",
+    "report_exit_code",
+    "run_doctor",
+    "main",
+]
