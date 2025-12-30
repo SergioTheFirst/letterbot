@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.feedback import record_action_feedback, record_priority_correction
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.system_health import OperationalMode
@@ -74,3 +75,54 @@ def test_priority_correction_persisted(tmp_path, caplog) -> None:
     assert row[4] == "entity-7"
     assert row[5] == "sender@example.com"
     assert row[6] == "account@example.com"
+
+
+def test_feedback_emits_event_v1(tmp_path) -> None:
+    db_path = tmp_path / "priority_feedback_events.sqlite"
+    knowledge_db = KnowledgeDB(db_path)
+    contract_emitter = ContractEventEmitter(db_path)
+
+    record_priority_correction(
+        knowledge_db=knowledge_db,
+        email_id=101,
+        correction="🔴",
+        old_priority="🟡",
+        entity_id="entity-7",
+        sender_email="sender@example.com",
+        account_email="account@example.com",
+        system_mode=OperationalMode.FULL,
+        contract_event_emitter=contract_emitter,
+        engine="priority_v2_shadow",
+        model_version="v2.0",
+        reason_codes=["rule_a"],
+    )
+    record_priority_correction(
+        knowledge_db=knowledge_db,
+        email_id=101,
+        correction="🔴",
+        old_priority="🟡",
+        entity_id="entity-7",
+        sender_email="sender@example.com",
+        account_email="account@example.com",
+        system_mode=OperationalMode.FULL,
+        contract_event_emitter=contract_emitter,
+        engine="priority_v2_shadow",
+        model_version="v2.0",
+        reason_codes=["rule_a"],
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        events = conn.execute(
+            "SELECT event_type, email_id, payload FROM events_v1"
+        ).fetchall()
+        feedback_count = conn.execute(
+            "SELECT COUNT(*) FROM priority_feedback"
+        ).fetchone()[0]
+
+    assert feedback_count == 2
+    assert len(events) == 1
+    assert events[0][0] == "priority_correction_recorded"
+    payload = json.loads(events[0][2])
+    assert payload["new_priority"] == "🔴"
+    assert payload["old_priority"] == "🟡"
+    assert payload["engine"] == "priority_v2_shadow"
