@@ -13,6 +13,8 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("doctor", help="Run system doctor checks.")
+    subparsers.add_parser("init-config", help="Create configuration templates.")
+    subparsers.add_parser("validate-config", help="Validate configuration files.")
     subparsers.add_parser("backup", help="Create a data backup archive.")
 
     restore_parser = subparsers.add_parser("restore", help="Restore data from a backup archive.")
@@ -43,6 +45,17 @@ def _run() -> None:
     if args.command == "doctor":
         report = run_doctor()
         sys.exit(report_exit_code(report))
+
+    if args.command == "init-config":
+        from mailbot_v26.tools.config_bootstrap import run_init_config
+
+        run_init_config()
+        return
+
+    if args.command == "validate-config":
+        from mailbot_v26.tools.config_bootstrap import run_validate_config
+
+        sys.exit(run_validate_config())
 
     if args.command == "backup":
         from mailbot_v26.tools.backup import run_backup

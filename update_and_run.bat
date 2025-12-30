@@ -64,6 +64,19 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+set "ACCOUNTS_FILE=%REPO_ROOT%mailbot_v26\config\accounts.ini"
+if not exist "%ACCOUNTS_FILE%" (
+    echo Running init-config to create templates...
+    python -m mailbot_v26 init-config
+    color 0C
+    echo =============================================
+    echo   CONFIGURATION REQUIRED
+    echo   Заполни mailbot_v26\config\accounts.ini
+    echo   затем запусти update_and_run.bat снова.
+    echo =============================================
+    exit /b 1
+)
+
 echo Running doctor checks...
 python -m mailbot_v26 doctor
 if %ERRORLEVEL% NEQ 0 (
@@ -72,6 +85,17 @@ if %ERRORLEVEL% NEQ 0 (
     echo   CRITICAL DOCTOR ISSUES DETECTED
     echo   MailBot will NOT start polling.
     echo   Please review the doctor report and fix IMAP/Telegram/DB issues.
+    echo =============================================
+    exit /b 1
+)
+
+echo Running config validation...
+python -m mailbot_v26 validate-config
+if %ERRORLEVEL% NEQ 0 (
+    color 0C
+    echo =============================================
+    echo   CONFIG VALIDATION FAILED
+    echo   Please fix config files and retry.
     echo =============================================
     exit /b 1
 )
