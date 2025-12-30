@@ -67,6 +67,7 @@ Done:
 - PriorityEngineV2 rule-based scoring wired in shadow mode with vip sender config, structured logs, and unit tests; pytest -q green.
 - Narrative Binding v1 implemented: deterministic composer, Telegram/preview integration, feature flags, and structured logs.
 - Added narrative composer tests and telegram payload stability coverage; pytest -q green.
+- Added Preview Actions priority explainability block and priority correction feedback persistence (SQLite + logs).
 
 Now:
 - UNCONFIRMED.
@@ -115,6 +116,12 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_tg_renderer.py
 - mailbot_v26/tests/test_telegram_rendering_format.py
 - mailbot_v26/tests/test_telegram_payload_pipeline.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/storage/schema.sql
+- mailbot_v26/storage/knowledge_db.py
+- mailbot_v26/feedback.py
+- mailbot_v26/tests/test_preview_actions.py
+- mailbot_v26/tests/test_action_feedback.py
 - mailbot_v26/tests/test_telegram_payload_validation.py
 - mailbot_v26/tests/test_telegram_render_modes.py
 - tests/test_tg_payload_pipeline.py
