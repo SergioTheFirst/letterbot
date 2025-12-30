@@ -25,6 +25,7 @@ from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE, humanize_severity, t
 
 logger = get_logger("mailbot")
 
@@ -83,7 +84,9 @@ def _collect_anomaly_alerts(
         safe_label = escape_tg_html(label)
         for anomaly in anomalies:
             title = escape_tg_html(anomaly.title)
-            severity = escape_tg_html(anomaly.severity)
+            severity = escape_tg_html(
+                humanize_severity(anomaly.severity, locale=DEFAULT_LOCALE)
+            )
             alerts.append(f"{safe_label}: {title} ({severity})")
             if contract_event_emitter is not None and account_email:
                 try:
@@ -205,7 +208,7 @@ def _collect_digest_data(
 
 
 def _build_digest_text(data: DigestData) -> str:
-    lines = ["<b>Daily Digest</b>"]
+    lines = [t("digest.daily", locale=DEFAULT_LOCALE)]
     if data.deferred_total > 0:
         lines.append(
             "• Отложено писем: "
@@ -227,7 +230,7 @@ def _build_digest_text(data: DigestData) -> str:
         sign = "+" if data.health_delta >= 0 else ""
         lines.append(f"• Здоровье отношений: {sign}{data.health_delta:.0f} пунктов")
     if data.anomaly_alerts:
-        lines.append("• Anomaly Alerts:")
+        lines.append(t("digest.anomalies", locale=DEFAULT_LOCALE))
         lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:5])
     if data.quality_metrics is not None:
         qm = data.quality_metrics

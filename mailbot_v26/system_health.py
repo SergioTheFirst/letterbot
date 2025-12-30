@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Iterable
 
 from mailbot_v26.observability import get_logger
+from mailbot_v26.ui.i18n import humanize_mode
 
 
 class OperationalMode(Enum):
@@ -54,13 +55,14 @@ class SystemHealth:
         return self._evaluate_mode()
 
     def system_notice(self, change: ModeChange) -> str:
+        label = humanize_mode(change.current.value, locale="ru")
         if change.current == OperationalMode.FULL:
-            return "System mode: FULL\nВозможности восстановлены."
+            return f"{label}\nВозможности восстановлены."
         if change.current == OperationalMode.DEGRADED_NO_LLM:
-            return "System mode: DEGRADED_NO_LLM\nAI-анализ временно недоступен."
+            return f"{label}\nAI-анализ временно недоступен."
         if change.current == OperationalMode.DEGRADED_NO_TELEGRAM:
-            return "System mode: DEGRADED_NO_TELEGRAM\nTelegram временно недоступен."
-        return "System mode: EMERGENCY_READ_ONLY\nCRM временно недоступен."
+            return f"{label}\nTelegram временно недоступен."
+        return f"{label}\nCRM временно недоступен."
 
     def _evaluate_mode(self) -> ModeChange | None:
         new_mode, reason = self._determine_mode()
