@@ -68,12 +68,13 @@ Done:
 - Narrative Binding v1 implemented: deterministic composer, Telegram/preview integration, feature flags, and structured logs.
 - Added narrative composer tests and telegram payload stability coverage; pytest -q green.
 - Added Preview Actions priority explainability block and priority correction feedback persistence (SQLite + logs).
+- Added priority correction events_v1 emission with idempotency, deterministic quality metrics from events, digest quality blocks under flag, and export of metrics.
 
 Now:
-- UNCONFIRMED.
+- Priority correction events v1 emitted with deduplication; deterministic priority quality metrics added with digest/export surfacing under feature flag.
 
 Next:
-- UNCONFIRMED.
+- Telegram inbound correction handler or auto-priority gate adjustments based on measured accuracy (UNCONFIRMED).
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -116,6 +117,18 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_tg_renderer.py
 - mailbot_v26/tests/test_telegram_rendering_format.py
 - mailbot_v26/tests/test_telegram_payload_pipeline.py
+- mailbot_v26/events/contract.py
+- mailbot_v26/feedback.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/insights/quality_metrics.py
+- mailbot_v26/pipeline/daily_digest.py
+- mailbot_v26/pipeline/weekly_digest.py
+- mailbot_v26/pipeline/digest_scheduler.py
+- mailbot_v26/features/flags.py
+- mailbot_v26/config/config.ini
+- mailbot_v26/tools/export_data.py
+- mailbot_v26/tests/test_action_feedback.py
+- mailbot_v26/tests/test_quality_metrics.py
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/storage/schema.sql
 - mailbot_v26/storage/knowledge_db.py

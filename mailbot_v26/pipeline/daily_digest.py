@@ -9,6 +9,10 @@ from mailbot_v26.insights.attention_economics import (
     compute_attention_economics,
     format_attention_block,
 )
+from mailbot_v26.insights.quality_metrics import (
+    QualityMetricsSnapshot,
+    compute_quality_metrics,
+)
 from mailbot_v26.observability import get_logger
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
 from mailbot_v26.events.contract import EventType, EventV1
@@ -35,6 +39,7 @@ class DigestData:
     health_delta: float | None
     anomaly_alerts: list[str]
     attention_economics: AttentionEconomicsResult | None
+    quality_metrics: QualityMetricsSnapshot | None
 
 
 def _collect_anomaly_alerts(
@@ -107,6 +112,7 @@ def _collect_digest_data(
     account_email: str,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
+    include_quality_metrics: bool = False,
     now: datetime | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
@@ -158,6 +164,18 @@ def _collect_digest_data(
             now=now or datetime.now(timezone.utc),
         )
 
+    quality_metrics: QualityMetricsSnapshot | None = None
+    if include_quality_metrics:
+        try:
+            quality_metrics = compute_quality_metrics(
+                analytics=analytics,
+                account_email=account_email,
+                window_days=1,
+                now=now,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("quality_metrics_daily_failed", error=str(exc))
+
     return DigestData(
         deferred_total=int(deferred.get("total", 0)),
         deferred_attachments_only=int(deferred.get("attachments_only", 0)),
@@ -168,6 +186,7 @@ def _collect_digest_data(
         health_delta=health_value,
         anomaly_alerts=anomaly_alerts,
         attention_economics=attention_economics,
+        quality_metrics=quality_metrics,
     )
 
 
@@ -196,6 +215,11 @@ def _build_digest_text(data: DigestData) -> str:
     if data.anomaly_alerts:
         lines.append("• Anomaly Alerts:")
         lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:5])
+    if data.quality_metrics is not None:
+        lines.append(
+            "• Качество: "
+            f"исправлений {data.quality_metrics.corrections_total} за 24ч"
+        )
     if data.attention_economics is not None:
         lines.append("")
         lines.extend(format_attention_block(data.attention_economics))
@@ -213,6 +237,8 @@ def _has_digest_content(data: DigestData) -> bool:
         return True
     if data.anomaly_alerts:
         return True
+    if data.quality_metrics is not None:
+        return True
     if data.attention_economics is not None:
         return True
     return False
@@ -227,6 +253,7 @@ def maybe_send_daily_digest(
     email_id: int,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
+    include_quality_metrics: bool = False,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
@@ -235,6 +262,7 @@ def maybe_send_daily_digest(
         account_email=account_email,
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
+        include_quality_metrics=include_quality_metrics,
         now=now,
         contract_event_emitter=contract_event_emitter,
     )

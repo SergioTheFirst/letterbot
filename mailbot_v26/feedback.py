@@ -1,11 +1,67 @@
 from __future__ import annotations
 
+import sqlite3
+from datetime import datetime, timezone
+from typing import Sequence
+
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
+from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.system_health import OperationalMode
 
 logger = get_logger("mailbot")
+
+
+def _priority_feedback_anchor_ts(
+    *,
+    knowledge_db: KnowledgeDB,
+    email_id: int | str,
+    correction: str,
+    created_at: datetime | None,
+) -> float:
+    try:
+        with sqlite3.connect(knowledge_db.path) as conn:
+            row = conn.execute(
+                """
+                SELECT created_at
+                FROM priority_feedback
+                WHERE email_id = ? AND value = ?
+                ORDER BY datetime(created_at) ASC, id ASC
+                LIMIT 1
+                """,
+                (str(email_id), correction),
+            ).fetchone()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("priority_feedback_anchor_failed", error=str(exc))
+        row = None
+
+    if row and row[0]:
+        parsed = parse_sqlite_datetime(str(row[0]))
+        if parsed:
+            return parsed.timestamp()
+
+    if created_at is not None:
+        return created_at.timestamp()
+
+    return datetime.now(timezone.utc).timestamp()
+
+
+def _feedback_created_at(knowledge_db: KnowledgeDB, feedback_id: str) -> datetime | None:
+    try:
+        with sqlite3.connect(knowledge_db.path) as conn:
+            row = conn.execute(
+                "SELECT created_at FROM priority_feedback WHERE id = ?",
+                (feedback_id,),
+            ).fetchone()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("priority_feedback_created_at_read_failed", error=str(exc))
+        return None
+    if not row or not row[0]:
+        return None
+    return parse_sqlite_datetime(str(row[0]))
 
 
 def record_action_feedback(
@@ -55,6 +111,11 @@ def record_priority_correction(
     account_email: str | None = None,
     system_mode: OperationalMode = OperationalMode.FULL,
     event_emitter: EventEmitter | None = None,
+    contract_event_emitter: ContractEventEmitter | None = None,
+    old_priority: str | None = None,
+    engine: str | None = None,
+    model_version: str | None = None,
+    reason_codes: Sequence[str] | None = None,
 ) -> str:
     feedback_id = knowledge_db.save_priority_feedback(
         email_id=email_id,
@@ -63,6 +124,13 @@ def record_priority_correction(
         entity_id=entity_id,
         sender_email=sender_email,
         account_email=account_email,
+    )
+    created_at = _feedback_created_at(knowledge_db, feedback_id)
+    event_ts = _priority_feedback_anchor_ts(
+        knowledge_db=knowledge_db,
+        email_id=email_id,
+        correction=correction,
+        created_at=created_at,
     )
     if event_emitter is not None:
         event_emitter.emit(
@@ -75,6 +143,31 @@ def record_priority_correction(
                 "account_email": account_email or "",
             },
         )
+    if contract_event_emitter is not None:
+        payload_reason_codes = list(reason_codes) if reason_codes else []
+        try:
+            event = EventV1(
+                event_type=EventType.PRIORITY_CORRECTION_RECORDED,
+                ts_utc=event_ts,
+                account_id=account_email or "",
+                entity_id=entity_id,
+                email_id=int(str(email_id)) if str(email_id).isdigit() else None,
+                payload={
+                    "from_email": sender_email or "",
+                    "old_priority": old_priority or "",
+                    "new_priority": correction,
+                    "engine": engine or "",
+                    "model_version": model_version or "",
+                    "reason_codes": payload_reason_codes,
+                },
+            )
+            contract_event_emitter.emit(event)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "contract_priority_correction_emit_failed",
+                email_id=str(email_id),
+                error=str(exc),
+            )
     logger.info(
         "priority_correction_recorded",
         email_id=str(email_id),

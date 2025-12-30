@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from mailbot_v26.config_loader import ConfigError, load_storage_config
+from mailbot_v26.insights.quality_metrics import compute_quality_metrics
+from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
 
 @dataclass(frozen=True)
@@ -157,6 +159,49 @@ def _fetch_relationship_snapshots(
     return results
 
 
+def _quality_metrics_record(db_path: Path, since_dt: datetime, *, now: datetime) -> dict[str, Any]:
+    analytics = KnowledgeAnalytics(db_path)
+    window_days = max(1, int((now - since_dt).total_seconds() // 86400))
+    metrics = compute_quality_metrics(
+        analytics=analytics,
+        account_email=None,
+        window_days=window_days,
+        now=now,
+    )
+    return {
+        "record_type": "quality_metrics",
+        "window_days": metrics.window_days,
+        "evaluated_total": metrics.evaluated_total,
+        "corrections_total": metrics.corrections_total,
+        "accuracy": metrics.accuracy,
+        "by_mail_type": [
+            {
+                "key": row.key,
+                "evaluated": row.evaluated,
+                "corrections": row.corrections,
+            }
+            for row in metrics.by_mail_type
+        ],
+        "by_sender": [
+            {
+                "key": row.key,
+                "evaluated": row.evaluated,
+                "corrections": row.corrections,
+            }
+            for row in metrics.by_sender
+        ],
+        "by_priority": [
+            {
+                "key": row.key,
+                "evaluated": row.evaluated,
+                "corrections": row.corrections,
+            }
+            for row in metrics.by_priority
+        ],
+        "top_errors": metrics.top_errors,
+    }
+
+
 def _parse_sqlite_timestamp(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -175,6 +220,7 @@ def export_data(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     record_count = 0
     since_ts = since_dt.timestamp()
+    export_now = datetime.now(timezone.utc)
 
     with sqlite3.connect(db_path) as conn, output_path.open("w", encoding="utf-8") as handle:
         for record in _fetch_events(conn, since_ts):
@@ -189,6 +235,10 @@ def export_data(
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
             handle.write("\n")
             record_count += 1
+        quality_metrics = _quality_metrics_record(db_path, since_dt, now=export_now)
+        handle.write(json.dumps(quality_metrics, ensure_ascii=False, sort_keys=True))
+        handle.write("\n")
+        record_count += 1
 
     return ExportResult(output_path=output_path, record_count=record_count)
 

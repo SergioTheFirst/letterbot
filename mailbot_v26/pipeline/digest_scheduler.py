@@ -169,6 +169,7 @@ def _has_weekly_content(data: weekly_digest.WeeklyDigestData) -> bool:
         or data.overdue_commitments
         or data.trust_deltas
         or data.anomaly_alerts
+        or data.quality_metrics is not None
         or data.attention_economics is not None
     )
 
@@ -271,6 +272,7 @@ def run_digest_tick(
                     flags=flags,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                     include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
+                    include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
                 )
             else:
                 logger.info(
@@ -295,6 +297,7 @@ def run_digest_tick(
                     flags=flags,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                     include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
+                    include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
                 )
             else:
                 logger.info(
@@ -322,6 +325,7 @@ def _run_daily_digest(
     flags: FeatureFlags,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
+    include_quality_metrics: bool = False,
 ) -> None:
     if not _is_daily_due(now, config):
         logger.info(
@@ -348,6 +352,7 @@ def _run_daily_digest(
         account_email=account_email,
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
+        include_quality_metrics=include_quality_metrics,
         now=now,
         contract_event_emitter=storage.contract_event_emitter,
     )
@@ -459,6 +464,7 @@ def _run_weekly_digest(
     flags: FeatureFlags,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
+    include_quality_metrics: bool = False,
 ) -> None:
     week_key = weekly_digest._iso_week_key(now)
 
@@ -523,6 +529,7 @@ def _run_weekly_digest(
         week_key=week_key,
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
+        include_quality_metrics=include_quality_metrics,
         event_emitter=storage.event_emitter,
         contract_event_emitter=storage.contract_event_emitter,
         now=now,

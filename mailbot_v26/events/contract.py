@@ -12,6 +12,7 @@ class EventType(str, Enum):
     ATTACHMENT_EXTRACTED = "attachment_extracted"
     TELEGRAM_DELIVERED = "telegram_delivered"
     TELEGRAM_FAILED = "telegram_failed"
+    PRIORITY_CORRECTION_RECORDED = "priority_correction_recorded"
     COMMITMENT_CREATED = "commitment_created"
     COMMITMENT_STATUS_CHANGED = "commitment_status_changed"
     TRUST_SCORE_UPDATED = "trust_score_updated"

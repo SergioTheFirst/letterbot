@@ -3140,7 +3140,12 @@ def process_message(
                 account_id=account_email,
                 entity_id=entity_resolution.entity_id if entity_resolution else None,
                 email_id=message_id,
-                payload={"render_mode": render_mode.name},
+                payload={
+                    "render_mode": render_mode.name,
+                    "priority": priority,
+                    "mail_type": mail_type or "",
+                    "from_email": from_email,
+                },
             )
 
     if feature_flags.ENABLE_PREVIEW_ACTIONS:

@@ -35,6 +35,7 @@ class FeatureFlags:
         self.ENABLE_WEEKLY_DIGEST = False
         self.ENABLE_ANOMALY_ALERTS = False
         self.ENABLE_ATTENTION_ECONOMICS = False
+        self.ENABLE_QUALITY_METRICS = False
         self.ENABLE_HIERARCHICAL_MAIL_TYPES = False
         self.ENABLE_PRIORITY_V2 = True
         self.ENABLE_NARRATIVE_BINDING = True
@@ -63,6 +64,9 @@ class FeatureFlags:
         self.ENABLE_ANOMALY_ALERTS = self._get_flag(parser, "enable_anomaly_alerts")
         self.ENABLE_ATTENTION_ECONOMICS = self._get_flag(
             parser, "enable_attention_economics"
+        )
+        self.ENABLE_QUALITY_METRICS = self._get_flag(
+            parser, "enable_quality_metrics"
         )
         self.ENABLE_HIERARCHICAL_MAIL_TYPES = self._get_flag(
             parser, "enable_hierarchical_mail_types"

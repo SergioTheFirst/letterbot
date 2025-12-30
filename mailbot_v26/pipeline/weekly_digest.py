@@ -12,6 +12,10 @@ from mailbot_v26.insights.attention_economics import (
     compute_attention_economics,
     format_attention_block,
 )
+from mailbot_v26.insights.quality_metrics import (
+    QualityMetricsSnapshot,
+    compute_quality_metrics,
+)
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.events.contract import EventType, EventV1
@@ -69,6 +73,7 @@ class WeeklyDigestData:
     trust_deltas: dict[str, list[dict[str, object]]]
     anomaly_alerts: list[str]
     attention_economics: AttentionEconomicsResult | None = None
+    quality_metrics: QualityMetricsSnapshot | None = None
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -265,6 +270,7 @@ def _collect_weekly_data(
     week_key: str,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
+    include_quality_metrics: bool = False,
     event_emitter: EventEmitter | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
     now: datetime | None = None,
@@ -303,6 +309,18 @@ def _collect_weekly_data(
             account_email=account_email,
         )
 
+    quality_metrics: QualityMetricsSnapshot | None = None
+    if include_quality_metrics:
+        try:
+            quality_metrics = compute_quality_metrics(
+                analytics=analytics,
+                account_email=account_email,
+                window_days=7,
+                now=now,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("quality_metrics_weekly_failed", error=str(exc))
+
     return WeeklyDigestData(
         week_key=week_key,
         total_emails=int(volume.get("total") or 0),
@@ -313,6 +331,7 @@ def _collect_weekly_data(
         trust_deltas=trust_deltas,
         anomaly_alerts=anomaly_alerts,
         attention_economics=attention_economics,
+        quality_metrics=quality_metrics,
     )
 
 
@@ -343,6 +362,29 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         "• Trust score: "
         f"{_trust_summary(data.trust_deltas)}"
     )
+    if data.quality_metrics is not None:
+        accuracy_text = (
+            f", точность {data.quality_metrics.accuracy * 100:.0f}%"
+            if data.quality_metrics.accuracy is not None
+            else ""
+        )
+        lines.append(
+            "• Качество: "
+            f"исправлений {data.quality_metrics.corrections_total}"
+            f"{accuracy_text} (7 дней)"
+        )
+        if data.quality_metrics.top_errors:
+            formatted_errors = []
+            for error in data.quality_metrics.top_errors:
+                mail_type = escape_tg_html(error.get("mail_type") or "unknown")
+                old_priority = escape_tg_html(error.get("old_priority") or "")
+                new_priority = escape_tg_html(error.get("new_priority") or "")
+                formatted_errors.append(
+                    f"{mail_type} → {old_priority}→{new_priority} ({int(error.get('count') or 0)})"
+                )
+            lines.append(
+                "• Топ-ошибки: " + "; ".join(formatted_errors[:5])
+            )
     if data.anomaly_alerts:
         lines.append("• Anomaly Alerts:")
         lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:8])
@@ -364,6 +406,7 @@ def maybe_send_weekly_digest(
     now: datetime | None = None,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
+    include_quality_metrics: bool = False,
 ) -> None:
     current_time = now or datetime.now(timezone.utc)
     config = _load_weekly_digest_config()
@@ -418,6 +461,7 @@ def maybe_send_weekly_digest(
         week_key=week_key,
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
+        include_quality_metrics=include_quality_metrics,
         event_emitter=event_emitter,
         contract_event_emitter=contract_event_emitter,
         now=current_time,
