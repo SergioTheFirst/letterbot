@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -65,6 +65,27 @@ class KnowledgeAnalytics:
             return self._execute_select(query, params)
         except sqlite3.OperationalError:
             return []
+
+    def recent_email_events(
+        self,
+        *,
+        days: int,
+        now_dt: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        threshold = (now_dt or datetime.now(timezone.utc)) - timedelta(days=days)
+        try:
+            rows = self._execute_select(
+                """
+                SELECT type, timestamp, payload
+                FROM events
+                WHERE type = ?
+                  AND timestamp >= ?
+                """,
+                ("email_received", threshold.isoformat()),
+            )
+        except sqlite3.OperationalError:
+            return []
+        return rows
 
     def event_rows_for_entity(
         self,

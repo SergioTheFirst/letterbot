@@ -36,6 +36,7 @@ class FeatureFlags:
         self.ENABLE_ANOMALY_ALERTS = False
         self.ENABLE_ATTENTION_ECONOMICS = False
         self.ENABLE_HIERARCHICAL_MAIL_TYPES = False
+        self.ENABLE_PRIORITY_V2 = True
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -64,6 +65,8 @@ class FeatureFlags:
         self.ENABLE_HIERARCHICAL_MAIL_TYPES = self._get_flag(
             parser, "enable_hierarchical_mail_types"
         )
+        if parser.has_option("features", "enable_priority_v2"):
+            self.ENABLE_PRIORITY_V2 = self._get_flag(parser, "enable_priority_v2")
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6
         )
