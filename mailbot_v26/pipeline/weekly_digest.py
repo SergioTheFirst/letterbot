@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import configparser
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -15,6 +15,10 @@ from mailbot_v26.insights.attention_economics import (
 from mailbot_v26.insights.quality_metrics import (
     QualityMetricsSnapshot,
     compute_quality_metrics,
+)
+from mailbot_v26.observability.notification_sla import (
+    NotificationSLAResult,
+    compute_notification_sla,
 )
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.event_emitter import EventEmitter
@@ -74,6 +78,8 @@ class WeeklyDigestData:
     anomaly_alerts: list[str]
     attention_economics: AttentionEconomicsResult | None = None
     quality_metrics: QualityMetricsSnapshot | None = None
+    notification_sla: NotificationSLAResult | None = None
+    previous_week_sla: NotificationSLAResult | None = None
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -271,6 +277,7 @@ def _collect_weekly_data(
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
+    include_notification_sla: bool = False,
     event_emitter: EventEmitter | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
     now: datetime | None = None,
@@ -321,6 +328,20 @@ def _collect_weekly_data(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("quality_metrics_weekly_failed", error=str(exc))
 
+    notification_sla: NotificationSLAResult | None = None
+    previous_week_sla: NotificationSLAResult | None = None
+    if include_notification_sla:
+        try:
+            now_dt = now or datetime.now(timezone.utc)
+            notification_sla = compute_notification_sla(
+                analytics=analytics, now=now_dt
+            )
+            previous_week_sla = compute_notification_sla(
+                analytics=analytics, now=now_dt - timedelta(days=7)
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("notification_sla_weekly_failed", error=str(exc))
+
     return WeeklyDigestData(
         week_key=week_key,
         total_emails=int(volume.get("total") or 0),
@@ -332,6 +353,8 @@ def _collect_weekly_data(
         anomaly_alerts=anomaly_alerts,
         attention_economics=attention_economics,
         quality_metrics=quality_metrics,
+        notification_sla=notification_sla,
+        previous_week_sla=previous_week_sla,
     )
 
 
@@ -383,6 +406,19 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
                 f"{escape_tg_html(item.key)}: {item.count}" for item in qm.by_engine
             )
             lines.append("• Источник оценки: " + breakdown)
+    if data.notification_sla is not None:
+        current = data.notification_sla
+        prev = data.previous_week_sla
+        p90 = current.p90_latency_7d or 0
+        p99 = current.p99_latency_7d or 0
+        trend = ""
+        if prev and prev.p90_latency_7d is not None:
+            delta = p90 - prev.p90_latency_7d
+            trend = f" (Δ {delta:+.0f}с)"
+        lines.append(
+            "• Delivery SLA: "
+            f"p90 {p90:.0f}с{trend}, p99 {p99:.0f}с"
+        )
     if data.anomaly_alerts:
         lines.append("• Anomaly Alerts:")
         lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:8])
@@ -405,6 +441,7 @@ def maybe_send_weekly_digest(
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
+    include_notification_sla: bool = False,
 ) -> None:
     current_time = now or datetime.now(timezone.utc)
     config = _load_weekly_digest_config()
@@ -460,6 +497,7 @@ def maybe_send_weekly_digest(
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
         include_quality_metrics=include_quality_metrics,
+        include_notification_sla=include_notification_sla,
         event_emitter=event_emitter,
         contract_event_emitter=contract_event_emitter,
         now=current_time,

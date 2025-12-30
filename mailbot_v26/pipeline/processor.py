@@ -63,6 +63,11 @@ from mailbot_v26.observability.metrics import (
     SystemGates,
     SystemHealthSnapshotter,
 )
+from mailbot_v26.observability.notification_sla import (
+    NotificationAlertStore,
+    NotificationSLAResult,
+    compute_notification_sla,
+)
 from mailbot_v26.observability.relationship_health_snapshot import (
     RelationshipHealthSnapshotWriter,
 )
@@ -147,6 +152,7 @@ auto_action_engine = AutoActionEngine(
     confidence_threshold=feature_flags.AUTO_ACTION_CONFIDENCE_THRESHOLD
 )
 system_orchestrator = SystemOrchestrator()
+notification_alert_store = NotificationAlertStore(DB_PATH)
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +160,8 @@ class PolicyInputs:
     metrics: dict[str, dict[str, float]] | None
     gates: GateEvaluation | None
     runtime_flags: RuntimeFlags
+    notification_sla: NotificationSLAResult | None
+    notification_sla: NotificationSLAResult | None
 
 
 @dataclass
@@ -218,6 +226,8 @@ def _coerce_delivery_result(result: object, *, email_id: int) -> DeliveryResult:
             delivered=result,
             retryable=False,
             error=None if result else "telegram_delivery_failed",
+            mode="html",
+            retry_count=0,
         )
     if result is None:
         logger.warning(
@@ -225,19 +235,32 @@ def _coerce_delivery_result(result: object, *, email_id: int) -> DeliveryResult:
             email_id=email_id,
             reason="none_returned",
         )
-        return DeliveryResult(delivered=True, retryable=False, error=None)
+        return DeliveryResult(
+            delivered=True,
+            retryable=False,
+            error=None,
+            mode="html",
+            retry_count=0,
+        )
     logger.warning(
         "telegram_delivery_result_coerced",
         email_id=email_id,
         reason=f"unexpected_type:{type(result).__name__}",
     )
-    return DeliveryResult(delivered=True, retryable=False, error=None)
+    return DeliveryResult(
+        delivered=True,
+        retryable=False,
+        error=None,
+        mode="html",
+        retry_count=0,
+    )
 
 
 def _collect_policy_inputs() -> PolicyInputs:
     metrics: dict[str, dict[str, float]] | None = None
     gates: GateEvaluation | None = None
     runtime_flags = RuntimeFlags()
+    notification_sla: NotificationSLAResult | None = None
     try:
         metrics = metrics_aggregator.snapshot()
         gates = system_gates.evaluate(metrics)
@@ -247,7 +270,17 @@ def _collect_policy_inputs() -> PolicyInputs:
         runtime_flags, _ = runtime_flag_store.get_flags()
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("system_policy_runtime_flags_failed", error=str(exc))
-    return PolicyInputs(metrics=metrics, gates=gates, runtime_flags=runtime_flags)
+    if getattr(feature_flags, "ENABLE_NOTIFICATION_SLA", True):
+        try:
+            notification_sla = compute_notification_sla(analytics=analytics)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("notification_sla_compute_failed", error=str(exc))
+    return PolicyInputs(
+        metrics=metrics,
+        gates=gates,
+        runtime_flags=runtime_flags,
+        notification_sla=notification_sla,
+    )
 
 
 def _evaluate_policy(
@@ -301,7 +334,73 @@ def _evaluate_policy(
         auto_priority_gate_enabled=auto_priority_gate_enabled,
         enable_quality_metrics=quality_metrics_enabled,
         fallback_decision=fallback,
+        notification_sla=policy_inputs.notification_sla,
     )
+
+
+def _notification_alert_fingerprint(reasons: list[str]) -> str:
+    return "|".join(sorted(reasons))
+
+
+def _maybe_alert_notification_sla(
+    *,
+    account_email: str,
+    telegram_chat_id: str,
+    sla_result: NotificationSLAResult | None,
+    consecutive_failures: int,
+) -> None:
+    if not getattr(feature_flags, "ENABLE_NOTIFICATION_SLA", False):
+        return
+    reasons: list[str] = []
+    if sla_result is not None:
+        reasons.extend(sla_result.degraded_reasons())
+    if consecutive_failures >= 3:
+        reasons.append("consecutive_failures")
+    if not reasons:
+        return
+    fingerprint = _notification_alert_fingerprint(reasons)
+    now_dt = datetime.now(timezone.utc)
+    if not notification_alert_store.should_alert(
+        fingerprint=fingerprint, now=now_dt
+    ):
+        return
+    delivery_pct = (
+        f"{sla_result.delivery_rate_24h * 100:.1f}%" if sla_result else "n/a"
+    )
+    p90_latency = (
+        f"{int(sla_result.p90_latency_24h)}s" if sla_result and sla_result.p90_latency_24h is not None else "n/a"
+    )
+    top_error = "n/a"
+    if sla_result and sla_result.top_error_reasons_24h:
+        top = sla_result.top_error_reasons_24h[0]
+        top_error = f"{top.reason} ({top.share * 100:.1f}%)"
+    action_hint = "salvage/plaintext fallback" if consecutive_failures >= 3 else "retrying"
+    alert_prefix = "\U0001F6A8 TG DELIVERY DEGRADED"
+    alert_text = (
+        f"{alert_prefix}\n"
+        f"Delivery 24h: {delivery_pct}\n"
+        f"p90 latency: {p90_latency}\n"
+        f"Top error: {top_error}\n"
+        f"Action: {action_hint}"
+    )
+    payload = TelegramPayload(
+        html_text=escape_tg_html(alert_text),
+        priority="\U0001F534",
+        metadata={
+            "chat_id": telegram_chat_id,
+            "account_email": account_email,
+        },
+    )
+    try:
+        result = enqueue_tg(email_id=0, payload=payload)
+        if result is not None and not result.delivered:
+            logger.warning(
+                "notification_sla_alert_send_failed",
+                error=result.error or "send_failed",
+            )
+        notification_alert_store.save_alert(fingerprint, now=now_dt)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("notification_sla_alert_failed", error=str(exc))
 
 
 @dataclass
@@ -2538,6 +2637,7 @@ def process_message(
         "from_email": from_email,
         "subject": subject,
         "attachments_count": len(attachments),
+        "occurred_at_utc": received_at.timestamp(),
     }
     for attachment in attachments:
         _emit_contract_event(
@@ -3089,11 +3189,15 @@ def process_message(
         )
     else:
         telegram_delivered = False
+        delivery_ts = time.time()
+        consecutive_tg_failures = 0
+        delivery_result: DeliveryResult | None = None
         try:
             result = _coerce_delivery_result(
                 enqueue_tg(email_id=message_id, payload=payload),
                 email_id=message_id,
             )
+            delivery_result = result
             if not result.delivered:
                 if result.retryable:
                     raise RuntimeError(result.error or "Telegram delivery failed")
@@ -3130,11 +3234,20 @@ def process_message(
                 )
                 _emit_contract_event(
                     EventType.TELEGRAM_FAILED,
-                    ts_utc=received_at.timestamp(),
+                    ts_utc=delivery_ts,
                     account_id=account_email,
                     entity_id=entity_resolution.entity_id if entity_resolution else None,
                     email_id=message_id,
-                    payload={"error": result.error or "non-retryable failure"},
+                    payload={
+                        "error": result.error or "non-retryable failure",
+                        "delivered": False,
+                        "occurred_at_utc": delivery_ts,
+                        "mode": result.mode,
+                        "retry_count": result.retry_count,
+                    },
+                )
+                consecutive_tg_failures = notification_alert_store.record_failure(
+                    datetime.fromtimestamp(delivery_ts, tz=timezone.utc)
                 )
             else:
                 telegram_delivered = True
@@ -3176,11 +3289,20 @@ def process_message(
             )
             _emit_contract_event(
                 EventType.TELEGRAM_FAILED,
-                ts_utc=received_at.timestamp(),
+                ts_utc=delivery_ts,
                 account_id=account_email,
                 entity_id=entity_resolution.entity_id if entity_resolution else None,
                 email_id=message_id,
-                payload={"error": str(exc)},
+                payload={
+                    "error": str(exc),
+                    "delivered": False,
+                    "occurred_at_utc": delivery_ts,
+                    "mode": "html",
+                    "retry_count": 0,
+                },
+            )
+            consecutive_tg_failures = notification_alert_store.record_failure(
+                datetime.fromtimestamp(delivery_ts, tz=timezone.utc)
             )
             logger.error(
                 "processing_error",
@@ -3190,6 +3312,7 @@ def process_message(
             )
             raise
         if telegram_delivered:
+            notification_alert_store.reset_failures()
             event_emitter.emit(
                 type="telegram_delivery_succeeded",
                 timestamp=received_at,
@@ -3198,7 +3321,7 @@ def process_message(
             )
             _emit_contract_event(
                 EventType.TELEGRAM_DELIVERED,
-                ts_utc=received_at.timestamp(),
+                ts_utc=delivery_ts,
                 account_id=account_email,
                 entity_id=entity_resolution.entity_id if entity_resolution else None,
                 email_id=message_id,
@@ -3207,8 +3330,19 @@ def process_message(
                     "priority": priority,
                     "mail_type": mail_type or "",
                     "from_email": from_email,
+                    "delivered": True,
+                    "occurred_at_utc": delivery_ts,
+                    "mode": result.mode,
+                    "retry_count": result.retry_count,
                 },
             )
+
+        _maybe_alert_notification_sla(
+            account_email=account_email,
+            telegram_chat_id=telegram_chat_id,
+            sla_result=policy_decision.notification_sla,
+            consecutive_failures=consecutive_tg_failures,
+        )
 
     if feature_flags.ENABLE_PREVIEW_ACTIONS:
         if not policy_decision.allow_preview:

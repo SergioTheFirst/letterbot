@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 from mailbot_v26.config_loader import ConfigError, load_storage_config
 from mailbot_v26.insights.quality_metrics import compute_quality_metrics
+from mailbot_v26.observability.notification_sla import compute_notification_sla
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
 
@@ -185,6 +186,27 @@ def _quality_metrics_record(db_path: Path, since_dt: datetime, *, now: datetime)
     }
 
 
+def _notification_sla_record(db_path: Path, *, now: datetime) -> dict[str, Any]:
+    analytics = KnowledgeAnalytics(db_path)
+    sla = compute_notification_sla(analytics=analytics, now=now)
+    return {
+        "record_type": "notification_sla",
+        "delivery_rate_24h": sla.delivery_rate_24h,
+        "delivery_rate_7d": sla.delivery_rate_7d,
+        "salvage_rate_24h": sla.salvage_rate_24h,
+        "p50_latency_24h": sla.p50_latency_24h,
+        "p90_latency_24h": sla.p90_latency_24h,
+        "p99_latency_24h": sla.p99_latency_24h,
+        "p50_latency_7d": sla.p50_latency_7d,
+        "p90_latency_7d": sla.p90_latency_7d,
+        "p99_latency_7d": sla.p99_latency_7d,
+        "top_error_reasons_24h": [
+            {"reason": row.reason, "count": row.count, "share": row.share}
+            for row in sla.top_error_reasons_24h
+        ],
+    }
+
+
 def _parse_sqlite_timestamp(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -220,6 +242,10 @@ def export_data(
             record_count += 1
         quality_metrics = _quality_metrics_record(db_path, since_dt, now=export_now)
         handle.write(json.dumps(quality_metrics, ensure_ascii=False, sort_keys=True))
+        handle.write("\n")
+        record_count += 1
+        notification_sla = _notification_sla_record(db_path, now=export_now)
+        handle.write(json.dumps(notification_sla, ensure_ascii=False, sort_keys=True))
         handle.write("\n")
         record_count += 1
 

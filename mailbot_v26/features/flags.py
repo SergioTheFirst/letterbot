@@ -40,6 +40,7 @@ class FeatureFlags:
         self.ENABLE_PRIORITY_V2 = True
         self.ENABLE_NARRATIVE_BINDING = True
         self.ENABLE_NARRATIVE_PATTERNS = True
+        self.ENABLE_NOTIFICATION_SLA = True
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -81,6 +82,10 @@ class FeatureFlags:
             )
         if parser.has_option("features", "enable_priority_v2"):
             self.ENABLE_PRIORITY_V2 = self._get_flag(parser, "enable_priority_v2")
+        if parser.has_option("features", "enable_notification_sla"):
+            self.ENABLE_NOTIFICATION_SLA = self._get_flag(
+                parser, "enable_notification_sla"
+            )
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6
         )
