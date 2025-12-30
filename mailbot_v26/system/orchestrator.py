@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from mailbot_v26.features.flags import FeatureFlags
+from mailbot_v26.insights.auto_priority_quality_gate import GateResult
 from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.metrics import GateEvaluation
@@ -18,9 +19,11 @@ class SystemPolicyDecision:
     allow_llm: bool
     allow_preview: bool
     allow_auto_priority: bool
+    allow_auto_priority_v2: bool
     allow_daily_digest: bool
     allow_weekly_digest: bool
     allow_anomaly_alerts: bool
+    auto_priority_gate_result: GateResult | None
     reasons: list[str]
 
 
@@ -48,6 +51,9 @@ class SystemOrchestrator:
         telegram_ok: bool,
         has_daily_digest_content: bool,
         has_weekly_digest_content: bool,
+        auto_priority_gate_result: GateResult | None = None,
+        auto_priority_gate_enabled: bool = False,
+        enable_quality_metrics: bool | None = None,
         fallback_decision: SystemPolicyDecision | None = None,
     ) -> SystemPolicyDecision:
         fallback = fallback_decision or self.legacy_decision(
@@ -64,17 +70,38 @@ class SystemOrchestrator:
                 _append_reason(reasons, "llm_disabled_by_mode")
 
             auto_priority_flag = _flag(feature_flags, "ENABLE_AUTO_PRIORITY")
-            allow_auto_priority = (
+            quality_metrics_flag = (
+                enable_quality_metrics
+                if enable_quality_metrics is not None
+                else _flag(feature_flags, "ENABLE_QUALITY_METRICS")
+            )
+            allow_auto_priority_v2 = (
                 system_mode == SystemMode.FULL
                 and auto_priority_flag
                 and runtime_flags.enable_auto_priority
+                and quality_metrics_flag
+                and auto_priority_gate_enabled
+                and auto_priority_gate_result is not None
+                and auto_priority_gate_result.passed
             )
+            allow_auto_priority = allow_auto_priority_v2
             if system_mode != SystemMode.FULL:
                 _append_reason(reasons, "mode_not_full")
             if not auto_priority_flag:
                 _append_reason(reasons, "auto_priority_flag_disabled")
             if not runtime_flags.enable_auto_priority:
                 _append_reason(reasons, "auto_priority_runtime_disabled")
+            if not quality_metrics_flag:
+                _append_reason(reasons, "quality_metrics_disabled")
+            if not auto_priority_gate_enabled:
+                _append_reason(reasons, "auto_priority_gate_disabled")
+            if auto_priority_gate_result is None:
+                _append_reason(reasons, "auto_priority_gate_unavailable")
+            elif not auto_priority_gate_result.passed:
+                _append_reason(
+                    reasons,
+                    f"auto_priority_gate:{auto_priority_gate_result.reason}",
+                )
 
             anomaly_flag = _flag(feature_flags, "ENABLE_ANOMALY_ALERTS")
             allow_anomaly_alerts = (
@@ -124,9 +151,11 @@ class SystemOrchestrator:
                 allow_llm=allow_llm,
                 allow_preview=allow_preview,
                 allow_auto_priority=allow_auto_priority,
+                allow_auto_priority_v2=allow_auto_priority_v2,
                 allow_daily_digest=allow_daily_digest,
                 allow_weekly_digest=allow_weekly_digest,
                 allow_anomaly_alerts=allow_anomaly_alerts,
+                auto_priority_gate_result=auto_priority_gate_result,
                 reasons=reasons,
             )
             self._log_evaluated(
@@ -144,6 +173,9 @@ class SystemOrchestrator:
                 allow_llm=fallback.allow_llm,
                 allow_preview=fallback.allow_preview,
                 allow_auto_priority=fallback.allow_auto_priority,
+                allow_auto_priority_v2=getattr(
+                    fallback, "allow_auto_priority_v2", fallback.allow_auto_priority
+                ),
                 allow_daily_digest=fallback.allow_daily_digest,
                 allow_weekly_digest=fallback.allow_weekly_digest,
                 allow_anomaly_alerts=fallback.allow_anomaly_alerts,
@@ -183,9 +215,11 @@ class SystemOrchestrator:
             allow_llm=True,
             allow_preview=allow_preview,
             allow_auto_priority=allow_auto_priority,
+            allow_auto_priority_v2=allow_auto_priority,
             allow_daily_digest=allow_daily_digest,
             allow_weekly_digest=allow_weekly_digest,
             allow_anomaly_alerts=allow_anomaly_alerts,
+            auto_priority_gate_result=None,
             reasons=["legacy_fallback"],
         )
 
@@ -202,9 +236,15 @@ class SystemOrchestrator:
             allow_llm=decision.allow_llm,
             allow_preview=decision.allow_preview,
             allow_auto_priority=decision.allow_auto_priority,
+            allow_auto_priority_v2=decision.allow_auto_priority_v2,
             allow_daily_digest=decision.allow_daily_digest,
             allow_weekly_digest=decision.allow_weekly_digest,
             allow_anomaly_alerts=decision.allow_anomaly_alerts,
+            auto_priority_gate_reason=(
+                decision.auto_priority_gate_result.reason
+                if decision.auto_priority_gate_result
+                else None
+            ),
             reasons=decision.reasons,
             gates_passed=gates.passed if gates else None,
             gates_failed=list(gates.failed_reasons) if gates else None,

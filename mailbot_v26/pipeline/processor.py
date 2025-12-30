@@ -15,6 +15,14 @@ from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
 from mailbot_v26.features import FeatureFlags
+from mailbot_v26.config.auto_priority_gate import (
+    AutoPriorityGateConfig,
+    load_auto_priority_gate_config,
+)
+from mailbot_v26.insights.auto_priority_quality_gate import (
+    AutoPriorityGateStateStore,
+    AutoPriorityQualityGate,
+)
 from mailbot_v26.insights.commitment_signals import (
     CommitmentReliabilityMetrics,
     compute_commitment_reliability,
@@ -107,6 +115,12 @@ shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
 auto_priority_gates = AutoPriorityGates(analytics)
 auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
+auto_priority_gate_config = load_auto_priority_gate_config()
+auto_priority_gate_state_store = AutoPriorityGateStateStore(knowledge_db)
+auto_priority_quality_gate = AutoPriorityQualityGate(
+    analytics=analytics,
+    state_store=auto_priority_gate_state_store,
+)
 metrics_aggregator = MetricsAggregator(DB_PATH)
 system_gates = SystemGates()
 system_snapshotter = SystemHealthSnapshotter(metrics_aggregator, system_gates)
@@ -251,6 +265,29 @@ def _evaluate_policy(
         has_daily_digest_content=has_daily_digest_content,
         has_weekly_digest_content=has_weekly_digest_content,
     )
+    gate_result = None
+    auto_priority_gate_enabled = bool(
+        getattr(auto_priority_gate_config, "enabled", False)
+    )
+    quality_metrics_enabled = bool(
+        getattr(feature_flags, "ENABLE_QUALITY_METRICS", False)
+    )
+    if auto_priority_gate_enabled and quality_metrics_enabled:
+        engine_label = (
+            "priority_v2_auto"
+            if getattr(feature_flags, "ENABLE_AUTO_PRIORITY", False)
+            else "priority_v2_shadow"
+        )
+        try:
+            gate_result = auto_priority_quality_gate.evaluate(
+                engine=engine_label,
+                window_days=auto_priority_gate_config.window_days,
+                min_samples=auto_priority_gate_config.min_samples,
+                max_correction_rate=auto_priority_gate_config.max_correction_rate,
+                cooldown_hours=auto_priority_gate_config.cooldown_hours,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("auto_priority_quality_gate_failed", error=str(exc))
     return system_orchestrator.evaluate(
         system_mode=system_mode,
         metrics=policy_inputs.metrics,
@@ -260,6 +297,9 @@ def _evaluate_policy(
         telegram_ok=telegram_ok,
         has_daily_digest_content=has_daily_digest_content,
         has_weekly_digest_content=has_weekly_digest_content,
+        auto_priority_gate_result=gate_result,
+        auto_priority_gate_enabled=auto_priority_gate_enabled,
+        enable_quality_metrics=quality_metrics_enabled,
         fallback_decision=fallback,
     )
 
@@ -2491,18 +2531,14 @@ def process_message(
     )
     entity_resolution = llm_context.entity_resolution
     signal_quality = llm_context.signal_quality
-    _emit_contract_event(
-        EventType.EMAIL_RECEIVED,
-        ts_utc=received_at.timestamp(),
-        account_id=account_email,
-        entity_id=entity_resolution.entity_id if entity_resolution else None,
-        email_id=message_id,
-        payload={
-            "from_email": from_email,
-            "subject": subject,
-            "attachments_count": len(attachments),
-        },
+    contract_event_entity_id = (
+        entity_resolution.entity_id if entity_resolution else None
     )
+    contract_event_payload = {
+        "from_email": from_email,
+        "subject": subject,
+        "attachments_count": len(attachments),
+    }
     for attachment in attachments:
         _emit_contract_event(
             EventType.ATTACHMENT_EXTRACTED,
@@ -2559,6 +2595,17 @@ def process_message(
             account_email=account_email,
         )
         logger.warning("llm_empty_result", email_id=message_id)
+        try:
+            _emit_contract_event(
+                EventType.EMAIL_RECEIVED,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=contract_event_entity_id,
+                email_id=message_id,
+                payload={**contract_event_payload, "engine": "llm"},
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("contract_event_emit_failed", error=str(exc))
         return
     change = system_health.update_component("LLM", True)
     _notify_system_mode_change(
@@ -2625,6 +2672,8 @@ def process_message(
             reason=shadow_reason or "",
         )
 
+    priority_engine_label = "priority_v2_shadow" if priority_v2_result else "llm"
+
     # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged + runtime) ----------
     confidence_score: float | None = None
     confidence_decision: str | None = None
@@ -2684,6 +2733,7 @@ def process_message(
         priority = auto_priority_outcome.final_priority
         priority_reason = auto_priority_outcome.priority_reason
         confidence_decision = auto_priority_outcome.confidence_decision
+        priority_engine_label = "priority_v2_auto"
     elif auto_priority_outcome.confidence_decision:
         confidence_decision = auto_priority_outcome.confidence_decision
 
@@ -2718,6 +2768,18 @@ def process_message(
         action_line=action_line,
         latency_ms=llm_latency_ms,
     )
+
+    try:
+        _emit_contract_event(
+            EventType.EMAIL_RECEIVED,
+            ts_utc=received_at.timestamp(),
+            account_id=account_email,
+            entity_id=contract_event_entity_id,
+            email_id=message_id,
+            payload={**contract_event_payload, "engine": priority_engine_label},
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("contract_event_emit_failed", error=str(exc))
 
     if policy_decision.allow_auto_priority or feature_flags.ENABLE_AUTO_PRIORITY:
         logger.info(

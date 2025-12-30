@@ -9,6 +9,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Callable, Iterable, TypeVar
 
 from mailbot_v26.insights.commitment_tracker import Commitment
@@ -20,6 +21,13 @@ from mailbot_v26.insights.commitment_lifecycle import (
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+
+
+@dataclass(frozen=True, slots=True)
+class AutoPriorityGateState:
+    last_disabled_at_utc: float | None
+    last_disabled_reason: str | None
+    last_eval_at_utc: float | None
 
 
 class KnowledgeDB:
@@ -44,6 +52,7 @@ class KnowledgeDB:
                     conn.executescript(schema_sql)
                 self._ensure_optional_columns(conn)
                 self._ensure_priority_feedback_index(conn)
+                self._ensure_auto_priority_gate_state_table(conn)
                 if views_sql:
                     conn.executescript(views_sql)
                     logger.debug("[CRM-ANALYTICS] views OK")
@@ -147,6 +156,25 @@ class KnowledgeDB:
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("KnowledgeDB migration failed: %s", exc)
 
+    def _ensure_auto_priority_gate_state_table(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auto_priority_gate_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    last_disabled_at_utc REAL,
+                    last_disabled_reason TEXT,
+                    last_eval_at_utc REAL
+                );
+                """
+            )
+            conn.commit()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("KnowledgeDB auto_priority_gate_state_failed: %s", exc)
+
+
     def _ensure_priority_feedback_index(self, conn: sqlite3.Connection) -> None:
         try:
             conn.execute(
@@ -168,6 +196,54 @@ class KnowledgeDB:
             conn.commit()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("KnowledgeDB priority_feedback_index_failed: %s", exc)
+
+    def read_auto_priority_gate_state(self) -> AutoPriorityGateState:
+        try:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    """
+                    SELECT last_disabled_at_utc, last_disabled_reason, last_eval_at_utc
+                    FROM auto_priority_gate_state
+                    WHERE id = 1
+                    """
+                )
+                row = cur.fetchone()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("auto_priority_gate_state_read_failed: %s", exc)
+            return AutoPriorityGateState(None, None, None)
+        if not row:
+            return AutoPriorityGateState(None, None, None)
+        return AutoPriorityGateState(
+            float(row[0]) if row[0] is not None else None,
+            str(row[1]) if row[1] is not None else None,
+            float(row[2]) if row[2] is not None else None,
+        )
+
+    def persist_auto_priority_gate_state(
+        self,
+        *,
+        last_disabled_at_utc: float | None,
+        last_disabled_reason: str | None,
+        last_eval_at_utc: float | None,
+    ) -> None:
+        def _action(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                """
+                INSERT INTO auto_priority_gate_state (
+                    id,
+                    last_disabled_at_utc,
+                    last_disabled_reason,
+                    last_eval_at_utc
+                ) VALUES (1, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    last_disabled_at_utc=excluded.last_disabled_at_utc,
+                    last_disabled_reason=excluded.last_disabled_reason,
+                    last_eval_at_utc=excluded.last_eval_at_utc;
+                """,
+                (last_disabled_at_utc, last_disabled_reason, last_eval_at_utc),
+            )
+        self.write_transaction(_action)
+
 
     def save_email(
         self,

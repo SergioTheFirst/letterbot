@@ -35,11 +35,14 @@ gigachat_max_latency_sec = 10
 gigachat_cooldown_sec = 600
 
 [features]
+enable_auto_priority = false
 enable_daily_digest = true
 enable_weekly_digest = false
 enable_anomaly_alerts = false
 enable_attention_economics = false
 enable_hierarchical_mail_types = false
+enable_quality_metrics = false
+enable_priority_v2 = true
 enable_narrative_binding = true
 enable_narrative_patterns = true
 
@@ -51,6 +54,13 @@ minute = 0
 weekday = mon
 hour = 9
 minute = 0
+
+[auto_priority_gate]
+enabled = false
+window_days = 30
+min_samples = 30
+max_correction_rate = 0.15
+cooldown_hours = 24
 
 [trust]
 half_life_days = 90

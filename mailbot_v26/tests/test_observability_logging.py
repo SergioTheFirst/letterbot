@@ -11,6 +11,8 @@ from mailbot_v26.observability import logger as observability_logger
 from mailbot_v26.pipeline import processor
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine
 from mailbot_v26.priority.auto_gates import CircuitBreakerStatus, GateDecision
+from mailbot_v26.insights.auto_priority_quality_gate import GateResult
+from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
@@ -22,6 +24,33 @@ def _capture_plain_json_logs() -> tuple[io.StringIO, logging.Handler, logging.Lo
     root_logger.addHandler(handler)
     root_logger.setLevel(logging.INFO)
     return stream, handler, root_logger
+
+
+def _enable_auto_priority_gate(monkeypatch) -> None:
+    monkeypatch.setattr(
+        processor,
+        "auto_priority_gate_config",
+        AutoPriorityGateConfig(
+            enabled=True,
+            window_days=30,
+            min_samples=30,
+            max_correction_rate=0.15,
+            cooldown_hours=24,
+        ),
+    )
+    monkeypatch.setattr(
+        processor.auto_priority_quality_gate,
+        "evaluate",
+        lambda **kwargs: GateResult(
+            passed=True,
+            reason="ok",
+            window_days=30,
+            samples=30,
+            corrections=1,
+            correction_rate=0.03,
+            engine=kwargs.get("engine", "priority_v2_auto"),
+        ),
+    )
 
 
 def _setup_processor(monkeypatch, processor_module) -> None:
@@ -62,6 +91,7 @@ def _setup_processor(monkeypatch, processor_module) -> None:
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
             ENABLE_PREVIEW_ACTIONS=False,
+            ENABLE_QUALITY_METRICS=True,
         ),
     )
     monkeypatch.setattr(
@@ -80,6 +110,7 @@ def _setup_processor(monkeypatch, processor_module) -> None:
             enabled_flag=lambda: processor_module.feature_flags.ENABLE_AUTO_PRIORITY,
         ),
     )
+    _enable_auto_priority_gate(monkeypatch)
 
 
 def test_structured_logging_events_emitted(monkeypatch) -> None:
@@ -251,6 +282,7 @@ def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
             AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
             ENABLE_SHADOW_PERSISTENCE=False,
             ENABLE_PREVIEW_ACTIONS=False,
+            ENABLE_QUALITY_METRICS=True,
         ),
     )
     monkeypatch.setattr(
@@ -264,6 +296,7 @@ def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
             enabled_flag=lambda: processor.feature_flags.ENABLE_AUTO_PRIORITY,
         ),
     )
+    _enable_auto_priority_gate(monkeypatch)
 
     saved_payload: dict[str, object] = {}
     monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: saved_payload.update(kwargs)))

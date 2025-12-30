@@ -200,6 +200,13 @@ CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts_iso
 CREATE INDEX IF NOT EXISTS idx_events_v1_entity_ts_iso
     ON events_v1(entity_id, ts);
 
+CREATE TABLE IF NOT EXISTS auto_priority_gate_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_disabled_at_utc REAL,
+    last_disabled_reason TEXT,
+    last_eval_at_utc REAL
+);
+
 CREATE TABLE IF NOT EXISTS events_backfill_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     status TEXT NOT NULL,
