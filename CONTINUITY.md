@@ -15,7 +15,7 @@ Key decisions:
 - Windows scripts standardized around root .venv and python -m mailbot_v26.
 
 State:
-- Release wrapper implemented: doctor diagnostics, version/changelog, Windows scripts, and quickstart/acceptance docs.
+- Release wrapper implemented: doctor diagnostics, version/changelog, Windows scripts, acceptance docs, and config bootstrap/validation.
 
 Done:
 - Added weekly_digest_state table and KnowledgeDB accessors.
@@ -56,6 +56,11 @@ Done:
 - Added backup/restore/export CLI and Windows wrappers.
 - Added backup/restore/export tooling with retention and redaction.
 - Added tests for backup/restore smoke, doctor gate, and export determinism.
+- Added init-config and validate-config CLI for template creation and config checks.
+- Updated Windows scripts to gate on config init, doctor, and validation before polling.
+- Added acceptance checklist and run_acceptance.bat.
+- Deprecated legacy Windows bat scripts with wrappers.
+- Added tests for config bootstrap, validation rules, and deprecated bat wrapper.
 
 Now:
 - UNCONFIRMED.
@@ -78,15 +83,24 @@ Working set (files / tables / tests):
 - install_and_run.bat
 - run_mailbot.bat
 - run_tests.bat
+- run_acceptance.bat
 - CHANGELOG.md
 - WINDOWS_QUICKSTART.md
+- ACCEPTANCE.md
 - docs/ACCEPTANCE_CHECKLIST.md
 - update_and_run.bat
+- open_config_folder.bat
 - backup.bat
 - restore.bat
+- update.bat
+- mailbot_v26/run_mailbot.bat
 - mailbot_v26/tools/backup.py
 - mailbot_v26/tools/restore.py
 - mailbot_v26/tools/export_data.py
+- mailbot_v26/tools/config_bootstrap.py
 - tests/test_backup_restore_smoke.py
 - tests/test_update_guard_doctor_gate.py
 - tests/test_export_determinism.py
+- tests/test_init_config_creates_templates.py
+- tests/test_validate_config_account_id_rules.py
+- tests/test_deprecated_bat_wrapper_docs_only.py
