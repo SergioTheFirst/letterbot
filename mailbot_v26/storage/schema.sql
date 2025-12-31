@@ -37,6 +37,18 @@ CREATE TABLE IF NOT EXISTS weekly_digest_state (
     last_sent_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS telegram_inbound_state (
+    state_key TEXT PRIMARY KEY,
+    last_update_id INTEGER,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS runtime_overrides (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_emails_account
     ON emails(account_email);
 

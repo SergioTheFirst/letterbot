@@ -17,6 +17,7 @@ from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
+from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
 from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.telegram_utils import telegram_safe
@@ -232,6 +233,7 @@ def run_digest_tick(
 ) -> None:
     try:
         flags = FeatureFlags(base_dir=_CONFIG_PATH.parent)
+        overrides = RuntimeOverrideStore(storage.knowledge_db.path).get_overrides()
         daily_config = _load_daily_digest_config()
         weekly_config = _load_weekly_digest_config()
         policy_inputs = _collect_policy_inputs(storage, logger)
@@ -258,7 +260,10 @@ def run_digest_tick(
                 )
                 continue
 
-            if flags.ENABLE_DAILY_DIGEST:
+            daily_enabled, daily_reason = _override_flag(
+                flags.ENABLE_DAILY_DIGEST, overrides.digest_enabled
+            )
+            if daily_enabled:
                 _run_daily_digest(
                     now=now,
                     config=daily_config,
@@ -279,11 +284,14 @@ def run_digest_tick(
                     "digest_tick_checked",
                     digest_type="daily",
                     decision="skipped",
-                    reason="flag_disabled",
+                    reason=daily_reason,
                     account_email=account_email,
                 )
 
-            if flags.ENABLE_WEEKLY_DIGEST:
+            weekly_enabled, weekly_reason = _override_flag(
+                flags.ENABLE_WEEKLY_DIGEST, overrides.digest_enabled
+            )
+            if weekly_enabled:
                 _run_weekly_digest(
                     now=now,
                     config=weekly_config,
@@ -304,11 +312,19 @@ def run_digest_tick(
                     "digest_tick_checked",
                     digest_type="weekly",
                     decision="skipped",
-                    reason="flag_disabled",
+                    reason=weekly_reason,
                     account_email=account_email,
                 )
     except Exception as exc:
         logger.error("digest_tick_failed", error=str(exc))
+
+
+def _override_flag(default: bool, override: bool | None) -> tuple[bool, str]:
+    if override is None:
+        return default, "flag_disabled" if not default else "flag_enabled"
+    if override:
+        return True, "override_enabled"
+    return False, "override_disabled"
 
 
 def _run_daily_digest(

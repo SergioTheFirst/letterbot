@@ -16,6 +16,7 @@ from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
+from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
@@ -239,6 +240,40 @@ def test_scheduler_weekly_iso_logic(monkeypatch, tmp_path) -> None:
     assert storage.knowledge_db.get_last_weekly_digest_key(
         account_email="account@example.com"
     ) == "2026-W01"
+
+
+def test_digest_override_disables_dispatch(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.ini"
+    _write_config(config_path, daily_enabled=True, weekly_enabled=False)
+    monkeypatch.setattr(digest_scheduler, "_CONFIG_PATH", config_path)
+
+    config = _build_config(tmp_path)
+    storage = _build_storage(tmp_path)
+    _seed_deferred_email(storage.knowledge_db, storage.contract_event_emitter)
+    RuntimeOverrideStore(storage.knowledge_db.path).set_digest_enabled(False)
+
+    sent: list[dict[str, object]] = []
+
+    def _sender(payload) -> DeliveryResult:
+        sent.append({"payload": payload})
+        return DeliveryResult(delivered=True, retryable=False)
+
+    now = datetime(2025, 1, 6, 9, 1, tzinfo=timezone.utc)
+    logger = DummyLogger()
+
+    digest_scheduler.run_digest_tick(
+        now=now,
+        config=config,
+        storage=storage,
+        telegram_sender=_sender,
+        logger=logger,
+    )
+
+    assert sent == []
+    assert any(
+        event == "digest_tick_checked" and fields.get("reason") == "override_disabled"
+        for _, event, fields in logger.events
+    )
 
 
 def test_scheduler_error_isolation(monkeypatch, tmp_path) -> None:

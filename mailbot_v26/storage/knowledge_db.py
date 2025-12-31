@@ -453,6 +453,26 @@ class KnowledgeDB:
             logger.error("KnowledgeDB weekly digest state read failed: %s", exc)
             return None
 
+    def get_last_weekly_digest_sent_at(self, *, account_email: str) -> datetime | None:
+        if not account_email:
+            return None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT last_sent_at
+                    FROM weekly_digest_state
+                    WHERE account_email = ?
+                    """,
+                    (account_email,),
+                ).fetchone()
+            if not row or not row[0]:
+                return None
+            return parse_sqlite_datetime(str(row[0]))
+        except Exception as exc:
+            logger.error("KnowledgeDB weekly digest sent read failed: %s", exc)
+            return None
+
     def set_last_digest_sent_at(
         self,
         *,

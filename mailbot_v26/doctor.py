@@ -76,24 +76,7 @@ _STATUS_LABELS_RU = {
 
 def run_doctor(config_dir: Path | None = None) -> DoctorReport:
     base_dir = config_dir or CONFIG_DIR
-    entries: list[DoctorEntry] = []
-
-    entries.append(_check_python())
-    entries.append(_check_venv())
-    entries.append(_check_dependencies())
-
-    config_entries, config_data = _check_config_files(base_dir)
-    entries.extend(config_entries)
-
-    storage_entry = _check_sqlite(config_data.get("db_path"))
-    entries.append(storage_entry)
-
-    telegram_entry = _check_telegram(config_data.get("telegram_bot_token"))
-    entries.append(telegram_entry)
-
-    entries.extend(_check_llm(base_dir))
-
-    entries.extend(_check_imap(config_data.get("account_configs")))
+    entries, config_data = run_doctor_checks(config_dir=base_dir, return_config=True)
 
     report_text = _format_report(entries, base_dir)
     print(report_text)
@@ -113,6 +96,36 @@ def run_doctor(config_dir: Path | None = None) -> DoctorReport:
         )
 
     return DoctorReport(entries=entries, telegram_sent=telegram_sent, telegram_error=telegram_error)
+
+
+def run_doctor_checks(
+    config_dir: Path | None = None,
+    *,
+    return_config: bool = False,
+) -> list[DoctorEntry] | tuple[list[DoctorEntry], dict[str, object]]:
+    base_dir = config_dir or CONFIG_DIR
+    entries: list[DoctorEntry] = []
+
+    entries.append(_check_python())
+    entries.append(_check_venv())
+    entries.append(_check_dependencies())
+
+    config_entries, config_data = _check_config_files(base_dir)
+    entries.extend(config_entries)
+
+    storage_entry = _check_sqlite(config_data.get("db_path"))
+    entries.append(storage_entry)
+
+    telegram_entry = _check_telegram(config_data.get("telegram_bot_token"))
+    entries.append(telegram_entry)
+
+    entries.extend(_check_llm(base_dir))
+
+    entries.extend(_check_imap(config_data.get("account_configs")))
+
+    if return_config:
+        return entries, config_data
+    return entries
 
 
 def has_critical_issues(report: DoctorReport) -> bool:
@@ -422,5 +435,6 @@ __all__ = [
     "has_critical_issues",
     "report_exit_code",
     "run_doctor",
+    "run_doctor_checks",
     "main",
 ]
