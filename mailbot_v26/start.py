@@ -47,6 +47,13 @@ from mailbot_v26.pipeline.digest_scheduler import DigestStorage, run_digest_tick
 from mailbot_v26.observability import get_logger
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.state_manager import StateManager
+from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
+from mailbot_v26.telegram import (
+    InboundStateStore,
+    TelegramInboundClient,
+    TelegramInboundProcessor,
+    run_inbound_polling,
+)
 from mailbot_v26.storage.self_check import run_self_check
 from mailbot_v26.system.startup_health import (
     LaunchReportBuilder,
@@ -445,6 +452,34 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             event_emitter=processor_module.event_emitter,
             contract_event_emitter=processor_module.contract_event_emitter,
         )
+        allowed_chat_ids = {
+            chat_id
+            for chat_id in (
+                [config.general.admin_chat_id]
+                + [account.telegram_chat_id for account in config.accounts]
+            )
+            if chat_id
+        }
+        inbound_client = TelegramInboundClient(
+            bot_token=config.keys.telegram_bot_token,
+            timeout_s=5,
+        )
+        inbound_state_store = InboundStateStore(processor_module.DB_PATH)
+        inbound_processor = TelegramInboundProcessor(
+            knowledge_db=processor_module.knowledge_db,
+            analytics=processor_module.analytics,
+            event_emitter=processor_module.event_emitter,
+            contract_event_emitter=processor_module.contract_event_emitter,
+            runtime_flag_store=processor_module.runtime_flag_store,
+            auto_priority_gate=processor_module.auto_priority_quality_gate,
+            auto_priority_gate_config=processor_module.auto_priority_gate_config,
+            override_store=RuntimeOverrideStore(processor_module.DB_PATH),
+            send_reply=lambda chat_id, text: inbound_client.send_message(
+                chat_id=chat_id, text=text
+            ),
+            feature_flags=processor_module.feature_flags,
+            allowed_chat_ids=frozenset(allowed_chat_ids),
+        )
         print("[OK] Ready to work\n")
 
         cycle = 0
@@ -457,6 +492,15 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 logger.info("Cycle #%d started", cycle)
 
                 try:
+                    try:
+                        run_inbound_polling(
+                            client=inbound_client,
+                            processor=inbound_processor,
+                            state_store=inbound_state_store,
+                        )
+                    except Exception:
+                        logger.exception("telegram_inbound_cycle_failed")
+
                     for account in accounts_to_poll:
                         login = account.login or "no_login"
                         now_utc = datetime.now(timezone.utc)
