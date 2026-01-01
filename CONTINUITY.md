@@ -15,7 +15,8 @@ Key decisions:
 - Apply digest override in scheduler before feature flags.
 
 State:
-- Telegram inbound handler implemented and wired into main loop.
+- Telegram inbound handler is implemented and wired into main loop.
+- Inbound replies and callback help text aligned with RU spec.
 
 Done:
 - Added telegram inbound module with polling client, command handling, callback parsing, and feedback persistence.
@@ -25,6 +26,7 @@ Done:
 - Added inbound tests (callbacks, commands, dedupe, polling offset).
 - Added digest override test coverage.
 - pytest -q green.
+- Aligned inbound replies and callback help text with RU spec via localization helpers.
 
 Now:
 - None.
@@ -46,3 +48,4 @@ Working set (files / tables / tests):
 - mailbot_v26/doctor.py
 - mailbot_v26/tests/test_telegram_inbound.py
 - mailbot_v26/tests/test_digest_scheduler.py
+- mailbot_v26/ui/i18n.py

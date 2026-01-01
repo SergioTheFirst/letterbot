@@ -97,6 +97,8 @@ def test_parse_callback_data_priority() -> None:
     assert parsed == ("priority", {"email_id": "123", "priority": "🔴"})
     parsed = parse_callback_data("prio:55:🔵")
     assert parsed == ("priority", {"email_id": "55", "priority": "🔵"})
+    parsed = parse_callback_data("mb:help:priority")
+    assert parsed == ("help", {"topic": "priority"})
     assert parse_callback_data("mb:prio:bad") is None
     assert parse_callback_data("mb:prio::R") is None
 
@@ -136,7 +138,7 @@ def test_priority_correction_deduped(tmp_path: Path) -> None:
 
     assert len(feedback_rows) == 1
     assert len(event_rows) == 1
-    assert any("Приоритет обновлён" in text for text in sent)
+    assert any("Принято: приоритет исправлен на 🔴" in text for text in sent)
 
 
 def test_digest_toggle_command_updates_override(tmp_path: Path) -> None:
