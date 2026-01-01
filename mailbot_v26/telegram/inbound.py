@@ -22,7 +22,7 @@ from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.system_health import system_health
 from mailbot_v26.telegram_utils import telegram_safe
-from mailbot_v26.ui.i18n import humanize_mode
+from mailbot_v26.ui.i18n import humanize_mode, t
 from mailbot_v26.worker.telegram_sender import DeliveryResult, send_telegram
 from mailbot_v26.features.flags import FeatureFlags
 
@@ -30,6 +30,8 @@ logger = get_logger("mailbot")
 
 _CALLBACK_PREFIXES = ("mb:prio:", "prio:")
 _TOGGLE_PREFIXES = ("mb:toggle:", "toggle:")
+_HELP_PREFIXES = ("mb:help:", "help:")
+_UI_LOCALE = "ru"
 
 _PRIORITY_MAP = {
     "R": "🔴",
@@ -48,9 +50,13 @@ def _clean_text(text: str | None) -> str:
     return str(text or "").strip()
 
 
+def _t(key: str, **kwargs: object) -> str:
+    return t(key, locale=_UI_LOCALE, **kwargs)
+
+
 def _format_ts(value: datetime | None) -> str:
     if value is None:
-        return "не отправлялся"
+        return _t("inbound.status.never_sent")
     return value.astimezone(timezone.utc).strftime("%d.%m %H:%M")
 
 
@@ -110,6 +116,12 @@ def parse_callback_data(data: str) -> tuple[str, dict[str, str]] | None:
             if value not in {"on", "off"}:
                 return None
             return "toggle", {"flag": flag, "value": value}
+
+    for prefix in _HELP_PREFIXES:
+        if raw.startswith(prefix):
+            remainder = raw[len(prefix) :].strip().lower()
+            if remainder in {"priority", "prio"}:
+                return "help", {"topic": "priority"}
 
     return None
 
@@ -285,7 +297,7 @@ class TelegramInboundProcessor:
 
         parsed = parse_callback_data(data)
         if not parsed:
-            self._reply(chat_id, "Некорректная кнопка. Напишите /help.")
+            self._reply(chat_id, _t("inbound.bad_button"))
             return
 
         action, payload = parsed
@@ -293,6 +305,8 @@ class TelegramInboundProcessor:
             self._apply_priority(chat_id, payload)
         elif action == "toggle":
             self._apply_toggle(chat_id, payload)
+        elif action == "help":
+            self._reply(chat_id, self._priority_help_text())
 
     def handle_message(self, message: dict[str, object]) -> None:
         chat_id = ""
@@ -307,7 +321,7 @@ class TelegramInboundProcessor:
         command, args = parse_command(text)
 
         if not command:
-            self._reply(chat_id, "Не понял команду. Напишите /help.")
+            self._reply(chat_id, _t("inbound.command_unknown"))
             return
 
         if command in {"/help", "help"}:
@@ -326,7 +340,7 @@ class TelegramInboundProcessor:
             self._handle_auto_priority_toggle(chat_id, args)
             return
 
-        self._reply(chat_id, "Не понял команду. Напишите /help.")
+        self._reply(chat_id, _t("inbound.command_unknown"))
 
     def _reply(self, chat_id: str, text: str) -> None:
         try:
@@ -340,7 +354,7 @@ class TelegramInboundProcessor:
     def _apply_priority(self, chat_id: str, payload: dict[str, str]) -> None:
         email_id_raw = payload.get("email_id")
         if not email_id_raw or not email_id_raw.isdigit():
-            self._reply(chat_id, "Некорректный идентификатор письма.")
+            self._reply(chat_id, _t("inbound.bad_email_id"))
             return
         email_id = int(email_id_raw)
         snapshot = _load_email_snapshot(self.knowledge_db.path, email_id)
@@ -361,7 +375,11 @@ class TelegramInboundProcessor:
             engine="priority_v2_auto",
             source="telegram_inbound",
         )
-        self._reply(chat_id, "Приоритет обновлён. Спасибо за обратную связь.")
+        priority = payload.get("priority") or "🔵"
+        self._reply(
+            chat_id,
+            _t("inbound.priority_ack", priority=priority),
+        )
 
     def _apply_toggle(self, chat_id: str, payload: dict[str, str]) -> None:
         flag = payload.get("flag")
@@ -369,34 +387,36 @@ class TelegramInboundProcessor:
         if flag == "digest":
             enabled = value == "on"
             self.override_store.set_digest_enabled(enabled)
-            status = "включены" if enabled else "выключены"
-            self._reply(chat_id, f"Дайджесты {status}.")
+            message_key = (
+                "inbound.digest_enabled" if enabled else "inbound.digest_disabled"
+            )
+            self._reply(chat_id, _t(message_key))
             return
         if flag == "autopriority":
             self._handle_auto_priority_toggle(chat_id, [value or ""])
             return
-        self._reply(chat_id, "Неизвестная настройка.")
+        self._reply(chat_id, _t("inbound.toggle_unknown"))
 
     def _handle_digest_toggle(self, chat_id: str, args: list[str]) -> None:
         if not args or args[0] not in {"on", "off"}:
-            self._reply(chat_id, "Использование: /digest on|off")
+            self._reply(chat_id, _t("inbound.digest_usage"))
             return
         enabled = args[0] == "on"
         self.override_store.set_digest_enabled(enabled)
-        status = "включены" if enabled else "выключены"
-        self._reply(chat_id, f"Дайджесты {status}.")
+        message_key = "inbound.digest_enabled" if enabled else "inbound.digest_disabled"
+        self._reply(chat_id, _t(message_key))
 
     def _handle_auto_priority_toggle(self, chat_id: str, args: list[str]) -> None:
         if not args or args[0] not in {"on", "off"}:
-            self._reply(chat_id, "Использование: /autopriority on|off")
+            self._reply(chat_id, _t("inbound.autopriority_usage"))
             return
         if args[0] == "off":
             self.runtime_flag_store.set_enable_auto_priority(False)
-            self._reply(chat_id, "Автоприоритет выключен. Режим: теневой.")
+            self._reply(chat_id, _t("inbound.autopriority_off"))
             return
         if not self.auto_priority_gate_config.enabled:
             self.runtime_flag_store.set_enable_auto_priority(True)
-            self._reply(chat_id, "Автоприоритет включён.")
+            self._reply(chat_id, _t("inbound.autopriority_on"))
             return
         gate_result = self.auto_priority_gate.evaluate(
             engine="priority_v2_auto",
@@ -407,29 +427,37 @@ class TelegramInboundProcessor:
         )
         if not gate_result.passed:
             reason_map = {
-                "cooldown_active": "пауза после отключения",
-                "insufficient_samples": "недостаточно данных",
-                "correction_rate_spike": "слишком много исправлений",
-                "analytics_failed": "ошибка аналитики",
+                "cooldown_active": _t("inbound.autopriority_reason.cooldown"),
+                "insufficient_samples": _t("inbound.autopriority_reason.samples"),
+                "correction_rate_spike": _t("inbound.autopriority_reason.corrections"),
+                "analytics_failed": _t("inbound.autopriority_reason.analytics"),
             }
-            reason = reason_map.get(gate_result.reason, "недостаточно данных")
+            reason = reason_map.get(
+                gate_result.reason,
+                _t("inbound.autopriority_reason.samples"),
+            )
             self._reply(
                 chat_id,
-                f"Пока нельзя: качество недостаточно ({reason}).",
+                _t("inbound.autopriority_gate_blocked", reason=reason),
             )
             return
         self.runtime_flag_store.set_enable_auto_priority(True)
-        self._reply(chat_id, "Автоприоритет включён.")
+        self._reply(chat_id, _t("inbound.autopriority_on"))
 
     def _help_text(self) -> str:
-        return (
-            "Команды:\n"
-            "/status — краткий статус системы\n"
-            "/doctor — диагностика (кратко)\n"
-            "/digest on|off — включить или выключить дайджесты\n"
-            "/autopriority on|off — включить или выключить автоприоритет\n"
-            "/help — эта справка"
+        return "\n".join(
+            [
+                _t("inbound.help.title"),
+                _t("inbound.help.status"),
+                _t("inbound.help.doctor"),
+                _t("inbound.help.digest"),
+                _t("inbound.help.autopriority"),
+                _t("inbound.help.help"),
+            ]
         )
+
+    def _priority_help_text(self) -> str:
+        return _t("inbound.priority_help")
 
     def _status_text(self) -> str:
         mode_label = humanize_mode(system_health.mode.value, locale="ru")
@@ -441,39 +469,56 @@ class TelegramInboundProcessor:
             daily = self.knowledge_db.get_last_digest_sent_at(account_email=account_email)
             weekly = self.knowledge_db.get_last_weekly_digest_sent_at(account_email=account_email)
             accounts.append(
-                f"{account_email}: день { _format_ts(daily) }, неделя { _format_ts(weekly) }"
+                _t(
+                    "inbound.status.digest_line",
+                    account_email=account_email,
+                    daily=_format_ts(daily),
+                    weekly=_format_ts(weekly),
+                )
             )
-        accounts_block = "\n".join(accounts) if accounts else "нет данных"
+        accounts_block = "\n".join(accounts) if accounts else _t("inbound.status.no_data")
 
         runtime_flags, _ = self.runtime_flag_store.get_flags(force=True)
         auto_mode = (
-            "авто"
+            _t("inbound.status.auto_mode")
             if self.feature_flags.ENABLE_AUTO_PRIORITY and runtime_flags.enable_auto_priority
-            else "теневой"
+            else _t("inbound.status.shadow_mode")
         )
 
         digest_flag = (
-            "включены" if digest_override is True else "выключены" if digest_override is False else None
+            _t("inbound.status.enabled")
+            if digest_override is True
+            else _t("inbound.status.disabled")
+            if digest_override is False
+            else None
         )
         if digest_flag is None:
-            digest_flag = "включены" if self.feature_flags.ENABLE_DAILY_DIGEST else "выключены"
-        flags_line = (
-            "Флаги: "
-            f"превью={ 'вкл' if self.feature_flags.ENABLE_PREVIEW_ACTIONS else 'выкл' }, "
-            f"аномалии={ 'вкл' if self.feature_flags.ENABLE_ANOMALY_ALERTS else 'выкл' }, "
-            f"качество={ 'вкл' if self.feature_flags.ENABLE_QUALITY_METRICS else 'выкл' }"
+            digest_flag = (
+                _t("inbound.status.enabled")
+                if self.feature_flags.ENABLE_DAILY_DIGEST
+                else _t("inbound.status.disabled")
+            )
+        flags_line = _t(
+            "inbound.status.flags",
+            preview=_t("inbound.status.short_on")
+            if self.feature_flags.ENABLE_PREVIEW_ACTIONS
+            else _t("inbound.status.short_off"),
+            anomalies=_t("inbound.status.short_on")
+            if self.feature_flags.ENABLE_ANOMALY_ALERTS
+            else _t("inbound.status.short_off"),
+            quality=_t("inbound.status.short_on")
+            if self.feature_flags.ENABLE_QUALITY_METRICS
+            else _t("inbound.status.short_off"),
         )
 
         return (
-            "Статус системы\n"
-            f"Режим: {mode_label}\n"
-            "Оперативность уведомлений (24ч): "
-            f"доставка {_format_percent(sla.delivery_rate_24h)}, "
-            f"ошибки {_format_percent(sla.error_rate_24h)}\n"
-            f"Дайджесты: {digest_flag}\n"
-            f"Автоприоритет: {auto_mode}\n"
+            f"{_t('inbound.status.title')}\n"
+            f"{_t('inbound.status.mode', mode=mode_label)}\n"
+            f"{_t('inbound.status.sla', delivery=_format_percent(sla.delivery_rate_24h), errors=_format_percent(sla.error_rate_24h))}\n"
+            f"{_t('inbound.status.digest', digest=digest_flag)}\n"
+            f"{_t('inbound.status.autopriority', mode=auto_mode)}\n"
             f"{flags_line}\n"
-            "Последние отправки дайджестов:\n"
+            f"{_t('inbound.status.last_digests')}\n"
             f"{accounts_block}"
         )
 
@@ -481,18 +526,22 @@ class TelegramInboundProcessor:
         try:
             from mailbot_v26 import doctor
         except Exception:  # pragma: no cover - defensive
-            return "Доктор недоступен."
+            return _t("inbound.doctor.unavailable")
         try:
             entries = doctor.run_doctor_checks()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("telegram_inbound_doctor_failed", error=str(exc))
-            return "Доктор завершился с ошибкой."
+            return _t("inbound.doctor.failed")
 
         failures = [entry for entry in entries if entry.status != "OK"]
         if not failures:
-            return "Доктор: все проверки ОК."
-        lines = ["Доктор: есть предупреждения."]
-        status_map = {"OK": "ОК", "WARN": "ПРЕДУПРЕЖДЕНИЕ", "FAIL": "ОШИБКА"}
+            return _t("inbound.doctor.ok")
+        lines = [_t("inbound.doctor.warn_title")]
+        status_map = {
+            "OK": _t("inbound.doctor.status_ok"),
+            "WARN": _t("inbound.doctor.status_warn"),
+            "FAIL": _t("inbound.doctor.status_fail"),
+        }
         for entry in failures:
             detail = f" ({entry.details})" if entry.details else ""
             status = status_map.get(entry.status, entry.status)
