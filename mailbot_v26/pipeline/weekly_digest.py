@@ -81,6 +81,7 @@ class WeeklyDigestData:
     quality_metrics: QualityMetricsSnapshot | None = None
     notification_sla: NotificationSLAResult | None = None
     previous_week_sla: NotificationSLAResult | None = None
+    weekly_accuracy_report: dict[str, object] | None = None
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -281,6 +282,7 @@ def _collect_weekly_data(
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
     include_notification_sla: bool = False,
+    include_weekly_accuracy_report: bool = False,
     event_emitter: EventEmitter | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
     now: datetime | None = None,
@@ -345,6 +347,16 @@ def _collect_weekly_data(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("notification_sla_weekly_failed", error=str(exc))
 
+    weekly_accuracy_report: dict[str, object] | None = None
+    if include_weekly_accuracy_report:
+        try:
+            weekly_accuracy_report = analytics.weekly_accuracy_report(
+                account_email=account_email,
+                days=7,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("weekly_accuracy_report_failed", error=str(exc))
+
     return WeeklyDigestData(
         week_key=week_key,
         total_emails=int(volume.get("total") or 0),
@@ -358,6 +370,7 @@ def _collect_weekly_data(
         quality_metrics=quality_metrics,
         notification_sla=notification_sla,
         previous_week_sla=previous_week_sla,
+        weekly_accuracy_report=weekly_accuracy_report,
     )
 
 
@@ -409,6 +422,22 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
                 f"{escape_tg_html(item.key)}: {item.count}" for item in qm.by_engine
             )
             lines.append("• Источник оценки: " + breakdown)
+    if data.weekly_accuracy_report is not None:
+        report = data.weekly_accuracy_report
+        corrections = int(report.get("priority_corrections") or 0)
+        if corrections > 0:
+            emails = int(report.get("emails_received") or 0)
+            surprises = int(report.get("surprises") or 0)
+            accuracy_pct = report.get("accuracy_pct")
+            if accuracy_pct is None:
+                surprise_rate = report.get("surprise_rate")
+                if surprise_rate is not None:
+                    accuracy_pct = round((1 - float(surprise_rate)) * 100)
+            accuracy_pct = int(accuracy_pct or 0)
+            lines.append("📊 <b>Отчёт точности (7 дней)</b>")
+            lines.append(f"• Писем обработано: {emails}")
+            lines.append(f"• Коррекции приоритета: {corrections}")
+            lines.append(f"• Сюрпризы: {surprises} (точность: {accuracy_pct}%)")
     if data.notification_sla is not None:
         current = data.notification_sla
         prev = data.previous_week_sla
@@ -445,6 +474,7 @@ def maybe_send_weekly_digest(
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
     include_notification_sla: bool = False,
+    include_weekly_accuracy_report: bool = False,
 ) -> None:
     current_time = now or datetime.now(timezone.utc)
     config = _load_weekly_digest_config()
@@ -501,6 +531,7 @@ def maybe_send_weekly_digest(
         include_attention_economics=include_attention_economics,
         include_quality_metrics=include_quality_metrics,
         include_notification_sla=include_notification_sla,
+        include_weekly_accuracy_report=include_weekly_accuracy_report,
         event_emitter=event_emitter,
         contract_event_emitter=contract_event_emitter,
         now=current_time,
