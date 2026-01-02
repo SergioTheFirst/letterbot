@@ -208,12 +208,12 @@ def _collect_digest_data(
     insights_enabled = bool(include_digest_insights)
     insights_max_items = max(0, int(digest_insights_max_items))
     if insights_enabled and insights_max_items > 0:
-        deadlock_insights = analytics.deadlock_insights(
+        deadlock_insights = analytics.get_deadlock_insights(
             account_email=account_email,
             window_days=max(1, int(digest_insights_window_days)),
             limit=insights_max_items,
         )
-        silence_insights = analytics.silence_insights(
+        silence_insights = analytics.get_silence_insights(
             account_email=account_email,
             window_days=max(1, int(digest_insights_window_days)),
             limit=insights_max_items,

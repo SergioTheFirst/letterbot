@@ -47,14 +47,38 @@ def test_daily_digest_insights_section_present_with_items() -> None:
                 {
                     "contact": "client@example.com",
                     "days_silent": 5,
-                    "count_window": 3,
-                    "last_seen_ts": 100,
                 }
             ],
         }
     )
     text = daily_digest._build_digest_text(data)
-    assert "ТРЕБУЕТ ВНИМАНИЯ" in text
+    assert "\u26a0\ufe0f <b>ТРЕБУЕТ ВНИМАНИЯ</b>" in text
     assert "Deadlock" in text
     assert "Silence" in text
     assert _TARGET_EMOJI in text
+
+
+def test_daily_digest_insights_order_and_limit() -> None:
+    data = daily_digest.DigestData(
+        **{
+            **_base_digest_kwargs(),
+            "digest_insights_max_items": 3,
+            "deadlock_insights": [
+                {"from_email": "a@example.com", "subject": "A1"},
+                {"from_email": "b@example.com", "subject": "B1"},
+            ],
+            "silence_insights": [
+                {"contact": "c@example.com", "days_silent": 3},
+                {"contact": "d@example.com", "days_silent": 4},
+            ],
+        }
+    )
+    text = daily_digest._build_digest_text(data)
+    lines = text.splitlines()
+    header_index = lines.index("\u26a0\ufe0f <b>ТРЕБУЕТ ВНИМАНИЯ</b>")
+    insight_lines = lines[header_index + 1 : header_index + 4]
+    assert insight_lines == [
+        f"• Deadlock: a@example.com — A1 → {_TARGET_EMOJI} Предложить созвон (15 мин)",
+        f"• Deadlock: b@example.com — B1 → {_TARGET_EMOJI} Предложить созвон (15 мин)",
+        f"• Silence: c@example.com молчит 3д → {_TARGET_EMOJI} Пинговать сегодня",
+    ]

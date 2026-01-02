@@ -770,7 +770,7 @@ class KnowledgeAnalytics:
             )
         return items
 
-    def deadlock_insights(
+    def get_deadlock_insights(
         self,
         *,
         account_email: str,
@@ -823,7 +823,20 @@ class KnowledgeAnalytics:
             )
         return results
 
-    def silence_insights(
+    def deadlock_insights(
+        self,
+        *,
+        account_email: str,
+        window_days: int,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        return self.get_deadlock_insights(
+            account_email=account_email,
+            window_days=window_days,
+            limit=limit,
+        )
+
+    def get_silence_insights(
         self,
         *,
         account_email: str,
@@ -857,8 +870,6 @@ class KnowledgeAnalytics:
                 "contact": contact,
                 "ts_utc": ts_utc,
                 "days_silent": days_silent,
-                "count_window": payload.get("count_window"),
-                "last_seen_ts": payload.get("last_seen_ts"),
             }
         if not latest:
             return []
@@ -873,11 +884,22 @@ class KnowledgeAnalytics:
                 {
                     "contact": item.get("contact", ""),
                     "days_silent": item.get("days_silent", 0),
-                    "count_window": item.get("count_window"),
-                    "last_seen_ts": item.get("last_seen_ts"),
                 }
             )
         return results
+
+    def silence_insights(
+        self,
+        *,
+        account_email: str,
+        window_days: int,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        return self.get_silence_insights(
+            account_email=account_email,
+            window_days=window_days,
+            limit=limit,
+        )
 
     def _thread_email_fields(
         self,
