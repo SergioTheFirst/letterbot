@@ -770,6 +770,154 @@ class KnowledgeAnalytics:
             )
         return items
 
+    def deadlock_insights(
+        self,
+        *,
+        account_email: str,
+        window_days: int,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        if not account_email or window_days <= 0 or limit <= 0:
+            return []
+        since_ts = self._window_start_ts(window_days)
+        rows = self._event_rows(
+            account_id=account_email,
+            event_type="deadlock_detected",
+            since_ts=since_ts,
+        )
+        latest: dict[str, dict[str, object]] = {}
+        for row in rows:
+            payload = self._event_payload(row)
+            thread_key = str(payload.get("thread_key") or "").strip()
+            if not thread_key:
+                continue
+            ts_utc = float(row.get("ts_utc") or 0)
+            prev = latest.get(thread_key)
+            if prev and float(prev.get("ts_utc") or 0) >= ts_utc:
+                continue
+            latest[thread_key] = {
+                "thread_key": thread_key,
+                "ts_utc": ts_utc,
+            }
+        if not latest:
+            return []
+        sorted_items = sorted(
+            latest.values(),
+            key=lambda item: float(item.get("ts_utc") or 0),
+            reverse=True,
+        )
+        results: list[dict[str, object]] = []
+        for item in sorted_items[:limit]:
+            thread_key = str(item.get("thread_key") or "").strip()
+            fields = self._thread_email_fields(
+                account_email=account_email,
+                thread_key=thread_key,
+            )
+            results.append(
+                {
+                    "thread_key": thread_key,
+                    "subject": fields.get("subject", ""),
+                    "from_email": fields.get("from_email", ""),
+                    "received_at": fields.get("received_at", ""),
+                }
+            )
+        return results
+
+    def silence_insights(
+        self,
+        *,
+        account_email: str,
+        window_days: int,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        if not account_email or window_days <= 0 or limit <= 0:
+            return []
+        since_ts = self._window_start_ts(window_days)
+        rows = self._event_rows(
+            account_id=account_email,
+            event_type="silence_signal_detected",
+            since_ts=since_ts,
+        )
+        latest: dict[str, dict[str, object]] = {}
+        for row in rows:
+            payload = self._event_payload(row)
+            contact = str(payload.get("contact") or "").strip()
+            if not contact:
+                continue
+            ts_utc = float(row.get("ts_utc") or 0)
+            prev = latest.get(contact)
+            if prev and float(prev.get("ts_utc") or 0) >= ts_utc:
+                continue
+            days_raw = payload.get("days_silent")
+            try:
+                days_silent = int(round(float(days_raw)))
+            except (TypeError, ValueError):
+                days_silent = 0
+            latest[contact] = {
+                "contact": contact,
+                "ts_utc": ts_utc,
+                "days_silent": days_silent,
+                "count_window": payload.get("count_window"),
+                "last_seen_ts": payload.get("last_seen_ts"),
+            }
+        if not latest:
+            return []
+        sorted_items = sorted(
+            latest.values(),
+            key=lambda item: float(item.get("ts_utc") or 0),
+            reverse=True,
+        )
+        results: list[dict[str, object]] = []
+        for item in sorted_items[:limit]:
+            results.append(
+                {
+                    "contact": item.get("contact", ""),
+                    "days_silent": item.get("days_silent", 0),
+                    "count_window": item.get("count_window"),
+                    "last_seen_ts": item.get("last_seen_ts"),
+                }
+            )
+        return results
+
+    def _thread_email_fields(
+        self,
+        *,
+        account_email: str,
+        thread_key: str,
+    ) -> dict[str, str]:
+        if not account_email or not thread_key:
+            return {"subject": "", "from_email": "", "received_at": ""}
+        try:
+            rows = self._execute_select(
+                """
+                SELECT subject, from_email, received_at
+                FROM emails
+                WHERE account_email = ?
+                  AND thread_key = ?
+                ORDER BY datetime(received_at) DESC
+                """,
+                (account_email, thread_key),
+            )
+        except sqlite3.OperationalError:
+            return {"subject": "", "from_email": "", "received_at": ""}
+        subject = ""
+        sender = ""
+        received_at = ""
+        if rows:
+            first = rows[0]
+            sender = str(first.get("from_email") or "").strip()
+            received_at = str(first.get("received_at") or "").strip()
+            for row in rows:
+                candidate = str(row.get("subject") or "").strip()
+                if candidate:
+                    subject = candidate
+                    break
+        return {
+            "subject": subject,
+            "from_email": sender,
+            "received_at": received_at,
+        }
+
     def commitment_status_counts(self, *, account_email: str) -> dict[str, int]:
         if not account_email:
             return {"pending": 0, "expired": 0}

@@ -41,6 +41,7 @@ locale = ru
 enable_auto_priority = false
 enable_daily_digest = true
 enable_weekly_digest = false
+enable_digest_insights = false
 enable_anomaly_alerts = false
 enable_attention_economics = false
 enable_hierarchical_mail_types = false
@@ -63,6 +64,10 @@ minute = 0
 weekday = mon
 hour = 9
 minute = 0
+
+[digest_insights]
+window_days = 7
+max_items = 3
 
 [delivery_policy]
 night_hours = 21-7

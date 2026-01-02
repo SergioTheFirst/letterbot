@@ -59,6 +59,12 @@ class WeeklyDigestConfig:
     minute: int
 
 
+@dataclass(frozen=True, slots=True)
+class DigestInsightsConfig:
+    window_days: int
+    max_items: int
+
+
 def _load_daily_digest_config() -> DailyDigestConfig:
     hour = 9
     minute = 0
@@ -97,6 +103,25 @@ def _load_weekly_digest_config() -> WeeklyDigestConfig:
         except ValueError:
             minute = 0
     return WeeklyDigestConfig(weekday=weekday, hour=hour, minute=minute)
+
+
+def _load_digest_insights_config() -> DigestInsightsConfig:
+    window_days = 7
+    max_items = 3
+    parser = configparser.ConfigParser()
+    if _CONFIG_PATH.exists():
+        parser.read(_CONFIG_PATH, encoding="utf-8")
+    section = parser["digest_insights"] if "digest_insights" in parser else None
+    if section is not None:
+        try:
+            window_days = max(1, section.getint("window_days", fallback=7))
+        except ValueError:
+            window_days = 7
+        try:
+            max_items = max(0, section.getint("max_items", fallback=3))
+        except ValueError:
+            max_items = 3
+    return DigestInsightsConfig(window_days=window_days, max_items=max_items)
 
 
 def _is_daily_due(now: datetime, config: DailyDigestConfig) -> bool:
@@ -238,6 +263,7 @@ def run_digest_tick(
         overrides = RuntimeOverrideStore(storage.knowledge_db.path).get_overrides()
         daily_config = _load_daily_digest_config()
         weekly_config = _load_weekly_digest_config()
+        digest_insights_config = _load_digest_insights_config()
         silence_policy = load_silence_policy_config(_CONFIG_PATH.parent)
         policy_inputs = _collect_policy_inputs(storage, logger)
 
@@ -279,6 +305,7 @@ def run_digest_tick(
                     policy_inputs=policy_inputs,
                     flags=flags,
                     silence_policy=silence_policy,
+                    digest_insights_config=digest_insights_config,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                     include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
                     include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
@@ -344,6 +371,7 @@ def _run_daily_digest(
     policy_inputs: PolicyInputs,
     flags: FeatureFlags,
     silence_policy: SilencePolicyConfig,
+    digest_insights_config: DigestInsightsConfig,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
@@ -387,6 +415,9 @@ def _run_daily_digest(
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
         include_quality_metrics=include_quality_metrics,
+        include_digest_insights=flags.ENABLE_DIGEST_INSIGHTS,
+        digest_insights_window_days=digest_insights_config.window_days,
+        digest_insights_max_items=digest_insights_config.max_items,
         now=now,
         contract_event_emitter=storage.contract_event_emitter,
     )
