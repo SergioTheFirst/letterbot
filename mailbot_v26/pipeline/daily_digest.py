@@ -25,6 +25,7 @@ from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
+from mailbot_v26.ui import action_templates
 from mailbot_v26.ui.i18n import DEFAULT_LOCALE, humanize_severity, t
 
 logger = get_logger("mailbot")
@@ -54,6 +55,7 @@ class DigestData:
     silence_insights: list[dict[str, object]]
     digest_insights_enabled: bool
     digest_insights_max_items: int
+    digest_action_templates_enabled: bool
     behavior_metrics: dict[str, object] | None = None
     behavior_metrics_enabled: bool = False
     behavior_metrics_window_days: int = 7
@@ -136,6 +138,7 @@ def _collect_digest_data(
     include_digest_insights: bool = False,
     digest_insights_window_days: int = 7,
     digest_insights_max_items: int = 3,
+    include_digest_action_templates: bool = False,
     include_behavior_metrics_digest: bool = False,
     behavior_metrics_window_days: int = 7,
     now: datetime | None = None,
@@ -256,6 +259,7 @@ def _collect_digest_data(
         silence_insights=silence_insights,
         digest_insights_enabled=insights_enabled,
         digest_insights_max_items=insights_max_items,
+        digest_action_templates_enabled=bool(include_digest_action_templates),
         behavior_metrics=behavior_metrics,
         behavior_metrics_enabled=bool(include_behavior_metrics_digest),
         behavior_metrics_window_days=behavior_metrics_window,
@@ -329,8 +333,9 @@ def _build_digest_text(data: DigestData) -> str:
         lines.extend(format_attention_block(data.attention_economics))
     if data.digest_insights_enabled and data.digest_insights_max_items > 0:
         insights_lines: list[str] = []
+        insight_count = 0
         for item in data.deadlock_insights:
-            if len(insights_lines) >= data.digest_insights_max_items:
+            if insight_count >= data.digest_insights_max_items:
                 break
             label = _format_deadlock_label(item)
             if not label:
@@ -340,8 +345,18 @@ def _build_digest_text(data: DigestData) -> str:
                 f"{label} "
                 f"→ {_TARGET_EMOJI} Предложить созвон (15 мин)"
             )
+            if data.digest_action_templates_enabled:
+                template = action_templates.template_for_deadlock(
+                    from_email=str(item.get("from_email") or "") or None,
+                    subject=str(item.get("subject") or "") or None,
+                )
+                if template:
+                    insights_lines.append(
+                        f"  <i>Текст: {escape_tg_html(template)}</i>"
+                    )
+            insight_count += 1
         for item in data.silence_insights:
-            if len(insights_lines) >= data.digest_insights_max_items:
+            if insight_count >= data.digest_insights_max_items:
                 break
             contact = _format_silence_contact(item)
             if not contact:
@@ -352,6 +367,13 @@ def _build_digest_text(data: DigestData) -> str:
                 f"{contact} — {days} "
                 f"→ {_TARGET_EMOJI} Вежливо напомнить сегодня"
             )
+            if data.digest_action_templates_enabled:
+                template = action_templates.template_for_silence(contact=contact)
+                if template:
+                    insights_lines.append(
+                        f"  <i>Текст: {escape_tg_html(template)}</i>"
+                    )
+            insight_count += 1
         if insights_lines:
             lines.append(f"{_WARNING_EMOJI} <b>ТРЕБУЕТ ВНИМАНИЯ</b>")
             lines.extend(insights_lines)

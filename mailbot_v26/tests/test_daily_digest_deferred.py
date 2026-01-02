@@ -21,6 +21,7 @@ def test_daily_digest_includes_deferred_items() -> None:
         silence_insights=[],
         digest_insights_enabled=False,
         digest_insights_max_items=0,
+        digest_action_templates_enabled=False,
     )
     text = daily_digest._build_digest_text(data)
     assert "Отложено для снижения перегрузки" in text

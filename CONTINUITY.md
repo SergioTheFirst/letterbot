@@ -84,3 +84,4 @@ Working set (files / tables / tests):
 2026-01-02: daily digest insights (deadlock+silence) behind enable_digest_insights.
 2026-01-02: daily behavioral metrics block behind enable_behavior_metrics_digest.
 2026-01-02: digest insight labels localized; i18n missing-key fallback returns empty.
+2026-01-02: digest action templates behind enable_digest_action_templates.

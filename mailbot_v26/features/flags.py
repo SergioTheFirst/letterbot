@@ -49,6 +49,7 @@ class FeatureFlags:
         self.ENABLE_DEADLOCK_DETECTION = "shadow"
         self.ENABLE_PREMIUM_PROCESSOR = False
         self.ENABLE_BEHAVIOR_METRICS_DIGEST = False
+        self.ENABLE_DIGEST_ACTION_TEMPLATES = False
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -115,6 +116,9 @@ class FeatureFlags:
         )
         self.ENABLE_BEHAVIOR_METRICS_DIGEST = self._get_flag(
             parser, "enable_behavior_metrics_digest"
+        )
+        self.ENABLE_DIGEST_ACTION_TEMPLATES = self._get_flag(
+            parser, "enable_digest_action_templates"
         )
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6

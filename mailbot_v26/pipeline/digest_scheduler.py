@@ -442,6 +442,7 @@ def _run_daily_digest(
         include_digest_insights=flags.ENABLE_DIGEST_INSIGHTS,
         digest_insights_window_days=digest_insights_config.window_days,
         digest_insights_max_items=digest_insights_config.max_items,
+        include_digest_action_templates=flags.ENABLE_DIGEST_ACTION_TEMPLATES,
         include_behavior_metrics_digest=flags.ENABLE_BEHAVIOR_METRICS_DIGEST,
         behavior_metrics_window_days=behavior_metrics_config.window_days,
         now=now,

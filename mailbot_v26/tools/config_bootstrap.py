@@ -42,6 +42,7 @@ enable_auto_priority = false
 enable_daily_digest = true
 enable_weekly_digest = false
 enable_digest_insights = false
+enable_digest_action_templates = false
 enable_anomaly_alerts = false
 enable_attention_economics = false
 enable_hierarchical_mail_types = false
