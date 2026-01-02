@@ -55,6 +55,7 @@ enable_surprise_budget = true
 enable_silence_as_signal = shadow
 enable_deadlock_detection = shadow
 enable_premium_processor = false
+enable_behavior_metrics_digest = false
 
 [daily_digest]
 hour = 9
@@ -68,6 +69,9 @@ minute = 0
 [digest_insights]
 window_days = 7
 max_items = 3
+
+[behavior_metrics_digest]
+window_days = 7
 
 [delivery_policy]
 night_hours = 21-7

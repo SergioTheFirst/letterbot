@@ -65,6 +65,11 @@ class DigestInsightsConfig:
     max_items: int
 
 
+@dataclass(frozen=True, slots=True)
+class BehaviorMetricsDigestConfig:
+    window_days: int
+
+
 def _load_daily_digest_config() -> DailyDigestConfig:
     hour = 9
     minute = 0
@@ -122,6 +127,22 @@ def _load_digest_insights_config() -> DigestInsightsConfig:
         except ValueError:
             max_items = 3
     return DigestInsightsConfig(window_days=window_days, max_items=max_items)
+
+
+def _load_behavior_metrics_digest_config() -> BehaviorMetricsDigestConfig:
+    window_days = 7
+    parser = configparser.ConfigParser()
+    if _CONFIG_PATH.exists():
+        parser.read(_CONFIG_PATH, encoding="utf-8")
+    section = (
+        parser["behavior_metrics_digest"] if "behavior_metrics_digest" in parser else None
+    )
+    if section is not None:
+        try:
+            window_days = max(1, section.getint("window_days", fallback=7))
+        except ValueError:
+            window_days = 7
+    return BehaviorMetricsDigestConfig(window_days=window_days)
 
 
 def _is_daily_due(now: datetime, config: DailyDigestConfig) -> bool:
@@ -264,6 +285,7 @@ def run_digest_tick(
         daily_config = _load_daily_digest_config()
         weekly_config = _load_weekly_digest_config()
         digest_insights_config = _load_digest_insights_config()
+        behavior_metrics_config = _load_behavior_metrics_digest_config()
         silence_policy = load_silence_policy_config(_CONFIG_PATH.parent)
         policy_inputs = _collect_policy_inputs(storage, logger)
 
@@ -306,6 +328,7 @@ def run_digest_tick(
                     flags=flags,
                     silence_policy=silence_policy,
                     digest_insights_config=digest_insights_config,
+                    behavior_metrics_config=behavior_metrics_config,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                     include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
                     include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
@@ -372,6 +395,7 @@ def _run_daily_digest(
     flags: FeatureFlags,
     silence_policy: SilencePolicyConfig,
     digest_insights_config: DigestInsightsConfig,
+    behavior_metrics_config: BehaviorMetricsDigestConfig,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
@@ -418,6 +442,8 @@ def _run_daily_digest(
         include_digest_insights=flags.ENABLE_DIGEST_INSIGHTS,
         digest_insights_window_days=digest_insights_config.window_days,
         digest_insights_max_items=digest_insights_config.max_items,
+        include_behavior_metrics_digest=flags.ENABLE_BEHAVIOR_METRICS_DIGEST,
+        behavior_metrics_window_days=behavior_metrics_config.window_days,
         now=now,
         contract_event_emitter=storage.contract_event_emitter,
     )

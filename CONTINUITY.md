@@ -82,3 +82,4 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_silence_detector.py
 - mailbot_v26/tests/test_silence_digest_hook.py
 2026-01-02: daily digest insights (deadlock+silence) behind enable_digest_insights.
+2026-01-02: daily behavioral metrics block behind enable_behavior_metrics_digest.
