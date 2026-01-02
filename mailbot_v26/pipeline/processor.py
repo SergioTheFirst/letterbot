@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import time
@@ -12,6 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
+from mailbot_v26.behavior.attention_engine import (
+    DeliveryContext,
+    DeliveryMode,
+    decide_delivery,
+    score_email,
+)
+from mailbot_v26.config.delivery_policy import load_delivery_policy_config
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
 from mailbot_v26.features import FeatureFlags
@@ -220,6 +228,45 @@ def _emit_contract_event(
         contract_event_emitter.emit(event)
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("contract_event_emit_failed", event_type=event_type.value, error=str(exc))
+
+
+def _is_quiet_hours(now_local: datetime, *, start_hour: int, end_hour: int) -> bool:
+    hour = now_local.hour
+    if start_hour == end_hour:
+        return False
+    if start_hour < end_hour:
+        return start_hour <= hour < end_hour
+    return hour >= start_hour or hour < end_hour
+
+
+def _count_recent_immediate_deliveries(
+    *, account_email: str, since_ts: float
+) -> int:
+    if not account_email:
+        return 0
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute(
+                """
+                SELECT payload
+                FROM events_v1
+                WHERE account_id = ?
+                  AND event_type = ?
+                  AND ts_utc >= ?
+                """,
+                (account_email, EventType.DELIVERY_POLICY_APPLIED.value, since_ts),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return 0
+    count = 0
+    for row in rows:
+        try:
+            payload = json.loads(row[0] or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if str(payload.get("mode") or "").upper() == DeliveryMode.IMMEDIATE.value:
+            count += 1
+    return count
 
 
 def _coerce_delivery_result(result: object, *, email_id: int) -> DeliveryResult:
@@ -3125,7 +3172,7 @@ def process_message(
             relationship_health_delta = float(value)
         except (TypeError, ValueError):
             relationship_health_delta = None
-    deferred_for_digest = False
+    attention_gate_deferred = False
     attention_reason = "default_send"
     try:
         gate_result = apply_attention_gate(
@@ -3142,7 +3189,7 @@ def process_message(
                 email_id=message_id,
             )
         )
-        deferred_for_digest = gate_result.deferred
+        attention_gate_deferred = gate_result.deferred
         attention_reason = gate_result.reason
     except Exception as exc:  # pragma: no cover - defensive fallback
         logger.error(
@@ -3150,10 +3197,91 @@ def process_message(
             email_id=message_id,
             error=str(exc),
         )
-        deferred_for_digest = False
+        attention_gate_deferred = False
         attention_reason = "gate_failed"
 
-    if deferred_for_digest:
+    enable_circadian = bool(
+        getattr(feature_flags, "ENABLE_CIRCADIAN_DELIVERY", False)
+    )
+    enable_attention_debt = bool(
+        getattr(feature_flags, "ENABLE_ATTENTION_DEBT", False)
+    )
+    behavior_enabled = enable_circadian or enable_attention_debt
+
+    if behavior_enabled:
+        policy_config = load_delivery_policy_config()
+        now_local = received_at.astimezone()
+        is_quiet_hours = enable_circadian and _is_quiet_hours(
+            now_local,
+            start_hour=policy_config.night_start_hour,
+            end_hour=policy_config.night_end_hour,
+        )
+        immediate_sent_last_hour = 0
+        if enable_attention_debt:
+            since_ts = time.time() - 3600
+            immediate_sent_last_hour = _count_recent_immediate_deliveries(
+                account_email=account_email,
+                since_ts=since_ts,
+            )
+        scores = score_email(
+            priority=priority,
+            commitments_count=len(commitments),
+            deadlines_count=deadlines_count,
+            insight_severity=max_insight_severity(analytics_result.aggregated_insights),
+            relationship_health_delta=relationship_health_delta,
+        )
+        context = DeliveryContext(
+            now_local=now_local,
+            is_weekend=now_local.weekday() >= 5,
+            is_quiet_hours=is_quiet_hours,
+            immediate_sent_last_hour=immediate_sent_last_hour,
+            max_immediate_per_hour=policy_config.max_immediate_per_hour,
+        )
+        delivery_decision = decide_delivery(
+            scores=scores,
+            context=context,
+            policy=policy_config,
+            attention_gate_deferred=attention_gate_deferred,
+        )
+        attention_reason = ",".join(delivery_decision.reason_codes) or attention_reason
+
+        if enable_attention_debt:
+            debt_bucket = "low"
+            if delivery_decision.attention_debt >= 70:
+                debt_bucket = "high"
+            elif delivery_decision.attention_debt >= 30:
+                debt_bucket = "medium"
+            _emit_contract_event(
+                EventType.ATTENTION_DEBT_UPDATED,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                email_id=message_id,
+                payload={
+                    "attention_debt": delivery_decision.attention_debt,
+                    "bucket": debt_bucket,
+                    "immediate_last_hour": immediate_sent_last_hour,
+                    "max_per_hour": policy_config.max_immediate_per_hour,
+                },
+            )
+
+        _emit_contract_event(
+            EventType.DELIVERY_POLICY_APPLIED,
+            ts_utc=received_at.timestamp(),
+            account_id=account_email,
+            entity_id=entity_resolution.entity_id if entity_resolution else None,
+            email_id=message_id,
+            payload={
+                "mode": delivery_decision.mode.value,
+                "reason_codes": delivery_decision.reason_codes,
+                "thresholds_used": delivery_decision.thresholds_used,
+                "attention_debt": delivery_decision.attention_debt,
+                "quiet_hours": is_quiet_hours,
+                "weekend": context.is_weekend,
+            },
+        )
+
+    if not behavior_enabled and attention_gate_deferred:
         if analytics_result.email_row_id is None:
             logger.error(
                 "[ATTENTION-GATE] persistence_failed",
@@ -3179,8 +3307,6 @@ def process_message(
                     email_id=message_id,
                     attention_reason=attention_reason,
                 )
-
-    if deferred_for_digest:
         logger.info(
             "telegram_deferred_for_digest",
             email_id=message_id,
@@ -3197,6 +3323,58 @@ def process_message(
                 "attachments_only": render_result.extracted_text_len <= 0 and len(attachments) > 0,
                 "attachments_count": len(attachments),
             },
+        )
+    elif behavior_enabled and delivery_decision.mode in {DeliveryMode.BATCH_TODAY, DeliveryMode.DEFER_TO_MORNING}:
+        if analytics_result.email_row_id is None:
+            logger.error(
+                "[ATTENTION-GATE] persistence_failed",
+                email_id=message_id,
+                reason="missing_email_row_id",
+                attention_reason=attention_reason,
+            )
+        else:
+            persisted = knowledge_db.mark_deferred_for_digest(
+                email_row_id=analytics_result.email_row_id,
+                deferred=True,
+            )
+            if not persisted:
+                logger.error(
+                    "[ATTENTION-GATE] persistence_failed",
+                    email_id=message_id,
+                    reason="crm_update_failed",
+                    attention_reason=attention_reason,
+                )
+            else:
+                logger.info(
+                    "[ATTENTION-GATE] persisted",
+                    email_id=message_id,
+                    attention_reason=attention_reason,
+                )
+        logger.info(
+            "telegram_deferred_for_digest",
+            email_id=message_id,
+            reason=attention_reason,
+            mode=delivery_decision.mode.value,
+        )
+        _emit_contract_event(
+            EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+            ts_utc=received_at.timestamp(),
+            account_id=account_email,
+            entity_id=entity_resolution.entity_id if entity_resolution else None,
+            email_id=message_id,
+            payload={
+                "reason": attention_reason,
+                "mode": delivery_decision.mode.value,
+                "attachments_only": render_result.extracted_text_len <= 0 and len(attachments) > 0,
+                "attachments_count": len(attachments),
+            },
+        )
+    elif behavior_enabled and delivery_decision.mode == DeliveryMode.SILENT_LOG:
+        logger.info(
+            "telegram_delivery_suppressed",
+            email_id=message_id,
+            reason=attention_reason,
+            mode=delivery_decision.mode.value,
         )
     else:
         telegram_delivered = False

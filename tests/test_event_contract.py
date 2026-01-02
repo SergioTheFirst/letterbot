@@ -29,6 +29,25 @@ def test_event_contract_emission_idempotent(tmp_path):
         assert count == 1
 
 
+def test_delivery_policy_event_written(tmp_path):
+    emitter = EventEmitter(tmp_path / "events.sqlite")
+    event = EventV1(
+        event_type=EventType.DELIVERY_POLICY_APPLIED,
+        ts_utc=time.time(),
+        account_id="acc",
+        entity_id=None,
+        email_id=1,
+        payload={"mode": "IMMEDIATE", "reason_codes": ["critical_risk"]},
+    )
+    assert emitter.emit(event) is True
+    with sqlite3.connect(tmp_path / "events.sqlite") as conn:
+        row = conn.execute(
+            "SELECT event_type FROM events_v1 WHERE event_type = ?",
+            (EventType.DELIVERY_POLICY_APPLIED.value,),
+        ).fetchone()
+        assert row[0] == EventType.DELIVERY_POLICY_APPLIED.value
+
+
 def test_event_emitter_fail_does_not_break_pipeline(monkeypatch):
     calls = {}
 

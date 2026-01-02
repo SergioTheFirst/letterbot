@@ -38,6 +38,7 @@ class DigestData:
     deferred_total: int
     deferred_attachments_only: int
     deferred_informational: int
+    deferred_items: list[dict[str, str]]
     commitments_pending: int
     commitments_expired: int
     trust_delta: float | None
@@ -126,6 +127,7 @@ def _collect_digest_data(
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
     deferred = analytics.deferred_digest_counts(account_email=account_email)
+    deferred_items = analytics.deferred_digest_items(account_email=account_email, limit=5)
     commitments = analytics.commitment_status_counts(account_email=account_email)
     trust_delta = analytics.latest_trust_score_delta()
     health_delta = analytics.latest_relationship_health_delta()
@@ -196,6 +198,7 @@ def _collect_digest_data(
         deferred_total=int(deferred.get("total", 0)),
         deferred_attachments_only=int(deferred.get("attachments_only", 0)),
         deferred_informational=int(deferred.get("informational", 0)),
+        deferred_items=deferred_items,
         commitments_pending=int(commitments.get("pending", 0)),
         commitments_expired=int(commitments.get("expired", 0)),
         trust_delta=trust_value,
@@ -216,6 +219,14 @@ def _build_digest_text(data: DigestData) -> str:
             f"(вложения: {data.deferred_attachments_only}, "
             f"информационные: {data.deferred_informational})"
         )
+    if data.deferred_items:
+        lines.append("• Отложено для снижения перегрузки:")
+        for item in data.deferred_items:
+            sender = item.get("sender") or ""
+            summary = item.get("summary") or item.get("subject") or ""
+            label_parts = [part for part in [sender, summary] if part]
+            if label_parts:
+                lines.append(f"  - {' — '.join(label_parts)}")
     if data.commitments_pending > 0 or data.commitments_expired > 0:
         lines.append(
             "• Обязательства: "

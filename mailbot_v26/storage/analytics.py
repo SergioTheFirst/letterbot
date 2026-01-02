@@ -737,6 +737,39 @@ class KnowledgeAnalytics:
             "informational": informational,
         }
 
+    def deferred_digest_items(
+        self, *, account_email: str, limit: int = 5
+    ) -> list[dict[str, str]]:
+        if not account_email or limit <= 0:
+            return []
+        try:
+            rows = self._execute_select(
+                """
+                SELECT subject, from_email, received_at, body_summary
+                FROM emails
+                WHERE account_email = ?
+                  AND deferred_for_digest = 1
+                ORDER BY datetime(received_at) DESC
+                LIMIT ?
+                """,
+                (account_email, limit),
+            )
+        except sqlite3.OperationalError:
+            return []
+        items: list[dict[str, str]] = []
+        for row in rows:
+            subject = str(row.get("subject") or "").strip()
+            sender = str(row.get("from_email") or "").strip()
+            summary = str(row.get("body_summary") or "").strip()
+            items.append(
+                {
+                    "subject": subject,
+                    "sender": sender,
+                    "summary": summary,
+                }
+            )
+        return items
+
     def commitment_status_counts(self, *, account_email: str) -> dict[str, int]:
         if not account_email:
             return {"pending": 0, "expired": 0}

@@ -179,6 +179,7 @@ def test_digest_blocks_include_notification_sla() -> None:
         deferred_total=0,
         deferred_attachments_only=0,
         deferred_informational=0,
+        deferred_items=[],
         commitments_pending=0,
         commitments_expired=0,
         trust_delta=None,
@@ -206,4 +207,3 @@ def test_digest_blocks_include_notification_sla() -> None:
         )
     )
     assert "Надёжность уведомлений" in weekly_data
-

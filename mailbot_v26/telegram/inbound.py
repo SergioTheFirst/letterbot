@@ -374,6 +374,7 @@ class TelegramInboundProcessor:
             old_priority=old_priority or None,
             engine="priority_v2_auto",
             source="telegram_inbound",
+            surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
         )
         priority = payload.get("priority") or "🔵"
         self._reply(

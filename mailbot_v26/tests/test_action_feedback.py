@@ -126,3 +126,30 @@ def test_feedback_emits_event_v1(tmp_path) -> None:
     assert payload["old_priority"] == "🟡"
     assert payload["engine"] == "priority_v2_shadow"
     assert payload["source"] == "preview_buttons"
+
+
+def test_surprise_event_emitted_when_enabled(tmp_path) -> None:
+    db_path = tmp_path / "priority_feedback_surprise.sqlite"
+    knowledge_db = KnowledgeDB(db_path)
+    contract_emitter = ContractEventEmitter(db_path)
+
+    record_priority_correction(
+        knowledge_db=knowledge_db,
+        email_id=202,
+        correction="🔴",
+        old_priority="🔵",
+        entity_id="entity-9",
+        sender_email="sender@example.com",
+        account_email="account@example.com",
+        system_mode=OperationalMode.FULL,
+        contract_event_emitter=contract_emitter,
+        engine="priority_v2_shadow",
+        source="preview_buttons",
+        surprise_mode="shadow",
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        event_types = [row[0] for row in conn.execute("SELECT event_type FROM events_v1")]
+
+    assert "priority_correction_recorded" in event_types
+    assert "surprise_detected" in event_types
