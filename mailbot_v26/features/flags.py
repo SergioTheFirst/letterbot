@@ -46,6 +46,7 @@ class FeatureFlags:
         self.ENABLE_SURPRISE_BUDGET = "shadow"
         self.ENABLE_SILENCE_AS_SIGNAL = "shadow"
         self.ENABLE_DEADLOCK_DETECTION = "shadow"
+        self.ENABLE_PREMIUM_PROCESSOR = False
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -103,6 +104,9 @@ class FeatureFlags:
         )
         self.ENABLE_DEADLOCK_DETECTION = self._get_flag_mode(
             parser, "enable_deadlock_detection", default="shadow"
+        )
+        self.ENABLE_PREMIUM_PROCESSOR = self._get_flag(
+            parser, "enable_premium_processor"
         )
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6

@@ -19,6 +19,7 @@ from mailbot_v26.pipeline import processor
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor, process_message
 from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.start import _process_queue
+from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.worker import telegram_sender
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
@@ -252,12 +253,13 @@ def test_telegram_retry_then_success(monkeypatch, tmp_path, caplog) -> None:
     monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
     monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
 
+    flags = FeatureFlags(base_dir=tmp_path)
     with caplog.at_level(logging.INFO):
-        _process_queue(storage, config, processor_instance)
+        _process_queue(storage, config, processor_instance, flags)
         _reset_queue_ready(storage)
-        _process_queue(storage, config, processor_instance)
+        _process_queue(storage, config, processor_instance, flags)
         _reset_queue_ready(storage)
-        _process_queue(storage, config, processor_instance)
+        _process_queue(storage, config, processor_instance, flags)
 
     with storage.conn:
         remaining = storage.conn.execute("SELECT COUNT(*) FROM queue").fetchone()[0]
@@ -290,12 +292,13 @@ def test_telegram_retry_exhausted_marks_failed(monkeypatch, tmp_path, caplog) ->
     monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
     monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
 
+    flags = FeatureFlags(base_dir=tmp_path)
     with caplog.at_level(logging.INFO):
-        _process_queue(storage, config, processor_instance)
+        _process_queue(storage, config, processor_instance, flags)
         _reset_queue_ready(storage)
-        _process_queue(storage, config, processor_instance)
+        _process_queue(storage, config, processor_instance, flags)
         _reset_queue_ready(storage)
-        _process_queue(storage, config, processor_instance)
+        _process_queue(storage, config, processor_instance, flags)
 
     with storage.conn:
         status = storage.conn.execute(

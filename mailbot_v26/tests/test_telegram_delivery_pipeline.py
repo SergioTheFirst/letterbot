@@ -23,6 +23,7 @@ from mailbot_v26.config_loader import (
 )
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
 from mailbot_v26.start import _process_queue
+from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
@@ -111,8 +112,9 @@ def test_telegram_retry_on_http_failure(monkeypatch, tmp_path, caplog: pytest.Lo
     monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
     monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
 
+    flags = FeatureFlags(base_dir=tmp_path)
     with caplog.at_level("INFO"):
-        _process_queue(storage, config, processor)
+        _process_queue(storage, config, processor, flags)
 
     with storage.conn:
         remaining = storage.conn.execute("SELECT COUNT(*) FROM queue").fetchone()[0]
@@ -145,7 +147,8 @@ def test_telegram_delivery_failed_after_max_attempts(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
     monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
 
-    _process_queue(storage, config, processor)
+    flags = FeatureFlags(base_dir=tmp_path)
+    _process_queue(storage, config, processor, flags)
 
     with storage.conn:
         status = storage.conn.execute(
