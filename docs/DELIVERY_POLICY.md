@@ -29,6 +29,7 @@
 - quiet_hours
 - critical_risk
 - high_value
+- weekend_batch
 - attention_debt
 - low_signal
 - default_batch

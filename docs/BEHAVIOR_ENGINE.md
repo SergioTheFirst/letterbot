@@ -22,12 +22,19 @@
 10. Low-value-night: низкая ценность ночью → SILENT_LOG.
 11. Debt-capped: внимание превышено → BATCH_TODAY.
 12. Signal-weak: не хватает фактов → SILENT_LOG.
+13. Weekend-high-value: weekend + high value (non-critical) → BATCH_TODAY.
 
 ## Инварианты
 - Fast First соблюдается для критичных писем.
 - Не увеличивать частоту уведомлений (только снижать/батчить/деферить).
 - Никаких предположений без фактов; если данных нет — нейтральные значения.
 - Нет LLM в принятии решений.
+
+## Shadow detectors (blocked: data prerequisites)
+- Deadlock detector requires a stable thread key in stored data/events:
+  - thread_id / conversation_id, or reliable in_reply_to / references mapping.
+- Silence detector requires explicit "waiting for response" signal and baseline response time.
+  - Example fields: mail_type=waiting_for_them + baseline response buckets.
 
 ## Scoring (v1.5)
 - Value: маппинг приоритета (🔴/🟠/🟡/🔵) + penalties/boosts.

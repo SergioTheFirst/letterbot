@@ -165,6 +165,19 @@ def decide_delivery(
             attention_debt=attention_debt,
         )
 
+    if (
+        context.is_weekend
+        and scores.value >= policy.immediate_value_threshold
+        and scores.risk < policy.critical_risk_threshold
+    ):
+        reason_codes.append("weekend_batch")
+        return DeliveryDecision(
+            mode=DeliveryMode.BATCH_TODAY,
+            reason_codes=reason_codes,
+            thresholds_used=thresholds_used,
+            attention_debt=attention_debt,
+        )
+
     if scores.value >= policy.immediate_value_threshold:
         reason_codes.append("high_value")
         return DeliveryDecision(
