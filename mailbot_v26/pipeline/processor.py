@@ -622,7 +622,7 @@ class MessageProcessor:
             lines.append(f"<i>{safe_summary}</i>")
         if attachments:
             lines.extend(self._render_attachments(attachments))
-        lines.append(f"<i>to: {safe_account_login}</i>")
+        lines.append(f"<i>аккаунт: {safe_account_login}</i>")
         return "\n".join(lines)
 
     @classmethod

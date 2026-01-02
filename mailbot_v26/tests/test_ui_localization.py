@@ -5,7 +5,13 @@ from mailbot_v26.doctor import DoctorEntry, _format_report
 from mailbot_v26.insights.quality_metrics import CountBreakdown, QualityMetricsSnapshot
 from mailbot_v26.observability.notification_sla import ErrorBreakdown, NotificationSLAResult
 from mailbot_v26.pipeline import daily_digest, processor, weekly_digest
-from mailbot_v26.ui.i18n import humanize_domain, humanize_mail_type, humanize_mode, humanize_reason_codes
+from mailbot_v26.ui.i18n import (
+    humanize_domain,
+    humanize_mail_type,
+    humanize_mode,
+    humanize_reason_codes,
+    t,
+)
 
 
 def test_humanize_mail_type_known_and_unknown() -> None:
@@ -114,6 +120,10 @@ def test_weekly_digest_ru_labels() -> None:
     assert "Delivery SLA" not in text
     assert "SLA" not in text
     assert "account(s)" not in text
+
+
+def test_i18n_missing_key_returns_empty_string() -> None:
+    assert t("missing.key", locale="ru") == ""
 
 
 def test_doctor_ru_report_has_ru_context() -> None:
