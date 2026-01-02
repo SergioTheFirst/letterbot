@@ -48,6 +48,11 @@ enable_quality_metrics = false
 enable_priority_v2 = true
 enable_narrative_binding = true
 enable_narrative_patterns = true
+enable_circadian_delivery = true
+enable_attention_debt = true
+enable_surprise_budget = true
+enable_silence_as_signal = shadow
+enable_deadlock_detection = shadow
 
 [daily_digest]
 hour = 9
@@ -57,6 +62,13 @@ minute = 0
 weekday = mon
 hour = 9
 minute = 0
+
+[delivery_policy]
+night_hours = 21-7
+immediate_value_threshold = 60
+batch_value_threshold = 20
+critical_risk_threshold = 80
+max_immediate_per_hour = 5
 
 [auto_priority_gate]
 enabled = false

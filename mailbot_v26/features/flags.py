@@ -41,6 +41,11 @@ class FeatureFlags:
         self.ENABLE_NARRATIVE_BINDING = True
         self.ENABLE_NARRATIVE_PATTERNS = True
         self.ENABLE_NOTIFICATION_SLA = True
+        self.ENABLE_CIRCADIAN_DELIVERY = False
+        self.ENABLE_ATTENTION_DEBT = False
+        self.ENABLE_SURPRISE_BUDGET = "shadow"
+        self.ENABLE_SILENCE_AS_SIGNAL = "shadow"
+        self.ENABLE_DEADLOCK_DETECTION = "shadow"
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -86,6 +91,19 @@ class FeatureFlags:
             self.ENABLE_NOTIFICATION_SLA = self._get_flag(
                 parser, "enable_notification_sla"
             )
+        self.ENABLE_CIRCADIAN_DELIVERY = self._get_flag(
+            parser, "enable_circadian_delivery"
+        )
+        self.ENABLE_ATTENTION_DEBT = self._get_flag(parser, "enable_attention_debt")
+        self.ENABLE_SURPRISE_BUDGET = self._get_flag_mode(
+            parser, "enable_surprise_budget", default="shadow"
+        )
+        self.ENABLE_SILENCE_AS_SIGNAL = self._get_flag_mode(
+            parser, "enable_silence_as_signal", default="shadow"
+        )
+        self.ENABLE_DEADLOCK_DETECTION = self._get_flag_mode(
+            parser, "enable_deadlock_detection", default="shadow"
+        )
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6
         )
@@ -108,6 +126,21 @@ class FeatureFlags:
             return parser.getfloat("features", option, fallback=default)
         except ValueError:
             return default
+
+    @staticmethod
+    def _get_flag_mode(
+        parser: configparser.ConfigParser, option: str, *, default: str
+    ) -> str:
+        raw = parser.get("features", option, fallback="").strip().lower()
+        if not raw:
+            return default
+        if raw in {"shadow", "enabled", "disabled"}:
+            return raw
+        if raw in {"true", "yes", "1", "on"}:
+            return "enabled"
+        if raw in {"false", "no", "0", "off"}:
+            return "disabled"
+        return default
 
 
 __all__ = ["FeatureFlags"]

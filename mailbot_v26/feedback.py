@@ -114,6 +114,7 @@ def record_priority_correction(
     old_priority: str | None = None,
     engine: str | None = None,
     source: str | None = None,
+    surprise_mode: str = "disabled",
 ) -> str:
     feedback_id, inserted = knowledge_db.save_priority_feedback(
         email_id=email_id,
@@ -160,6 +161,23 @@ def record_priority_correction(
                 },
             )
             contract_event_emitter.emit(event)
+            if _surprise_enabled(surprise_mode) and old_priority and correction:
+                contract_event_emitter.emit(
+                    EventV1(
+                        event_type=EventType.SURPRISE_DETECTED,
+                        ts_utc=event_ts,
+                        account_id=account_email or "",
+                        entity_id=entity_id,
+                        email_id=int(str(email_id)) if str(email_id).isdigit() else None,
+                        payload={
+                            "old_priority": old_priority or "",
+                            "new_priority": correction,
+                            "delta": _priority_delta(old_priority, correction),
+                            "engine": engine or "unknown",
+                            "source": source or "unknown",
+                        },
+                    )
+                )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error(
                 "contract_priority_correction_emit_failed",
@@ -176,6 +194,33 @@ def record_priority_correction(
         system_mode=system_mode.value,
     )
     return feedback_id
+
+
+def _priority_delta(old_priority: str, new_priority: str) -> int | None:
+    rank = _priority_rank
+    old_rank = rank(old_priority)
+    new_rank = rank(new_priority)
+    if old_rank is None or new_rank is None:
+        return None
+    return new_rank - old_rank
+
+
+def _priority_rank(value: str) -> int | None:
+    normalized = str(value or "").strip().lower()
+    mapping = {
+        "🔴": 3,
+        "🟠": 2,
+        "🟡": 2,
+        "🔵": 1,
+        "high": 3,
+        "medium": 2,
+        "low": 1,
+    }
+    return mapping.get(normalized)
+
+
+def _surprise_enabled(mode: str) -> bool:
+    return str(mode or "").strip().lower() in {"enabled", "shadow", "true", "on"}
 
 
 __all__ = ["record_action_feedback", "record_priority_correction"]

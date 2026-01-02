@@ -68,6 +68,7 @@ def test_digest_ru_has_no_english_codes() -> None:
         deferred_total=2,
         deferred_attachments_only=1,
         deferred_informational=1,
+        deferred_items=[],
         commitments_pending=1,
         commitments_expired=0,
         trust_delta=0.123,

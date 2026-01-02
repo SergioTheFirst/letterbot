@@ -1,32 +1,30 @@
 Goal (incl. success criteria):
-- Implement Telegram inbound handler (getUpdates polling) with callback handling, Russian command set, durable offset, SQLite feedback persistence/events_v1, override toggles, deterministic no-network tests; pytest -q green.
+- Implement deterministic Behavior/Attention Engine with delivery modes, docs/ADR, config policy, events_v1 integration, TG/digest wiring, and green tests.
 
 Constraints / Assumptions:
 - Pipeline order unchanged (PARSE → LLM → TG; digests as-is).
 - Telegram payload schema for outbound notifications unchanged.
-- GigaChat single-flight only; no parallel calls.
-- Inbound failures must not stop mail processing.
-- Events_v1 is the source of truth for inbound corrections.
+- Fast First preserved for critical deliveries.
+- Events_v1 remains the source of truth.
 - RU-first user-facing responses.
 - No new paid services.
 
 Key decisions:
-- Store inbound offset and runtime overrides in SQLite tables (telegram_inbound_state, runtime_overrides).
-- Apply digest override in scheduler before feature flags.
+- Delivery decisions are deterministic and logged in events_v1 (DELIVERY_POLICY_APPLIED).
+- Quiet hours use local machine time; no Telegram DND detection.
 
 State:
-- Telegram inbound handler is implemented and wired into main loop.
-- Inbound replies and callback help text aligned with RU spec.
+- Behavior/Attention Engine integrated with TG delivery and daily digest.
+- Delivery policy config and feature flags added.
+- Events_v1 extended for behavioral signals.
 
 Done:
-- Added telegram inbound module with polling client, command handling, callback parsing, and feedback persistence.
-- Added runtime overrides store for digest toggles and applied it in digest scheduler.
-- Added doctor read-only check helper for inbound /doctor command.
-- Added inbound state persistence table and runtime overrides table.
-- Added inbound tests (callbacks, commands, dedupe, polling offset).
-- Added digest override test coverage.
-- pytest -q green.
-- Aligned inbound replies and callback help text with RU spec via localization helpers.
+- Added behavior engine module and delivery decision policy (IMMEDIATE/BATCH/DEFER/SILENT).
+- Added delivery policy config + feature flags (circadian, attention debt, surprise budget shadow).
+- Extended events_v1 contract and emissions (delivery policy, attention debt, surprise).
+- Integrated deferral into TG delivery and daily digest with deferred items section.
+- Added ADRs + behavioral docs; updated STRATEGY.
+- Added unit tests for policy config, attention engine, digest deferred items, surprise event.
 
 Now:
 - None.
@@ -38,14 +36,13 @@ Open questions (UNCONFIRMED if needed):
 - None.
 
 Working set (files / tables / tests):
-- mailbot_v26/telegram/inbound.py
-- mailbot_v26/telegram/__init__.py
-- mailbot_v26/storage/runtime_overrides.py
-- mailbot_v26/storage/schema.sql
-- mailbot_v26/storage/knowledge_db.py
-- mailbot_v26/pipeline/digest_scheduler.py
-- mailbot_v26/start.py
-- mailbot_v26/doctor.py
-- mailbot_v26/tests/test_telegram_inbound.py
-- mailbot_v26/tests/test_digest_scheduler.py
-- mailbot_v26/ui/i18n.py
+- mailbot_v26/behavior/attention_engine.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/config/delivery_policy.py
+- mailbot_v26/storage/analytics.py
+- mailbot_v26/pipeline/daily_digest.py
+- mailbot_v26/feedback.py
+- mailbot_v26/events/contract.py
+- mailbot_v26/tests/test_attention_engine.py
+- mailbot_v26/tests/test_delivery_policy_config.py
+- mailbot_v26/tests/test_daily_digest_deferred.py

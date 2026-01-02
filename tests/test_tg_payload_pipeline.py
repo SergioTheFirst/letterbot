@@ -113,6 +113,26 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, caplog):
     monkeypatch.setattr(processor_module, "enqueue_tg", fake_enqueue_tg)
     monkeypatch.setattr(processor_module.EventEmitter, "emit", fake_emit)
     monkeypatch.setattr(processor_module, "run_llm_stage", fake_run_llm_stage)
+    monkeypatch.setattr(
+        processor_module,
+        "feature_flags",
+        SimpleNamespace(
+            ENABLE_AUTO_PRIORITY=False,
+            ENABLE_AUTO_ACTIONS=False,
+            ENABLE_PREVIEW_ACTIONS=False,
+            ENABLE_SHADOW_PERSISTENCE=False,
+            ENABLE_COMMITMENT_TRACKER=False,
+            ENABLE_ANOMALY_ALERTS=False,
+            ENABLE_DAILY_DIGEST=False,
+            ENABLE_WEEKLY_DIGEST=False,
+            ENABLE_HIERARCHICAL_MAIL_TYPES=False,
+            ENABLE_PRIORITY_V2=False,
+            AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.8,
+            AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+            ENABLE_CIRCADIAN_DELIVERY=False,
+            ENABLE_ATTENTION_DEBT=False,
+        ),
+    )
     monkeypatch.setattr(processor_module.context_store, "resolve_sender_entity", lambda **kwargs: None)
     monkeypatch.setattr(processor_module.shadow_priority_engine, "compute", lambda **kwargs: ("🔵", None))
     monkeypatch.setattr(processor_module.shadow_action_engine, "compute", lambda **kwargs: [])
