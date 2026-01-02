@@ -49,3 +49,24 @@ def test_critical_risk_overrides_quiet_hours() -> None:
     )
     decision = decide_delivery(scores=scores, context=context, policy=policy)
     assert decision.mode == DeliveryMode.IMMEDIATE
+
+
+def test_weekend_high_value_batches_non_critical() -> None:
+    policy = DeliveryPolicyConfig()
+    scores = score_email(
+        priority="🔴",
+        commitments_count=0,
+        deadlines_count=0,
+        insight_severity=None,
+        relationship_health_delta=None,
+    )
+    context = DeliveryContext(
+        now_local=datetime.now(timezone.utc),
+        is_weekend=True,
+        is_quiet_hours=False,
+        immediate_sent_last_hour=0,
+        max_immediate_per_hour=policy.max_immediate_per_hour,
+    )
+    decision = decide_delivery(scores=scores, context=context, policy=policy)
+    assert decision.mode == DeliveryMode.BATCH_TODAY
+    assert "weekend_batch" in decision.reason_codes

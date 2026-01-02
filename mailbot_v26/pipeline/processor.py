@@ -3207,79 +3207,90 @@ def process_message(
         getattr(feature_flags, "ENABLE_ATTENTION_DEBT", False)
     )
     behavior_enabled = enable_circadian or enable_attention_debt
+    delivery_decision: DeliveryDecision | None = None
 
     if behavior_enabled:
-        policy_config = load_delivery_policy_config()
-        now_local = received_at.astimezone()
-        is_quiet_hours = enable_circadian and _is_quiet_hours(
-            now_local,
-            start_hour=policy_config.night_start_hour,
-            end_hour=policy_config.night_end_hour,
-        )
-        immediate_sent_last_hour = 0
-        if enable_attention_debt:
-            since_ts = time.time() - 3600
-            immediate_sent_last_hour = _count_recent_immediate_deliveries(
-                account_email=account_email,
-                since_ts=since_ts,
+        try:
+            policy_config = load_delivery_policy_config()
+            now_local = received_at.astimezone()
+            is_quiet_hours = enable_circadian and _is_quiet_hours(
+                now_local,
+                start_hour=policy_config.night_start_hour,
+                end_hour=policy_config.night_end_hour,
             )
-        scores = score_email(
-            priority=priority,
-            commitments_count=len(commitments),
-            deadlines_count=deadlines_count,
-            insight_severity=max_insight_severity(analytics_result.aggregated_insights),
-            relationship_health_delta=relationship_health_delta,
-        )
-        context = DeliveryContext(
-            now_local=now_local,
-            is_weekend=now_local.weekday() >= 5,
-            is_quiet_hours=is_quiet_hours,
-            immediate_sent_last_hour=immediate_sent_last_hour,
-            max_immediate_per_hour=policy_config.max_immediate_per_hour,
-        )
-        delivery_decision = decide_delivery(
-            scores=scores,
-            context=context,
-            policy=policy_config,
-            attention_gate_deferred=attention_gate_deferred,
-        )
-        attention_reason = ",".join(delivery_decision.reason_codes) or attention_reason
+            immediate_sent_last_hour = 0
+            if enable_attention_debt:
+                since_ts = time.time() - 3600
+                immediate_sent_last_hour = _count_recent_immediate_deliveries(
+                    account_email=account_email,
+                    since_ts=since_ts,
+                )
+            scores = score_email(
+                priority=priority,
+                commitments_count=len(commitments),
+                deadlines_count=deadlines_count,
+                insight_severity=max_insight_severity(analytics_result.aggregated_insights),
+                relationship_health_delta=relationship_health_delta,
+            )
+            context = DeliveryContext(
+                now_local=now_local,
+                is_weekend=now_local.weekday() >= 5,
+                is_quiet_hours=is_quiet_hours,
+                immediate_sent_last_hour=immediate_sent_last_hour,
+                max_immediate_per_hour=policy_config.max_immediate_per_hour,
+            )
+            delivery_decision = decide_delivery(
+                scores=scores,
+                context=context,
+                policy=policy_config,
+                attention_gate_deferred=attention_gate_deferred,
+            )
+            attention_reason = ",".join(delivery_decision.reason_codes) or attention_reason
 
-        if enable_attention_debt:
-            debt_bucket = "low"
-            if delivery_decision.attention_debt >= 70:
-                debt_bucket = "high"
-            elif delivery_decision.attention_debt >= 30:
-                debt_bucket = "medium"
+            if enable_attention_debt:
+                debt_bucket = "low"
+                if delivery_decision.attention_debt >= 70:
+                    debt_bucket = "high"
+                elif delivery_decision.attention_debt >= 30:
+                    debt_bucket = "medium"
+                _emit_contract_event(
+                    EventType.ATTENTION_DEBT_UPDATED,
+                    ts_utc=received_at.timestamp(),
+                    account_id=account_email,
+                    entity_id=entity_resolution.entity_id if entity_resolution else None,
+                    email_id=message_id,
+                    payload={
+                        "attention_debt": delivery_decision.attention_debt,
+                        "bucket": debt_bucket,
+                        "immediate_last_hour": immediate_sent_last_hour,
+                        "max_per_hour": policy_config.max_immediate_per_hour,
+                    },
+                )
+
             _emit_contract_event(
-                EventType.ATTENTION_DEBT_UPDATED,
+                EventType.DELIVERY_POLICY_APPLIED,
                 ts_utc=received_at.timestamp(),
                 account_id=account_email,
                 entity_id=entity_resolution.entity_id if entity_resolution else None,
                 email_id=message_id,
                 payload={
+                    "mode": delivery_decision.mode.value,
+                    "reason_codes": delivery_decision.reason_codes,
+                    "thresholds_used": delivery_decision.thresholds_used,
                     "attention_debt": delivery_decision.attention_debt,
-                    "bucket": debt_bucket,
-                    "immediate_last_hour": immediate_sent_last_hour,
-                    "max_per_hour": policy_config.max_immediate_per_hour,
+                    "quiet_hours": is_quiet_hours,
+                    "weekend": context.is_weekend,
                 },
             )
-
-        _emit_contract_event(
-            EventType.DELIVERY_POLICY_APPLIED,
-            ts_utc=received_at.timestamp(),
-            account_id=account_email,
-            entity_id=entity_resolution.entity_id if entity_resolution else None,
-            email_id=message_id,
-            payload={
-                "mode": delivery_decision.mode.value,
-                "reason_codes": delivery_decision.reason_codes,
-                "thresholds_used": delivery_decision.thresholds_used,
-                "attention_debt": delivery_decision.attention_debt,
-                "quiet_hours": is_quiet_hours,
-                "weekend": context.is_weekend,
-            },
-        )
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            logger.error(
+                "[BEHAVIOR-ENGINE] failed",
+                email_id=message_id,
+                error=str(exc),
+            )
+            behavior_enabled = False
+            delivery_decision = None
+            attention_reason = "behavior_failed"
 
     if not behavior_enabled and attention_gate_deferred:
         if analytics_result.email_row_id is None:

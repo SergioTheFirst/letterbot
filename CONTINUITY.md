@@ -8,6 +8,7 @@ Constraints / Assumptions:
 - Events_v1 remains the source of truth.
 - RU-first user-facing responses.
 - No new paid services.
+- No stable thread key (thread_id/conversation_id or reliable in_reply_to mapping) available for shadow detectors.
 
 Key decisions:
 - Delivery decisions are deterministic and logged in events_v1 (DELIVERY_POLICY_APPLIED).
@@ -25,6 +26,8 @@ Done:
 - Integrated deferral into TG delivery and daily digest with deferred items section.
 - Added ADRs + behavioral docs; updated STRATEGY.
 - Added unit tests for policy config, attention engine, digest deferred items, surprise event.
+- Added weekend batching rule for non-critical high-value emails (reason_code=weekend_batch).
+- Added defensive fallback for behavior decision logic failures to preserve legacy delivery flow.
 
 Now:
 - None.
@@ -46,3 +49,6 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_attention_engine.py
 - mailbot_v26/tests/test_delivery_policy_config.py
 - mailbot_v26/tests/test_daily_digest_deferred.py
+- docs/BEHAVIOR_ENGINE.md
+- docs/DELIVERY_POLICY.md
+- docs/ADR/ADR-004.md
