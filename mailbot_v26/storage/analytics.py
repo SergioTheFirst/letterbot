@@ -93,6 +93,72 @@ class KnowledgeAnalytics:
             return 0
         return int(rows[0].get("total") or 0)
 
+    def bootstrap_start_ts(self, *, account_email: str) -> float | None:
+        if not account_email:
+            return None
+        query = """
+        SELECT MIN(ts_utc) AS start_ts
+        FROM events_v1
+        WHERE event_type = ?
+          AND account_id = ?
+        """
+        try:
+            rows = self._execute_select(
+                query,
+                ("email_received", account_email),
+            )
+        except sqlite3.OperationalError:
+            return None
+        if not rows:
+            return None
+        start_ts = rows[0].get("start_ts")
+        try:
+            return float(start_ts) if start_ts is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def bootstrap_samples_count(
+        self,
+        *,
+        account_email: str,
+        start_ts: float,
+    ) -> int:
+        if not account_email:
+            return 0
+        return self._event_count(
+            account_id=account_email,
+            event_type="email_received",
+            since_ts=start_ts,
+        )
+
+    def bootstrap_corrections_count(
+        self,
+        *,
+        account_email: str,
+        since_ts: float,
+    ) -> int:
+        if not account_email:
+            return 0
+        return self._event_count(
+            account_id=account_email,
+            event_type="priority_correction_recorded",
+            since_ts=since_ts,
+        )
+
+    def bootstrap_surprises_count(
+        self,
+        *,
+        account_email: str,
+        since_ts: float,
+    ) -> int:
+        if not account_email:
+            return 0
+        return self._event_count(
+            account_id=account_email,
+            event_type="surprise_detected",
+            since_ts=since_ts,
+        )
+
     def recent_email_events(
         self,
         *,
