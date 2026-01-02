@@ -31,6 +31,7 @@ Done:
 - Added defensive fallback for behavior decision logic failures to preserve legacy delivery flow.
 - Added premium processor feature flag with queue routing and fallback.
 - Added thread key primitives, header plumbing, persistence columns, and tests.
+- Added deadlock detector (shadow-only), policy config, and dedupe-backed events_v1 emission tests.
 
 Now:
 - None.
@@ -43,8 +44,10 @@ Open questions (UNCONFIRMED if needed):
 
 Working set (files / tables / tests):
 - mailbot_v26/behavior/attention_engine.py
+- mailbot_v26/behavior/deadlock_detector.py
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/config/delivery_policy.py
+- mailbot_v26/config/deadlock_policy.py
 - mailbot_v26/storage/analytics.py
 - mailbot_v26/pipeline/daily_digest.py
 - mailbot_v26/feedback.py
@@ -70,3 +73,5 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_threading.py
 - mailbot_v26/tests/test_threading_migration.py
 - mailbot_v26/tests/test_threading_premium_integration.py
+- mailbot_v26/tests/test_deadlock_detector.py
+- mailbot_v26/tests/test_deadlock_premium_hook.py

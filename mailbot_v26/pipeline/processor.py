@@ -19,7 +19,9 @@ from mailbot_v26.behavior.attention_engine import (
     decide_delivery,
     score_email,
 )
+from mailbot_v26.behavior.deadlock_detector import maybe_emit_deadlock
 from mailbot_v26.behavior.threading import compute_thread_key
+from mailbot_v26.config.deadlock_policy import load_deadlock_policy_config
 from mailbot_v26.config.delivery_policy import load_delivery_policy_config
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
@@ -139,6 +141,7 @@ _UI_LOCALE = DEFAULT_LOCALE
 auto_priority_gates = AutoPriorityGates(analytics)
 auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
 auto_priority_gate_config = load_auto_priority_gate_config()
+deadlock_policy = load_deadlock_policy_config()
 auto_priority_gate_state_store = AutoPriorityGateStateStore(knowledge_db)
 auto_priority_quality_gate = AutoPriorityQualityGate(
     analytics=analytics,
@@ -2075,6 +2078,19 @@ def _record_analytics(
             chat_id=telegram_chat_id,
             account_email=account_email,
         )
+        deadlock_mode = getattr(feature_flags, "ENABLE_DEADLOCK_DETECTION", "disabled")
+        if deadlock_mode in {"shadow", "enabled"}:
+            try:
+                maybe_emit_deadlock(
+                    knowledge_db=knowledge_db,
+                    event_emitter=contract_event_emitter,
+                    account_email=account_email,
+                    thread_key=thread_key,
+                    policy=deadlock_policy,
+                    now_ts=received_at.timestamp(),
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("deadlock_detection_failed", error=str(exc))
     except Exception as exc:
         change = system_health.update_component(
             "CRM",
