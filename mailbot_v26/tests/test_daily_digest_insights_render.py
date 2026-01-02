@@ -25,6 +25,9 @@ def _base_digest_kwargs() -> dict[str, object]:
         digest_insights_enabled=True,
         digest_insights_max_items=3,
         digest_action_templates_enabled=False,
+        trust_bootstrap_snapshot=None,
+        trust_bootstrap_min_samples=0,
+        trust_bootstrap_hide_action_templates=False,
     )
 
 
@@ -140,3 +143,63 @@ def test_daily_digest_insights_action_templates_absent_when_disabled() -> None:
     assert "пинговать" not in text
     assert "Deadlock" not in text
     assert "Silence" not in text
+
+
+def test_daily_digest_bootstrap_block_and_templates_hidden() -> None:
+    snapshot = daily_digest.TrustBootstrapSnapshot(
+        start_ts=1.0,
+        days_since_start=1.0,
+        samples_count=12,
+        corrections_count=0,
+        surprises_count=0,
+        surprise_rate=None,
+        active=True,
+    )
+    data = daily_digest.DigestData(
+        **{
+            **_base_digest_kwargs(),
+            "trust_bootstrap_snapshot": snapshot,
+            "trust_bootstrap_min_samples": 50,
+            "digest_action_templates_enabled": True,
+            "deadlock_insights": [
+                {"from_email": "boss@example.com", "subject": "Счёт"}
+            ],
+            "silence_insights": [
+                {"contact": "client@example.com", "days_silent": 5}
+            ],
+        }
+    )
+    text = daily_digest._build_digest_text(data)
+    assert "\U0001F393 <b>Режим обучения</b>" in text
+    assert "Прогресс: 12/50" in text
+    assert "Текст:" not in text
+    assert "→" not in text
+
+
+def test_daily_digest_bootstrap_inactive_keeps_templates() -> None:
+    snapshot = daily_digest.TrustBootstrapSnapshot(
+        start_ts=1.0,
+        days_since_start=20.0,
+        samples_count=60,
+        corrections_count=2,
+        surprises_count=0,
+        surprise_rate=0.0,
+        active=False,
+    )
+    data = daily_digest.DigestData(
+        **{
+            **_base_digest_kwargs(),
+            "trust_bootstrap_snapshot": snapshot,
+            "trust_bootstrap_min_samples": 50,
+            "digest_action_templates_enabled": True,
+            "deadlock_insights": [
+                {"from_email": "boss@example.com", "subject": "Счёт"}
+            ],
+            "silence_insights": [
+                {"contact": "client@example.com", "days_silent": 5}
+            ],
+        }
+    )
+    text = daily_digest._build_digest_text(data)
+    assert "\U0001F393 <b>Режим обучения</b>" not in text
+    assert "Текст:" in text

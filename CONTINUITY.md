@@ -33,6 +33,7 @@ Done:
 - Added thread key primitives, header plumbing, persistence columns, and tests.
 - Added deadlock detector (shadow-only), policy config, and dedupe-backed events_v1 emission tests.
 - Added silence-as-signal detector (shadow-only), config policy, digest hook, and tests.
+- 2026-01-02: trust bootstrapping (digest-only) behind enable_trust_bootstrap.
 
 Now:
 - None.
@@ -47,10 +48,12 @@ Working set (files / tables / tests):
 - mailbot_v26/behavior/attention_engine.py
 - mailbot_v26/behavior/deadlock_detector.py
 - mailbot_v26/behavior/silence_detector.py
+- mailbot_v26/behavior/trust_bootstrap.py
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/config/delivery_policy.py
 - mailbot_v26/config/deadlock_policy.py
 - mailbot_v26/config/silence_policy.py
+- mailbot_v26/config/trust_bootstrap.py
 - mailbot_v26/storage/analytics.py
 - mailbot_v26/pipeline/daily_digest.py
 - mailbot_v26/pipeline/digest_scheduler.py
@@ -81,6 +84,7 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_deadlock_premium_hook.py
 - mailbot_v26/tests/test_silence_detector.py
 - mailbot_v26/tests/test_silence_digest_hook.py
+- mailbot_v26/tests/test_trust_bootstrap_metrics.py
 2026-01-02: daily digest insights (deadlock+silence) behind enable_digest_insights.
 2026-01-02: daily behavioral metrics block behind enable_behavior_metrics_digest.
 2026-01-02: digest insight labels localized; i18n missing-key fallback returns empty.

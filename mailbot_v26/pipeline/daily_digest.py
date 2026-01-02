@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from mailbot_v26.behavior.trust_bootstrap import (
+    TrustBootstrapSnapshot,
+    compute_trust_bootstrap_snapshot,
+)
+from mailbot_v26.config.trust_bootstrap import TrustBootstrapConfig
 from mailbot_v26.insights.anomaly_engine import compute_anomalies
 from mailbot_v26.insights.attention_economics import (
     AttentionEconomicsResult,
@@ -35,6 +40,8 @@ _RELATIONSHIP_HEALTH_DELTA_THRESHOLD = 5.0
 _WARNING_EMOJI = "\u26a0\ufe0f"
 _TARGET_EMOJI = "\U0001F3AF"
 _CHART_EMOJI = "\U0001F4C8"
+_LEARNING_EMOJI = "\U0001F393"
+_OBSERVATION_EMOJI = "\U0001F50E"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +66,9 @@ class DigestData:
     behavior_metrics: dict[str, object] | None = None
     behavior_metrics_enabled: bool = False
     behavior_metrics_window_days: int = 7
+    trust_bootstrap_snapshot: TrustBootstrapSnapshot | None = None
+    trust_bootstrap_min_samples: int = 0
+    trust_bootstrap_hide_action_templates: bool = False
 
 
 def _collect_anomaly_alerts(
@@ -141,6 +151,8 @@ def _collect_digest_data(
     include_digest_action_templates: bool = False,
     include_behavior_metrics_digest: bool = False,
     behavior_metrics_window_days: int = 7,
+    include_trust_bootstrap: bool = False,
+    trust_bootstrap_config: TrustBootstrapConfig | None = None,
     now: datetime | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
@@ -242,6 +254,35 @@ def _collect_digest_data(
         if metrics:
             behavior_metrics = metrics
 
+    trust_bootstrap_snapshot: TrustBootstrapSnapshot | None = None
+    trust_bootstrap_min_samples = 0
+    trust_bootstrap_hide_action_templates = False
+    if include_trust_bootstrap:
+        resolved_config = trust_bootstrap_config or TrustBootstrapConfig()
+        trust_bootstrap_min_samples = resolved_config.min_samples
+        trust_bootstrap_hide_action_templates = (
+            resolved_config.hide_action_templates_until_ready
+        )
+        try:
+            trust_bootstrap_snapshot = compute_trust_bootstrap_snapshot(
+                analytics=analytics,
+                account_email=account_email,
+                now_ts=(now or datetime.now(timezone.utc)).timestamp(),
+                config=resolved_config,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("trust_bootstrap_snapshot_failed", error=str(exc))
+            trust_bootstrap_snapshot = None
+
+    digest_action_templates_enabled = bool(include_digest_action_templates)
+    if (
+        digest_action_templates_enabled
+        and trust_bootstrap_snapshot
+        and trust_bootstrap_snapshot.active
+        and trust_bootstrap_hide_action_templates
+    ):
+        digest_action_templates_enabled = False
+
     return DigestData(
         deferred_total=int(deferred.get("total", 0)),
         deferred_attachments_only=int(deferred.get("attachments_only", 0)),
@@ -259,15 +300,27 @@ def _collect_digest_data(
         silence_insights=silence_insights,
         digest_insights_enabled=insights_enabled,
         digest_insights_max_items=insights_max_items,
-        digest_action_templates_enabled=bool(include_digest_action_templates),
+        digest_action_templates_enabled=digest_action_templates_enabled,
         behavior_metrics=behavior_metrics,
         behavior_metrics_enabled=bool(include_behavior_metrics_digest),
         behavior_metrics_window_days=behavior_metrics_window,
+        trust_bootstrap_snapshot=trust_bootstrap_snapshot,
+        trust_bootstrap_min_samples=trust_bootstrap_min_samples,
+        trust_bootstrap_hide_action_templates=trust_bootstrap_hide_action_templates,
     )
 
 
 def _build_digest_text(data: DigestData) -> str:
     lines = [t("digest.daily", locale=DEFAULT_LOCALE)]
+    if data.trust_bootstrap_snapshot and data.trust_bootstrap_snapshot.active:
+        lines.append(f"{_LEARNING_EMOJI} <b>Режим обучения</b>")
+        lines.append(
+            "• Прогресс: "
+            f"{data.trust_bootstrap_snapshot.samples_count}/{data.trust_bootstrap_min_samples}"
+        )
+        lines.append(
+            "• Я пока показываю факты и наблюдения — без «готовых действий»."
+        )
     if data.deferred_total > 0:
         lines.append(
             "• Отложено писем: "
@@ -334,26 +387,41 @@ def _build_digest_text(data: DigestData) -> str:
     if data.digest_insights_enabled and data.digest_insights_max_items > 0:
         insights_lines: list[str] = []
         insight_count = 0
+        action_mode = not (
+            data.trust_bootstrap_snapshot
+            and data.trust_bootstrap_snapshot.active
+        )
+        insights_header = (
+            f"{_WARNING_EMOJI} <b>ТРЕБУЕТ ВНИМАНИЯ</b>"
+            if action_mode
+            else f"{_OBSERVATION_EMOJI} <b>НАБЛЮДЕНИЯ</b>"
+        )
         for item in data.deadlock_insights:
             if insight_count >= data.digest_insights_max_items:
                 break
             label = _format_deadlock_label(item)
             if not label:
                 continue
-            insights_lines.append(
-                "• Застой в переписке: "
-                f"{label} "
-                f"→ {_TARGET_EMOJI} Предложить созвон (15 мин)"
-            )
-            if data.digest_action_templates_enabled:
-                template = action_templates.template_for_deadlock(
-                    from_email=str(item.get("from_email") or "") or None,
-                    subject=str(item.get("subject") or "") or None,
+            if action_mode:
+                insights_lines.append(
+                    "• Застой в переписке: "
+                    f"{label} "
+                    f"→ {_TARGET_EMOJI} Предложить созвон (15 мин)"
                 )
-                if template:
-                    insights_lines.append(
-                        f"  <i>Текст: {escape_tg_html(template)}</i>"
+                if data.digest_action_templates_enabled:
+                    template = action_templates.template_for_deadlock(
+                        from_email=str(item.get("from_email") or "") or None,
+                        subject=str(item.get("subject") or "") or None,
                     )
+                    if template:
+                        insights_lines.append(
+                            f"  <i>Текст: {escape_tg_html(template)}</i>"
+                        )
+            else:
+                insights_lines.append(
+                    "• Наблюдение: "
+                    f"застой в переписке — {label}"
+                )
             insight_count += 1
         for item in data.silence_insights:
             if insight_count >= data.digest_insights_max_items:
@@ -362,20 +430,26 @@ def _build_digest_text(data: DigestData) -> str:
             if not contact:
                 continue
             days = _format_silence_days_label(item)
-            insights_lines.append(
-                "• Нет ответа: "
-                f"{contact} — {days} "
-                f"→ {_TARGET_EMOJI} Вежливо напомнить сегодня"
-            )
-            if data.digest_action_templates_enabled:
-                template = action_templates.template_for_silence(contact=contact)
-                if template:
-                    insights_lines.append(
-                        f"  <i>Текст: {escape_tg_html(template)}</i>"
-                    )
+            if action_mode:
+                insights_lines.append(
+                    "• Нет ответа: "
+                    f"{contact} — {days} "
+                    f"→ {_TARGET_EMOJI} Вежливо напомнить сегодня"
+                )
+                if data.digest_action_templates_enabled:
+                    template = action_templates.template_for_silence(contact=contact)
+                    if template:
+                        insights_lines.append(
+                            f"  <i>Текст: {escape_tg_html(template)}</i>"
+                        )
+            else:
+                insights_lines.append(
+                    "• Наблюдение: "
+                    f"нет ответа — {contact}, {days}"
+                )
             insight_count += 1
         if insights_lines:
-            lines.append(f"{_WARNING_EMOJI} <b>ТРЕБУЕТ ВНИМАНИЯ</b>")
+            lines.append(insights_header)
             lines.extend(insights_lines)
     if data.behavior_metrics_enabled and data.behavior_metrics:
         metrics = data.behavior_metrics
