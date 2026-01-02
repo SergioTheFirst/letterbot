@@ -78,6 +78,12 @@ min_samples = 30
 max_correction_rate = 0.15
 cooldown_hours = 24
 
+[deadlock_policy]
+window_days = 5
+min_messages = 10
+cooldown_hours = 24
+max_per_run = 20
+
 [trust]
 half_life_days = 90
 weight_commitment = 0.5
