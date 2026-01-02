@@ -27,6 +27,7 @@ class DeliveryContext:
     now_local: datetime
     is_weekend: bool
     is_quiet_hours: bool
+    is_focus_hours: bool
     immediate_sent_last_hour: int
     max_immediate_per_hour: int
 
@@ -123,6 +124,24 @@ def decide_delivery(
         reason_codes.append("critical_risk")
         return DeliveryDecision(
             mode=DeliveryMode.IMMEDIATE,
+            reason_codes=reason_codes,
+            thresholds_used=thresholds_used,
+            attention_debt=attention_debt,
+        )
+
+    if context.is_focus_hours:
+        reason_codes.append("focus_hours")
+        if context.is_quiet_hours:
+            reason_codes.append("defer_to_morning")
+            return DeliveryDecision(
+                mode=DeliveryMode.DEFER_TO_MORNING,
+                reason_codes=reason_codes,
+                thresholds_used=thresholds_used,
+                attention_debt=attention_debt,
+            )
+        reason_codes.append("default_batch")
+        return DeliveryDecision(
+            mode=DeliveryMode.BATCH_TODAY,
             reason_codes=reason_codes,
             thresholds_used=thresholds_used,
             attention_debt=attention_debt,

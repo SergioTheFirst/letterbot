@@ -24,6 +24,7 @@ def test_quiet_hours_defers_non_critical() -> None:
         now_local=datetime.now(timezone.utc),
         is_weekend=False,
         is_quiet_hours=True,
+        is_focus_hours=False,
         immediate_sent_last_hour=0,
         max_immediate_per_hour=policy.max_immediate_per_hour,
     )
@@ -44,6 +45,7 @@ def test_critical_risk_overrides_quiet_hours() -> None:
         now_local=datetime.now(timezone.utc),
         is_weekend=False,
         is_quiet_hours=True,
+        is_focus_hours=False,
         immediate_sent_last_hour=0,
         max_immediate_per_hour=policy.max_immediate_per_hour,
     )
@@ -64,6 +66,7 @@ def test_weekend_high_value_batches_non_critical() -> None:
         now_local=datetime.now(timezone.utc),
         is_weekend=True,
         is_quiet_hours=False,
+        is_focus_hours=False,
         immediate_sent_last_hour=0,
         max_immediate_per_hour=policy.max_immediate_per_hour,
     )
