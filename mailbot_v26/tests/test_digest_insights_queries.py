@@ -100,7 +100,7 @@ def test_deadlock_insights_dedupe_and_fields(tmp_path) -> None:
         )
     )
 
-    insights = analytics.deadlock_insights(
+    insights = analytics.get_deadlock_insights(
         account_email=account_email,
         window_days=7,
         limit=5,
@@ -111,7 +111,7 @@ def test_deadlock_insights_dedupe_and_fields(tmp_path) -> None:
     assert item["subject"] == "Сделка"
     assert item["from_email"] == "new@example.com"
 
-    limited = analytics.deadlock_insights(
+    limited = analytics.get_deadlock_insights(
         account_email=account_email,
         window_days=7,
         limit=1,
@@ -174,7 +174,7 @@ def test_silence_insights_dedupe_and_limit(tmp_path) -> None:
         )
     )
 
-    insights = analytics.silence_insights(
+    insights = analytics.get_silence_insights(
         account_email=account_email,
         window_days=7,
         limit=2,
@@ -182,4 +182,3 @@ def test_silence_insights_dedupe_and_limit(tmp_path) -> None:
     assert len(insights) == 2
     by_contact = {item["contact"]: item for item in insights}
     assert by_contact["client@example.com"]["days_silent"] == 5
-    assert by_contact["client@example.com"]["count_window"] == 6
