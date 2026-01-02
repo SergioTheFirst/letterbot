@@ -31,6 +31,8 @@ logger = get_logger("mailbot")
 
 _TRUST_DELTA_THRESHOLD = 0.0
 _RELATIONSHIP_HEALTH_DELTA_THRESHOLD = 5.0
+_WARNING_EMOJI = "\u26a0\ufe0f"
+_TARGET_EMOJI = "\U0001F3AF"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +49,10 @@ class DigestData:
     attention_economics: AttentionEconomicsResult | None
     quality_metrics: QualityMetricsSnapshot | None
     notification_sla: NotificationSLAResult | None
+    deadlock_insights: list[dict[str, object]]
+    silence_insights: list[dict[str, object]]
+    digest_insights_enabled: bool
+    digest_insights_max_items: int
 
 
 def _collect_anomaly_alerts(
@@ -123,6 +129,9 @@ def _collect_digest_data(
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
     include_notification_sla: bool = False,
+    include_digest_insights: bool = False,
+    digest_insights_window_days: int = 7,
+    digest_insights_max_items: int = 3,
     now: datetime | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
@@ -194,6 +203,22 @@ def _collect_digest_data(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("notification_sla_digest_failed", error=str(exc))
 
+    deadlock_insights: list[dict[str, object]] = []
+    silence_insights: list[dict[str, object]] = []
+    insights_enabled = bool(include_digest_insights)
+    insights_max_items = max(0, int(digest_insights_max_items))
+    if insights_enabled and insights_max_items > 0:
+        deadlock_insights = analytics.deadlock_insights(
+            account_email=account_email,
+            window_days=max(1, int(digest_insights_window_days)),
+            limit=insights_max_items,
+        )
+        silence_insights = analytics.silence_insights(
+            account_email=account_email,
+            window_days=max(1, int(digest_insights_window_days)),
+            limit=insights_max_items,
+        )
+
     return DigestData(
         deferred_total=int(deferred.get("total", 0)),
         deferred_attachments_only=int(deferred.get("attachments_only", 0)),
@@ -207,6 +232,10 @@ def _collect_digest_data(
         attention_economics=attention_economics,
         quality_metrics=quality_metrics,
         notification_sla=notification_sla,
+        deadlock_insights=deadlock_insights,
+        silence_insights=silence_insights,
+        digest_insights_enabled=insights_enabled,
+        digest_insights_max_items=insights_max_items,
     )
 
 
@@ -275,7 +304,59 @@ def _build_digest_text(data: DigestData) -> str:
     if data.attention_economics is not None:
         lines.append("")
         lines.extend(format_attention_block(data.attention_economics))
+    if data.digest_insights_enabled and data.digest_insights_max_items > 0:
+        insights_lines: list[str] = []
+        for item in data.deadlock_insights:
+            if len(insights_lines) >= data.digest_insights_max_items:
+                break
+            label = _format_deadlock_label(item)
+            if not label:
+                continue
+            insights_lines.append(
+                "• Deadlock: "
+                f"{label} "
+                f"→ {_TARGET_EMOJI} Предложить созвон (15 мин)"
+            )
+        for item in data.silence_insights:
+            if len(insights_lines) >= data.digest_insights_max_items:
+                break
+            contact = _format_silence_contact(item)
+            if not contact:
+                continue
+            days = _format_silence_days(item)
+            insights_lines.append(
+                "• Silence: "
+                f"{contact} молчит {days}д "
+                f"→ {_TARGET_EMOJI} Пинговать сегодня"
+            )
+        if insights_lines:
+            lines.append(f"{_WARNING_EMOJI} <b>ТРЕБУЕТ ВНИМАНИЯ</b>")
+            lines.extend(insights_lines)
     return "\n".join(lines)
+
+
+def _format_deadlock_label(item: dict[str, object]) -> str:
+    sender = str(item.get("from_email") or "").strip()
+    subject = str(item.get("subject") or "").strip()
+    parts = [part for part in [sender, subject] if part]
+    if not parts:
+        return ""
+    return " — ".join(escape_tg_html(part) for part in parts)
+
+
+def _format_silence_contact(item: dict[str, object]) -> str:
+    contact = str(item.get("contact") or "").strip()
+    if not contact:
+        return ""
+    return escape_tg_html(contact)
+
+
+def _format_silence_days(item: dict[str, object]) -> int:
+    raw = item.get("days_silent")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _has_digest_content(data: DigestData) -> bool:
@@ -293,6 +374,9 @@ def _has_digest_content(data: DigestData) -> bool:
         return True
     if data.attention_economics is not None:
         return True
+    if data.digest_insights_enabled and data.digest_insights_max_items > 0:
+        if data.deadlock_insights or data.silence_insights:
+            return True
     return False
 
 

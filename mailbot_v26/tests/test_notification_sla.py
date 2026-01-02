@@ -188,6 +188,10 @@ def test_digest_blocks_include_notification_sla() -> None:
         attention_economics=None,
         quality_metrics=None,
         notification_sla=sla,
+        deadlock_insights=[],
+        silence_insights=[],
+        digest_insights_enabled=False,
+        digest_insights_max_items=0,
     )
     text = daily_digest._build_digest_text(digest_data)
     assert "Надёжность уведомлений" in text
