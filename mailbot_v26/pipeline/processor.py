@@ -23,6 +23,10 @@ from mailbot_v26.behavior.deadlock_detector import maybe_emit_deadlock
 from mailbot_v26.behavior.threading import compute_thread_key
 from mailbot_v26.config.deadlock_policy import load_deadlock_policy_config
 from mailbot_v26.config.delivery_policy import load_delivery_policy_config
+from mailbot_v26.config.flow_protection import (
+    FlowProtectionConfig,
+    load_flow_protection_config,
+)
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
 from mailbot_v26.features import FeatureFlags
@@ -241,6 +245,38 @@ def _is_quiet_hours(now_local: datetime, *, start_hour: int, end_hour: int) -> b
     if start_hour < end_hour:
         return start_hour <= hour < end_hour
     return hour >= start_hour or hour < end_hour
+
+
+def _build_delivery_context(
+    *,
+    now_local: datetime,
+    policy_config: DeliveryPolicyConfig,
+    flow_config: FlowProtectionConfig | None,
+    enable_circadian: bool,
+    enable_flow_protection: bool,
+    immediate_sent_last_hour: int,
+) -> DeliveryContext:
+    is_quiet_hours = enable_circadian and _is_quiet_hours(
+        now_local,
+        start_hour=policy_config.night_start_hour,
+        end_hour=policy_config.night_end_hour,
+    )
+    is_focus_hours = False
+    if enable_flow_protection:
+        resolved_flow_config = flow_config or FlowProtectionConfig()
+        is_focus_hours = _is_quiet_hours(
+            now_local,
+            start_hour=resolved_flow_config.focus_start_hour,
+            end_hour=resolved_flow_config.focus_end_hour,
+        )
+    return DeliveryContext(
+        now_local=now_local,
+        is_weekend=now_local.weekday() >= 5,
+        is_quiet_hours=is_quiet_hours,
+        is_focus_hours=is_focus_hours,
+        immediate_sent_last_hour=immediate_sent_last_hour,
+        max_immediate_per_hour=policy_config.max_immediate_per_hour,
+    )
 
 
 def _count_recent_immediate_deliveries(
@@ -3247,21 +3283,22 @@ def process_message(
     enable_circadian = bool(
         getattr(feature_flags, "ENABLE_CIRCADIAN_DELIVERY", False)
     )
+    enable_flow_protection = bool(
+        getattr(feature_flags, "ENABLE_FLOW_PROTECTION", False)
+    )
     enable_attention_debt = bool(
         getattr(feature_flags, "ENABLE_ATTENTION_DEBT", False)
     )
-    behavior_enabled = enable_circadian or enable_attention_debt
+    behavior_enabled = enable_circadian or enable_attention_debt or enable_flow_protection
     delivery_decision: DeliveryDecision | None = None
 
     if behavior_enabled:
         try:
             policy_config = load_delivery_policy_config()
-            now_local = received_at.astimezone()
-            is_quiet_hours = enable_circadian and _is_quiet_hours(
-                now_local,
-                start_hour=policy_config.night_start_hour,
-                end_hour=policy_config.night_end_hour,
+            flow_config = (
+                load_flow_protection_config() if enable_flow_protection else None
             )
+            now_local = received_at.astimezone()
             immediate_sent_last_hour = 0
             if enable_attention_debt:
                 since_ts = time.time() - 3600
@@ -3276,12 +3313,13 @@ def process_message(
                 insight_severity=max_insight_severity(analytics_result.aggregated_insights),
                 relationship_health_delta=relationship_health_delta,
             )
-            context = DeliveryContext(
+            context = _build_delivery_context(
                 now_local=now_local,
-                is_weekend=now_local.weekday() >= 5,
-                is_quiet_hours=is_quiet_hours,
+                policy_config=policy_config,
+                flow_config=flow_config,
+                enable_circadian=enable_circadian,
+                enable_flow_protection=enable_flow_protection,
                 immediate_sent_last_hour=immediate_sent_last_hour,
-                max_immediate_per_hour=policy_config.max_immediate_per_hour,
             )
             delivery_decision = decide_delivery(
                 scores=scores,
@@ -3322,7 +3360,7 @@ def process_message(
                     "reason_codes": delivery_decision.reason_codes,
                     "thresholds_used": delivery_decision.thresholds_used,
                     "attention_debt": delivery_decision.attention_debt,
-                    "quiet_hours": is_quiet_hours,
+                    "quiet_hours": context.is_quiet_hours,
                     "weekend": context.is_weekend,
                 },
             )

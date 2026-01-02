@@ -90,3 +90,4 @@ Working set (files / tables / tests):
 2026-01-02: digest insight labels localized; i18n missing-key fallback returns empty.
 2026-01-02: digest action templates behind enable_digest_action_templates.
 2026-01-03: weekly accuracy report behind enable_weekly_accuracy_report.
+2026-01-02: flow protection (focus hours) behind enable_flow_protection.

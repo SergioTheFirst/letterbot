@@ -52,6 +52,7 @@ enable_priority_v2 = true
 enable_narrative_binding = true
 enable_narrative_patterns = true
 enable_circadian_delivery = true
+enable_flow_protection = false
 enable_attention_debt = true
 enable_surprise_budget = true
 enable_silence_as_signal = shadow
@@ -88,6 +89,9 @@ immediate_value_threshold = 60
 batch_value_threshold = 20
 critical_risk_threshold = 80
 max_immediate_per_hour = 5
+
+[flow_protection]
+focus_hours = 9-12
 
 [auto_priority_gate]
 enabled = false

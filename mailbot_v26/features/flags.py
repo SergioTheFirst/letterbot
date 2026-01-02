@@ -44,6 +44,7 @@ class FeatureFlags:
         self.ENABLE_NARRATIVE_PATTERNS = True
         self.ENABLE_NOTIFICATION_SLA = True
         self.ENABLE_CIRCADIAN_DELIVERY = False
+        self.ENABLE_FLOW_PROTECTION = False
         self.ENABLE_ATTENTION_DEBT = False
         self.ENABLE_SURPRISE_BUDGET = "shadow"
         self.ENABLE_SILENCE_AS_SIGNAL = "shadow"
@@ -105,6 +106,9 @@ class FeatureFlags:
             )
         self.ENABLE_CIRCADIAN_DELIVERY = self._get_flag(
             parser, "enable_circadian_delivery"
+        )
+        self.ENABLE_FLOW_PROTECTION = self._get_flag(
+            parser, "enable_flow_protection"
         )
         self.ENABLE_ATTENTION_DEBT = self._get_flag(parser, "enable_attention_debt")
         self.ENABLE_SURPRISE_BUDGET = self._get_flag_mode(

@@ -43,6 +43,7 @@ def test_feature_flags_shadow_modes(tmp_path: Path) -> None:
         """
 [features]
 enable_circadian_delivery = true
+enable_flow_protection = true
 enable_attention_debt = true
 enable_surprise_budget = shadow
 enable_silence_as_signal = shadow
@@ -51,6 +52,7 @@ enable_deadlock_detection = shadow
     )
     flags = FeatureFlags(base_dir=config_dir)
     assert flags.ENABLE_CIRCADIAN_DELIVERY is True
+    assert flags.ENABLE_FLOW_PROTECTION is True
     assert flags.ENABLE_ATTENTION_DEBT is True
     assert flags.ENABLE_SURPRISE_BUDGET == "shadow"
     assert flags.ENABLE_SILENCE_AS_SIGNAL == "shadow"
