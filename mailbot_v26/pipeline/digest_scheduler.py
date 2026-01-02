@@ -234,6 +234,10 @@ def _has_weekly_content(data: weekly_digest.WeeklyDigestData) -> bool:
         or data.anomaly_alerts
         or data.quality_metrics is not None
         or data.attention_economics is not None
+        or (
+            data.weekly_accuracy_report is not None
+            and int(data.weekly_accuracy_report.get("priority_corrections") or 0) > 0
+        )
     )
 
 
@@ -376,6 +380,7 @@ def run_digest_tick(
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                     include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
                     include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
+                    include_weekly_accuracy_report=flags.ENABLE_WEEKLY_ACCURACY_REPORT,
                 )
             else:
                 logger.info(
@@ -416,6 +421,7 @@ def _run_daily_digest(
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
+    include_weekly_accuracy_report: bool = False,
 ) -> None:
     if not _is_daily_due(now, config):
         logger.info(
@@ -641,6 +647,7 @@ def _run_weekly_digest(
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
         include_quality_metrics=include_quality_metrics,
+        include_weekly_accuracy_report=include_weekly_accuracy_report,
         event_emitter=storage.event_emitter,
         contract_event_emitter=storage.contract_event_emitter,
         now=now,

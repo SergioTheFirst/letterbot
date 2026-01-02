@@ -33,6 +33,7 @@ class FeatureFlags:
         self.ENABLE_COMMITMENT_TRACKER = False
         self.ENABLE_DAILY_DIGEST = False
         self.ENABLE_WEEKLY_DIGEST = False
+        self.ENABLE_WEEKLY_ACCURACY_REPORT = False
         self.ENABLE_DIGEST_INSIGHTS = False
         self.ENABLE_ANOMALY_ALERTS = False
         self.ENABLE_ATTENTION_ECONOMICS = False
@@ -72,6 +73,9 @@ class FeatureFlags:
         self.ENABLE_COMMITMENT_TRACKER = self._get_flag(parser, "enable_commitment_tracker")
         self.ENABLE_DAILY_DIGEST = self._get_flag(parser, "enable_daily_digest")
         self.ENABLE_WEEKLY_DIGEST = self._get_flag(parser, "enable_weekly_digest")
+        self.ENABLE_WEEKLY_ACCURACY_REPORT = self._get_flag(
+            parser, "enable_weekly_accuracy_report"
+        )
         self.ENABLE_DIGEST_INSIGHTS = self._get_flag(
             parser, "enable_digest_insights"
         )

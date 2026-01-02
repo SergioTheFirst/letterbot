@@ -1132,6 +1132,38 @@ class KnowledgeAnalytics:
             "deferred": int(row.get("deferred") or 0),
         }
 
+    def weekly_accuracy_report(
+        self, *, account_email: str, days: int = 7
+    ) -> dict[str, int | float]:
+        if not account_email:
+            return {"emails_received": 0, "priority_corrections": 0, "surprises": 0}
+        since_ts = self._window_start_ts(days)
+        emails_received = self._event_count(
+            account_id=account_email,
+            event_type="email_received",
+            since_ts=since_ts,
+        )
+        corrections_total = self._event_count(
+            account_id=account_email,
+            event_type="priority_correction_recorded",
+            since_ts=since_ts,
+        )
+        surprises_total = self._event_count(
+            account_id=account_email,
+            event_type="surprise_detected",
+            since_ts=since_ts,
+        )
+        report: dict[str, int | float] = {
+            "emails_received": int(emails_received),
+            "priority_corrections": int(corrections_total),
+            "surprises": int(surprises_total),
+        }
+        if corrections_total > 0:
+            surprise_rate = surprises_total / corrections_total
+            report["surprise_rate"] = surprise_rate
+            report["accuracy_pct"] = round((1 - surprise_rate) * 100)
+        return report
+
     def weekly_attention_entities(
         self, *, account_email: str, days: int = 7
     ) -> list[dict[str, object]]:
