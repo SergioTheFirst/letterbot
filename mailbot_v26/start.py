@@ -6,7 +6,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from email import message_from_bytes
-from email.utils import parseaddr
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -41,6 +41,7 @@ from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthchec
 from mailbot_v26.imap_client import ResilientIMAP
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor, event_emitter
+from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.pipeline import processor as processor_module
 from mailbot_v26.pipeline.digest_scheduler import DigestStorage, run_digest_tick
@@ -110,6 +111,74 @@ def _build_system_payload(
         html_text=telegram_safe(text),
         priority=priority,
         metadata={"bot_token": bot_token, "chat_id": chat_id},
+    )
+
+
+def _cleanup_pipeline_cache(email_id: int) -> None:
+    PIPELINE_CACHE.pop(email_id, None)
+    PIPELINE_INBOUND_CACHE.pop(email_id, None)
+    PIPELINE_RAW_CACHE.pop(email_id, None)
+
+
+def _coerce_received_at(header_value: str | None) -> datetime:
+    if not header_value:
+        return datetime.now(timezone.utc)
+    try:
+        parsed = parsedate_to_datetime(header_value)
+    except Exception:
+        return datetime.now(timezone.utc)
+    if parsed is None:
+        return datetime.now(timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _build_attachment_payloads(inbound: InboundMessage) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    for attachment in inbound.attachments or []:
+        payload: dict[str, object] = {
+            "filename": attachment.filename,
+            "content_type": attachment.content_type,
+            "text": attachment.text,
+            "size_bytes": attachment.size_bytes,
+        }
+        if attachment.content:
+            payload["content"] = attachment.content
+        if attachment.metadata:
+            payload["metadata"] = attachment.metadata
+        payloads.append(payload)
+    return payloads
+
+
+def _run_premium_processor(
+    *,
+    ctx: PipelineContext,
+    inbound: InboundMessage,
+    raw: bytes | None,
+    config: BotConfig,
+) -> None:
+    message_obj = message_from_bytes(raw) if raw else None
+    from_header = decode_mime_header(message_obj.get("From", "")) if message_obj else ""
+    from_name, from_email = parseaddr(from_header or inbound.sender)
+    date_header = decode_mime_header(message_obj.get("Date", "")) if message_obj else ""
+    received_at = _coerce_received_at(date_header)
+    attachments = _build_attachment_payloads(inbound)
+
+    account = _get_account_by_login(config, ctx.account_email)
+    if not account:
+        raise RuntimeError(f"Missing account config for {ctx.account_email}")
+
+    processor_module.process_message(
+        account_email=ctx.account_email,
+        message_id=ctx.email_id,
+        from_email=from_email or inbound.sender or "",
+        from_name=from_name or None,
+        subject=inbound.subject,
+        received_at=received_at,
+        body_text=inbound.body or "",
+        attachments=attachments,
+        telegram_chat_id=account.telegram_chat_id,
     )
 
 
@@ -187,7 +256,12 @@ def _emit_contract_event(
         )
 
 
-def _process_queue(storage: Storage, config: BotConfig, processor: MessageProcessor) -> None:
+def _process_queue(
+    storage: Storage,
+    config: BotConfig,
+    processor: MessageProcessor,
+    flags: FeatureFlags,
+) -> None:
     max_tg_attempts = 3
     while True:
         item = storage.claim_next(["PARSE", "LLM", "TG"])
@@ -210,6 +284,27 @@ def _process_queue(storage: Storage, config: BotConfig, processor: MessageProces
                 raise RuntimeError(f"No pipeline context for email {email_id}")
 
             if stage == "PARSE":
+                if flags.ENABLE_PREMIUM_PROCESSOR:
+                    inbound = PIPELINE_INBOUND_CACHE.get(email_id)
+                    raw = PIPELINE_RAW_CACHE.get(email_id)
+                    if inbound is not None:
+                        try:
+                            _run_premium_processor(
+                                ctx=ctx,
+                                inbound=inbound,
+                                raw=raw,
+                                config=config,
+                            )
+                        except Exception as exc:
+                            logger.exception(
+                                "premium_processor_failed email_id=%s error=%s",
+                                email_id,
+                                exc,
+                            )
+                        else:
+                            storage.mark_done(queue_id)
+                            _cleanup_pipeline_cache(email_id)
+                            continue
                 stage_parse(ctx)
                 storage.mark_done(queue_id)
                 storage.enqueue_stage(email_id, "LLM")
@@ -368,6 +463,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         try:
             base_config_dir = config_dir or CURRENT_DIR / "config"
             config = load_config(base_config_dir)
+            flags = FeatureFlags(base_dir=base_config_dir)
             logger.info("Configuration loaded: %d accounts", len(config.accounts))
             print(f"[OK] Loaded {len(config.accounts)} accounts")
         except InvalidAccountIdError as exc:
@@ -680,7 +776,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
                     if storage:
                         try:
-                            _process_queue(storage, config, processor)
+                            _process_queue(storage, config, processor, flags)
                         except Exception:
                             logger.exception("Queue dispatcher failure")
                             for ctx in list(PIPELINE_CACHE.values()):

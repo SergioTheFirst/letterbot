@@ -29,6 +29,7 @@ from mailbot_v26.config_loader import (
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline.processor import MessageProcessor
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
+from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.start import _build_system_payload, _process_queue
 from mailbot_v26.text.mime_utils import decode_mime_header
 from mailbot_v26.worker.telegram_sender import DeliveryResult
@@ -149,7 +150,8 @@ def run_single_cycle(
             store_inbound(email_id, inbound)
             storage.enqueue_stage(email_id, "PARSE")
 
-    _process_queue(storage, config, processor)
+    flags = FeatureFlags()
+    _process_queue(storage, config, processor, flags)
 
 
 __all__ = [

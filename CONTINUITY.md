@@ -18,6 +18,7 @@ State:
 - Behavior/Attention Engine integrated with TG delivery and daily digest.
 - Delivery policy config and feature flags added.
 - Events_v1 extended for behavioral signals.
+- Premium processor routing available behind feature flag.
 
 Done:
 - Added behavior engine module and delivery decision policy (IMMEDIATE/BATCH/DEFER/SILENT).
@@ -28,6 +29,7 @@ Done:
 - Added unit tests for policy config, attention engine, digest deferred items, surprise event.
 - Added weekend batching rule for non-critical high-value emails (reason_code=weekend_batch).
 - Added defensive fallback for behavior decision logic failures to preserve legacy delivery flow.
+- Added premium processor feature flag with queue routing and fallback.
 
 Now:
 - None.
@@ -52,3 +54,11 @@ Working set (files / tables / tests):
 - docs/BEHAVIOR_ENGINE.md
 - docs/DELIVERY_POLICY.md
 - docs/ADR/ADR-004.md
+- mailbot_v26/start.py
+- mailbot_v26/features/flags.py
+- mailbot_v26/config/config.ini
+- mailbot_v26/tools/config_bootstrap.py
+- mailbot_v26/tests/test_premium_processor_routing.py
+- mailbot_v26/tests/integration/harness.py
+- mailbot_v26/tests/integration/test_degradation_scenarios.py
+- mailbot_v26/tests/test_telegram_delivery_pipeline.py
