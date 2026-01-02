@@ -11,7 +11,7 @@ def _processor() -> MessageProcessor:
 
 def _summary_line(result: str) -> str:
     for line in result.split("\n"):
-        if line.strip().startswith("<i>") and not line.startswith("<i>to:"):
+        if line.strip().startswith("<i>") and not line.startswith("<i>аккаунт:"):
             return re.sub(r"</?[^>]+>", "", line)
     return ""
 

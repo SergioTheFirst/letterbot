@@ -336,7 +336,7 @@ def _build_digest_text(data: DigestData) -> str:
             if not label:
                 continue
             insights_lines.append(
-                "• Deadlock: "
+                "• Застой в переписке: "
                 f"{label} "
                 f"→ {_TARGET_EMOJI} Предложить созвон (15 мин)"
             )
@@ -346,11 +346,11 @@ def _build_digest_text(data: DigestData) -> str:
             contact = _format_silence_contact(item)
             if not contact:
                 continue
-            days = _format_silence_days(item)
+            days = _format_silence_days_label(item)
             insights_lines.append(
-                "• Silence: "
-                f"{contact} молчит {days}д "
-                f"→ {_TARGET_EMOJI} Пинговать сегодня"
+                "• Нет ответа: "
+                f"{contact} — {days} "
+                f"→ {_TARGET_EMOJI} Вежливо напомнить сегодня"
             )
         if insights_lines:
             lines.append(f"{_WARNING_EMOJI} <b>ТРЕБУЕТ ВНИМАНИЯ</b>")
@@ -410,12 +410,20 @@ def _format_silence_contact(item: dict[str, object]) -> str:
     return escape_tg_html(contact)
 
 
-def _format_silence_days(item: dict[str, object]) -> int:
+def _format_silence_days_label(item: dict[str, object]) -> str:
     raw = item.get("days_silent")
     try:
-        return int(raw)
+        days = int(raw)
     except (TypeError, ValueError):
-        return 0
+        days = 0
+    days = max(days, 0)
+    if days % 10 == 1 and days % 100 != 11:
+        suffix = "день"
+    elif days % 10 in {2, 3, 4} and days % 100 not in {12, 13, 14}:
+        suffix = "дня"
+    else:
+        suffix = "дней"
+    return f"{days} {suffix}"
 
 
 def _has_digest_content(data: DigestData) -> bool:

@@ -53,8 +53,8 @@ def test_daily_digest_insights_section_present_with_items() -> None:
     )
     text = daily_digest._build_digest_text(data)
     assert "\u26a0\ufe0f <b>ТРЕБУЕТ ВНИМАНИЯ</b>" in text
-    assert "Deadlock" in text
-    assert "Silence" in text
+    assert "Застой в переписке" in text
+    assert "Нет ответа" in text
     assert _TARGET_EMOJI in text
 
 
@@ -78,7 +78,7 @@ def test_daily_digest_insights_order_and_limit() -> None:
     header_index = lines.index("\u26a0\ufe0f <b>ТРЕБУЕТ ВНИМАНИЯ</b>")
     insight_lines = lines[header_index + 1 : header_index + 4]
     assert insight_lines == [
-        f"• Deadlock: a@example.com — A1 → {_TARGET_EMOJI} Предложить созвон (15 мин)",
-        f"• Deadlock: b@example.com — B1 → {_TARGET_EMOJI} Предложить созвон (15 мин)",
-        f"• Silence: c@example.com молчит 3д → {_TARGET_EMOJI} Пинговать сегодня",
+        f"• Застой в переписке: a@example.com — A1 → {_TARGET_EMOJI} Предложить созвон (15 мин)",
+        f"• Застой в переписке: b@example.com — B1 → {_TARGET_EMOJI} Предложить созвон (15 мин)",
+        f"• Нет ответа: c@example.com — 3 дня → {_TARGET_EMOJI} Вежливо напомнить сегодня",
     ]

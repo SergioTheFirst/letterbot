@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import configparser
+import logging
 from typing import Iterable
 
 DEFAULT_LOCALE = "ru"
+_LOGGER = logging.getLogger(__name__)
 
 
 _MAIL_TYPE_LABELS_RU = {
@@ -216,10 +218,14 @@ def get_locale(config: configparser.ConfigParser | dict | None) -> str:
 
 def t(key: str, *, locale: str = DEFAULT_LOCALE, **kwargs) -> str:
     catalog = _STRINGS_RU if locale.startswith("ru") else {}
-    template = catalog.get(key, f"(нет перевода: {key})")
+    template = catalog.get(key)
+    if template is None:
+        _LOGGER.warning("Missing i18n key: %s (locale=%s)", key, locale)
+        return ""
     try:
         return template.format(**kwargs)
     except Exception:
+        _LOGGER.warning("Failed to format i18n key: %s (locale=%s)", key, locale)
         return template
 
 
