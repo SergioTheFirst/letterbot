@@ -87,6 +87,7 @@ def test_digest_ru_has_no_english_codes() -> None:
         silence_insights=[],
         digest_insights_enabled=False,
         digest_insights_max_items=0,
+        digest_action_templates_enabled=False,
     )
 
     text = daily_digest._build_digest_text(data)  # type: ignore[attr-defined]

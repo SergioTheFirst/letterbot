@@ -21,6 +21,7 @@ def _base_digest_kwargs() -> dict[str, object]:
         silence_insights=[],
         digest_insights_enabled=False,
         digest_insights_max_items=0,
+        digest_action_templates_enabled=False,
     )
 
 

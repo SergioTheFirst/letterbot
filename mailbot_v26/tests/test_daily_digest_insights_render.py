@@ -24,6 +24,7 @@ def _base_digest_kwargs() -> dict[str, object]:
         silence_insights=[],
         digest_insights_enabled=True,
         digest_insights_max_items=3,
+        digest_action_templates_enabled=False,
     )
 
 
@@ -56,6 +57,9 @@ def test_daily_digest_insights_section_present_with_items() -> None:
     assert "Застой в переписке" in text
     assert "Нет ответа" in text
     assert _TARGET_EMOJI in text
+    assert "пинговать" not in text
+    assert "Deadlock" not in text
+    assert "Silence" not in text
 
 
 def test_daily_digest_insights_order_and_limit() -> None:
@@ -82,3 +86,57 @@ def test_daily_digest_insights_order_and_limit() -> None:
         f"• Застой в переписке: b@example.com — B1 → {_TARGET_EMOJI} Предложить созвон (15 мин)",
         f"• Нет ответа: c@example.com — 3 дня → {_TARGET_EMOJI} Вежливо напомнить сегодня",
     ]
+
+
+def test_daily_digest_insights_action_templates_present_when_enabled() -> None:
+    data = daily_digest.DigestData(
+        **{
+            **_base_digest_kwargs(),
+            "digest_action_templates_enabled": True,
+            "deadlock_insights": [
+                {
+                    "from_email": "boss@example.com",
+                    "subject": "Счёт",
+                }
+            ],
+            "silence_insights": [
+                {
+                    "contact": "client@example.com",
+                    "days_silent": 5,
+                }
+            ],
+        }
+    )
+    text = daily_digest._build_digest_text(data)
+    lines = [line for line in text.splitlines() if line.strip()]
+    assert any(line.startswith("  <i>Текст:") and line.endswith("</i>") for line in lines)
+    assert lines.count("  <i>Текст: Предлагаю созвониться на 15 минут сегодня или завтра — так быстрее решим вопрос.</i>") == 1
+    assert lines.count("  <i>Текст: Напомню про наш вопрос. Удобно вернуться к нему сегодня?</i>") == 1
+    assert "пинговать" not in text
+    assert "Deadlock" not in text
+    assert "Silence" not in text
+
+
+def test_daily_digest_insights_action_templates_absent_when_disabled() -> None:
+    data = daily_digest.DigestData(
+        **{
+            **_base_digest_kwargs(),
+            "deadlock_insights": [
+                {
+                    "from_email": "boss@example.com",
+                    "subject": "Счёт",
+                }
+            ],
+            "silence_insights": [
+                {
+                    "contact": "client@example.com",
+                    "days_silent": 5,
+                }
+            ],
+        }
+    )
+    text = daily_digest._build_digest_text(data)
+    assert "Текст:" not in text
+    assert "пинговать" not in text
+    assert "Deadlock" not in text
+    assert "Silence" not in text
