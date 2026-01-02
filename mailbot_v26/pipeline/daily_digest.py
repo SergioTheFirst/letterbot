@@ -33,6 +33,7 @@ _TRUST_DELTA_THRESHOLD = 0.0
 _RELATIONSHIP_HEALTH_DELTA_THRESHOLD = 5.0
 _WARNING_EMOJI = "\u26a0\ufe0f"
 _TARGET_EMOJI = "\U0001F3AF"
+_CHART_EMOJI = "\U0001F4C8"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +54,9 @@ class DigestData:
     silence_insights: list[dict[str, object]]
     digest_insights_enabled: bool
     digest_insights_max_items: int
+    behavior_metrics: dict[str, object] | None = None
+    behavior_metrics_enabled: bool = False
+    behavior_metrics_window_days: int = 7
 
 
 def _collect_anomaly_alerts(
@@ -132,6 +136,8 @@ def _collect_digest_data(
     include_digest_insights: bool = False,
     digest_insights_window_days: int = 7,
     digest_insights_max_items: int = 3,
+    include_behavior_metrics_digest: bool = False,
+    behavior_metrics_window_days: int = 7,
     now: datetime | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
@@ -219,6 +225,20 @@ def _collect_digest_data(
             limit=insights_max_items,
         )
 
+    behavior_metrics_window = 7
+    try:
+        behavior_metrics_window = max(1, int(behavior_metrics_window_days))
+    except (TypeError, ValueError):
+        behavior_metrics_window = 7
+    behavior_metrics: dict[str, object] | None = None
+    if include_behavior_metrics_digest:
+        metrics = analytics.behavior_metrics_digest(
+            account_email=account_email,
+            window_days=behavior_metrics_window,
+        )
+        if metrics:
+            behavior_metrics = metrics
+
     return DigestData(
         deferred_total=int(deferred.get("total", 0)),
         deferred_attachments_only=int(deferred.get("attachments_only", 0)),
@@ -236,6 +256,9 @@ def _collect_digest_data(
         silence_insights=silence_insights,
         digest_insights_enabled=insights_enabled,
         digest_insights_max_items=insights_max_items,
+        behavior_metrics=behavior_metrics,
+        behavior_metrics_enabled=bool(include_behavior_metrics_digest),
+        behavior_metrics_window_days=behavior_metrics_window,
     )
 
 
@@ -332,6 +355,42 @@ def _build_digest_text(data: DigestData) -> str:
         if insights_lines:
             lines.append(f"{_WARNING_EMOJI} <b>ТРЕБУЕТ ВНИМАНИЯ</b>")
             lines.extend(insights_lines)
+    if data.behavior_metrics_enabled and data.behavior_metrics:
+        metrics = data.behavior_metrics
+
+        def _percent(value: object) -> int | None:
+            try:
+                return int(round(float(value) * 100))
+            except (TypeError, ValueError):
+                return None
+
+        lines.append(
+            f"{_CHART_EMOJI} <b>ПОВЕДЕНЧЕСКИЕ МЕТРИКИ ({data.behavior_metrics_window_days} дней)</b>"
+        )
+        surprise_rate = metrics.get("surprise_rate")
+        if surprise_rate is not None:
+            pct = _percent(surprise_rate)
+            if pct is not None:
+                lines.append(f"• Ошибки приоритета: {pct}%")
+        compression_rate = metrics.get("compression_rate")
+        if compression_rate is not None:
+            pct = _percent(compression_rate)
+            if pct is not None:
+                lines.append(f"• Снижение шума: {pct}%")
+        distribution = metrics.get("attention_debt_distribution")
+        if isinstance(distribution, dict):
+            low = int(distribution.get("low") or 0)
+            medium = int(distribution.get("medium") or 0)
+            high = int(distribution.get("high") or 0)
+            lines.append(
+                f"• Долг внимания: низк {low}, средн {medium}, высок {high}"
+            )
+        signal_counts = metrics.get("signal_counts")
+        if isinstance(signal_counts, dict):
+            deadlock = int(signal_counts.get("deadlock_count") or 0)
+            silence = int(signal_counts.get("silence_count") or 0)
+            if deadlock > 0 or silence > 0:
+                lines.append(f"• Сигналы: дедлок {deadlock}, тишина {silence}")
     return "\n".join(lines)
 
 
@@ -377,6 +436,8 @@ def _has_digest_content(data: DigestData) -> bool:
     if data.digest_insights_enabled and data.digest_insights_max_items > 0:
         if data.deadlock_insights or data.silence_insights:
             return True
+    if data.behavior_metrics_enabled and data.behavior_metrics:
+        return True
     return False
 
 
@@ -391,6 +452,8 @@ def maybe_send_daily_digest(
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
     include_notification_sla: bool = False,
+    include_behavior_metrics_digest: bool = False,
+    behavior_metrics_window_days: int = 7,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
@@ -402,6 +465,8 @@ def maybe_send_daily_digest(
         include_quality_metrics=include_quality_metrics,
         include_notification_sla=include_notification_sla,
         now=now,
+        include_behavior_metrics_digest=include_behavior_metrics_digest,
+        behavior_metrics_window_days=behavior_metrics_window_days,
         contract_event_emitter=contract_event_emitter,
     )
     already_sent = analytics.has_daily_digest_sent(

@@ -66,6 +66,33 @@ class KnowledgeAnalytics:
         except sqlite3.OperationalError:
             return []
 
+    def _event_count(
+        self,
+        *,
+        account_id: str | None,
+        event_type: str,
+        since_ts: float | None = None,
+    ) -> int:
+        query = """
+        SELECT COUNT(*) AS total
+        FROM events_v1
+        WHERE event_type = ?
+        """
+        params: list[object] = [event_type]
+        if account_id:
+            query += " AND account_id = ?"
+            params.append(account_id)
+        if since_ts is not None:
+            query += " AND ts_utc >= ?"
+            params.append(since_ts)
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return 0
+        if not rows:
+            return 0
+        return int(rows[0].get("total") or 0)
+
     def recent_email_events(
         self,
         *,
@@ -1136,6 +1163,85 @@ class KnowledgeAnalytics:
             key=lambda item: (-float(item["estimated_read_minutes"]), str(item["entity_id"]).lower())
         )
         return results
+
+    def behavior_metrics_digest(
+        self,
+        *,
+        account_email: str,
+        window_days: int = 7,
+    ) -> dict[str, object]:
+        if not account_email:
+            return {}
+        try:
+            window_days = max(1, int(window_days))
+        except (TypeError, ValueError):
+            window_days = 7
+        since_ts = self._window_start_ts(window_days)
+
+        metrics: dict[str, object] = {}
+
+        corrections_total = self._event_count(
+            account_id=account_email,
+            event_type="priority_correction_recorded",
+            since_ts=since_ts,
+        )
+        if corrections_total > 0:
+            surprise_total = self._event_count(
+                account_id=account_email,
+                event_type="surprise_detected",
+                since_ts=since_ts,
+            )
+            metrics["surprise_rate"] = surprise_total / corrections_total
+
+        delivery_rows = self._event_rows(
+            account_id=account_email,
+            event_type="delivery_policy_applied",
+            since_ts=since_ts,
+        )
+        if delivery_rows:
+            suppressed_modes = {"BATCH_TODAY", "DEFER_TO_MORNING", "SILENT_LOG"}
+            suppressed_count = 0
+            for row in delivery_rows:
+                payload = self._event_payload(row)
+                mode = str(payload.get("mode") or "").upper()
+                if mode in suppressed_modes:
+                    suppressed_count += 1
+            total_count = len(delivery_rows)
+            if total_count > 0:
+                metrics["compression_rate"] = suppressed_count / total_count
+
+        debt_rows = self._event_rows(
+            account_id=account_email,
+            event_type="attention_debt_updated",
+            since_ts=since_ts,
+        )
+        if debt_rows:
+            distribution = {"low": 0, "medium": 0, "high": 0}
+            for row in debt_rows:
+                payload = self._event_payload(row)
+                bucket = str(payload.get("bucket") or "").strip().lower()
+                if bucket in distribution:
+                    distribution[bucket] += 1
+            if sum(distribution.values()) > 0:
+                metrics["attention_debt_distribution"] = distribution
+
+        deadlock_count = self._event_count(
+            account_id=account_email,
+            event_type="deadlock_detected",
+            since_ts=since_ts,
+        )
+        silence_count = self._event_count(
+            account_id=account_email,
+            event_type="silence_signal_detected",
+            since_ts=since_ts,
+        )
+        if deadlock_count > 0 or silence_count > 0:
+            metrics["signal_counts"] = {
+                "deadlock_count": deadlock_count,
+                "silence_count": silence_count,
+            }
+
+        return metrics
 
     def weekly_commitment_counts(
         self, *, account_email: str, days: int = 7
