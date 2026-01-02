@@ -19,6 +19,7 @@ from mailbot_v26.behavior.attention_engine import (
     decide_delivery,
     score_email,
 )
+from mailbot_v26.behavior.threading import compute_thread_key
 from mailbot_v26.config.delivery_policy import load_delivery_policy_config
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
@@ -469,6 +470,9 @@ class InboundMessage:
     sender: str = ""
     attachments: list[Attachment] = field(default_factory=list)
     received_at: datetime | None = None
+    rfc_message_id: str | None = None
+    in_reply_to: str | None = None
+    references: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1854,6 +1858,10 @@ def _record_analytics(
     action_line: str,
     body_summary: str,
     attachment_summaries: list[dict[str, Any]],
+    rfc_message_id: str | None,
+    in_reply_to: str | None,
+    references: str | None,
+    thread_key: str,
     commitments: list[Commitment],
     enable_commitments: bool,
     entity_resolution: Any | None,
@@ -2046,6 +2054,10 @@ def _record_analytics(
             action_line=action_line,
             body_summary=body_summary,
             raw_body=body_text,
+            rfc_message_id=rfc_message_id,
+            in_reply_to=in_reply_to,
+            references=references,
+            thread_key=thread_key,
             attachment_summaries=[
                 (a["filename"], a["summary"])
                 for a in attachment_summaries
@@ -2580,6 +2592,9 @@ def process_message(
     body_text: str,
     attachments: list[dict[str, Any]],
     telegram_chat_id: str,
+    rfc_message_id: str | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
 ) -> None:
     """
     Главный pipeline:
@@ -2602,6 +2617,14 @@ def process_message(
         from_email=from_email,
         subject=subject,
         received_at=received_at.isoformat(),
+    )
+    thread_key = compute_thread_key(
+        account_email=account_email,
+        rfc_message_id=rfc_message_id,
+        in_reply_to=in_reply_to,
+        references=references,
+        subject=subject,
+        from_email=from_email,
     )
     mail_type: str | None = None
     mail_type_reasons: list[str] = []
@@ -2696,6 +2719,7 @@ def process_message(
         "subject": subject,
         "attachments_count": len(attachments),
         "occurred_at_utc": received_at.timestamp(),
+        "thread_key": thread_key,
     }
     for attachment in attachments:
         _emit_contract_event(
@@ -3077,6 +3101,10 @@ def process_message(
         action_line=action_line,
         body_summary=body_summary,
         attachment_summaries=attachment_summaries,
+        rfc_message_id=rfc_message_id,
+        in_reply_to=in_reply_to,
+        references=references,
+        thread_key=thread_key,
         commitments=commitments,
         enable_commitments=enable_commitments,
         entity_resolution=entity_resolution,
