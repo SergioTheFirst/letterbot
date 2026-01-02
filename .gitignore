@@ -1,1 +1,7 @@
 __pycache__/
+mailbot_v26/mailbot.log
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+database.sqlite
+nul

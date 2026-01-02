@@ -148,6 +148,14 @@ class KnowledgeDB:
                 migrations.append(
                     "ALTER TABLE emails ADD COLUMN deferred_for_digest INTEGER DEFAULT 0;"
                 )
+            if "rfc_message_id" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN rfc_message_id TEXT;")
+            if "in_reply_to" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN in_reply_to TEXT;")
+            if "references" not in columns:
+                migrations.append('ALTER TABLE emails ADD COLUMN "references" TEXT;')
+            if "thread_key" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN thread_key TEXT;")
 
             for statement in migrations:
                 conn.execute(statement)
@@ -269,6 +277,10 @@ class KnowledgeDB:
         action_line: str,
         body_summary: str,
         raw_body: str,
+        rfc_message_id: str | None = None,
+        in_reply_to: str | None = None,
+        references: str | None = None,
+        thread_key: str | None = None,
         attachment_summaries: Iterable[tuple[str, str]],
     ) -> int | None:
         try:
@@ -300,9 +312,13 @@ class KnowledgeDB:
                         deferred_for_digest,
                         action_line,
                         body_summary,
-                        raw_body_hash
+                        raw_body_hash,
+                        rfc_message_id,
+                        in_reply_to,
+                        "references",
+                        thread_key
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account_email,
@@ -326,6 +342,10 @@ class KnowledgeDB:
                         action_line,
                         body_summary,
                         raw_body_hash,
+                        rfc_message_id,
+                        in_reply_to,
+                        references,
+                        thread_key,
                     ),
                 )
 

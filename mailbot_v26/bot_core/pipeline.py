@@ -500,6 +500,9 @@ def parse_raw_email(raw_bytes: bytes, config: BotConfig) -> InboundMessage:
     email_obj = message_from_bytes(raw_bytes)
     subject = _decode_subject(email_obj)
     sender = _decode_from(email_obj)
+    message_id = decode_mime_header(email_obj.get("Message-ID", ""))
+    in_reply_to = decode_mime_header(email_obj.get("In-Reply-To", ""))
+    references = decode_mime_header(email_obj.get("References", ""))
     body = _extract_body(email_obj)
     attachments = _extract_attachments(
         email_obj,
@@ -509,7 +512,13 @@ def parse_raw_email(raw_bytes: bytes, config: BotConfig) -> InboundMessage:
         max_extracted_total_chars=config.general.max_extracted_total_chars,
     )
     return InboundMessage(
-        subject=subject, body=body, sender=sender, attachments=attachments
+        subject=subject,
+        body=body,
+        sender=sender,
+        attachments=attachments,
+        rfc_message_id=message_id or None,
+        in_reply_to=in_reply_to or None,
+        references=references or None,
     )
 
 

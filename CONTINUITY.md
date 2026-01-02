@@ -30,6 +30,7 @@ Done:
 - Added weekend batching rule for non-critical high-value emails (reason_code=weekend_batch).
 - Added defensive fallback for behavior decision logic failures to preserve legacy delivery flow.
 - Added premium processor feature flag with queue routing and fallback.
+- Added thread key primitives, header plumbing, persistence columns, and tests.
 
 Now:
 - None.
@@ -62,3 +63,10 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/integration/harness.py
 - mailbot_v26/tests/integration/test_degradation_scenarios.py
 - mailbot_v26/tests/test_telegram_delivery_pipeline.py
+- mailbot_v26/behavior/threading.py
+- mailbot_v26/bot_core/pipeline.py
+- mailbot_v26/storage/knowledge_db.py
+- mailbot_v26/storage/schema.sql
+- mailbot_v26/tests/test_threading.py
+- mailbot_v26/tests/test_threading_migration.py
+- mailbot_v26/tests/test_threading_premium_integration.py

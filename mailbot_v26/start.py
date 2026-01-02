@@ -164,6 +164,13 @@ def _run_premium_processor(
     date_header = decode_mime_header(message_obj.get("Date", "")) if message_obj else ""
     received_at = _coerce_received_at(date_header)
     attachments = _build_attachment_payloads(inbound)
+    rfc_message_id = inbound.rfc_message_id
+    in_reply_to = inbound.in_reply_to
+    references = inbound.references
+    if message_obj:
+        rfc_message_id = rfc_message_id or decode_mime_header(message_obj.get("Message-ID", "")) or None
+        in_reply_to = in_reply_to or decode_mime_header(message_obj.get("In-Reply-To", "")) or None
+        references = references or decode_mime_header(message_obj.get("References", "")) or None
 
     account = _get_account_by_login(config, ctx.account_email)
     if not account:
@@ -179,6 +186,9 @@ def _run_premium_processor(
         body_text=inbound.body or "",
         attachments=attachments,
         telegram_chat_id=account.telegram_chat_id,
+        rfc_message_id=rfc_message_id or None,
+        in_reply_to=in_reply_to or None,
+        references=references or None,
     )
 
 
