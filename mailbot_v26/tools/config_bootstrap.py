@@ -84,6 +84,14 @@ min_messages = 10
 cooldown_hours = 24
 max_per_run = 20
 
+[silence_policy]
+lookback_days = 60
+min_messages = 6
+silence_factor = 3.0
+min_silence_days = 7
+cooldown_hours = 72
+max_per_run = 20
+
 [trust]
 half_life_days = 90
 weight_commitment = 0.5

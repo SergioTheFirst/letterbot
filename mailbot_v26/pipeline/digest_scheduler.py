@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from mailbot_v26.behavior.silence_detector import run_silence_scan
+from mailbot_v26.config.silence_policy import SilencePolicyConfig, load_silence_policy_config
 from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.observability.logger import LoggerLike
@@ -236,6 +238,7 @@ def run_digest_tick(
         overrides = RuntimeOverrideStore(storage.knowledge_db.path).get_overrides()
         daily_config = _load_daily_digest_config()
         weekly_config = _load_weekly_digest_config()
+        silence_policy = load_silence_policy_config(_CONFIG_PATH.parent)
         policy_inputs = _collect_policy_inputs(storage, logger)
 
         for account in config.accounts:
@@ -275,6 +278,7 @@ def run_digest_tick(
                     logger=logger,
                     policy_inputs=policy_inputs,
                     flags=flags,
+                    silence_policy=silence_policy,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                     include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
                     include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
@@ -339,6 +343,7 @@ def _run_daily_digest(
     logger: LoggerLike,
     policy_inputs: PolicyInputs,
     flags: FeatureFlags,
+    silence_policy: SilencePolicyConfig,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
@@ -362,6 +367,19 @@ def _run_daily_digest(
             account_email=account_email,
         )
         return
+
+    if flags.ENABLE_SILENCE_AS_SIGNAL in {"shadow", "enabled"}:
+        if storage.contract_event_emitter is not None:
+            try:
+                run_silence_scan(
+                    knowledge_db=storage.knowledge_db,
+                    event_emitter=storage.contract_event_emitter,
+                    account_email=account_email,
+                    now_ts=now.timestamp(),
+                    policy=silence_policy,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("silence_detector_failed", error=str(exc))
 
     data = daily_digest._collect_digest_data(
         analytics=storage.analytics,
