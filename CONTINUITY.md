@@ -99,3 +99,4 @@ Working set (files / tables / tests):
 2026-01-03: uncertainty queue (digest-only) behind enable_uncertainty_queue.
 2026-01-03: commitment chain digest (facts-only) behind enable_commitment_chain_digest.
 2026-01-04: premium clarity v1 flag, emoji whitelist, selective render events.
+2026-01-04: premium clarity confidence dots (auto/always/never).

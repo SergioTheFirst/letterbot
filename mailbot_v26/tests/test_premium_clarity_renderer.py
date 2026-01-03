@@ -11,6 +11,9 @@ def _render(
     body_summary: str = "Краткий факт письма.",
     extraction_failed: bool = False,
     confidence_percent: int = 80,
+    confidence_available: bool = True,
+    confidence_dots_mode: str = "auto",
+    confidence_dots_threshold: int = 75,
     insight_digest: InsightDigest | None = None,
 ) -> str:
     return processor._build_premium_clarity_text(
@@ -27,8 +30,15 @@ def _render(
         attachments_count=len(attachments or []),
         extracted_text_len=0 if extraction_failed else 120,
         confidence_percent=confidence_percent,
+        confidence_available=confidence_available,
+        confidence_dots_mode=confidence_dots_mode,
+        confidence_dots_threshold=confidence_dots_threshold,
         extraction_failed=extraction_failed,
     )
+
+
+def _extract_dots(text: str) -> str:
+    return "".join(char for char in text if char in {"●", "○"})
 
 
 def test_premium_clarity_includes_required_lines() -> None:
@@ -89,3 +99,64 @@ def test_premium_clarity_extraction_failed_placeholder() -> None:
         confidence_percent=30,
     )
     assert "не извлечено" in rendered
+
+
+def test_premium_clarity_confidence_dots_never_mode() -> None:
+    digest = InsightDigest(
+        headline="Контакт в зоне риска.",
+        status_label="Risk Zone",
+        short_explanation="Есть просрочки.",
+    )
+    rendered = _render(
+        insight_digest=digest,
+        confidence_percent=20,
+        confidence_dots_mode="never",
+    )
+    assert _extract_dots(rendered) == ""
+
+
+def test_premium_clarity_confidence_dots_auto_above_threshold() -> None:
+    digest = InsightDigest(
+        headline="Контакт в зоне риска.",
+        status_label="Risk Zone",
+        short_explanation="Есть просрочки.",
+    )
+    rendered = _render(
+        insight_digest=digest,
+        confidence_percent=90,
+        confidence_dots_mode="auto",
+        confidence_dots_threshold=75,
+    )
+    assert _extract_dots(rendered) == ""
+
+
+def test_premium_clarity_confidence_dots_auto_below_threshold() -> None:
+    digest = InsightDigest(
+        headline="Контакт в зоне риска.",
+        status_label="Risk Zone",
+        short_explanation="Есть просрочки.",
+    )
+    rendered = _render(
+        insight_digest=digest,
+        confidence_percent=30,
+        confidence_dots_mode="auto",
+        confidence_dots_threshold=75,
+    )
+    dots = _extract_dots(rendered)
+    assert len(dots) == 10
+
+
+def test_premium_clarity_confidence_dots_always_mode() -> None:
+    digest = InsightDigest(
+        headline="Контакт в зоне риска.",
+        status_label="Risk Zone",
+        short_explanation="Есть просрочки.",
+    )
+    rendered = _render(
+        insight_digest=digest,
+        confidence_percent=85,
+        confidence_available=True,
+        confidence_dots_mode="always",
+    )
+    dots = _extract_dots(rendered)
+    assert len(dots) == 10
