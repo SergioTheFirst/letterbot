@@ -60,6 +60,7 @@ enable_deadlock_detection = shadow
 enable_premium_processor = false
 enable_behavior_metrics_digest = false
 enable_trust_bootstrap = false
+enable_regret_minimization = false
 
 [daily_digest]
 hour = 9
@@ -85,6 +86,11 @@ learning_days = 14
 min_samples = 50
 max_allowed_surprise_rate = 0.30
 hide_action_templates_until_ready = true
+
+[regret_minimization]
+window_days = 90
+trust_drop_window_days = 7
+min_samples = 5
 
 [delivery_policy]
 night_hours = 21-7

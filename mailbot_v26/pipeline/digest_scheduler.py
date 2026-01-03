@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Callable
 
 from mailbot_v26.behavior.silence_detector import run_silence_scan
+from mailbot_v26.config.regret_minimization import (
+    RegretMinimizationConfig,
+    load_regret_minimization_config,
+)
 from mailbot_v26.config.trust_bootstrap import (
     TrustBootstrapConfig,
     load_trust_bootstrap_config,
@@ -82,6 +86,11 @@ class BehaviorMetricsDigestConfig:
 @dataclass(frozen=True, slots=True)
 class TrustBootstrapDigestConfig:
     settings: TrustBootstrapConfig
+
+
+@dataclass(frozen=True, slots=True)
+class RegretMinimizationDigestConfig:
+    settings: RegretMinimizationConfig
 
 
 def _load_daily_digest_config() -> DailyDigestConfig:
@@ -180,6 +189,11 @@ def _load_behavior_metrics_digest_config() -> BehaviorMetricsDigestConfig:
 def _load_trust_bootstrap_config() -> TrustBootstrapDigestConfig:
     settings = load_trust_bootstrap_config(_CONFIG_PATH.parent)
     return TrustBootstrapDigestConfig(settings=settings)
+
+
+def _load_regret_minimization_config() -> RegretMinimizationDigestConfig:
+    settings = load_regret_minimization_config(_CONFIG_PATH.parent)
+    return RegretMinimizationDigestConfig(settings=settings)
 
 
 def _is_daily_due(now: datetime, config: DailyDigestConfig) -> bool:
@@ -329,6 +343,7 @@ def run_digest_tick(
         digest_insights_config = _load_digest_insights_config()
         behavior_metrics_config = _load_behavior_metrics_digest_config()
         trust_bootstrap_config = _load_trust_bootstrap_config()
+        regret_minimization_config = _load_regret_minimization_config()
         silence_policy = load_silence_policy_config(_CONFIG_PATH.parent)
         policy_inputs = _collect_policy_inputs(storage, logger)
 
@@ -373,6 +388,7 @@ def run_digest_tick(
                     digest_insights_config=digest_insights_config,
                     behavior_metrics_config=behavior_metrics_config,
                     trust_bootstrap_config=trust_bootstrap_config,
+                    regret_minimization_config=regret_minimization_config,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
                     include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
                     include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
@@ -443,6 +459,7 @@ def _run_daily_digest(
     digest_insights_config: DigestInsightsConfig,
     behavior_metrics_config: BehaviorMetricsDigestConfig,
     trust_bootstrap_config: TrustBootstrapDigestConfig,
+    regret_minimization_config: RegretMinimizationDigestConfig,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
@@ -495,6 +512,8 @@ def _run_daily_digest(
         behavior_metrics_window_days=behavior_metrics_config.window_days,
         include_trust_bootstrap=flags.ENABLE_TRUST_BOOTSTRAP,
         trust_bootstrap_config=trust_bootstrap_config.settings,
+        include_regret_minimization=flags.ENABLE_REGRET_MINIMIZATION,
+        regret_minimization_config=regret_minimization_config.settings,
         now=now,
         contract_event_emitter=storage.contract_event_emitter,
     )

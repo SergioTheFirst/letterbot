@@ -1409,6 +1409,121 @@ class KnowledgeAnalytics:
         )
         return overdue[:limit]
 
+    def regret_minimization_stats(
+        self,
+        *,
+        account_email: str,
+        window_days: int,
+        trust_drop_window_days: int,
+        min_samples: int,
+        now_dt: datetime | None = None,
+    ) -> dict[str, int] | None:
+        if not account_email:
+            return None
+        now_ts = (now_dt or datetime.now(timezone.utc)).timestamp()
+        window_days = max(1, int(window_days))
+        trust_drop_window_days = max(1, int(trust_drop_window_days))
+        min_samples = max(1, int(min_samples))
+        since_ts = now_ts - (window_days * 24 * 60 * 60)
+
+        expired_rows = self._event_rows(
+            account_id=account_email,
+            event_type="commitment_expired",
+            since_ts=since_ts,
+        )
+        total = len(expired_rows)
+        if total < min_samples:
+            return None
+
+        trust_rows = self._event_rows(
+            account_id=account_email,
+            event_type="trust_score_updated",
+            since_ts=since_ts,
+        )
+        health_rows = self._event_rows(
+            account_id=account_email,
+            event_type="relationship_health_updated",
+            since_ts=since_ts,
+        )
+
+        trust_by_entity: dict[str, list[tuple[float, float]]] = {}
+        for row in trust_rows:
+            entity_id = str(row.get("entity_id") or "").strip()
+            if not entity_id:
+                continue
+            payload = self._event_payload(row)
+            score_raw = payload.get("trust_score")
+            try:
+                score = float(score_raw)
+            except (TypeError, ValueError):
+                continue
+            ts_utc = float(row.get("ts_utc") or 0.0)
+            if ts_utc <= 0:
+                continue
+            trust_by_entity.setdefault(entity_id, []).append((ts_utc, score))
+
+        health_by_entity: dict[str, list[tuple[float, float]]] = {}
+        for row in health_rows:
+            entity_id = str(row.get("entity_id") or "").strip()
+            if not entity_id:
+                continue
+            payload = self._event_payload(row)
+            score_raw = payload.get("health_score")
+            try:
+                score = float(score_raw)
+            except (TypeError, ValueError):
+                continue
+            ts_utc = float(row.get("ts_utc") or 0.0)
+            if ts_utc <= 0:
+                continue
+            health_by_entity.setdefault(entity_id, []).append((ts_utc, score))
+
+        for rows in trust_by_entity.values():
+            rows.sort(key=lambda item: item[0])
+        for rows in health_by_entity.values():
+            rows.sort(key=lambda item: item[0])
+
+        def _has_negative_delta(
+            rows: list[tuple[float, float]],
+            *,
+            start_ts: float,
+            end_ts: float,
+        ) -> bool:
+            if not rows:
+                return False
+            window = [entry for entry in rows if start_ts <= entry[0] <= end_ts]
+            if len(window) < 2:
+                return False
+            first = window[0][1]
+            last = window[-1][1]
+            return (last - first) < 0
+
+        drops = 0
+        window_span = trust_drop_window_days * 24 * 60 * 60
+        for row in expired_rows:
+            entity_id = str(row.get("entity_id") or "").strip()
+            if not entity_id:
+                continue
+            ts_utc = float(row.get("ts_utc") or 0.0)
+            if ts_utc <= 0:
+                continue
+            end_ts = min(now_ts, ts_utc + window_span)
+            trust_drop = _has_negative_delta(
+                trust_by_entity.get(entity_id, []),
+                start_ts=ts_utc,
+                end_ts=end_ts,
+            )
+            health_drop = _has_negative_delta(
+                health_by_entity.get(entity_id, []),
+                start_ts=ts_utc,
+                end_ts=end_ts,
+            )
+            if trust_drop or health_drop:
+                drops += 1
+
+        pct = round((drops / total) * 100) if total > 0 else 0
+        return {"total": total, "drops": drops, "pct": int(pct)}
+
     def weekly_trust_score_deltas(
         self, *, days: int = 7
     ) -> dict[str, list[dict[str, object]]]:
