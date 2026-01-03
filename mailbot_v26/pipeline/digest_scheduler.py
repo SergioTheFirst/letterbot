@@ -15,6 +15,10 @@ from mailbot_v26.config.trust_bootstrap import (
     TrustBootstrapConfig,
     load_trust_bootstrap_config,
 )
+from mailbot_v26.config.uncertainty_queue import (
+    UncertaintyQueueConfig,
+    load_uncertainty_queue_config,
+)
 from mailbot_v26.config.silence_policy import SilencePolicyConfig, load_silence_policy_config
 from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
@@ -384,6 +388,7 @@ def run_digest_tick(
         behavior_metrics_config = _load_behavior_metrics_digest_config()
         trust_bootstrap_config = _load_trust_bootstrap_config()
         regret_minimization_config = _load_regret_minimization_config()
+        uncertainty_queue_config = load_uncertainty_queue_config(_CONFIG_PATH.parent)
         silence_policy = load_silence_policy_config(_CONFIG_PATH.parent)
         policy_inputs = _collect_policy_inputs(storage, logger)
 
@@ -427,6 +432,7 @@ def run_digest_tick(
                     silence_policy=silence_policy,
                     digest_insights_config=digest_insights_config,
                     behavior_metrics_config=behavior_metrics_config,
+                    uncertainty_queue_config=uncertainty_queue_config,
                     trust_bootstrap_config=trust_bootstrap_config,
                     regret_minimization_config=regret_minimization_config,
                     include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
@@ -502,6 +508,7 @@ def _run_daily_digest(
     silence_policy: SilencePolicyConfig,
     digest_insights_config: DigestInsightsConfig,
     behavior_metrics_config: BehaviorMetricsDigestConfig,
+    uncertainty_queue_config: UncertaintyQueueConfig,
     trust_bootstrap_config: TrustBootstrapDigestConfig,
     regret_minimization_config: RegretMinimizationDigestConfig,
     include_anomalies: bool = False,
@@ -554,6 +561,8 @@ def _run_daily_digest(
         include_digest_action_templates=flags.ENABLE_DIGEST_ACTION_TEMPLATES,
         include_behavior_metrics_digest=flags.ENABLE_BEHAVIOR_METRICS_DIGEST,
         behavior_metrics_window_days=behavior_metrics_config.window_days,
+        include_uncertainty_queue=flags.ENABLE_UNCERTAINTY_QUEUE,
+        uncertainty_queue_config=uncertainty_queue_config,
         include_trust_bootstrap=flags.ENABLE_TRUST_BOOTSTRAP,
         trust_bootstrap_config=trust_bootstrap_config.settings,
         include_regret_minimization=flags.ENABLE_REGRET_MINIMIZATION,

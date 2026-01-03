@@ -13,6 +13,7 @@ class EventType(str, Enum):
     TELEGRAM_DELIVERED = "telegram_delivered"
     TELEGRAM_FAILED = "telegram_failed"
     PRIORITY_CORRECTION_RECORDED = "priority_correction_recorded"
+    PRIORITY_DECISION_RECORDED = "priority_decision_recorded"
     # Payload (v1):
     # {
     #   "old_priority": "🔵|🟡|🔴" (string; may be empty if unknown),

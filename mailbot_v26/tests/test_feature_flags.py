@@ -18,6 +18,7 @@ def test_flags_default_to_false_when_missing(tmp_path: Path) -> None:
     assert not flags.ENABLE_CRM_DIAGNOSTICS
     assert not flags.ENABLE_ANOMALY_ALERTS
     assert not flags.ENABLE_PREMIUM_PROCESSOR
+    assert not flags.ENABLE_UNCERTAINTY_QUEUE
     assert flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD == 0.6
     assert flags.ENABLE_PRIORITY_V2 is True
 
@@ -34,6 +35,7 @@ enable_crm_diagnostics = on
 enable_anomaly_alerts = true
 enable_priority_v2 = false
 enable_premium_processor = true
+enable_uncertainty_queue = true
 auto_priority_confidence_threshold = 0.8
 """,
     )
@@ -46,6 +48,7 @@ auto_priority_confidence_threshold = 0.8
     assert flags.ENABLE_ANOMALY_ALERTS is True
     assert flags.ENABLE_PRIORITY_V2 is False
     assert flags.ENABLE_PREMIUM_PROCESSOR is True
+    assert flags.ENABLE_UNCERTAINTY_QUEUE is True
     assert flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD == 0.8
 
 

@@ -8,6 +8,7 @@ from mailbot_v26.behavior.trust_bootstrap import (
     compute_trust_bootstrap_snapshot,
     is_ready_for_action_templates,
 )
+from mailbot_v26.config.uncertainty_queue import UncertaintyQueueConfig
 from mailbot_v26.config.regret_minimization import RegretMinimizationConfig
 from mailbot_v26.config.trust_bootstrap import TrustBootstrapConfig
 from mailbot_v26.insights.anomaly_engine import compute_anomalies
@@ -52,6 +53,7 @@ class DigestData:
     deferred_attachments_only: int
     deferred_informational: int
     deferred_items: list[dict[str, str]]
+    uncertainty_queue_items: list[dict[str, object]]
     commitments_pending: int
     commitments_expired: int
     trust_delta: float | None
@@ -162,6 +164,8 @@ def _collect_digest_data(
     include_digest_action_templates: bool = False,
     include_behavior_metrics_digest: bool = False,
     behavior_metrics_window_days: int = 7,
+    include_uncertainty_queue: bool = False,
+    uncertainty_queue_config: UncertaintyQueueConfig | None = None,
     include_trust_bootstrap: bool = False,
     trust_bootstrap_config: TrustBootstrapConfig | None = None,
     include_regret_minimization: bool = False,
@@ -174,6 +178,7 @@ def _collect_digest_data(
     commitments = analytics.commitment_status_counts(account_email=account_email)
     trust_delta = analytics.latest_trust_score_delta()
     health_delta = analytics.latest_relationship_health_delta()
+    uncertainty_queue_items: list[dict[str, object]] = []
 
     trust_value: float | None = None
     if trust_delta is not None:
@@ -267,6 +272,43 @@ def _collect_digest_data(
         if metrics:
             behavior_metrics = metrics
 
+    if include_uncertainty_queue:
+        resolved_config = uncertainty_queue_config or UncertaintyQueueConfig()
+        try:
+            window_days = max(1, int(resolved_config.window_days))
+        except (TypeError, ValueError):
+            window_days = 1
+        try:
+            min_confidence = int(resolved_config.min_confidence)
+        except (TypeError, ValueError):
+            min_confidence = 70
+        min_confidence = max(0, min(100, min_confidence))
+        try:
+            max_items = max(0, int(resolved_config.max_items))
+        except (TypeError, ValueError):
+            max_items = 5
+        since_ts = (now or datetime.now(timezone.utc)).timestamp() - (
+            window_days * 24 * 60 * 60
+        )
+        items = analytics.uncertainty_queue_items(
+            account_email,
+            since_ts=since_ts,
+            min_confidence=min_confidence,
+            limit=max_items,
+        )
+        for item in items:
+            sender = str(item.get("sender") or "").strip()
+            subject = str(item.get("subject") or "").strip()
+            if not sender and not subject:
+                continue
+            uncertainty_queue_items.append(
+                {
+                    "sender": sender,
+                    "subject": subject,
+                    "confidence": item.get("confidence"),
+                }
+            )
+
     trust_bootstrap_snapshot: TrustBootstrapSnapshot | None = None
     trust_bootstrap_min_samples = 0
     trust_bootstrap_hide_action_templates = False
@@ -342,6 +384,7 @@ def _collect_digest_data(
         deferred_attachments_only=int(deferred.get("attachments_only", 0)),
         deferred_informational=int(deferred.get("informational", 0)),
         deferred_items=deferred_items,
+        uncertainty_queue_items=uncertainty_queue_items,
         commitments_pending=int(commitments.get("pending", 0)),
         commitments_expired=int(commitments.get("expired", 0)),
         trust_delta=trust_value,
@@ -391,6 +434,26 @@ def _build_digest_text(data: DigestData) -> str:
             label_parts = [part for part in [sender, summary] if part]
             if label_parts:
                 lines.append(f"  - {' — '.join(label_parts)}")
+    if data.uncertainty_queue_items:
+        lines.append("<b>Требуют уточнения</b>")
+        lines.append(
+            "• Низкая уверенность по приоритету: "
+            f"{len(data.uncertainty_queue_items)}"
+        )
+        for item in data.uncertainty_queue_items:
+            sender = str(item.get("sender") or "").strip()
+            subject = str(item.get("subject") or "").strip()
+            parts = [part for part in [sender, subject] if part]
+            if not parts:
+                continue
+            label = " — ".join(escape_tg_html(part) for part in parts)
+            raw_confidence = item.get("confidence")
+            try:
+                confidence = int(raw_confidence)
+            except (TypeError, ValueError):
+                confidence = 0
+            confidence = max(0, min(100, confidence))
+            lines.append(f"  - {label} ({confidence}%)")
     if data.commitments_pending > 0 or data.commitments_expired > 0:
         lines.append(
             "• Обязательства: "
@@ -593,6 +656,8 @@ def _format_silence_days_label(item: dict[str, object]) -> str:
 
 def _has_digest_content(data: DigestData) -> bool:
     if data.deferred_total > 0:
+        return True
+    if data.uncertainty_queue_items:
         return True
     if data.commitments_pending > 0 or data.commitments_expired > 0:
         return True
