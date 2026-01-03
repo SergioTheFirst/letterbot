@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from mailbot_v26.insights.aggregator import Insight
 from mailbot_v26.pipeline import processor, tg_renderer
 from mailbot_v26.ui.emoji_whitelist import ALLOWED_EMOJIS, find_disallowed_emojis
@@ -11,11 +13,13 @@ def _assert_whitelist(text: str) -> None:
 def test_telegram_render_emoji_whitelist_premium_clarity() -> None:
     rendered = processor._build_premium_clarity_text(
         priority="🔴",
+        received_at=datetime(2026, 1, 1),
         from_email="Анна 😊 <anna@example.com>",
         from_name="Анна 😊",
         subject="Срочно: счет 😊",
         action_line="Ответить клиенту 😊",
         body_summary="Нужно оплатить счет до завтра 😊",
+        body_text="Нужно оплатить счет до завтра 😊",
         attachments=[
             {"filename": "invoice😊.pdf", "text": "Счет на оплату 10 000"},
             {"filename": "notes.txt", "text": ""},
