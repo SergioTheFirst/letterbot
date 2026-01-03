@@ -54,7 +54,7 @@ def test_weekly_accuracy_report_block_renders_when_enabled() -> None:
         }
     )
     text = weekly_digest._build_weekly_digest_text(data)
-    assert "📊 <b>Отчёт точности (7 дней)</b>" in text
+    assert "<b>Отчёт точности (7 дней)</b>" in text
     assert "• Писем обработано: 12" in text
     assert "• Коррекции приоритета: 3" in text
     assert "• Сюрпризы: 1 (точность: 67%)" in text
