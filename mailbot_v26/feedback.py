@@ -8,7 +8,7 @@ from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.event_emitter import EventEmitter
-from mailbot_v26.config_loader import resolve_account_scope
+from mailbot_v26.config_loader import get_account_scope
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.system_health import OperationalMode
 
@@ -145,12 +145,12 @@ def record_priority_correction(
         )
     if contract_event_emitter is not None and inserted:
         try:
-            scope = resolve_account_scope(account_email or "")
+            scope = get_account_scope(account_email or "")
             scope_payload: dict[str, str | list[str]] = {}
             if scope:
                 scope_payload = {
-                    "chat_scope": f"tg:{scope.chat_id}",
-                    "account_emails": scope.account_emails,
+                    "chat_scope": scope[0],
+                    "account_emails": scope[1],
                 }
             event = EventV1(
                 event_type=EventType.PRIORITY_CORRECTION_RECORDED,

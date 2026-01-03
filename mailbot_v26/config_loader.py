@@ -195,6 +195,16 @@ def resolve_account_scope(
     return scopes.get(account_email)
 
 
+def get_account_scope(account_email: str) -> tuple[str, list[str]] | None:
+    scope = resolve_account_scope(account_email)
+    if scope is None or not scope.chat_id:
+        return None
+    account_emails = list(scope.account_emails)
+    if account_email and account_email not in account_emails:
+        account_emails.append(account_email)
+    return (f"tg:{scope.chat_id}", account_emails)
+
+
 def load_keys_config(base_dir: Path = CONFIG_DIR) -> KeysConfig:
     parser = _read_config_file(base_dir / "keys.ini")
     if "telegram" not in parser or "cloudflare" not in parser:
@@ -248,6 +258,7 @@ __all__ = [
     "InvalidAccountIdError",
     "KeysConfig",
     "StorageConfig",
+    "get_account_scope",
     "load_config",
     "load_accounts_config",
     "load_general_config",

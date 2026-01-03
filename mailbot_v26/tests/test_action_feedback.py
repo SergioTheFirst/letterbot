@@ -150,6 +150,32 @@ telegram_chat_id = chat
     assert payload["account_emails"] == ["account@example.com", "alt@example.com"]
 
 
+def test_get_account_scope(tmp_path, monkeypatch) -> None:
+    _write_accounts(
+        tmp_path,
+        """[primary]
+login = account@example.com
+password = secret
+telegram_chat_id = chat
+
+[alt]
+login = alt@example.com
+password = secret
+telegram_chat_id = chat
+
+[nochat]
+login = nochat@example.com
+password = secret
+""",
+    )
+    monkeypatch.setattr(config_loader, "CONFIG_DIR", tmp_path)
+    config_loader._load_account_scopes.cache_clear()
+
+    scope = config_loader.get_account_scope("account@example.com")
+    assert scope == ("tg:chat", ["account@example.com", "alt@example.com"])
+    assert config_loader.get_account_scope("nochat@example.com") is None
+
+
 def test_surprise_event_emitted_when_enabled(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "priority_feedback_surprise.sqlite"
     knowledge_db = KnowledgeDB(db_path)
@@ -198,3 +224,40 @@ telegram_chat_id = chat
     )
     assert surprise_payload["chat_scope"] == "tg:chat"
     assert surprise_payload["account_emails"] == ["account@example.com", "alt@example.com"]
+
+
+def test_priority_correction_payload_without_scope(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "priority_feedback_noscope.sqlite"
+    knowledge_db = KnowledgeDB(db_path)
+    contract_emitter = ContractEventEmitter(db_path)
+    _write_accounts(
+        tmp_path,
+        """[primary]
+login = account@example.com
+password = secret
+""",
+    )
+    monkeypatch.setattr(config_loader, "CONFIG_DIR", tmp_path)
+    config_loader._load_account_scopes.cache_clear()
+
+    record_priority_correction(
+        knowledge_db=knowledge_db,
+        email_id=303,
+        correction="🔴",
+        old_priority="🟡",
+        entity_id="entity-10",
+        sender_email="sender@example.com",
+        account_email="account@example.com",
+        system_mode=OperationalMode.FULL,
+        contract_event_emitter=contract_emitter,
+        engine="priority_v2_shadow",
+        source="preview_buttons",
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        event_rows = conn.execute(
+            "SELECT event_type, payload FROM events_v1"
+        ).fetchall()
+    payload = json.loads(event_rows[0][1])
+    assert "chat_scope" not in payload
+    assert "account_emails" not in payload
