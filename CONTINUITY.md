@@ -109,3 +109,4 @@ Working set (files / tables / tests):
 2026-01-03: weekly digest добавил shadow-предложения к калибровке (events_v1).
 2026-01-10: daily digest trust bootstrap + behavior metrics now aggregate by chat-scope account_emails (single-user multi-account).
 2026-01-10: quality metrics (daily+weekly) now aggregate by chat-scope account_emails (single-user multi-account).
+2026-01-04: daily digest uncertainty queue now aggregates by chat-scope account_emails (single-user multi-account).

@@ -343,11 +343,13 @@ class KnowledgeAnalytics:
         self,
         account_email: str,
         *,
+        account_emails: Iterable[str] | None = None,
         since_ts: float,
         min_confidence: int,
         limit: int,
     ) -> list[dict[str, object]]:
-        if not account_email:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return []
         resolved_limit = max(0, int(limit))
         if resolved_limit <= 0:
@@ -356,19 +358,18 @@ class KnowledgeAnalytics:
         SELECT ts_utc, payload, payload_json
         FROM events_v1
         WHERE event_type = ?
-          AND account_id = ?
           AND ts_utc >= ?
-        ORDER BY ts_utc DESC
         """
+        params: list[object] = [
+            EventType.PRIORITY_DECISION_RECORDED.value,
+            since_ts,
+        ]
+        clause, clause_params = self._account_scope_clause(account_ids)
+        query += clause
+        query += "\n        ORDER BY ts_utc DESC"
+        params.extend(clause_params)
         try:
-            rows = self._execute_select(
-                query,
-                (
-                    EventType.PRIORITY_DECISION_RECORDED.value,
-                    account_email,
-                    since_ts,
-                ),
-            )
+            rows = self._execute_select(query, params)
         except sqlite3.OperationalError:
             return []
         items: list[dict[str, object]] = []
