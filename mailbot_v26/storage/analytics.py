@@ -1040,16 +1040,23 @@ class KnowledgeAnalytics:
         query += " ORDER BY c.deadline_iso ASC"
         return self._execute_select(query, params)
 
-    def deferred_digest_counts(self, *, account_email: str, days: int = 1) -> dict[str, int]:
-        if not account_email:
+    def deferred_digest_counts(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        days: int = 1,
+    ) -> dict[str, int]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return {
                 "total": 0,
                 "attachments_only": 0,
                 "informational": 0,
             }
         since_ts = self._window_start_ts(days)
-        rows = self._event_rows(
-            account_id=account_email,
+        rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="attention_deferred_for_digest",
             since_ts=since_ts,
         )
@@ -1068,21 +1075,31 @@ class KnowledgeAnalytics:
         }
 
     def deferred_digest_items(
-        self, *, account_email: str, limit: int = 5
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        limit: int = 5,
     ) -> list[dict[str, str]]:
-        if not account_email or limit <= 0:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids or limit <= 0:
             return []
+        clause, clause_params = self._account_scope_clause(account_ids)
+        if clause:
+            clause = clause.replace("account_id", "account_email")
         try:
             rows = self._execute_select(
                 """
                 SELECT subject, from_email, received_at, body_summary
                 FROM emails
-                WHERE account_email = ?
-                  AND deferred_for_digest = 1
+                WHERE deferred_for_digest = 1
+                """
+                + clause
+                + """
                 ORDER BY datetime(received_at) DESC
                 LIMIT ?
                 """,
-                (account_email, limit),
+                [*clause_params, limit],
             )
         except sqlite3.OperationalError:
             return []
@@ -1270,15 +1287,21 @@ class KnowledgeAnalytics:
             "received_at": received_at,
         }
 
-    def commitment_status_counts(self, *, account_email: str) -> dict[str, int]:
-        if not account_email:
+    def commitment_status_counts(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+    ) -> dict[str, int]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return {"pending": 0, "expired": 0}
-        created_rows = self._event_rows(
-            account_id=account_email,
+        created_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="commitment_created",
         )
-        status_rows = self._event_rows(
-            account_id=account_email,
+        status_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="commitment_status_changed",
         )
         created_count = len(created_rows)

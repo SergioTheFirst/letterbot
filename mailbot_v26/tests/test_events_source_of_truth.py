@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
@@ -161,6 +161,127 @@ def test_analytics_from_events(tmp_path) -> None:
     commitments = analytics.weekly_commitment_counts(account_email="account@example.com", days=7)
     assert commitments["created"] == 1
     assert commitments["fulfilled"] == 1
+
+
+def test_scoped_deferred_commitments_aggregate(tmp_path) -> None:
+    db_path = tmp_path / "scoped.sqlite"
+    db = KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    contract_emitter = ContractEventEmitter(db_path)
+
+    now = datetime.now(timezone.utc)
+    email_id_primary = db.save_email(
+        account_email="account@example.com",
+        from_email="primary@example.com",
+        subject="Primary A",
+        received_at=(now - timedelta(minutes=5)).isoformat(),
+        priority="🔵",
+        action_line="Проверить",
+        body_summary="Summary A",
+        raw_body="",
+        attachment_summaries=[],
+        deferred_for_digest=True,
+    )
+    email_id_alt = db.save_email(
+        account_email="alt@example.com",
+        from_email="alt@example.com",
+        subject="Alt A",
+        received_at=now.isoformat(),
+        priority="🔵",
+        action_line="Проверить",
+        body_summary="Summary B",
+        raw_body="",
+        attachment_summaries=[],
+        deferred_for_digest=True,
+    )
+    db.save_email(
+        account_email="account@example.com",
+        from_email="primary-old@example.com",
+        subject="Primary B",
+        received_at=(now - timedelta(minutes=10)).isoformat(),
+        priority="🔵",
+        action_line="Проверить",
+        body_summary="Summary C",
+        raw_body="",
+        attachment_summaries=[],
+        deferred_for_digest=True,
+    )
+    assert email_id_primary is not None
+    assert email_id_alt is not None
+
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=email_id_primary,
+            payload={"reason": "test", "attachments_only": False, "attachments_count": 0},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+            ts_utc=now.timestamp(),
+            account_id="alt@example.com",
+            entity_id=None,
+            email_id=email_id_alt,
+            payload={"reason": "test", "attachments_only": True, "attachments_count": 1},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_CREATED,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=email_id_primary,
+            payload={},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_CREATED,
+            ts_utc=now.timestamp(),
+            account_id="alt@example.com",
+            entity_id=None,
+            email_id=email_id_alt,
+            payload={},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_STATUS_CHANGED,
+            ts_utc=now.timestamp(),
+            account_id="alt@example.com",
+            entity_id=None,
+            email_id=email_id_alt,
+            payload={"new_status": "expired"},
+        )
+    )
+
+    scope = ["account@example.com", "alt@example.com"]
+    deferred = analytics.deferred_digest_counts(
+        account_email="account@example.com",
+        account_emails=scope,
+    )
+    assert deferred == {"total": 2, "attachments_only": 1, "informational": 1}
+
+    deferred_items = analytics.deferred_digest_items(
+        account_email="account@example.com",
+        account_emails=scope,
+        limit=2,
+    )
+    assert [item["sender"] for item in deferred_items] == [
+        "alt@example.com",
+        "primary@example.com",
+    ]
+
+    commitments = analytics.commitment_status_counts(
+        account_email="account@example.com",
+        account_emails=scope,
+    )
+    assert commitments == {"pending": 1, "expired": 1}
 
 
 def test_backfill_idempotent(tmp_path) -> None:
