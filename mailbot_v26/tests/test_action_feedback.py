@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from mailbot_v26 import config_loader
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.feedback import record_action_feedback, record_priority_correction
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.system_health import OperationalMode
+
+
+def _write_accounts(tmp_path, content: str) -> None:
+    (tmp_path / "accounts.ini").write_text(content, encoding="utf-8")
 
 
 def test_feedback_persisted_and_logged(tmp_path, caplog) -> None:
@@ -77,10 +82,25 @@ def test_priority_correction_persisted(tmp_path, caplog) -> None:
     assert row[6] == "account@example.com"
 
 
-def test_feedback_emits_event_v1(tmp_path) -> None:
+def test_feedback_emits_event_v1(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "priority_feedback_events.sqlite"
     knowledge_db = KnowledgeDB(db_path)
     contract_emitter = ContractEventEmitter(db_path)
+    _write_accounts(
+        tmp_path,
+        """[primary]
+login = account@example.com
+password = secret
+telegram_chat_id = chat
+
+[alt]
+login = alt@example.com
+password = secret
+telegram_chat_id = chat
+""",
+    )
+    monkeypatch.setattr(config_loader, "CONFIG_DIR", tmp_path)
+    config_loader._load_account_scopes.cache_clear()
 
     first_id = record_priority_correction(
         knowledge_db=knowledge_db,
@@ -126,12 +146,29 @@ def test_feedback_emits_event_v1(tmp_path) -> None:
     assert payload["old_priority"] == "🟡"
     assert payload["engine"] == "priority_v2_shadow"
     assert payload["source"] == "preview_buttons"
+    assert payload["chat_scope"] == "tg:chat"
+    assert payload["account_emails"] == ["account@example.com", "alt@example.com"]
 
 
-def test_surprise_event_emitted_when_enabled(tmp_path) -> None:
+def test_surprise_event_emitted_when_enabled(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "priority_feedback_surprise.sqlite"
     knowledge_db = KnowledgeDB(db_path)
     contract_emitter = ContractEventEmitter(db_path)
+    _write_accounts(
+        tmp_path,
+        """[primary]
+login = account@example.com
+password = secret
+telegram_chat_id = chat
+
+[alt]
+login = alt@example.com
+password = secret
+telegram_chat_id = chat
+""",
+    )
+    monkeypatch.setattr(config_loader, "CONFIG_DIR", tmp_path)
+    config_loader._load_account_scopes.cache_clear()
 
     record_priority_correction(
         knowledge_db=knowledge_db,
@@ -149,7 +186,15 @@ def test_surprise_event_emitted_when_enabled(tmp_path) -> None:
     )
 
     with sqlite3.connect(db_path) as conn:
-        event_types = [row[0] for row in conn.execute("SELECT event_type FROM events_v1")]
+        event_rows = conn.execute(
+            "SELECT event_type, payload FROM events_v1"
+        ).fetchall()
+    event_types = [row[0] for row in event_rows]
 
     assert "priority_correction_recorded" in event_types
     assert "surprise_detected" in event_types
+    surprise_payload = next(
+        json.loads(row[1]) for row in event_rows if row[0] == "surprise_detected"
+    )
+    assert surprise_payload["chat_scope"] == "tg:chat"
+    assert surprise_payload["account_emails"] == ["account@example.com", "alt@example.com"]

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import configparser
 from dataclasses import dataclass
+from functools import lru_cache
 import re
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -41,6 +42,12 @@ class AccountConfig:
     port: int
     use_ssl: bool
     telegram_chat_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AccountScope:
+    chat_id: str
+    account_emails: list[str]
 
 
 @dataclass
@@ -155,6 +162,39 @@ def load_accounts_config(base_dir: Path = CONFIG_DIR) -> List[AccountConfig]:
     return accounts
 
 
+@lru_cache(maxsize=8)
+def _load_account_scopes(base_dir: str) -> dict[str, AccountScope]:
+    scopes: dict[str, AccountScope] = {}
+    try:
+        accounts = load_accounts_config(Path(base_dir))
+    except ConfigError:
+        return scopes
+    chat_groups: dict[str, list[str]] = {}
+    for account in accounts:
+        if not account.telegram_chat_id:
+            continue
+        chat_groups.setdefault(account.telegram_chat_id, []).append(account.login)
+    for account in accounts:
+        if not account.telegram_chat_id:
+            continue
+        scopes[account.login] = AccountScope(
+            chat_id=account.telegram_chat_id,
+            account_emails=chat_groups.get(account.telegram_chat_id, []),
+        )
+    return scopes
+
+
+def resolve_account_scope(
+    account_email: str,
+    base_dir: Path | None = None,
+) -> AccountScope | None:
+    if not account_email:
+        return None
+    config_dir = base_dir or CONFIG_DIR
+    scopes = _load_account_scopes(str(config_dir))
+    return scopes.get(account_email)
+
+
 def load_keys_config(base_dir: Path = CONFIG_DIR) -> KeysConfig:
     parser = _read_config_file(base_dir / "keys.ini")
     if "telegram" not in parser or "cloudflare" not in parser:
@@ -201,6 +241,7 @@ def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
 
 __all__ = [
     "AccountConfig",
+    "AccountScope",
     "BotConfig",
     "ConfigError",
     "GeneralConfig",
@@ -212,4 +253,5 @@ __all__ = [
     "load_general_config",
     "load_keys_config",
     "load_storage_config",
+    "resolve_account_scope",
 ]
