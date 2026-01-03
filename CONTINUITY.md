@@ -96,3 +96,4 @@ Working set (files / tables / tests):
 2026-01-03: action templates gated by events accuracy behind enable_trust_bootstrap.
 
 2026-01-03: weekly calibration (surprise breakdown) behind enable_weekly_calibration_report.
+2026-01-03: uncertainty queue (digest-only) behind enable_uncertainty_queue.

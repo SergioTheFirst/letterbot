@@ -9,6 +9,7 @@ def test_daily_digest_includes_deferred_items() -> None:
         deferred_attachments_only=0,
         deferred_informational=1,
         deferred_items=[{"sender": "user@example.com", "summary": "Кратко"}],
+        uncertainty_queue_items=[],
         commitments_pending=0,
         commitments_expired=0,
         trust_delta=None,

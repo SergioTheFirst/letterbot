@@ -62,6 +62,7 @@ enable_premium_processor = false
 enable_behavior_metrics_digest = false
 enable_trust_bootstrap = false
 enable_regret_minimization = false
+enable_uncertainty_queue = false
 
 [daily_digest]
 hour = 9
@@ -86,6 +87,11 @@ max_items = 3
 
 [behavior_metrics_digest]
 window_days = 7
+
+[uncertainty_queue]
+window_days = 1
+min_confidence = 70
+max_items = 5
 
 [trust_bootstrap]
 learning_days = 14

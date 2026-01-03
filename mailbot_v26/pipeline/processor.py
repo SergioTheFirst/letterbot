@@ -88,7 +88,7 @@ from mailbot_v26.observability.relationship_health_snapshot import (
 )
 from mailbot_v26.observability.trust_snapshot import TrustSnapshotWriter
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine, AutoPriorityOutcome
-from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
+from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine, PRIORITY_ORDER
 from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
 from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
@@ -350,6 +350,33 @@ def _coerce_delivery_result(result: object, *, email_id: int) -> DeliveryResult:
         mode="html",
         retry_count=0,
     )
+
+
+def _priority_confidence_percent(
+    *,
+    confidence_score: float | None,
+    deadlines_count: int,
+    commitments_count: int,
+    attachments_only: bool,
+    extracted_text_len: int,
+    priority: str,
+) -> int:
+    if confidence_score is not None:
+        try:
+            raw_score = float(confidence_score) * 100
+        except (TypeError, ValueError):
+            raw_score = 0.0
+        return max(0, min(100, int(round(raw_score))))
+    score = 50
+    if deadlines_count > 0:
+        score += 20
+    if commitments_count > 0:
+        score += 15
+    if attachments_only or extracted_text_len > 0:
+        score += 10
+    if PRIORITY_ORDER.get(priority, 0) >= 1:
+        score += 10
+    return max(0, min(100, score))
 
 
 def _collect_policy_inputs() -> PolicyInputs:
@@ -3260,6 +3287,34 @@ def process_message(
     )
     deadlines_count = sum(
         1 for commitment in commitments if commitment.deadline_iso
+    )
+    attachments_only = render_result.extracted_text_len <= 0 and len(attachments) > 0
+    confidence_percent = _priority_confidence_percent(
+        confidence_score=confidence_score,
+        deadlines_count=deadlines_count,
+        commitments_count=len(commitments),
+        attachments_only=attachments_only,
+        extracted_text_len=render_result.extracted_text_len,
+        priority=priority,
+    )
+    priority_engine_for_event = "shadow"
+    if auto_priority_outcome.applied:
+        priority_engine_for_event = "rules"
+    elif priority_v2_result:
+        priority_engine_for_event = "priority_v2"
+    _emit_contract_event(
+        EventType.PRIORITY_DECISION_RECORDED,
+        ts_utc=received_at.timestamp(),
+        account_id=account_email,
+        entity_id=contract_event_entity_id,
+        email_id=message_id,
+        payload={
+            "priority": priority,
+            "confidence": confidence_percent,
+            "sender": from_email or "",
+            "subject": subject or "",
+            "engine": priority_engine_for_event,
+        },
     )
     relationship_health_delta: float | None = None
     if analytics_result.health_snapshot is not None:

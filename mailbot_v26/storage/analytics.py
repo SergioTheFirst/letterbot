@@ -173,6 +173,62 @@ class KnowledgeAnalytics:
             since_ts=since_ts,
         )
 
+    def uncertainty_queue_items(
+        self,
+        account_email: str,
+        *,
+        since_ts: float,
+        min_confidence: int,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        if not account_email:
+            return []
+        resolved_limit = max(0, int(limit))
+        if resolved_limit <= 0:
+            return []
+        query = """
+        SELECT ts_utc, payload, payload_json
+        FROM events_v1
+        WHERE event_type = ?
+          AND account_id = ?
+          AND ts_utc >= ?
+        ORDER BY ts_utc DESC
+        """
+        try:
+            rows = self._execute_select(
+                query,
+                (
+                    EventType.PRIORITY_DECISION_RECORDED.value,
+                    account_email,
+                    since_ts,
+                ),
+            )
+        except sqlite3.OperationalError:
+            return []
+        items: list[dict[str, object]] = []
+        for row in rows:
+            payload = self._event_payload(row)
+            raw_confidence = payload.get("confidence")
+            try:
+                confidence = int(raw_confidence)
+            except (TypeError, ValueError):
+                continue
+            confidence = max(0, min(100, confidence))
+            if confidence >= min_confidence:
+                continue
+            sender = str(payload.get("sender") or "")
+            subject = str(payload.get("subject") or "")
+            items.append(
+                {
+                    "sender": sender,
+                    "subject": subject,
+                    "confidence": confidence,
+                }
+            )
+            if len(items) >= resolved_limit:
+                break
+        return items
+
     def recent_email_events(
         self,
         *,
