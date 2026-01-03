@@ -43,6 +43,51 @@ def _insert_email(
         )
 
 
+def _emit_email_event(
+    emitter: ContractEventEmitter,
+    *,
+    ts_utc: float,
+    account_id: str,
+    from_email: str,
+) -> None:
+    emitter.emit(
+        EventV1(
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=ts_utc,
+            account_id=account_id,
+            entity_id=None,
+            email_id=None,
+            payload={
+                "from_email": from_email,
+                "subject": "subject",
+                "body_summary": "summary text",
+                "attachments_count": 0,
+            },
+        )
+    )
+
+
+def _emit_score_event(
+    emitter: ContractEventEmitter,
+    *,
+    ts_utc: float,
+    account_id: str,
+    entity_id: str,
+    event_type: EventType,
+    payload: dict[str, object],
+) -> None:
+    emitter.emit(
+        EventV1(
+            event_type=event_type,
+            ts_utc=ts_utc,
+            account_id=account_id,
+            entity_id=entity_id,
+            email_id=None,
+            payload=payload,
+        )
+    )
+
+
 def test_at_risk_only_uses_health_or_anomalies(tmp_path: Path) -> None:
     db_path = tmp_path / "attention.sqlite"
     KnowledgeDB(db_path)
@@ -151,3 +196,90 @@ def test_at_risk_only_uses_health_or_anomalies(tmp_path: Path) -> None:
 
     at_risk_ids = {entity.entity_id for entity in result.at_risk}
     assert at_risk_ids == {"risk@example.com"}
+
+
+def test_attention_economics_scopes_account_emails(tmp_path: Path) -> None:
+    db_path = tmp_path / "attention_scope.sqlite"
+    KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    emitter = ContractEventEmitter(db_path)
+    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+
+    _emit_email_event(
+        emitter,
+        ts_utc=now.timestamp(),
+        account_id="acc-a@example.com",
+        from_email="alpha@example.com",
+    )
+    _emit_email_event(
+        emitter,
+        ts_utc=now.timestamp(),
+        account_id="acc-b@example.com",
+        from_email="beta@example.com",
+    )
+    _emit_score_event(
+        emitter,
+        ts_utc=now.timestamp(),
+        account_id="acc-a@example.com",
+        entity_id="alpha@example.com",
+        event_type=EventType.TRUST_SCORE_UPDATED,
+        payload={"trust_score": 0.7},
+    )
+    _emit_score_event(
+        emitter,
+        ts_utc=now.timestamp(),
+        account_id="acc-b@example.com",
+        entity_id="beta@example.com",
+        event_type=EventType.RELATIONSHIP_HEALTH_UPDATED,
+        payload={"health_score": 80.0},
+    )
+
+    result = compute_attention_economics(
+        analytics=analytics,
+        account_email="acc-a@example.com",
+        account_emails=["acc-a@example.com", "acc-b@example.com"],
+        window_days=7,
+        now=now,
+        sample_threshold=1,
+    )
+
+    assert result is not None
+    assert result.sample_size == 2
+    assert {entity.entity_id for entity in result.entities} == {
+        "alpha@example.com",
+        "beta@example.com",
+    }
+
+
+def test_attention_economics_empty_scope_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "attention_empty.sqlite"
+    KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    emitter = ContractEventEmitter(db_path)
+    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+
+    _emit_email_event(
+        emitter,
+        ts_utc=now.timestamp(),
+        account_id="acc-a@example.com",
+        from_email="alpha@example.com",
+    )
+    _emit_email_event(
+        emitter,
+        ts_utc=now.timestamp(),
+        account_id="acc-b@example.com",
+        from_email="beta@example.com",
+    )
+
+    result = compute_attention_economics(
+        analytics=analytics,
+        account_email="acc-a@example.com",
+        account_emails=[],
+        window_days=7,
+        now=now,
+        sample_threshold=1,
+    )
+
+    assert result is not None
+    assert result.sample_size == 1
+    assert [entity.entity_id for entity in result.entities] == ["alpha@example.com"]

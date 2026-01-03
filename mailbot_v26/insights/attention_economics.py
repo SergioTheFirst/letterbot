@@ -93,15 +93,19 @@ def compute_attention_economics(
     *,
     analytics: KnowledgeAnalytics,
     account_email: str,
+    account_emails: Sequence[str] | None = None,
     window_days: int = 7,
     include_anomalies: bool = False,
     event_emitter: EventEmitter | None = None,
     now: datetime | None = None,
     sample_threshold: int = _MIN_SAMPLE_SIZE,
 ) -> AttentionEconomicsResult | None:
+    account_ids = analytics._normalize_account_scope(account_email, account_emails)
     try:
         raw_entities = analytics.attention_entity_metrics(
-            account_email=account_email, days=window_days
+            account_email=account_email,
+            account_emails=account_ids,
+            days=window_days,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("attention_economics_compute_failed", error=str(exc))
@@ -136,7 +140,11 @@ def compute_attention_economics(
         )
         return None
 
-    deltas = analytics.trust_and_health_deltas(days=window_days)
+    deltas = analytics.trust_and_health_deltas(
+        account_email=account_email,
+        account_emails=account_ids,
+        days=window_days,
+    )
     entities: list[AttentionEntity] = []
     for item in raw_entities:
         entity_id = str(item.get("entity_id") or "").strip()
