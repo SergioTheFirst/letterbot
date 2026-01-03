@@ -1,9 +1,40 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
+from mailbot_v26.config_loader import AccountScope
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline import daily_digest
+from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 
 _TARGET_EMOJI = "\U0001F3AF"
+
+
+def _seed_email(
+    db: KnowledgeDB,
+    *,
+    account_email: str,
+    from_email: str,
+    subject: str,
+    received_at: datetime,
+    thread_key: str,
+) -> None:
+    email_id = db.save_email(
+        account_email=account_email,
+        from_email=from_email,
+        subject=subject,
+        received_at=received_at.isoformat(),
+        priority="P0",
+        action_line="",
+        body_summary="",
+        raw_body="",
+        thread_key=thread_key,
+        attachment_summaries=[],
+    )
+    assert email_id is not None
 
 
 def _base_digest_kwargs() -> dict[str, object]:
@@ -204,3 +235,112 @@ def test_daily_digest_bootstrap_inactive_keeps_templates() -> None:
     text = daily_digest._build_digest_text(data)
     assert "\U0001F393 <b>Режим обучения</b>" not in text
     assert "Текст:" in text
+
+
+def test_daily_digest_insights_scope_aggregation(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "digest.sqlite"
+    db = KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    emitter = ContractEventEmitter(db_path)
+
+    now = datetime.now(timezone.utc)
+    primary = "account@example.com"
+    secondary = "alt@example.com"
+
+    _seed_email(
+        db,
+        account_email=primary,
+        from_email="primary@example.com",
+        subject="Первичный",
+        received_at=now - timedelta(days=1),
+        thread_key="thread-primary",
+    )
+    _seed_email(
+        db,
+        account_email=secondary,
+        from_email="secondary@example.com",
+        subject="Вторичный",
+        received_at=now - timedelta(hours=4),
+        thread_key="thread-secondary",
+    )
+
+    emitter.emit(
+        EventV1(
+            event_type=EventType.DEADLOCK_DETECTED,
+            ts_utc=(now - timedelta(hours=2)).timestamp(),
+            account_id=primary,
+            entity_id=None,
+            email_id=None,
+            payload={"thread_key": "thread-primary"},
+        )
+    )
+    emitter.emit(
+        EventV1(
+            event_type=EventType.DEADLOCK_DETECTED,
+            ts_utc=(now - timedelta(hours=1)).timestamp(),
+            account_id=secondary,
+            entity_id=None,
+            email_id=None,
+            payload={"thread_key": "thread-secondary"},
+        )
+    )
+    emitter.emit(
+        EventV1(
+            event_type=EventType.SILENCE_SIGNAL_DETECTED,
+            ts_utc=(now - timedelta(hours=2)).timestamp(),
+            account_id=primary,
+            entity_id=None,
+            email_id=None,
+            payload={"contact": "client@example.com", "days_silent": 3},
+        )
+    )
+    emitter.emit(
+        EventV1(
+            event_type=EventType.SILENCE_SIGNAL_DETECTED,
+            ts_utc=(now - timedelta(hours=1)).timestamp(),
+            account_id=secondary,
+            entity_id=None,
+            email_id=None,
+            payload={"contact": "vendor@example.com", "days_silent": 4},
+        )
+    )
+
+    monkeypatch.setattr(
+        daily_digest,
+        "resolve_account_scope",
+        lambda *_args, **_kwargs: AccountScope(
+            chat_id="chat",
+            account_emails=[primary, secondary],
+        ),
+    )
+
+    data = daily_digest._collect_digest_data(
+        analytics=analytics,
+        account_email=primary,
+        include_digest_insights=True,
+        digest_insights_window_days=7,
+        digest_insights_max_items=5,
+        now=now,
+    )
+
+    text = daily_digest._build_digest_text(data)
+    assert (
+        f"• Застой в переписке: primary@example.com — Первичный → {_TARGET_EMOJI} "
+        "Предложить созвон (15 мин)"
+        in text
+    )
+    assert (
+        f"• Застой в переписке: secondary@example.com — Вторичный → {_TARGET_EMOJI} "
+        "Предложить созвон (15 мин)"
+        in text
+    )
+    assert (
+        f"• Нет ответа: client@example.com — 3 дня → {_TARGET_EMOJI} "
+        "Вежливо напомнить сегодня"
+        in text
+    )
+    assert (
+        f"• Нет ответа: vendor@example.com — 4 дня → {_TARGET_EMOJI} "
+        "Вежливо напомнить сегодня"
+        in text
+    )
