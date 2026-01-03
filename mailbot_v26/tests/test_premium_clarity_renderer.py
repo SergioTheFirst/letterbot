@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 
 from mailbot_v26.insights.digest import InsightDigest
 from mailbot_v26.insights.commitment_tracker import Commitment
@@ -152,6 +153,29 @@ def test_premium_clarity_attachment_summary_status() -> None:
     assert "• invoice.pdf — Счёт" in rendered
 
 
+def test_premium_clarity_attachment_summary_suppresses_numbers() -> None:
+    attachments = [{"filename": "invoice_1234.pdf", "text": ""}]
+    summaries = [
+        {"filename": "invoice_1234.pdf", "summary": "Счёт №1234 на 50 000₽"}
+    ]
+    rendered = _render(
+        attachments=attachments,
+        attachment_summaries=summaries,
+        extraction_failed=True,
+        confidence_available=False,
+        confidence_percent=0,
+        body_summary="",
+        body_text="",
+    )
+    line = next(
+        line for line in rendered.splitlines() if line.startswith("• invoice_1234.pdf")
+    )
+    summary = line.split("—", 1)[-1].strip()
+    assert "invoice_1234.pdf" in line
+    assert "Счёт" in summary
+    assert re.search(r"\d", summary) is None
+
+
 def test_premium_clarity_fact_provenance_subject() -> None:
     rendered = _render(
         subject="Счет на 12 000 ₽",
@@ -177,6 +201,20 @@ def test_premium_clarity_fact_provenance_attachment() -> None:
         body_text="",
     )
     assert "Сумма: 5 000 руб. (invoice.pdf)" in rendered
+
+
+def test_premium_clarity_fact_provenance_omitted_for_ambiguous_attachment() -> None:
+    attachments = [
+        {"filename": "first.pdf", "text": "Сумма 5 000 руб."},
+        {"filename": "second.pdf", "text": "Сумма 5 000 руб."},
+    ]
+    rendered = _render(
+        attachments=attachments,
+        body_summary="Есть счет.",
+        body_text="",
+    )
+    assert "(first.pdf)" not in rendered
+    assert "(second.pdf)" not in rendered
 
 
 def test_premium_clarity_fact_provenance_omitted_when_unknown() -> None:

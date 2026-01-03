@@ -103,3 +103,4 @@ Working set (files / tables / tests):
 2026-01-04: premium clarity facts baseline and line budget enforcement.
 2026-01-05: premium clarity v1.1 provenance tags and why line.
 - 2026-01-05: premium clarity v1.1 evidence-first gating, attachment line update, render event metadata, tests.
+- 2026-01-06: premium clarity v1.2 attachment provenance disambiguation, numeric-safe attachment summaries, TG render flags.

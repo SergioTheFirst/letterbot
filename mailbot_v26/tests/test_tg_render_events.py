@@ -84,8 +84,14 @@ def test_delivery_policy_event_payload_and_render_record(monkeypatch) -> None:
         "extraction_failed",
         "confidence_bucket",
         "attachments_count",
+        "suppressed_numeric_facts",
+        "has_attachment_fact_provenance",
     }
     assert render_payload["confidence_bucket"] in {"hi", "med", "low", "na"}
     assert isinstance(render_payload["attachments_count"], int)
     assert render_payload["shown_fact_types"] == []
     assert render_payload["fact_sources"] == []
+    assert isinstance(render_payload["suppressed_numeric_facts"], bool)
+    assert isinstance(render_payload["has_attachment_fact_provenance"], bool)
+    assert render_payload["suppressed_numeric_facts"] is True
+    assert render_payload["has_attachment_fact_provenance"] is False
