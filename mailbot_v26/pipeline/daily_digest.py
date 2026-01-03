@@ -272,11 +272,13 @@ def _collect_digest_data(
     if insights_enabled and insights_max_items > 0:
         deadlock_insights = analytics.get_deadlock_insights(
             account_email=account_email,
+            account_emails=scope_account_emails,
             window_days=max(1, int(digest_insights_window_days)),
             limit=insights_max_items,
         )
         silence_insights = analytics.get_silence_insights(
             account_email=account_email,
+            account_emails=scope_account_emails,
             window_days=max(1, int(digest_insights_window_days)),
             limit=insights_max_items,
         )

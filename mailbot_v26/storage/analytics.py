@@ -1121,14 +1121,16 @@ class KnowledgeAnalytics:
         self,
         *,
         account_email: str,
+        account_emails: Iterable[str] | None = None,
         window_days: int,
         limit: int,
     ) -> list[dict[str, object]]:
-        if not account_email or window_days <= 0 or limit <= 0:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids or window_days <= 0 or limit <= 0:
             return []
         since_ts = self._window_start_ts(window_days)
-        rows = self._event_rows(
-            account_id=account_email,
+        rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="deadlock_detected",
             since_ts=since_ts,
         )
@@ -1158,6 +1160,7 @@ class KnowledgeAnalytics:
             thread_key = str(item.get("thread_key") or "").strip()
             fields = self._thread_email_fields(
                 account_email=account_email,
+                account_emails=account_emails,
                 thread_key=thread_key,
             )
             results.append(
@@ -1174,11 +1177,13 @@ class KnowledgeAnalytics:
         self,
         *,
         account_email: str,
+        account_emails: Iterable[str] | None = None,
         window_days: int,
         limit: int,
     ) -> list[dict[str, object]]:
         return self.get_deadlock_insights(
             account_email=account_email,
+            account_emails=account_emails,
             window_days=window_days,
             limit=limit,
         )
@@ -1187,14 +1192,16 @@ class KnowledgeAnalytics:
         self,
         *,
         account_email: str,
+        account_emails: Iterable[str] | None = None,
         window_days: int,
         limit: int,
     ) -> list[dict[str, object]]:
-        if not account_email or window_days <= 0 or limit <= 0:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids or window_days <= 0 or limit <= 0:
             return []
         since_ts = self._window_start_ts(window_days)
-        rows = self._event_rows(
-            account_id=account_email,
+        rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="silence_signal_detected",
             since_ts=since_ts,
         )
@@ -1239,11 +1246,13 @@ class KnowledgeAnalytics:
         self,
         *,
         account_email: str,
+        account_emails: Iterable[str] | None = None,
         window_days: int,
         limit: int,
     ) -> list[dict[str, object]]:
         return self.get_silence_insights(
             account_email=account_email,
+            account_emails=account_emails,
             window_days=window_days,
             limit=limit,
         )
@@ -1252,20 +1261,27 @@ class KnowledgeAnalytics:
         self,
         *,
         account_email: str,
+        account_emails: Iterable[str] | None = None,
         thread_key: str,
     ) -> dict[str, str]:
-        if not account_email or not thread_key:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids or not thread_key:
             return {"subject": "", "from_email": "", "received_at": ""}
+        clause, clause_params = self._account_scope_clause(account_ids)
+        if clause:
+            clause = clause.replace("account_id", "account_email")
         try:
             rows = self._execute_select(
                 """
                 SELECT subject, from_email, received_at
                 FROM emails
-                WHERE account_email = ?
-                  AND thread_key = ?
+                WHERE thread_key = ?
+                """
+                + clause
+                + """
                 ORDER BY datetime(received_at) DESC
                 """,
-                (account_email, thread_key),
+                [thread_key, *clause_params],
             )
         except sqlite3.OperationalError:
             return {"subject": "", "from_email": "", "received_at": ""}
