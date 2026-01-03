@@ -152,3 +152,35 @@ def test_signal_counts_include_deadlock_and_silence(tmp_path) -> None:
         "deadlock_count": 2,
         "silence_count": 1,
     }
+
+
+def test_behavior_metrics_digest_aggregates_account_scope(tmp_path) -> None:
+    db_path = tmp_path / "metrics.sqlite"
+    KnowledgeDB(db_path)
+    emitter = ContractEventEmitter(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    now = datetime.now(timezone.utc)
+
+    for offset, mode in enumerate(["BATCH_TODAY", "IMMEDIATE"]):
+        _emit_event(
+            emitter,
+            event_type=EventType.DELIVERY_POLICY_APPLIED,
+            ts_utc=now.timestamp() + offset,
+            account_email="acc@example.com",
+            payload={"mode": mode},
+        )
+    for offset, mode in enumerate(["DEFER_TO_MORNING", "IMMEDIATE"]):
+        _emit_event(
+            emitter,
+            event_type=EventType.DELIVERY_POLICY_APPLIED,
+            ts_utc=now.timestamp() + 10 + offset,
+            account_email="alt@example.com",
+            payload={"mode": mode},
+        )
+
+    metrics = analytics.behavior_metrics_digest(
+        account_email="acc@example.com",
+        account_emails=["acc@example.com", "alt@example.com"],
+        window_days=7,
+    )
+    assert metrics["compression_rate"] == pytest.approx(0.5)

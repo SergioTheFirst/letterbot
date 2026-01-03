@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from mailbot_v26.behavior.trust_bootstrap import (
     compute_trust_bootstrap_snapshot,
     is_bootstrap_active,
+    is_ready_for_action_templates,
 )
 from mailbot_v26.config.trust_bootstrap import TrustBootstrapConfig
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
@@ -208,3 +209,51 @@ def test_trust_bootstrap_inactive_when_ready(tmp_path) -> None:
         config=config,
     )
     assert snapshot.active is False
+
+
+def test_trust_bootstrap_aggregates_account_scope(tmp_path) -> None:
+    analytics, conn = _setup_db(tmp_path)
+    now = datetime.now(timezone.utc)
+    start_ts = (now - timedelta(days=30)).timestamp()
+    _seed_email_received(conn, account_id="account@example.com", start_ts=start_ts, count=3)
+    _seed_email_received(conn, account_id="alt@example.com", start_ts=start_ts, count=3)
+    corrections_start = (now - timedelta(days=2)).timestamp()
+    _seed_corrections(
+        conn,
+        account_id="account@example.com",
+        start_ts=corrections_start,
+        corrections=2,
+        surprises=0,
+    )
+    _seed_corrections(
+        conn,
+        account_id="alt@example.com",
+        start_ts=corrections_start,
+        corrections=2,
+        surprises=0,
+    )
+    conn.commit()
+
+    config = TrustBootstrapConfig(
+        learning_days=14,
+        min_samples=6,
+        templates_window_days=7,
+        templates_min_corrections=4,
+        templates_max_surprise_rate=0.25,
+    )
+    snapshot = compute_trust_bootstrap_snapshot(
+        analytics=analytics,
+        account_email="account@example.com",
+        account_emails=["account@example.com", "alt@example.com"],
+        now_ts=now.timestamp(),
+        config=config,
+    )
+    assert snapshot.active is False
+    assert snapshot.samples_count == 6
+    assert is_ready_for_action_templates(
+        "account@example.com",
+        now.timestamp(),
+        analytics=analytics,
+        config=config,
+        account_emails=["account@example.com", "alt@example.com"],
+    )

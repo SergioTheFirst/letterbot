@@ -12,6 +12,7 @@ from mailbot_v26.config.commitment_chain_digest import CommitmentChainDigestConf
 from mailbot_v26.config.uncertainty_queue import UncertaintyQueueConfig
 from mailbot_v26.config.regret_minimization import RegretMinimizationConfig
 from mailbot_v26.config.trust_bootstrap import TrustBootstrapConfig
+from mailbot_v26.config_loader import resolve_account_scope
 from mailbot_v26.insights.anomaly_engine import compute_anomalies
 from mailbot_v26.insights.attention_economics import (
     AttentionEconomicsResult,
@@ -177,6 +178,12 @@ def _collect_digest_data(
     now: datetime | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
+    resolved_scope = resolve_account_scope(account_email)
+    scope_account_emails = (
+        list(resolved_scope.account_emails) if resolved_scope else None
+    )
+    if not scope_account_emails and account_email:
+        scope_account_emails = [account_email]
     deferred = analytics.deferred_digest_counts(account_email=account_email)
     deferred_items = analytics.deferred_digest_items(account_email=account_email, limit=5)
     commitments = analytics.commitment_status_counts(account_email=account_email)
@@ -272,6 +279,7 @@ def _collect_digest_data(
     if include_behavior_metrics_digest:
         metrics = analytics.behavior_metrics_digest(
             account_email=account_email,
+            account_emails=scope_account_emails,
             window_days=behavior_metrics_window,
         )
         if metrics:
@@ -355,6 +363,7 @@ def _collect_digest_data(
             trust_bootstrap_snapshot = compute_trust_bootstrap_snapshot(
                 analytics=analytics,
                 account_email=account_email,
+                account_emails=scope_account_emails,
                 now_ts=(now or datetime.now(timezone.utc)).timestamp(),
                 config=resolved_config,
             )
@@ -368,6 +377,7 @@ def _collect_digest_data(
                     (now or datetime.now(timezone.utc)).timestamp(),
                     analytics=analytics,
                     config=resolved_config,
+                    account_emails=scope_account_emails,
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.error("trust_bootstrap_templates_ready_failed", error=str(exc))
