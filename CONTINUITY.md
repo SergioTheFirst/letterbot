@@ -1,6 +1,5 @@
 Goal (incl. success criteria):
 - Implement deterministic Behavior/Attention Engine with delivery modes, docs/ADR, config policy, events_v1 integration, TG/digest wiring, and green tests.
-
 Constraints / Assumptions:
 - Pipeline order unchanged (PARSE → LLM → TG; digests as-is).
 - Telegram payload schema for outbound notifications unchanged.
@@ -9,17 +8,14 @@ Constraints / Assumptions:
 - RU-first user-facing responses.
 - No new paid services.
 - No stable thread key (thread_id/conversation_id or reliable in_reply_to mapping) available for shadow detectors.
-
 Key decisions:
 - Delivery decisions are deterministic and logged in events_v1 (DELIVERY_POLICY_APPLIED).
 - Quiet hours use local machine time; no Telegram DND detection.
-
 State:
 - Behavior/Attention Engine integrated with TG delivery and daily digest.
 - Delivery policy config and feature flags added.
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
-
 Done:
 - Added behavior engine module and delivery decision policy (IMMEDIATE/BATCH/DEFER/SILENT).
 - Added delivery policy config + feature flags (circadian, attention debt, surprise budget shadow).
@@ -34,16 +30,12 @@ Done:
 - Added deadlock detector (shadow-only), policy config, and dedupe-backed events_v1 emission tests.
 - Added silence-as-signal detector (shadow-only), config policy, digest hook, and tests.
 - 2026-01-02: trust bootstrapping (digest-only) behind enable_trust_bootstrap.
-
 Now:
 - None.
-
 Next:
 - UNCONFIRMED
-
 Open questions (UNCONFIRMED if needed):
 - None.
-
 Working set (files / tables / tests):
 - mailbot_v26/behavior/attention_engine.py
 - mailbot_v26/behavior/deadlock_detector.py
@@ -94,7 +86,6 @@ Working set (files / tables / tests):
 2026-01-03: weekly accuracy report behind enable_weekly_accuracy_report.
 2026-01-03: regret minimization (commitments evidence) behind enable_regret_minimization.
 2026-01-03: action templates gated by events accuracy behind enable_trust_bootstrap.
-
 2026-01-03: weekly calibration (surprise breakdown) behind enable_weekly_calibration_report.
 2026-01-03: uncertainty queue (digest-only) behind enable_uncertainty_queue.
 2026-01-03: commitment chain digest (facts-only) behind enable_commitment_chain_digest.
@@ -107,14 +98,12 @@ Working set (files / tables / tests):
 - 2026-01-06: digest scheduler deduped by chat_id, daily_digest_sent payload includes chat_scope/account_emails, test added.
 2026-01-07: verified chat_id digest dedup test coverage and daily_digest_sent payload fields.
 2026-01-07: weekly_digest_sent now includes chat_scope/account_emails (chat_id dedup scope) for events_v1.
-
 2026-01-07: scoped learning events (delivery_policy_applied/priority_correction/surprise) with chat_scope+account_emails for multi-account single user.
 2026-01-07: scoped learning events (delivery_policy_applied/priority_correction/surprise) with optional chat_scope+account_emails when chat_id is configured.
 2026-01-07: scoped learning events (delivery_policy_applied/priority_correction/surprise) with optional chat_scope+account_emails for single-user multi-account.
 2026-01-08: weekly digest calibration now includes gated “рост точности” (events-only surprise-rate delta vs previous window).
-
 2026-01-08: added optional chat_scope/account_emails to delivery_policy/correction/surprise events for single-user multi-account learning scope.
 2026-01-08: unified chat_scope/account_emails propagation for surprise/correction/delivery events and restored scope test coverage.
-2026-01-XX: premium clarity confidence dots scale (5|10) config + tests.
-
+2026-01-03: premium clarity confidence dots scale (5|10) config + tests.
 2026-01-09: weekly analytics now aggregate by chat scope account_emails (single-user multi-account), tests.
+2026-01-03: weekly digest добавил shadow-предложения к калибровке (events_v1).

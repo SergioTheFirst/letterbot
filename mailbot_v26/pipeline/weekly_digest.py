@@ -299,6 +299,47 @@ def _emit_attention_block_event(
         logger.error("attention_block_event_failed", error=str(exc))
 
 
+def _emit_calibration_proposals_event(
+    *,
+    contract_event_emitter: ContractEventEmitter | None,
+    account_email: str,
+    account_emails: Sequence[str] | None,
+    week_key: str,
+    proposals: Sequence[dict[str, object]],
+    now: datetime,
+) -> None:
+    if contract_event_emitter is None or not proposals:
+        return
+    payload: dict[str, object] = {
+        "week_key": week_key,
+        "proposals_count": len(proposals),
+        "top_labels": [
+            str(item.get("label") or "")
+            for item in proposals[:3]
+            if str(item.get("label") or "").strip()
+        ],
+    }
+    if account_emails:
+        payload["account_emails"] = sorted({str(email).strip() for email in account_emails if str(email).strip()})
+    try:
+        contract_event_emitter.emit(
+            EventV1(
+                event_type=EventType.CALIBRATION_PROPOSALS_GENERATED,
+                ts_utc=now.timestamp(),
+                account_id=account_email,
+                entity_id=None,
+                email_id=None,
+                payload=payload,
+            )
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error(
+            "contract_event_emit_failed",
+            event_type=EventType.CALIBRATION_PROPOSALS_GENERATED.value,
+            error=str(exc),
+        )
+
+
 def _collect_weekly_data(
     *,
     analytics: KnowledgeAnalytics,
@@ -396,7 +437,7 @@ def _collect_weekly_data(
         try:
             anchor = now or datetime.now(timezone.utc)
             since_ts = anchor.timestamp() - (weekly_calibration_window_days * 86400)
-            weekly_calibration_report = analytics.weekly_surprise_breakdown(
+            weekly_calibration_report = analytics.weekly_calibration_proposals(
                 account_email=account_email,
                 since_ts=since_ts,
                 top_n=weekly_calibration_top_n,
@@ -405,6 +446,15 @@ def _collect_weekly_data(
             )
             if weekly_calibration_report is not None:
                 weekly_calibration_report["window_days"] = weekly_calibration_window_days
+                proposals = weekly_calibration_report.get("proposals") or []
+                _emit_calibration_proposals_event(
+                    contract_event_emitter=contract_event_emitter,
+                    account_email=account_email,
+                    account_emails=account_emails,
+                    week_key=week_key,
+                    proposals=proposals,
+                    now=anchor,
+                )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("weekly_calibration_report_failed", error=str(exc))
 
@@ -528,6 +578,15 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
                     label = escape_tg_html(str(item.get("label") or ""))
                     count = int(item.get("count") or 0)
                     lines.append(f"  - {label} — {count}")
+            proposals = report.get("proposals") or []
+            if proposals:
+                lines.append("• Предложения к калибровке (shadow):")
+                for item in proposals[:3]:
+                    label = escape_tg_html(str(item.get("label") or ""))
+                    transition = escape_tg_html(str(item.get("transition") or ""))
+                    count = int(item.get("count") or 0)
+                    hint = escape_tg_html(str(item.get("hint") or ""))
+                    lines.append(f"  - {label}: {transition} ×{count} — {hint}")
     if data.weekly_accuracy_report is not None or data.weekly_calibration_report is not None:
         progress_line = _format_weekly_accuracy_progress(data.weekly_accuracy_progress)
         if progress_line:

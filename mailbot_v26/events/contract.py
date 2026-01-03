@@ -37,6 +37,7 @@ class EventType(str, Enum):
     DEADLOCK_DETECTED = "deadlock_detected"
     DAILY_DIGEST_SENT = "daily_digest_sent"
     WEEKLY_DIGEST_SENT = "weekly_digest_sent"
+    CALIBRATION_PROPOSALS_GENERATED = "calibration_proposals_generated"
     ANOMALY_DETECTED = "anomaly_detected"
     TG_RENDER_RECORDED = "tg_render_recorded"
 

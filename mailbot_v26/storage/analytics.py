@@ -230,6 +230,29 @@ class KnowledgeAnalytics:
         safe_numerator = max(0, int(numerator))
         return int((safe_numerator * 100 + (safe_denominator // 2)) // safe_denominator)
 
+    @staticmethod
+    def _priority_emoji(value: object) -> str | None:
+        normalized = str(value or "").strip().lower()
+        mapping = {
+            "🔴": "🔴",
+            "🟡": "🟡",
+            "🔵": "🔵",
+            "high": "🔴",
+            "medium": "🟡",
+            "low": "🔵",
+            "red": "🔴",
+            "yellow": "🟡",
+            "blue": "🔵",
+        }
+        return mapping.get(normalized)
+
+    @staticmethod
+    def _priority_rank(value: str | None) -> int | None:
+        mapping = {"🔵": 1, "🟡": 2, "🔴": 3}
+        if not value:
+            return None
+        return mapping.get(value)
+
     def event_count(
         self,
         *,
@@ -1647,6 +1670,154 @@ class KnowledgeAnalytics:
             "corrections": int(corrections),
             "surprises": int(surprises),
             "top": top,
+        }
+        if accuracy_pct is not None:
+            report["accuracy_pct"] = accuracy_pct
+        return report
+
+    def weekly_calibration_proposals(
+        self,
+        account_email: str,
+        *,
+        since_ts: float,
+        top_n: int,
+        min_corrections: int,
+        account_emails: Iterable[str] | None = None,
+    ) -> dict[str, object] | None:
+        account_ids = self._normalize_account_scope(
+            account_email,
+            account_emails,
+        )
+        if not account_ids:
+            return None
+
+        corrections = self._event_count_scoped(
+            account_ids=account_ids,
+            event_type="priority_correction_recorded",
+            since_ts=since_ts,
+        )
+        surprises = self._event_count_scoped(
+            account_ids=account_ids,
+            event_type="surprise_detected",
+            since_ts=since_ts,
+        )
+        if corrections < min_corrections:
+            return None
+
+        def _label_from_event(
+            row: dict[str, object], payload: dict[str, object]
+        ) -> str:
+            label = str(
+                payload.get("sender_email")
+                or payload.get("from_email")
+                or payload.get("entity_id")
+                or row.get("entity_id")
+                or ""
+            ).strip()
+            return label or "контакт"
+
+        correction_rows = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type="priority_correction_recorded",
+            since_ts=since_ts,
+        )
+        correction_totals: dict[str, int] = {}
+        transition_totals: dict[str, dict[tuple[str, str], int]] = {}
+        for row in correction_rows:
+            payload = self._event_payload(row)
+            label = _label_from_event(row, payload)
+            correction_totals[label] = correction_totals.get(label, 0) + 1
+            old_priority = self._priority_emoji(payload.get("old_priority"))
+            new_priority = self._priority_emoji(payload.get("new_priority"))
+            if not old_priority or not new_priority:
+                continue
+            transitions = transition_totals.setdefault(label, {})
+            key = (old_priority, new_priority)
+            transitions[key] = transitions.get(key, 0) + 1
+
+        surprise_rows = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type="surprise_detected",
+            since_ts=since_ts,
+        )
+        surprise_totals: dict[str, int] = {}
+        for row in surprise_rows:
+            payload = self._event_payload(row)
+            label = _label_from_event(row, payload)
+            surprise_totals[label] = surprise_totals.get(label, 0) + 1
+
+        ordered_surprises = sorted(
+            surprise_totals.items(), key=lambda item: (-item[1], item[0])
+        )
+        top = [
+            {"label": label, "count": count}
+            for label, count in ordered_surprises[: max(0, top_n)]
+        ]
+
+        ordered_corrections = sorted(
+            correction_totals.items(), key=lambda item: (-item[1], item[0])
+        )
+        top_labels = [label for label, _ in ordered_corrections[: max(0, top_n)]]
+
+        proposals: list[dict[str, object]] = []
+        min_signal = 3
+        for label in top_labels:
+            transition_map = transition_totals.get(label, {})
+            transition_entry: tuple[tuple[str, str], int] | None = None
+            if transition_map:
+                transition_entry = sorted(
+                    transition_map.items(),
+                    key=lambda item: (-item[1], f"{item[0][0]}→{item[0][1]}"),
+                )[0]
+            correction_count = int(correction_totals.get(label, 0))
+            if transition_entry and (
+                transition_entry[1] >= min_signal or correction_count >= min_signal
+            ):
+                (old_priority, new_priority), count = transition_entry
+                old_rank = self._priority_rank(old_priority)
+                new_rank = self._priority_rank(new_priority)
+                if old_rank is not None and new_rank is not None:
+                    if old_rank > new_rank:
+                        hint = "вероятно, завышаем срочность"
+                    elif old_rank < new_rank:
+                        hint = "вероятно, занижаем срочность"
+                    else:
+                        hint = "часто корректируем срочность"
+                else:
+                    hint = "часто корректируем срочность"
+                proposals.append(
+                    {
+                        "label": label,
+                        "transition": f"{old_priority}→{new_priority}",
+                        "count": int(count),
+                        "hint": hint,
+                    }
+                )
+                continue
+            surprise_count = int(surprise_totals.get(label, 0))
+            if surprise_count >= min_signal:
+                proposals.append(
+                    {
+                        "label": label,
+                        "transition": "решение→сюрприз",
+                        "count": surprise_count,
+                        "hint": "после решения часто возникает сюрприз",
+                    }
+                )
+
+        accuracy_pct: int | None = None
+        if corrections > 0:
+            accuracy_pct = round((1 - (surprises / corrections)) * 100)
+        window_days = max(
+            1,
+            int(round((datetime.now(timezone.utc).timestamp() - since_ts) / 86400)),
+        )
+        report: dict[str, object] = {
+            "window_days": window_days,
+            "corrections": int(corrections),
+            "surprises": int(surprises),
+            "top": top,
+            "proposals": proposals,
         }
         if accuracy_pct is not None:
             report["accuracy_pct"] = accuracy_pct

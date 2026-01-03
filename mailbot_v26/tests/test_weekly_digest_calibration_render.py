@@ -43,6 +43,14 @@ def test_weekly_calibration_report_block_renders_when_enabled() -> None:
                     {"label": "entity-a", "count": 3},
                     {"label": "entity-b", "count": 2},
                 ],
+                "proposals": [
+                    {
+                        "label": "entity-a",
+                        "transition": "🔴→🟡",
+                        "count": 5,
+                        "hint": "вероятно, завышаем срочность",
+                    }
+                ],
             },
             "weekly_accuracy_progress": WeeklyAccuracyProgress(
                 current_surprise_rate_pp=10,
@@ -61,6 +69,8 @@ def test_weekly_calibration_report_block_renders_when_enabled() -> None:
     assert "• Где чаще всего случалось:" in text
     assert "  - entity-a — 3" in text
     assert "  - entity-b — 2" in text
+    assert "• Предложения к калибровке (shadow):" in text
+    assert "  - entity-a: 🔴→🟡 ×5 — вероятно, завышаем срочность" in text
     assert "Рост точности: +10 п.п. (сюрпризы 20% → 10%), коррекции: 5 за период" in text
 
 
@@ -81,6 +91,36 @@ def test_weekly_calibration_report_progress_hidden_without_data() -> None:
     text = weekly_digest._build_weekly_digest_text(data)
     assert "Рост точности:" not in text
     assert "Падение точности:" not in text
+
+
+def test_weekly_calibration_proposals_limited_to_three_lines() -> None:
+    data = weekly_digest.WeeklyDigestData(
+        **{
+            **_base_weekly_kwargs(),
+            "weekly_calibration_report": {
+                "window_days": 7,
+                "corrections": 12,
+                "surprises": 6,
+                "accuracy_pct": 50,
+                "top": [],
+                "proposals": [
+                    {"label": "entity-a", "transition": "🔴→🟡", "count": 5, "hint": "hint-a"},
+                    {"label": "entity-b", "transition": "🔵→🔴", "count": 4, "hint": "hint-b"},
+                    {"label": "entity-c", "transition": "🟡→🔴", "count": 3, "hint": "hint-c"},
+                    {"label": "entity-d", "transition": "🔴→🔵", "count": 3, "hint": "hint-d"},
+                ],
+            },
+        }
+    )
+    text = weekly_digest._build_weekly_digest_text(data)
+    lines = text.splitlines()
+    header_index = lines.index("• Предложения к калибровке (shadow):")
+    proposal_lines = []
+    for line in lines[header_index + 1 :]:
+        if not line.startswith("  - "):
+            break
+        proposal_lines.append(line)
+    assert len(proposal_lines) == 3
 
 
 def test_collect_weekly_data_accepts_account_emails() -> None:
@@ -124,8 +164,19 @@ def test_collect_weekly_data_accepts_account_emails() -> None:
             min_corrections: int,
             account_emails: list[str] | None = None,
         ) -> dict[str, object]:
+            raise AssertionError("weekly_surprise_breakdown should not be called")
+
+        def weekly_calibration_proposals(
+            self,
+            account_email: str,
+            *,
+            since_ts: float,
+            top_n: int,
+            min_corrections: int,
+            account_emails: list[str] | None = None,
+        ) -> dict[str, object]:
             self.seen["calibration"] = account_emails
-            return {"corrections": 0, "surprises": 0, "top": []}
+            return {"corrections": 0, "surprises": 0, "top": [], "proposals": []}
 
         def weekly_accuracy_progress(
             self,
