@@ -59,6 +59,7 @@ def test_premium_clarity_includes_required_lines() -> None:
     assert lines[0].startswith("🔵 ")
     assert lines[1].startswith("От: ")
     assert lines[2].startswith("Тема: ")
+    assert any(line.startswith("📎 Вложения (0):") for line in lines)
     assert any(line.startswith("💬 ") or line.startswith("⚡ ") or line.startswith("⏸️ ") for line in lines)
 
 
@@ -72,7 +73,7 @@ def test_premium_clarity_attachment_truncation() -> None:
     rendered = _render(attachments=attachments)
     lines = rendered.splitlines()
     assert "📎 Вложения (4):" in lines
-    assert any("... ещё 1" in line for line in lines)
+    assert any("... и ещё 1" in line for line in lines)
     assert "• one.pdf" in lines
 
 
@@ -116,7 +117,7 @@ def test_premium_clarity_extraction_failed_placeholder() -> None:
 
 def test_premium_clarity_attachments_absent() -> None:
     rendered = _render(attachments=[])
-    assert "📎 Вложения" not in rendered
+    assert "📎 Вложения (0):" in rendered
 
 
 def test_premium_clarity_attachments_visible() -> None:
@@ -141,7 +142,7 @@ def test_premium_clarity_attachments_more_than_three() -> None:
     assert "• file-0.pdf" in lines
     assert "• file-1.pdf" in lines
     assert "• file-2.pdf" in lines
-    assert any("... ещё 3" in line for line in lines)
+    assert any("... и ещё 3" in line for line in lines)
 
 
 def test_premium_clarity_attachment_summary_status() -> None:
@@ -183,6 +184,32 @@ def test_premium_clarity_fact_provenance_omitted_when_unknown() -> None:
     assert "(тема)" not in rendered
     assert "(письмо)" not in rendered
     assert "(invoice.pdf)" not in rendered
+
+
+def test_premium_clarity_subject_numbers_tagged_and_essence_generic() -> None:
+    rendered = _render(
+        subject="Счет на 12 000 ₽",
+        body_summary="Оплатить 12 000 ₽ до 12.02.2025.",
+        body_text="Оплатить до 12.02.2025.",
+    )
+    lines = rendered.splitlines()
+    assert lines[0].startswith("🔵 ")
+    assert not any(char.isdigit() for char in lines[0])
+    assert "Тема: Счет на 12 000 ₽ (тема)" in rendered
+
+
+def test_premium_clarity_extraction_failed_suppresses_numeric_facts() -> None:
+    rendered = _render(
+        subject="Без чисел",
+        body_summary="Сумма 5 000 руб.",
+        body_text="Сумма 5 000 руб.",
+        attachments=[{"filename": "file.pdf", "text": "Сумма 5 000 руб."}],
+        extraction_failed=True,
+        confidence_percent=20,
+        confidence_available=False,
+    )
+    assert "Сумма:" not in rendered
+    assert "Проверьте вручную" in rendered
 
 
 def test_premium_clarity_why_line_for_low_confidence() -> None:
