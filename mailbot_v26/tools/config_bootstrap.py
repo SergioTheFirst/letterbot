@@ -66,6 +66,10 @@ enable_regret_minimization = false
 enable_uncertainty_queue = false
 enable_commitment_chain_digest = false
 
+[premium_clarity]
+premium_clarity_confidence_dots = auto
+premium_clarity_confidence_threshold = 75
+
 [daily_digest]
 hour = 9
 minute = 0

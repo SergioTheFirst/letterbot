@@ -28,6 +28,7 @@ from mailbot_v26.config.flow_protection import (
     FlowProtectionConfig,
     load_flow_protection_config,
 )
+from mailbot_v26.config.premium_clarity import load_premium_clarity_config
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
 from mailbot_v26.features import FeatureFlags
@@ -154,6 +155,7 @@ auto_priority_gates = AutoPriorityGates(analytics)
 auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
 auto_priority_gate_config = load_auto_priority_gate_config()
 deadlock_policy = load_deadlock_policy_config()
+premium_clarity_config = load_premium_clarity_config()
 auto_priority_gate_state_store = AutoPriorityGateStateStore(knowledge_db)
 auto_priority_quality_gate = AutoPriorityQualityGate(
     analytics=analytics,
@@ -1086,8 +1088,35 @@ def _build_premium_clarity_attachments(
     return lines
 
 
+def _format_confidence_dots(confidence_percent: int) -> str:
+    filled = max(0, min(10, int(confidence_percent / 10)))
+    empty = 10 - filled
+    return f"{'●' * filled}{'○' * empty}"
+
+
+def _should_show_confidence_dots(
+    *,
+    mode: str,
+    threshold: int,
+    confidence_available: bool,
+    confidence_percent: int,
+) -> bool:
+    normalized_mode = (mode or "").strip().lower()
+    if normalized_mode not in {"auto", "always", "never"}:
+        normalized_mode = "auto"
+    if normalized_mode == "never":
+        return False
+    if not confidence_available:
+        return False
+    if normalized_mode == "always":
+        return True
+    return confidence_percent < threshold
+
+
 def _build_premium_clarity_spoiler(
     lines: list[str],
+    *,
+    dots: str = "",
 ) -> str:
     if not lines:
         return ""
@@ -1099,7 +1128,10 @@ def _build_premium_clarity_spoiler(
     if not sanitized:
         return ""
     limited = sanitized[:6]
-    return "\n".join(["<tg-spoiler>", "Подробнее:", *limited, "</tg-spoiler>"])
+    closing = "</tg-spoiler>"
+    if dots:
+        closing = f"{closing} {dots}"
+    return "\n".join(["<tg-spoiler>", "Подробнее:", *limited, closing])
 
 
 def _pick_action_emoji(action_text: str) -> str:
@@ -1147,6 +1179,9 @@ def _build_premium_clarity_text(
     attachments_count: int,
     extracted_text_len: int,
     confidence_percent: int,
+    confidence_available: bool,
+    confidence_dots_mode: str,
+    confidence_dots_threshold: int,
     extraction_failed: bool,
 ) -> str:
     priority = strip_disallowed_emojis(priority or "")
@@ -1213,7 +1248,16 @@ def _build_premium_clarity_text(
     if commitments:
         spoiler_lines.append("Есть обязательства по письму")
 
-    spoiler = _build_premium_clarity_spoiler(spoiler_lines)
+    dots_text = ""
+    if spoiler_lines and _should_show_confidence_dots(
+        mode=confidence_dots_mode,
+        threshold=confidence_dots_threshold,
+        confidence_available=confidence_available,
+        confidence_percent=confidence_percent,
+    ):
+        dots_text = _format_confidence_dots(confidence_percent)
+
+    spoiler = _build_premium_clarity_spoiler(spoiler_lines, dots=dots_text)
     if spoiler:
         lines.append(spoiler)
 
@@ -3525,6 +3569,7 @@ def process_message(
         priority=priority,
     )
     if render_result.premium_clarity_enabled:
+        confidence_available = confidence_score is not None
         extraction_failed = render_result.extracted_text_len <= 0 and len(attachments) > 0
         premium_payload = TelegramPayload(
             html_text=_build_premium_clarity_text(
@@ -3541,6 +3586,11 @@ def process_message(
                 attachments_count=len(attachments),
                 extracted_text_len=render_result.extracted_text_len,
                 confidence_percent=confidence_percent,
+                confidence_available=confidence_available,
+                confidence_dots_mode=premium_clarity_config.confidence_dots_mode,
+                confidence_dots_threshold=(
+                    premium_clarity_config.confidence_dots_threshold
+                ),
                 extraction_failed=extraction_failed,
             ),
             priority=priority,
