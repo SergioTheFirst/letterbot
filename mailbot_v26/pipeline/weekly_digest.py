@@ -400,6 +400,7 @@ def _collect_weekly_data(
             quality_metrics = compute_quality_metrics(
                 analytics=analytics,
                 account_email=account_email,
+                account_emails=account_emails,
                 window_days=7,
                 now=now,
             )

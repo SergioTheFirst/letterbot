@@ -169,6 +169,16 @@ def _quality_metrics_record(db_path: Path, since_dt: datetime, *, now: datetime)
         window_days=window_days,
         now=now,
     )
+    if metrics is None:
+        return {
+            "record_type": "quality_metrics",
+            "window_days": window_days,
+            "corrections_total": 0,
+            "correction_rate": None,
+            "emails_received": 0,
+            "by_new_priority": [],
+            "by_engine": [],
+        }
     return {
         "record_type": "quality_metrics",
         "window_days": metrics.window_days,

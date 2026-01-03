@@ -241,6 +241,7 @@ def _collect_digest_data(
             quality_metrics = compute_quality_metrics(
                 analytics=analytics,
                 account_email=account_email,
+                account_emails=scope_account_emails,
                 window_days=1,
                 now=now,
             )

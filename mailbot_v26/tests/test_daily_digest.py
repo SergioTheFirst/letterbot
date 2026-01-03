@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from mailbot_v26.config_loader import AccountScope
 from mailbot_v26.pipeline import daily_digest
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
@@ -111,6 +112,49 @@ def _emit_trust_event(
                 "sample_size": 3,
                 "data_window_days": 30,
                 "model_version": model_version,
+            },
+        )
+    )
+
+
+def _emit_received(
+    emitter: ContractEventEmitter,
+    *,
+    ts: datetime,
+    account_id: str,
+    email_id: int,
+) -> None:
+    emitter.emit(
+        EventV1(
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=ts.timestamp(),
+            account_id=account_id,
+            entity_id=None,
+            email_id=email_id,
+            payload={"from_email": "sender@example.com"},
+        )
+    )
+
+
+def _emit_correction(
+    emitter: ContractEventEmitter,
+    *,
+    ts: datetime,
+    account_id: str,
+    email_id: int,
+    new_priority: str,
+) -> None:
+    emitter.emit(
+        EventV1(
+            event_type=EventType.PRIORITY_CORRECTION_RECORDED,
+            ts_utc=ts.timestamp(),
+            account_id=account_id,
+            entity_id=None,
+            email_id=email_id,
+            payload={
+                "old_priority": "🟡",
+                "new_priority": new_priority,
+                "engine": "priority_v2",
             },
         )
     )
@@ -284,3 +328,62 @@ def test_digest_or_preview_uses_v2_when_available(tmp_path) -> None:
     )
 
     assert data.trust_delta == pytest.approx(0.1)
+
+
+def test_daily_digest_quality_metrics_aggregates_account_scope(
+    monkeypatch, tmp_path
+) -> None:
+    db_path = tmp_path / "daily_quality.sqlite"
+    KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    contract_emitter = ContractEventEmitter(db_path)
+    anchor = datetime(2024, 1, 7, tzinfo=timezone.utc)
+
+    _emit_received(
+        contract_emitter,
+        ts=anchor,
+        account_id="account@example.com",
+        email_id=1,
+    )
+    _emit_received(
+        contract_emitter,
+        ts=anchor,
+        account_id="alt@example.com",
+        email_id=2,
+    )
+    _emit_correction(
+        contract_emitter,
+        ts=anchor,
+        account_id="account@example.com",
+        email_id=1,
+        new_priority="🔴",
+    )
+    _emit_correction(
+        contract_emitter,
+        ts=anchor,
+        account_id="alt@example.com",
+        email_id=2,
+        new_priority="🟡",
+    )
+
+    monkeypatch.setattr(
+        daily_digest,
+        "resolve_account_scope",
+        lambda *_args, **_kwargs: AccountScope(
+            chat_id="chat",
+            account_emails=["account@example.com", "alt@example.com"],
+        ),
+    )
+
+    data = daily_digest._collect_digest_data(
+        analytics=analytics,
+        account_email="account@example.com",
+        include_quality_metrics=True,
+        now=anchor,
+        contract_event_emitter=contract_emitter,
+    )
+
+    assert data.quality_metrics is not None
+    assert data.quality_metrics.corrections_total == 2
+    assert data.quality_metrics.emails_received == 2
+    assert data.quality_metrics.correction_rate == 1.0
