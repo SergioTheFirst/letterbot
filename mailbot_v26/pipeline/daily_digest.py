@@ -306,6 +306,7 @@ def _collect_digest_data(
         )
         items = analytics.uncertainty_queue_items(
             account_email,
+            account_emails=scope_account_emails,
             since_ts=since_ts,
             min_confidence=min_confidence,
             limit=max_items,
