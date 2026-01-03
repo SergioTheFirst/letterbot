@@ -1178,6 +1178,68 @@ class KnowledgeAnalytics:
             report["accuracy_pct"] = round((1 - surprise_rate) * 100)
         return report
 
+    def weekly_surprise_breakdown(
+        self,
+        account_email: str,
+        *,
+        since_ts: float,
+        top_n: int,
+        min_corrections: int,
+    ) -> dict[str, object] | None:
+        if not account_email:
+            return None
+        corrections = self._event_count(
+            account_id=account_email,
+            event_type="priority_correction_recorded",
+            since_ts=since_ts,
+        )
+        surprises = self._event_count(
+            account_id=account_email,
+            event_type="surprise_detected",
+            since_ts=since_ts,
+        )
+        if corrections < min_corrections:
+            return None
+        accuracy_pct: int | None = None
+        if corrections > 0:
+            accuracy_pct = round((1 - (surprises / corrections)) * 100)
+        rows = self._event_rows(
+            account_id=account_email,
+            event_type="surprise_detected",
+            since_ts=since_ts,
+        )
+        totals: dict[str, int] = {}
+        for row in rows:
+            payload = self._event_payload(row)
+            label = str(
+                payload.get("sender_email")
+                or payload.get("from_email")
+                or payload.get("entity_id")
+                or row.get("entity_id")
+                or ""
+            ).strip()
+            if not label:
+                label = "контакт"
+            totals[label] = totals.get(label, 0) + 1
+        ordered = sorted(totals.items(), key=lambda item: (-item[1], item[0]))
+        top = [
+            {"label": label, "count": count}
+            for label, count in ordered[: max(0, top_n)]
+        ]
+        window_days = max(
+            1,
+            int(round((datetime.now(timezone.utc).timestamp() - since_ts) / 86400)),
+        )
+        report: dict[str, object] = {
+            "window_days": window_days,
+            "corrections": int(corrections),
+            "surprises": int(surprises),
+            "top": top,
+        }
+        if accuracy_pct is not None:
+            report["accuracy_pct"] = accuracy_pct
+        return report
+
     def weekly_attention_entities(
         self, *, account_email: str, days: int = 7
     ) -> list[dict[str, object]]:

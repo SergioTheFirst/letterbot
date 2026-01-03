@@ -82,6 +82,7 @@ class WeeklyDigestData:
     notification_sla: NotificationSLAResult | None = None
     previous_week_sla: NotificationSLAResult | None = None
     weekly_accuracy_report: dict[str, object] | None = None
+    weekly_calibration_report: dict[str, object] | None = None
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -284,6 +285,10 @@ def _collect_weekly_data(
     include_notification_sla: bool = False,
     include_weekly_accuracy_report: bool = False,
     weekly_accuracy_window_days: int = 7,
+    include_weekly_calibration_report: bool = False,
+    weekly_calibration_window_days: int = 7,
+    weekly_calibration_top_n: int = 3,
+    weekly_calibration_min_corrections: int = 10,
     event_emitter: EventEmitter | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
     now: datetime | None = None,
@@ -359,6 +364,22 @@ def _collect_weekly_data(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("weekly_accuracy_report_failed", error=str(exc))
 
+    weekly_calibration_report: dict[str, object] | None = None
+    if include_weekly_calibration_report:
+        try:
+            anchor = now or datetime.now(timezone.utc)
+            since_ts = anchor.timestamp() - (weekly_calibration_window_days * 86400)
+            weekly_calibration_report = analytics.weekly_surprise_breakdown(
+                account_email=account_email,
+                since_ts=since_ts,
+                top_n=weekly_calibration_top_n,
+                min_corrections=weekly_calibration_min_corrections,
+            )
+            if weekly_calibration_report is not None:
+                weekly_calibration_report["window_days"] = weekly_calibration_window_days
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("weekly_calibration_report_failed", error=str(exc))
+
     return WeeklyDigestData(
         week_key=week_key,
         total_emails=int(volume.get("total") or 0),
@@ -373,6 +394,7 @@ def _collect_weekly_data(
         notification_sla=notification_sla,
         previous_week_sla=previous_week_sla,
         weekly_accuracy_report=weekly_accuracy_report,
+        weekly_calibration_report=weekly_calibration_report,
     )
 
 
@@ -441,6 +463,24 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
             lines.append(f"• Писем обработано: {emails}")
             lines.append(f"• Коррекции приоритета: {corrections}")
             lines.append(f"• Сюрпризы: {surprises} (точность: {accuracy_pct}%)")
+    if data.weekly_calibration_report is not None:
+        report = data.weekly_calibration_report
+        corrections = int(report.get("corrections") or 0)
+        surprises = int(report.get("surprises") or 0)
+        window_days = int(report.get("window_days") or 7)
+        accuracy_pct = report.get("accuracy_pct")
+        if corrections > 0:
+            accuracy_pct = int(accuracy_pct or 0)
+            lines.append(f"<b>Отчёт точности ({window_days} дней)</b>")
+            lines.append(f"• Коррекции приоритета: {corrections}")
+            lines.append(f"• Сюрпризы: {surprises} (точность: {accuracy_pct}%)")
+            top_items = report.get("top") or []
+            if top_items:
+                lines.append("• Где чаще всего случалось:")
+                for item in top_items:
+                    label = escape_tg_html(str(item.get("label") or ""))
+                    count = int(item.get("count") or 0)
+                    lines.append(f"  - {label} — {count}")
     if data.notification_sla is not None:
         current = data.notification_sla
         prev = data.previous_week_sla

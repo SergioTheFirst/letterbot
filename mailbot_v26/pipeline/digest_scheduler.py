@@ -73,6 +73,13 @@ class WeeklyAccuracyReportConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class WeeklyCalibrationReportConfig:
+    window_days: int
+    top_n: int
+    min_corrections: int
+
+
+@dataclass(frozen=True, slots=True)
 class DigestInsightsConfig:
     window_days: int
     max_items: int
@@ -149,6 +156,38 @@ def _load_weekly_accuracy_report_config() -> WeeklyAccuracyReportConfig:
         except ValueError:
             window_days = 7
     return WeeklyAccuracyReportConfig(window_days=window_days)
+
+
+def _load_weekly_calibration_report_config() -> WeeklyCalibrationReportConfig:
+    window_days = 7
+    top_n = 3
+    min_corrections = 10
+    parser = configparser.ConfigParser()
+    if _CONFIG_PATH.exists():
+        parser.read(_CONFIG_PATH, encoding="utf-8")
+    section = (
+        parser["weekly_calibration_report"]
+        if "weekly_calibration_report" in parser
+        else None
+    )
+    if section is not None:
+        try:
+            window_days = max(1, section.getint("window_days", fallback=7))
+        except ValueError:
+            window_days = 7
+        try:
+            top_n = max(0, section.getint("top_n", fallback=3))
+        except ValueError:
+            top_n = 3
+        try:
+            min_corrections = max(0, section.getint("min_corrections", fallback=10))
+        except ValueError:
+            min_corrections = 10
+    return WeeklyCalibrationReportConfig(
+        window_days=window_days,
+        top_n=top_n,
+        min_corrections=min_corrections,
+    )
 
 
 def _load_digest_insights_config() -> DigestInsightsConfig:
@@ -340,6 +379,7 @@ def run_digest_tick(
         daily_config = _load_daily_digest_config()
         weekly_config = _load_weekly_digest_config()
         weekly_accuracy_report_config = _load_weekly_accuracy_report_config()
+        weekly_calibration_report_config = _load_weekly_calibration_report_config()
         digest_insights_config = _load_digest_insights_config()
         behavior_metrics_config = _load_behavior_metrics_digest_config()
         trust_bootstrap_config = _load_trust_bootstrap_config()
@@ -410,6 +450,9 @@ def run_digest_tick(
                     now=now,
                     config=weekly_config,
                     weekly_accuracy_window_days=weekly_accuracy_report_config.window_days,
+                    weekly_calibration_window_days=weekly_calibration_report_config.window_days,
+                    weekly_calibration_top_n=weekly_calibration_report_config.top_n,
+                    weekly_calibration_min_corrections=weekly_calibration_report_config.min_corrections,
                     account_email=account_email,
                     chat_id=chat_id,
                     bot_token=bot_token,
@@ -422,6 +465,7 @@ def run_digest_tick(
                     include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
                     include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
                     include_weekly_accuracy_report=flags.ENABLE_WEEKLY_ACCURACY_REPORT,
+                    include_weekly_calibration_report=flags.ENABLE_WEEKLY_CALIBRATION_REPORT,
                 )
             else:
                 logger.info(
@@ -616,6 +660,9 @@ def _run_weekly_digest(
     now: datetime,
     config: WeeklyDigestConfig,
     weekly_accuracy_window_days: int,
+    weekly_calibration_window_days: int,
+    weekly_calibration_top_n: int,
+    weekly_calibration_min_corrections: int,
     account_email: str,
     chat_id: str,
     bot_token: str,
@@ -628,6 +675,7 @@ def _run_weekly_digest(
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
     include_weekly_accuracy_report: bool = False,
+    include_weekly_calibration_report: bool = False,
 ) -> None:
     week_key = weekly_digest._iso_week_key(now)
 
@@ -695,6 +743,10 @@ def _run_weekly_digest(
         include_quality_metrics=include_quality_metrics,
         include_weekly_accuracy_report=include_weekly_accuracy_report,
         weekly_accuracy_window_days=weekly_accuracy_window_days,
+        include_weekly_calibration_report=include_weekly_calibration_report,
+        weekly_calibration_window_days=weekly_calibration_window_days,
+        weekly_calibration_top_n=weekly_calibration_top_n,
+        weekly_calibration_min_corrections=weekly_calibration_min_corrections,
         event_emitter=storage.event_emitter,
         contract_event_emitter=storage.contract_event_emitter,
         now=now,
