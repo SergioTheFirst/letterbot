@@ -7,7 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from mailbot_v26.events.contract import EventType
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
@@ -54,6 +54,35 @@ class KnowledgeAnalytics:
         anchor = datetime.now(timezone.utc).timestamp()
         return anchor - (days * 24 * 60 * 60)
 
+    @staticmethod
+    def _normalize_account_scope(
+        account_email: str,
+        account_emails: Iterable[str] | None,
+    ) -> list[str]:
+        normalized: set[str] = set()
+        if account_emails is not None:
+            for email in account_emails:
+                if email is None:
+                    continue
+                cleaned = str(email).strip()
+                if cleaned:
+                    normalized.add(cleaned)
+            if normalized:
+                return sorted(normalized)
+        cleaned_primary = account_email.strip() if account_email else ""
+        if cleaned_primary:
+            return [cleaned_primary]
+        return []
+
+    @staticmethod
+    def _account_scope_clause(account_ids: Sequence[str]) -> tuple[str, list[object]]:
+        if not account_ids:
+            return "", []
+        if len(account_ids) == 1:
+            return " AND account_id = ?", [account_ids[0]]
+        placeholders = ", ".join(["?"] * len(account_ids))
+        return f" AND account_id IN ({placeholders})", list(account_ids)
+
     def _event_rows(
         self,
         *,
@@ -78,6 +107,32 @@ class KnowledgeAnalytics:
         except sqlite3.OperationalError:
             return []
 
+    def _event_rows_scoped(
+        self,
+        *,
+        account_ids: Sequence[str],
+        event_type: str,
+        since_ts: float | None = None,
+    ) -> list[dict[str, object]]:
+        if not account_ids:
+            return []
+        query = """
+        SELECT event_type, ts_utc, account_id, entity_id, email_id, payload, payload_json
+        FROM events_v1
+        WHERE event_type = ?
+        """
+        params: list[object] = [event_type]
+        if since_ts is not None:
+            query += " AND ts_utc >= ?"
+            params.append(since_ts)
+        clause, clause_params = self._account_scope_clause(account_ids)
+        query += clause
+        params.extend(clause_params)
+        try:
+            return self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return []
+
     def _event_count(
         self,
         *,
@@ -97,6 +152,43 @@ class KnowledgeAnalytics:
         if since_ts is not None:
             query += " AND ts_utc >= ?"
             params.append(since_ts)
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return 0
+        if not rows:
+            return 0
+        return int(rows[0].get("total") or 0)
+
+    def _event_count_scoped(
+        self,
+        *,
+        account_ids: Sequence[str],
+        event_type: str,
+        since_ts: float | None = None,
+        start_ts: float | None = None,
+        end_ts: float | None = None,
+    ) -> int:
+        if not account_ids:
+            return 0
+        query = """
+        SELECT COUNT(*) AS total
+        FROM events_v1
+        WHERE event_type = ?
+        """
+        params: list[object] = [event_type]
+        if start_ts is not None:
+            query += " AND ts_utc >= ?"
+            params.append(start_ts)
+            if end_ts is not None:
+                query += " AND ts_utc < ?"
+                params.append(end_ts)
+        elif since_ts is not None:
+            query += " AND ts_utc >= ?"
+            params.append(since_ts)
+        clause, clause_params = self._account_scope_clause(account_ids)
+        query += clause
+        params.extend(clause_params)
         try:
             rows = self._execute_select(query, params)
         except sqlite3.OperationalError:
@@ -1387,23 +1479,31 @@ class KnowledgeAnalytics:
         }
 
     def weekly_accuracy_report(
-        self, *, account_email: str, days: int = 7
+        self,
+        *,
+        account_email: str,
+        days: int = 7,
+        account_emails: Iterable[str] | None = None,
     ) -> dict[str, int | float]:
-        if not account_email:
+        account_ids = self._normalize_account_scope(
+            account_email,
+            account_emails,
+        )
+        if not account_ids:
             return {"emails_received": 0, "priority_corrections": 0, "surprises": 0}
         since_ts = self._window_start_ts(days)
-        emails_received = self._event_count(
-            account_id=account_email,
+        emails_received = self._event_count_scoped(
+            account_ids=account_ids,
             event_type="email_received",
             since_ts=since_ts,
         )
-        corrections_total = self._event_count(
-            account_id=account_email,
+        corrections_total = self._event_count_scoped(
+            account_ids=account_ids,
             event_type="priority_correction_recorded",
             since_ts=since_ts,
         )
-        surprises_total = self._event_count(
-            account_id=account_email,
+        surprises_total = self._event_count_scoped(
+            account_ids=account_ids,
             event_type="surprise_detected",
             since_ts=since_ts,
         )
@@ -1424,8 +1524,13 @@ class KnowledgeAnalytics:
         account_email: str,
         now_ts: float,
         window_days: int,
+        account_emails: Iterable[str] | None = None,
     ) -> WeeklyAccuracyProgress | None:
-        if not account_email:
+        account_ids = self._normalize_account_scope(
+            account_email,
+            account_emails,
+        )
+        if not account_ids:
             return None
         try:
             window_days = max(1, int(window_days))
@@ -1434,14 +1539,14 @@ class KnowledgeAnalytics:
         current_start = now_ts - (window_days * 86400)
         prev_start = now_ts - (window_days * 2 * 86400)
 
-        current_decisions = self._event_count_between(
-            account_id=account_email,
+        current_decisions = self._event_count_scoped(
+            account_ids=account_ids,
             event_type=EventType.DELIVERY_POLICY_APPLIED.value,
             start_ts=current_start,
             end_ts=now_ts,
         )
-        prev_decisions = self._event_count_between(
-            account_id=account_email,
+        prev_decisions = self._event_count_scoped(
+            account_ids=account_ids,
             event_type=EventType.DELIVERY_POLICY_APPLIED.value,
             start_ts=prev_start,
             end_ts=current_start,
@@ -1449,20 +1554,20 @@ class KnowledgeAnalytics:
         if current_decisions < 25 or prev_decisions < 25:
             return None
 
-        current_surprises = self._event_count_between(
-            account_id=account_email,
+        current_surprises = self._event_count_scoped(
+            account_ids=account_ids,
             event_type=EventType.SURPRISE_DETECTED.value,
             start_ts=current_start,
             end_ts=now_ts,
         )
-        prev_surprises = self._event_count_between(
-            account_id=account_email,
+        prev_surprises = self._event_count_scoped(
+            account_ids=account_ids,
             event_type=EventType.SURPRISE_DETECTED.value,
             start_ts=prev_start,
             end_ts=current_start,
         )
-        current_corrections = self._event_count_between(
-            account_id=account_email,
+        current_corrections = self._event_count_scoped(
+            account_ids=account_ids,
             event_type=EventType.PRIORITY_CORRECTION_RECORDED.value,
             start_ts=current_start,
             end_ts=now_ts,
@@ -1487,16 +1592,21 @@ class KnowledgeAnalytics:
         since_ts: float,
         top_n: int,
         min_corrections: int,
+        account_emails: Iterable[str] | None = None,
     ) -> dict[str, object] | None:
-        if not account_email:
+        account_ids = self._normalize_account_scope(
+            account_email,
+            account_emails,
+        )
+        if not account_ids:
             return None
-        corrections = self._event_count(
-            account_id=account_email,
+        corrections = self._event_count_scoped(
+            account_ids=account_ids,
             event_type="priority_correction_recorded",
             since_ts=since_ts,
         )
-        surprises = self._event_count(
-            account_id=account_email,
+        surprises = self._event_count_scoped(
+            account_ids=account_ids,
             event_type="surprise_detected",
             since_ts=since_ts,
         )
@@ -1505,8 +1615,8 @@ class KnowledgeAnalytics:
         accuracy_pct: int | None = None
         if corrections > 0:
             accuracy_pct = round((1 - (surprises / corrections)) * 100)
-        rows = self._event_rows(
-            account_id=account_email,
+        rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="surprise_detected",
             since_ts=since_ts,
         )

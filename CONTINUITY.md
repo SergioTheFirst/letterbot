@@ -116,3 +116,5 @@ Working set (files / tables / tests):
 2026-01-08: added optional chat_scope/account_emails to delivery_policy/correction/surprise events for single-user multi-account learning scope.
 2026-01-08: unified chat_scope/account_emails propagation for surprise/correction/delivery events and restored scope test coverage.
 2026-01-XX: premium clarity confidence dots scale (5|10) config + tests.
+
+2026-01-09: weekly analytics now aggregate by chat scope account_emails (single-user multi-account), tests.

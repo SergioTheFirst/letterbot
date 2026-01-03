@@ -303,6 +303,7 @@ def _collect_weekly_data(
     *,
     analytics: KnowledgeAnalytics,
     account_email: str,
+    account_emails: Sequence[str] | None = None,
     week_key: str,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
@@ -384,6 +385,7 @@ def _collect_weekly_data(
             weekly_accuracy_report = analytics.weekly_accuracy_report(
                 account_email=account_email,
                 days=weekly_accuracy_window_days,
+                account_emails=account_emails,
             )
             weekly_accuracy_report["window_days"] = weekly_accuracy_window_days
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -399,6 +401,7 @@ def _collect_weekly_data(
                 since_ts=since_ts,
                 top_n=weekly_calibration_top_n,
                 min_corrections=weekly_calibration_min_corrections,
+                account_emails=account_emails,
             )
             if weekly_calibration_report is not None:
                 weekly_calibration_report["window_days"] = weekly_calibration_window_days
@@ -418,6 +421,7 @@ def _collect_weekly_data(
                 account_email=account_email,
                 now_ts=anchor.timestamp(),
                 window_days=progress_window_days,
+                account_emails=account_emails,
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("weekly_accuracy_progress_failed", error=str(exc))
@@ -557,6 +561,7 @@ def maybe_send_weekly_digest(
     event_emitter: EventEmitter,
     contract_event_emitter: ContractEventEmitter | None = None,
     account_email: str,
+    account_emails: Sequence[str] | None = None,
     telegram_chat_id: str,
     email_id: int,
     now: datetime | None = None,
@@ -617,6 +622,7 @@ def maybe_send_weekly_digest(
     data = _collect_weekly_data(
         analytics=analytics,
         account_email=account_email,
+        account_emails=account_emails,
         week_key=week_key,
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,

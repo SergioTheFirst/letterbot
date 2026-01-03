@@ -81,3 +81,76 @@ def test_weekly_calibration_report_progress_hidden_without_data() -> None:
     text = weekly_digest._build_weekly_digest_text(data)
     assert "Рост точности:" not in text
     assert "Падение точности:" not in text
+
+
+def test_collect_weekly_data_accepts_account_emails() -> None:
+    class DummyAnalytics:
+        def __init__(self) -> None:
+            self.seen: dict[str, object] = {}
+
+        def weekly_email_volume(self, *, account_email: str, days: int = 7) -> dict[str, int]:
+            return {"total": 0, "deferred": 0}
+
+        def weekly_attention_entities(self, *, account_email: str, days: int = 7) -> list[dict[str, object]]:
+            return []
+
+        def weekly_commitment_counts(self, *, account_email: str, days: int = 7) -> dict[str, int]:
+            return {}
+
+        def weekly_overdue_commitments(
+            self, *, account_email: str, days: int = 7, limit: int = 5
+        ) -> list[dict[str, object]]:
+            return []
+
+        def weekly_trust_score_deltas(self, *, days: int = 7) -> dict[str, list[dict[str, object]]]:
+            return {}
+
+        def weekly_accuracy_report(
+            self,
+            *,
+            account_email: str,
+            days: int,
+            account_emails: list[str] | None = None,
+        ) -> dict[str, object]:
+            self.seen["accuracy"] = account_emails
+            return {"emails_received": 0, "priority_corrections": 0, "surprises": 0}
+
+        def weekly_surprise_breakdown(
+            self,
+            account_email: str,
+            *,
+            since_ts: float,
+            top_n: int,
+            min_corrections: int,
+            account_emails: list[str] | None = None,
+        ) -> dict[str, object]:
+            self.seen["calibration"] = account_emails
+            return {"corrections": 0, "surprises": 0, "top": []}
+
+        def weekly_accuracy_progress(
+            self,
+            *,
+            account_email: str,
+            now_ts: float,
+            window_days: int,
+            account_emails: list[str] | None = None,
+        ) -> WeeklyAccuracyProgress | None:
+            self.seen["progress"] = account_emails
+            return None
+
+    analytics = DummyAnalytics()
+    account_emails = ["acc@example.com", "alt@example.com"]
+
+    weekly_digest._collect_weekly_data(
+        analytics=analytics,
+        account_email="acc@example.com",
+        account_emails=account_emails,
+        week_key="2025-W01",
+        include_weekly_accuracy_report=True,
+        include_weekly_calibration_report=True,
+        weekly_calibration_min_corrections=0,
+    )
+
+    assert analytics.seen["accuracy"] == account_emails
+    assert analytics.seen["calibration"] == account_emails
+    assert analytics.seen["progress"] == account_emails
