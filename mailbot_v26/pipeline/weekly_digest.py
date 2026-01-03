@@ -58,7 +58,6 @@ _WEEKDAY_ALIASES = {
     "sunday": 6,
     "воскресенье": 6,
 }
-_BAR_CHART = "\N{BAR CHART}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -438,7 +437,7 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
                 if surprise_rate is not None:
                     accuracy_pct = round((1 - float(surprise_rate)) * 100)
             accuracy_pct = int(accuracy_pct or 0)
-            lines.append(f"{_BAR_CHART} <b>Отчёт точности ({window_days} дней)</b>")
+            lines.append(f"<b>Отчёт точности ({window_days} дней)</b>")
             lines.append(f"• Писем обработано: {emails}")
             lines.append(f"• Коррекции приоритета: {corrections}")
             lines.append(f"• Сюрпризы: {surprises} (точность: {accuracy_pct}%)")

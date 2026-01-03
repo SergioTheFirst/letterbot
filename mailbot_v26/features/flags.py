@@ -53,6 +53,7 @@ class FeatureFlags:
         self.ENABLE_BEHAVIOR_METRICS_DIGEST = False
         self.ENABLE_DIGEST_ACTION_TEMPLATES = False
         self.ENABLE_TRUST_BOOTSTRAP = False
+        self.ENABLE_REGRET_MINIMIZATION = False
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -131,6 +132,9 @@ class FeatureFlags:
         )
         self.ENABLE_TRUST_BOOTSTRAP = self._get_flag(
             parser, "enable_trust_bootstrap"
+        )
+        self.ENABLE_REGRET_MINIMIZATION = self._get_flag(
+            parser, "enable_regret_minimization"
         )
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6

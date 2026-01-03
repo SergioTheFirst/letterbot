@@ -25,6 +25,7 @@ class EventType(str, Enum):
     # }
     COMMITMENT_CREATED = "commitment_created"
     COMMITMENT_STATUS_CHANGED = "commitment_status_changed"
+    COMMITMENT_EXPIRED = "commitment_expired"
     TRUST_SCORE_UPDATED = "trust_score_updated"
     RELATIONSHIP_HEALTH_UPDATED = "relationship_health_updated"
     ATTENTION_DEFERRED_FOR_DIGEST = "attention_deferred_for_digest"

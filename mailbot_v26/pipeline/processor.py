@@ -1998,6 +1998,22 @@ def _record_analytics(
                                     commitment_id=update.commitment_id,
                                     reason=update.reason,
                                 )
+                                _emit_contract_event(
+                                    EventType.COMMITMENT_EXPIRED,
+                                    ts_utc=received_at.timestamp(),
+                                    account_id=account_email,
+                                    entity_id=entity_resolution.entity_id if entity_resolution else None,
+                                    email_id=message_id,
+                                    payload={
+                                        "commitment_id": update.commitment_id,
+                                        "old_status": update.old_status,
+                                        "new_status": update.new_status,
+                                        "reason": update.reason,
+                                        "deadline_iso": update.deadline_iso,
+                                        "commitment_text": update.commitment_text,
+                                        "from_email": from_email,
+                                    },
+                                )
                                 event_emitter.emit(
                                     type="commitment_expired",
                                     timestamp=received_at,

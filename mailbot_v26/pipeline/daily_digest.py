@@ -7,6 +7,7 @@ from mailbot_v26.behavior.trust_bootstrap import (
     TrustBootstrapSnapshot,
     compute_trust_bootstrap_snapshot,
 )
+from mailbot_v26.config.regret_minimization import RegretMinimizationConfig
 from mailbot_v26.config.trust_bootstrap import TrustBootstrapConfig
 from mailbot_v26.insights.anomaly_engine import compute_anomalies
 from mailbot_v26.insights.attention_economics import (
@@ -69,6 +70,15 @@ class DigestData:
     trust_bootstrap_snapshot: TrustBootstrapSnapshot | None = None
     trust_bootstrap_min_samples: int = 0
     trust_bootstrap_hide_action_templates: bool = False
+    regret_minimization_stats: "RegretMinimizationStats | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class RegretMinimizationStats:
+    total: int
+    drops: int
+    pct: int
+    window_days: int
 
 
 def _collect_anomaly_alerts(
@@ -153,6 +163,8 @@ def _collect_digest_data(
     behavior_metrics_window_days: int = 7,
     include_trust_bootstrap: bool = False,
     trust_bootstrap_config: TrustBootstrapConfig | None = None,
+    include_regret_minimization: bool = False,
+    regret_minimization_config: RegretMinimizationConfig | None = None,
     now: datetime | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
@@ -274,6 +286,29 @@ def _collect_digest_data(
             logger.error("trust_bootstrap_snapshot_failed", error=str(exc))
             trust_bootstrap_snapshot = None
 
+    regret_minimization_stats: RegretMinimizationStats | None = None
+    if include_regret_minimization:
+        resolved_config = regret_minimization_config or RegretMinimizationConfig()
+        if not (trust_bootstrap_snapshot and trust_bootstrap_snapshot.active):
+            try:
+                stats = analytics.regret_minimization_stats(
+                    account_email=account_email,
+                    window_days=resolved_config.window_days,
+                    trust_drop_window_days=resolved_config.trust_drop_window_days,
+                    min_samples=resolved_config.min_samples,
+                    now_dt=now,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("regret_minimization_stats_failed", error=str(exc))
+                stats = None
+            if stats:
+                regret_minimization_stats = RegretMinimizationStats(
+                    total=int(stats.get("total") or 0),
+                    drops=int(stats.get("drops") or 0),
+                    pct=int(stats.get("pct") or 0),
+                    window_days=resolved_config.window_days,
+                )
+
     digest_action_templates_enabled = bool(include_digest_action_templates)
     if (
         digest_action_templates_enabled
@@ -307,6 +342,7 @@ def _collect_digest_data(
         trust_bootstrap_snapshot=trust_bootstrap_snapshot,
         trust_bootstrap_min_samples=trust_bootstrap_min_samples,
         trust_bootstrap_hide_action_templates=trust_bootstrap_hide_action_templates,
+        regret_minimization_stats=regret_minimization_stats,
     )
 
 
@@ -342,6 +378,20 @@ def _build_digest_text(data: DigestData) -> str:
             f"ожидают {data.commitments_pending}, "
             f"просрочено {data.commitments_expired}"
         )
+        if (
+            data.commitments_expired > 0
+            and data.regret_minimization_stats is not None
+            and not (
+                data.trust_bootstrap_snapshot
+                and data.trust_bootstrap_snapshot.active
+            )
+        ):
+            stats = data.regret_minimization_stats
+            lines.append(
+                "• Если откладывать: "
+                f"в похожих случаях за {stats.window_days} дней снижение доверия было "
+                f"в {stats.drops} из {stats.total} ({stats.pct}%)."
+            )
     if data.trust_delta is not None and abs(data.trust_delta) > _TRUST_DELTA_THRESHOLD:
         delta_pp = data.trust_delta * 100.0
         sign = "+" if delta_pp >= 0 else ""
