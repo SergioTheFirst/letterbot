@@ -371,6 +371,7 @@ def _collect_weekly_data(
         attention_economics = compute_attention_economics(
             analytics=analytics,
             account_email=account_email,
+            account_emails=account_emails,
             window_days=7,
             include_anomalies=include_anomalies,
             event_emitter=event_emitter,
@@ -379,6 +380,7 @@ def _collect_weekly_data(
         compute_attention_economics(
             analytics=analytics,
             account_email=account_email,
+            account_emails=account_emails,
             window_days=30,
             include_anomalies=include_anomalies,
             event_emitter=event_emitter,

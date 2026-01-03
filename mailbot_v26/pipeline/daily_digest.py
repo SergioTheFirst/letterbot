@@ -232,6 +232,7 @@ def _collect_digest_data(
         attention_economics = compute_attention_economics(
             analytics=analytics,
             account_email=account_email,
+            account_emails=scope_account_emails,
             window_days=7,
             include_anomalies=include_anomalies,
             now=now or datetime.now(timezone.utc),
@@ -240,6 +241,7 @@ def _collect_digest_data(
         compute_attention_economics(
             analytics=analytics,
             account_email=account_email,
+            account_emails=scope_account_emails,
             window_days=30,
             include_anomalies=include_anomalies,
             now=now or datetime.now(timezone.utc),
@@ -356,6 +358,7 @@ def _collect_digest_data(
         try:
             commitment_chain_items = analytics.commitment_chain_digest_items(
                 account_email,
+                account_emails=scope_account_emails,
                 since_ts=since_ts,
                 max_entities=max_entities,
                 max_items_per_entity=max_items,
@@ -404,6 +407,7 @@ def _collect_digest_data(
             try:
                 stats = analytics.regret_minimization_stats(
                     account_email=account_email,
+                    account_emails=scope_account_emails,
                     window_days=resolved_config.window_days,
                     trust_drop_window_days=resolved_config.trust_drop_window_days,
                     min_samples=resolved_config.min_samples,

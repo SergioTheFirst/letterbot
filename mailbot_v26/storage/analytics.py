@@ -1341,11 +1341,13 @@ class KnowledgeAnalytics:
         self,
         account_email: str,
         *,
+        account_emails: Iterable[str] | None = None,
         since_ts: float,
         max_entities: int,
         max_items_per_entity: int,
     ) -> list[dict[str, object]]:
-        if not account_email:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return []
         try:
             resolved_since_ts = float(since_ts)
@@ -1363,20 +1365,21 @@ class KnowledgeAnalytics:
             return []
 
         try:
+            clause, clause_params = self._account_scope_clause(account_ids)
             rows = self._execute_select(
-                """
+                f"""
                 SELECT event_type, ts_utc, account_id, entity_id, email_id, payload, payload_json
                 FROM events_v1
-                WHERE account_id = ?
-                  AND event_type IN (
+                WHERE event_type IN (
                     'commitment_created',
                     'commitment_status_changed',
                     'commitment_expired'
-                  )
+                )
                   AND ts_utc >= ?
+                {clause}
                 ORDER BY ts_utc DESC
                 """,
-                (account_email, resolved_since_ts),
+                [resolved_since_ts, *clause_params],
             )
         except sqlite3.OperationalError:
             return []
@@ -1902,13 +1905,18 @@ class KnowledgeAnalytics:
         return results
 
     def attention_entity_metrics(
-        self, *, account_email: str, days: int = 7
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        days: int = 7,
     ) -> list[dict[str, object]]:
-        if not account_email:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return []
         since_ts = self._window_start_ts(days)
-        deferred_rows = self._event_rows(
-            account_id=account_email,
+        deferred_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="attention_deferred_for_digest",
             since_ts=since_ts,
         )
@@ -1917,8 +1925,8 @@ class KnowledgeAnalytics:
             for row in deferred_rows
             if row.get("email_id") is not None
         }
-        rows = self._event_rows(
-            account_id=account_email,
+        rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="email_received",
             since_ts=since_ts,
         )
@@ -2121,12 +2129,14 @@ class KnowledgeAnalytics:
         self,
         *,
         account_email: str,
+        account_emails: Iterable[str] | None = None,
         window_days: int,
         trust_drop_window_days: int,
         min_samples: int,
         now_dt: datetime | None = None,
     ) -> dict[str, int] | None:
-        if not account_email:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return None
         now_ts = (now_dt or datetime.now(timezone.utc)).timestamp()
         window_days = max(1, int(window_days))
@@ -2134,8 +2144,8 @@ class KnowledgeAnalytics:
         min_samples = max(1, int(min_samples))
         since_ts = now_ts - (window_days * 24 * 60 * 60)
 
-        expired_rows = self._event_rows(
-            account_id=account_email,
+        expired_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="commitment_expired",
             since_ts=since_ts,
         )
@@ -2143,13 +2153,13 @@ class KnowledgeAnalytics:
         if total < min_samples:
             return None
 
-        trust_rows = self._event_rows(
-            account_id=account_email,
+        trust_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="trust_score_updated",
             since_ts=since_ts,
         )
-        health_rows = self._event_rows(
-            account_id=account_email,
+        health_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="relationship_health_updated",
             since_ts=since_ts,
         )
@@ -2299,15 +2309,24 @@ class KnowledgeAnalytics:
         downs = [item for item in down_sorted if float(item["delta"]) < 0][:3]
         return {"up": ups, "down": downs}
 
-    def trust_and_health_deltas(self, *, days: int = 7) -> dict[str, dict[str, float]]:
+    def trust_and_health_deltas(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        days: int = 7,
+    ) -> dict[str, dict[str, float]]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return {}
         since_ts = self._window_start_ts(days)
-        trust_rows = self._event_rows(
-            account_id=None,
+        trust_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="trust_score_updated",
             since_ts=since_ts,
         )
-        health_rows = self._event_rows(
-            account_id=None,
+        health_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="relationship_health_updated",
             since_ts=since_ts,
         )

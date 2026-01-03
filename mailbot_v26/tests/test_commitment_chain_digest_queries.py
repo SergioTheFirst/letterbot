@@ -116,3 +116,99 @@ def test_commitment_chain_digest_orders_and_limits(tmp_path: Path) -> None:
     assert items[1]["items"] == [
         {"text": "Отправить договор", "status": "ожидает", "due": "2024-07-12"}
     ]
+
+
+def test_commitment_chain_digest_scopes_account_emails(tmp_path: Path) -> None:
+    db_path = tmp_path / "commitment_chain_scope.sqlite"
+    analytics = KnowledgeAnalytics(db_path)
+    emitter = ContractEventEmitter(db_path)
+    now = datetime(2024, 7, 10, tzinfo=timezone.utc)
+
+    _emit_event(
+        emitter,
+        event_type=EventType.COMMITMENT_STATUS_CHANGED,
+        ts_utc=(now - timedelta(days=2)).timestamp(),
+        account_id="acc-a@example.com",
+        entity_id="entity-a",
+        payload={
+            "commitment_id": 1,
+            "old_status": "pending",
+            "new_status": "expired",
+            "deadline_iso": "2024-07-01",
+            "commitment_text": "Согласовать бюджет",
+            "from_email": "a@example.com",
+        },
+    )
+    _emit_event(
+        emitter,
+        event_type=EventType.COMMITMENT_CREATED,
+        ts_utc=(now - timedelta(days=1)).timestamp(),
+        account_id="acc-b@example.com",
+        entity_id="entity-b",
+        payload={
+            "commitment_text": "Отправить договор",
+            "deadline_iso": "2024-07-12",
+            "status": "pending",
+            "source": "test",
+            "confidence": 0.9,
+            "from_email": "b@example.com",
+        },
+    )
+
+    items = analytics.commitment_chain_digest_items(
+        "acc-a@example.com",
+        account_emails=["acc-a@example.com", "acc-b@example.com"],
+        since_ts=(now - timedelta(days=30)).timestamp(),
+        max_entities=3,
+        max_items_per_entity=1,
+    )
+
+    assert [item["entity_label"] for item in items] == ["entity-a", "entity-b"]
+
+
+def test_commitment_chain_digest_empty_scope_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "commitment_chain_empty.sqlite"
+    analytics = KnowledgeAnalytics(db_path)
+    emitter = ContractEventEmitter(db_path)
+    now = datetime(2024, 7, 10, tzinfo=timezone.utc)
+
+    _emit_event(
+        emitter,
+        event_type=EventType.COMMITMENT_STATUS_CHANGED,
+        ts_utc=(now - timedelta(days=2)).timestamp(),
+        account_id="acc-a@example.com",
+        entity_id="entity-a",
+        payload={
+            "commitment_id": 1,
+            "old_status": "pending",
+            "new_status": "expired",
+            "deadline_iso": "2024-07-01",
+            "commitment_text": "Согласовать бюджет",
+            "from_email": "a@example.com",
+        },
+    )
+    _emit_event(
+        emitter,
+        event_type=EventType.COMMITMENT_CREATED,
+        ts_utc=(now - timedelta(days=1)).timestamp(),
+        account_id="acc-b@example.com",
+        entity_id="entity-b",
+        payload={
+            "commitment_text": "Отправить договор",
+            "deadline_iso": "2024-07-12",
+            "status": "pending",
+            "source": "test",
+            "confidence": 0.9,
+            "from_email": "b@example.com",
+        },
+    )
+
+    items = analytics.commitment_chain_digest_items(
+        "acc-a@example.com",
+        account_emails=[],
+        since_ts=(now - timedelta(days=30)).timestamp(),
+        max_entities=3,
+        max_items_per_entity=1,
+    )
+
+    assert [item["entity_label"] for item in items] == ["entity-a"]
