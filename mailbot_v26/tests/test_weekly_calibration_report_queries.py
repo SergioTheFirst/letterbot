@@ -344,3 +344,43 @@ def test_weekly_surprise_breakdown_aggregates_multiple_accounts(tmp_path) -> Non
         {"label": "entity-b", "count": 2},
         {"label": "контакт", "count": 1},
     ]
+
+
+def test_weekly_calibration_proposals_aggregate_transitions(tmp_path) -> None:
+    db_path = tmp_path / "calibration.sqlite"
+    KnowledgeDB(db_path)
+    emitter = ContractEventEmitter(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    now = datetime.now(timezone.utc)
+    accounts = ["acc@example.com", "alt@example.com"]
+
+    for account in accounts:
+        for offset in range(2):
+            _emit_event(
+                emitter,
+                event_type=EventType.PRIORITY_CORRECTION_RECORDED,
+                ts_utc=now.timestamp() + offset,
+                account_email=account,
+                entity_id="entity-a",
+                payload={"old_priority": "🔴", "new_priority": "🟡"},
+            )
+
+    report = analytics.weekly_calibration_proposals(
+        "acc@example.com",
+        since_ts=now.timestamp() - (7 * 86400),
+        top_n=3,
+        min_corrections=3,
+        account_emails=accounts,
+    )
+
+    assert report is not None
+    assert report["corrections"] == 4
+    proposals = report["proposals"]
+    assert proposals == [
+        {
+            "label": "entity-a",
+            "transition": "🔴→🟡",
+            "count": 4,
+            "hint": "вероятно, завышаем срочность",
+        }
+    ]
