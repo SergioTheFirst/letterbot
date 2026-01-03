@@ -113,7 +113,6 @@ from .telegram_payload import TelegramPayload
 from . import tg_renderer
 from .tg_renderer import (
     _escape_dynamic,
-    _is_binary_leak,
     _normalize_attachment_text,
     _truncate_attachment_text,
 )
@@ -1064,24 +1063,32 @@ def _build_premium_clarity_facts(
 
 def _build_premium_clarity_attachments(
     attachments: list[dict[str, Any]],
+    attachment_summaries: list[dict[str, Any]],
 ) -> list[str]:
     if not attachments:
         return []
+    summary_by_name: dict[str, str] = {}
+    for summary in attachment_summaries:
+        filename = str(summary.get("filename") or "").strip()
+        if not filename:
+            continue
+        summary_text = str(summary.get("summary") or "").strip()
+        if not summary_text:
+            continue
+        summary_by_name[filename.lower()] = summary_text
     lines = [f"📎 Вложения ({len(attachments)}):"]
     for attachment in attachments[:3]:
-        filename = _escape_dynamic(
-            strip_disallowed_emojis(attachment.get("filename") or "вложение")
-        )
-        extracted_text = _normalize_attachment_text(attachment.get("text"))
-        if extracted_text and not _is_binary_leak(extracted_text):
-            extracted_text = _truncate_attachment_text(extracted_text)
-        else:
-            extracted_text = ""
-        if extracted_text:
-            safe_text = _escape_dynamic(strip_disallowed_emojis(extracted_text))
+        raw_filename = attachment.get("filename") or "вложение"
+        filename = _escape_dynamic(strip_disallowed_emojis(raw_filename))
+        summary_text = summary_by_name.get(str(raw_filename).strip().lower(), "")
+        summary_text = _normalize_attachment_text(summary_text)
+        if summary_text:
+            summary_text = _truncate_attachment_text(summary_text)
+        if summary_text:
+            safe_text = _escape_dynamic(strip_disallowed_emojis(summary_text))
             lines.append(f"• {filename} — {safe_text}")
         else:
-            lines.append(f"• {filename} — не извлечено")
+            lines.append(f"• {filename}")
     remaining = len(attachments) - 3
     if remaining > 0:
         lines.append(f"... ещё {remaining}")
@@ -1113,25 +1120,105 @@ def _should_show_confidence_dots(
     return confidence_percent < threshold
 
 
-def _build_premium_clarity_spoiler(
+def _build_premium_clarity_spoiler_lines(
     lines: list[str],
     *,
     dots: str = "",
-) -> str:
+) -> list[str]:
     if not lines:
-        return ""
+        return []
     sanitized = []
     for line in lines:
         cleaned = (line or "").strip()
         if cleaned:
             sanitized.append(_escape_dynamic(strip_disallowed_emojis(cleaned)))
     if not sanitized:
-        return ""
+        return []
     limited = sanitized[:6]
     closing = "</tg-spoiler>"
     if dots:
         closing = f"{closing} {dots}"
-    return "\n".join(["<tg-spoiler>", "Подробнее:", *limited, closing])
+    return ["<tg-spoiler>", "Подробнее:", *limited, closing]
+
+
+def _enforce_premium_clarity_line_budget(
+    *,
+    base_lines: list[str],
+    primary_fact_line: str,
+    attachment_lines: list[str],
+    action_line: str,
+    optional_lines: list[str],
+    spoiler_lines: list[str],
+    dots_text: str,
+    max_lines: int = 18,
+) -> list[str]:
+    def _build_lines(
+        *,
+        spoiler_details: list[str],
+        optional_details: list[str],
+    ) -> list[str]:
+        lines = [*base_lines]
+        if primary_fact_line:
+            lines.append(primary_fact_line)
+        lines.extend(attachment_lines)
+        lines.append(action_line)
+        lines.extend(optional_details)
+        spoiler_block = _build_premium_clarity_spoiler_lines(
+            spoiler_details,
+            dots=dots_text,
+        )
+        if spoiler_block:
+            lines.extend(spoiler_block)
+        return lines
+
+    current_optional = list(optional_lines)
+    current_spoiler = list(spoiler_lines)
+    lines = _build_lines(
+        spoiler_details=current_spoiler,
+        optional_details=current_optional,
+    )
+    if len(lines) <= max_lines:
+        return lines
+
+    if current_spoiler:
+        trimmed_spoiler = list(current_spoiler)
+        while trimmed_spoiler and len(
+            _build_lines(
+                spoiler_details=trimmed_spoiler,
+                optional_details=current_optional,
+            )
+        ) > max_lines:
+            trimmed_spoiler.pop()
+        current_spoiler = trimmed_spoiler
+        lines = _build_lines(
+            spoiler_details=current_spoiler,
+            optional_details=current_optional,
+        )
+        if len(lines) <= max_lines:
+            return lines
+
+    if current_optional:
+        trimmed_optional = list(current_optional)
+        while trimmed_optional and len(
+            _build_lines(
+                spoiler_details=current_spoiler,
+                optional_details=trimmed_optional,
+            )
+        ) > max_lines:
+            trimmed_optional.pop()
+        current_optional = trimmed_optional
+        lines = _build_lines(
+            spoiler_details=current_spoiler,
+            optional_details=current_optional,
+        )
+        if len(lines) <= max_lines:
+            return lines
+
+    lines = _build_lines(
+        spoiler_details=[],
+        optional_details=current_optional,
+    )
+    return lines[:max_lines]
 
 
 def _pick_action_emoji(action_text: str) -> str:
@@ -1173,6 +1260,7 @@ def _build_premium_clarity_text(
     action_line: str,
     body_summary: str,
     attachments: list[dict[str, Any]],
+    attachment_summaries: list[dict[str, Any]],
     insights: list[Insight],
     insight_digest: InsightDigest | None,
     commitments: list[Commitment],
@@ -1213,17 +1301,21 @@ def _build_premium_clarity_text(
     facts_line = _build_premium_clarity_facts(
         body_summary=body_summary,
     )
+    primary_fact_line = ""
     if facts_line:
-        lines.append(_escape_dynamic(facts_line))
+        primary_fact_line = _escape_dynamic(facts_line)
+    elif extracted_text_len <= 0 and attachments_count > 0:
+        primary_fact_line = "не извлечено"
 
-    if not facts_line and extracted_text_len <= 0 and attachments_count > 0:
-        lines.append("не извлечено")
-
-    lines.extend(_build_premium_clarity_attachments(attachments))
+    attachment_lines = _build_premium_clarity_attachments(
+        attachments,
+        attachment_summaries,
+    )
     action_prefix = _pick_action_emoji(action_text)
     action_line_text = safe_action if safe_action else "Действий не требуется"
-    lines.append(f"{action_prefix} {action_line_text}")
+    action_line_rendered = f"{action_prefix} {action_line_text}"
 
+    optional_lines: list[str] = []
     if priority == "🔴":
         reason_line = ""
         if extraction_failed:
@@ -1234,7 +1326,7 @@ def _build_premium_clarity_text(
             reason_line = "критический приоритет"
         if reason_line:
             safe_reason = _escape_dynamic(strip_disallowed_emojis(reason_line))
-            lines.append(f"Причина: {safe_reason}")
+            optional_lines.append(f"Причина: {safe_reason}")
 
     spoiler_lines: list[str] = []
     if insight_digest:
@@ -1257,11 +1349,15 @@ def _build_premium_clarity_text(
     ):
         dots_text = _format_confidence_dots(confidence_percent)
 
-    spoiler = _build_premium_clarity_spoiler(spoiler_lines, dots=dots_text)
-    if spoiler:
-        lines.append(spoiler)
-
-    limited_lines = lines[:18]
+    limited_lines = _enforce_premium_clarity_line_budget(
+        base_lines=lines,
+        primary_fact_line=primary_fact_line,
+        attachment_lines=attachment_lines,
+        action_line=action_line_rendered,
+        optional_lines=optional_lines,
+        spoiler_lines=spoiler_lines,
+        dots_text=dots_text,
+    )
     return "\n".join(limited_lines)
 
 
@@ -3580,6 +3676,7 @@ def process_message(
                 action_line=action_line,
                 body_summary=body_summary,
                 attachments=attachments,
+                attachment_summaries=attachment_summaries,
                 insights=analytics_result.aggregated_insights,
                 insight_digest=analytics_result.insight_digest,
                 commitments=commitments,
@@ -3596,13 +3693,6 @@ def process_message(
             priority=priority,
             metadata=render_result.payload.metadata,
         )
-        if len(premium_payload.html_text.splitlines()) > 18:
-            premium_lines = premium_payload.html_text.splitlines()[:18]
-            premium_payload = TelegramPayload(
-                html_text="\n".join(premium_lines),
-                priority=premium_payload.priority,
-                metadata=premium_payload.metadata,
-            )
         render_result = RenderResult(
             payload=premium_payload,
             render_mode=render_result.render_mode,

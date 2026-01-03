@@ -8,6 +8,7 @@ def _render(
     *,
     priority: str = "🔵",
     attachments: list[dict[str, object]] | None = None,
+    attachment_summaries: list[dict[str, object]] | None = None,
     body_summary: str = "Краткий факт письма.",
     extraction_failed: bool = False,
     confidence_percent: int = 80,
@@ -15,15 +16,17 @@ def _render(
     confidence_dots_mode: str = "auto",
     confidence_dots_threshold: int = 75,
     insight_digest: InsightDigest | None = None,
+    subject: str = "Тема письма",
 ) -> str:
     return processor._build_premium_clarity_text(
         priority=priority,
         from_email="sender@example.com",
         from_name="Sender",
-        subject="Тема письма",
+        subject=subject,
         action_line="Ответить клиенту",
         body_summary=body_summary,
         attachments=attachments or [],
+        attachment_summaries=attachment_summaries or [],
         insights=[],
         insight_digest=insight_digest,
         commitments=[],
@@ -61,6 +64,7 @@ def test_premium_clarity_attachment_truncation() -> None:
     lines = rendered.splitlines()
     assert "📎 Вложения (4):" in lines
     assert any("... ещё 1" in line for line in lines)
+    assert "• one.pdf" in lines
 
 
 def test_premium_clarity_reason_for_critical() -> None:
@@ -98,7 +102,44 @@ def test_premium_clarity_extraction_failed_placeholder() -> None:
         extraction_failed=True,
         confidence_percent=30,
     )
-    assert "не извлечено" in rendered
+    assert "• file.pdf" in rendered
+
+
+def test_premium_clarity_attachments_absent() -> None:
+    rendered = _render(attachments=[])
+    assert "📎 Вложения" not in rendered
+
+
+def test_premium_clarity_attachments_visible() -> None:
+    attachments = [
+        {"filename": "one.pdf", "text": "text"},
+        {"filename": "two.pdf", "text": ""},
+        {"filename": "three.pdf", "text": ""},
+    ]
+    rendered = _render(attachments=attachments)
+    lines = rendered.splitlines()
+    assert "📎 Вложения (3):" in lines
+    assert "• one.pdf" in lines
+    assert "• two.pdf" in lines
+    assert "• three.pdf" in lines
+
+
+def test_premium_clarity_attachments_more_than_three() -> None:
+    attachments = [{"filename": f"file-{idx}.pdf", "text": ""} for idx in range(6)]
+    rendered = _render(attachments=attachments)
+    lines = rendered.splitlines()
+    assert "📎 Вложения (6):" in lines
+    assert "• file-0.pdf" in lines
+    assert "• file-1.pdf" in lines
+    assert "• file-2.pdf" in lines
+    assert any("... ещё 3" in line for line in lines)
+
+
+def test_premium_clarity_attachment_summary_status() -> None:
+    attachments = [{"filename": "invoice.pdf", "text": ""}]
+    summaries = [{"filename": "invoice.pdf", "summary": "Счёт"}]
+    rendered = _render(attachments=attachments, attachment_summaries=summaries)
+    assert "• invoice.pdf — Счёт" in rendered
 
 
 def test_premium_clarity_confidence_dots_never_mode() -> None:
@@ -160,3 +201,31 @@ def test_premium_clarity_confidence_dots_always_mode() -> None:
     )
     dots = _extract_dots(rendered)
     assert len(dots) == 10
+
+
+def test_premium_clarity_line_budget_enforced_and_html_valid() -> None:
+    attachments = [{"filename": f"file-{idx}.pdf", "text": ""} for idx in range(6)]
+    digest = InsightDigest(
+        headline="Контакт в зоне риска.",
+        status_label="Risk Zone",
+        short_explanation="\n".join(f"Подробность {idx}" for idx in range(10)),
+    )
+    rendered = _render(
+        attachments=attachments,
+        attachment_summaries=[{"filename": "file-0.pdf", "summary": "Счёт"}],
+        insight_digest=digest,
+        confidence_percent=10,
+        confidence_dots_mode="always",
+        subject="Очень длинная тема <с тегами> " * 3,
+    )
+    lines = rendered.splitlines()
+    assert len(lines) <= 18
+    assert lines[0].startswith("🔵 ")
+    assert any(line.startswith("От: ") for line in lines)
+    assert any(line.startswith("Тема: ") for line in lines)
+    assert any(line.startswith("📎 Вложения (6):") for line in lines)
+    assert "• file-0.pdf" in rendered
+    assert "• file-1.pdf" in rendered
+    assert "• file-2.pdf" in rendered
+    assert rendered.count("<tg-spoiler>") == rendered.count("</tg-spoiler>")
+    assert "<с тегами>" not in rendered

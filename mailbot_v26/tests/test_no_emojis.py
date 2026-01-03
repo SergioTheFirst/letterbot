@@ -20,6 +20,7 @@ def test_telegram_render_emoji_whitelist_premium_clarity() -> None:
             {"filename": "invoice😊.pdf", "text": "Счет на оплату 10 000"},
             {"filename": "notes.txt", "text": ""},
         ],
+        attachment_summaries=[],
         insights=[Insight(type="Risk", severity="HIGH", explanation="", recommendation="")],
         insight_digest=None,
         commitments=[],
