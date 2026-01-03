@@ -28,6 +28,7 @@ from mailbot_v26.config.flow_protection import (
     load_flow_protection_config,
 )
 from mailbot_v26.config.premium_clarity import load_premium_clarity_config
+from mailbot_v26.config_loader import resolve_account_scope
 from mailbot_v26.facts.fact_extractor import FactExtractor
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
@@ -4156,6 +4157,13 @@ def process_message(
         render_result.extracted_text_len <= 0 and len(attachments) > 0
     )
     if behavior_enabled and delivery_decision and delivery_context:
+        scope = resolve_account_scope(account_email)
+        scope_payload: dict[str, Any] = {}
+        if scope:
+            scope_payload = {
+                "chat_scope": f"tg:{scope.chat_id}",
+                "account_emails": scope.account_emails,
+            }
         _emit_contract_event(
             EventType.DELIVERY_POLICY_APPLIED,
             ts_utc=received_at.timestamp(),
@@ -4174,6 +4182,7 @@ def process_message(
                 "extraction_success": extraction_success,
                 "attachment_count": len(attachments),
                 "sources": sources,
+                **scope_payload,
             },
         )
 
