@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterable
 
 from mailbot_v26.config.trust_bootstrap import TrustBootstrapConfig
-from mailbot_v26.events.contract import EventType
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
 _DAY_SECONDS = 24 * 60 * 60
@@ -24,10 +24,14 @@ def compute_trust_bootstrap_snapshot(
     *,
     analytics: KnowledgeAnalytics,
     account_email: str,
+    account_emails: Iterable[str] | None = None,
     now_ts: float,
     config: TrustBootstrapConfig,
 ) -> TrustBootstrapSnapshot:
-    start_ts = analytics.bootstrap_start_ts(account_email=account_email)
+    start_ts = analytics.bootstrap_start_ts(
+        account_email=account_email,
+        account_emails=account_emails,
+    )
     if start_ts is None:
         return TrustBootstrapSnapshot(
             start_ts=None,
@@ -43,16 +47,19 @@ def compute_trust_bootstrap_snapshot(
     samples_count = analytics.bootstrap_samples_count(
         account_email=account_email,
         start_ts=start_ts,
+        account_emails=account_emails,
     )
     window_days = min(7, max(1, config.learning_days))
     corrections_since_ts = now_ts - (window_days * _DAY_SECONDS)
     corrections_count = analytics.bootstrap_corrections_count(
         account_email=account_email,
         since_ts=corrections_since_ts,
+        account_emails=account_emails,
     )
     surprises_count = analytics.bootstrap_surprises_count(
         account_email=account_email,
         since_ts=corrections_since_ts,
+        account_emails=account_emails,
     )
     surprise_rate = (
         surprises_count / corrections_count
@@ -89,10 +96,12 @@ def is_bootstrap_active(
     *,
     analytics: KnowledgeAnalytics,
     config: TrustBootstrapConfig,
+    account_emails: Iterable[str] | None = None,
 ) -> bool:
     snapshot = compute_trust_bootstrap_snapshot(
         analytics=analytics,
         account_email=account_email,
+        account_emails=account_emails,
         now_ts=now_ts,
         config=config,
     )
@@ -105,24 +114,25 @@ def is_ready_for_action_templates(
     *,
     analytics: KnowledgeAnalytics,
     config: TrustBootstrapConfig,
+    account_emails: Iterable[str] | None = None,
 ) -> bool:
     if not account_email:
         return False
     window_days = max(1, config.templates_window_days)
     since_ts = now_ts - (window_days * _DAY_SECONDS)
-    corrections_count = analytics.event_count(
-        account_id=account_email,
-        event_type=EventType.PRIORITY_CORRECTION_RECORDED,
+    corrections_count = analytics.bootstrap_corrections_count(
+        account_email=account_email,
         since_ts=since_ts,
+        account_emails=account_emails,
     )
     if corrections_count < config.templates_min_corrections:
         return False
     if corrections_count == 0:
         return False
-    surprises_count = analytics.event_count(
-        account_id=account_email,
-        event_type=EventType.SURPRISE_DETECTED,
+    surprises_count = analytics.bootstrap_surprises_count(
+        account_email=account_email,
         since_ts=since_ts,
+        account_emails=account_emails,
     )
     surprise_rate = surprises_count / corrections_count
     if surprise_rate > config.templates_max_surprise_rate:

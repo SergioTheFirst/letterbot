@@ -266,19 +266,26 @@ class KnowledgeAnalytics:
             since_ts=since_ts,
         )
 
-    def bootstrap_start_ts(self, *, account_email: str) -> float | None:
-        if not account_email:
+    def bootstrap_start_ts(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+    ) -> float | None:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return None
         query = """
         SELECT MIN(ts_utc) AS start_ts
         FROM events_v1
         WHERE event_type = ?
-          AND account_id = ?
         """
+        clause, clause_params = self._account_scope_clause(account_ids)
+        query += clause
         try:
             rows = self._execute_select(
                 query,
-                ("email_received", account_email),
+                ("email_received", *clause_params),
             )
         except sqlite3.OperationalError:
             return None
@@ -295,11 +302,11 @@ class KnowledgeAnalytics:
         *,
         account_email: str,
         start_ts: float,
+        account_emails: Iterable[str] | None = None,
     ) -> int:
-        if not account_email:
-            return 0
-        return self._event_count(
-            account_id=account_email,
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        return self._event_count_scoped(
+            account_ids=account_ids,
             event_type="email_received",
             since_ts=start_ts,
         )
@@ -309,11 +316,11 @@ class KnowledgeAnalytics:
         *,
         account_email: str,
         since_ts: float,
+        account_emails: Iterable[str] | None = None,
     ) -> int:
-        if not account_email:
-            return 0
-        return self._event_count(
-            account_id=account_email,
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        return self._event_count_scoped(
+            account_ids=account_ids,
             event_type="priority_correction_recorded",
             since_ts=since_ts,
         )
@@ -323,11 +330,11 @@ class KnowledgeAnalytics:
         *,
         account_email: str,
         since_ts: float,
+        account_emails: Iterable[str] | None = None,
     ) -> int:
-        if not account_email:
-            return 0
-        return self._event_count(
-            account_id=account_email,
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        return self._event_count_scoped(
+            account_ids=account_ids,
             event_type="surprise_detected",
             since_ts=since_ts,
         )
@@ -1925,9 +1932,11 @@ class KnowledgeAnalytics:
         self,
         *,
         account_email: str,
+        account_emails: Iterable[str] | None = None,
         window_days: int = 7,
     ) -> dict[str, object]:
-        if not account_email:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return {}
         try:
             window_days = max(1, int(window_days))
@@ -1937,21 +1946,21 @@ class KnowledgeAnalytics:
 
         metrics: dict[str, object] = {}
 
-        corrections_total = self._event_count(
-            account_id=account_email,
+        corrections_total = self._event_count_scoped(
+            account_ids=account_ids,
             event_type="priority_correction_recorded",
             since_ts=since_ts,
         )
         if corrections_total > 0:
-            surprise_total = self._event_count(
-                account_id=account_email,
+            surprise_total = self._event_count_scoped(
+                account_ids=account_ids,
                 event_type="surprise_detected",
                 since_ts=since_ts,
             )
             metrics["surprise_rate"] = surprise_total / corrections_total
 
-        delivery_rows = self._event_rows(
-            account_id=account_email,
+        delivery_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="delivery_policy_applied",
             since_ts=since_ts,
         )
@@ -1967,8 +1976,8 @@ class KnowledgeAnalytics:
             if total_count > 0:
                 metrics["compression_rate"] = suppressed_count / total_count
 
-        debt_rows = self._event_rows(
-            account_id=account_email,
+        debt_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="attention_debt_updated",
             since_ts=since_ts,
         )
@@ -1982,13 +1991,13 @@ class KnowledgeAnalytics:
             if sum(distribution.values()) > 0:
                 metrics["attention_debt_distribution"] = distribution
 
-        deadlock_count = self._event_count(
-            account_id=account_email,
+        deadlock_count = self._event_count_scoped(
+            account_ids=account_ids,
             event_type="deadlock_detected",
             since_ts=since_ts,
         )
-        silence_count = self._event_count(
-            account_id=account_email,
+        silence_count = self._event_count_scoped(
+            account_ids=account_ids,
             event_type="silence_signal_detected",
             since_ts=since_ts,
         )
