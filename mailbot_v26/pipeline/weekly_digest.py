@@ -26,7 +26,7 @@ from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
-from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.storage.analytics import KnowledgeAnalytics, WeeklyAccuracyProgress
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
 from mailbot_v26.ui.i18n import DEFAULT_LOCALE, humanize_severity, t
@@ -83,6 +83,7 @@ class WeeklyDigestData:
     previous_week_sla: NotificationSLAResult | None = None
     weekly_accuracy_report: dict[str, object] | None = None
     weekly_calibration_report: dict[str, object] | None = None
+    weekly_accuracy_progress: WeeklyAccuracyProgress | None = None
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -185,6 +186,30 @@ def _trust_summary(trust_deltas: dict[str, list[dict[str, object]]]) -> str:
             down_items.append(f"{name} {delta_pp:.1f} п.п.")
         parts.append(f"падение: {', '.join(down_items)}")
     return "; ".join(parts)
+
+
+def _format_weekly_accuracy_progress(
+    progress: WeeklyAccuracyProgress | None,
+) -> str | None:
+    if progress is None:
+        return None
+    delta = int(progress.delta_pp)
+    if abs(delta) < 2:
+        return None
+    prev_rate = int(progress.prev_surprise_rate_pp)
+    current_rate = int(progress.current_surprise_rate_pp)
+    corrections = int(progress.current_corrections)
+    if delta > 0:
+        return (
+            f"Рост точности: +{delta} п.п. "
+            f"(сюрпризы {prev_rate}% → {current_rate}%), "
+            f"коррекции: {corrections} за период"
+        )
+    return (
+        f"Падение точности: {abs(delta)} п.п. "
+        f"(сюрпризы {prev_rate}% → {current_rate}%), "
+        f"коррекции: {corrections} за период"
+    )
 
 
 def _collect_anomaly_alerts(
@@ -380,6 +405,23 @@ def _collect_weekly_data(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("weekly_calibration_report_failed", error=str(exc))
 
+    weekly_accuracy_progress: WeeklyAccuracyProgress | None = None
+    if include_weekly_calibration_report or include_weekly_accuracy_report:
+        try:
+            anchor = now or datetime.now(timezone.utc)
+            progress_window_days = (
+                weekly_calibration_window_days
+                if include_weekly_calibration_report
+                else weekly_accuracy_window_days
+            )
+            weekly_accuracy_progress = analytics.weekly_accuracy_progress(
+                account_email=account_email,
+                now_ts=anchor.timestamp(),
+                window_days=progress_window_days,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("weekly_accuracy_progress_failed", error=str(exc))
+
     return WeeklyDigestData(
         week_key=week_key,
         total_emails=int(volume.get("total") or 0),
@@ -395,6 +437,7 @@ def _collect_weekly_data(
         previous_week_sla=previous_week_sla,
         weekly_accuracy_report=weekly_accuracy_report,
         weekly_calibration_report=weekly_calibration_report,
+        weekly_accuracy_progress=weekly_accuracy_progress,
     )
 
 
@@ -481,6 +524,10 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
                     label = escape_tg_html(str(item.get("label") or ""))
                     count = int(item.get("count") or 0)
                     lines.append(f"  - {label} — {count}")
+    if data.weekly_accuracy_report is not None or data.weekly_calibration_report is not None:
+        progress_line = _format_weekly_accuracy_progress(data.weekly_accuracy_progress)
+        if progress_line:
+            lines.append(f"• {progress_line}")
     if data.notification_sla is not None:
         current = data.notification_sla
         prev = data.previous_week_sla

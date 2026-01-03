@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
@@ -12,6 +13,16 @@ from mailbot_v26.events.contract import EventType
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class WeeklyAccuracyProgress:
+    current_surprise_rate_pp: int
+    prev_surprise_rate_pp: int
+    delta_pp: int
+    current_decisions: int
+    prev_decisions: int
+    current_corrections: int
 
 
 class KnowledgeAnalytics:
@@ -93,6 +104,39 @@ class KnowledgeAnalytics:
         if not rows:
             return 0
         return int(rows[0].get("total") or 0)
+
+    def _event_count_between(
+        self,
+        *,
+        account_id: str | None,
+        event_type: str,
+        start_ts: float,
+        end_ts: float,
+    ) -> int:
+        query = """
+        SELECT COUNT(*) AS total
+        FROM events_v1
+        WHERE event_type = ?
+          AND ts_utc >= ?
+          AND ts_utc < ?
+        """
+        params: list[object] = [event_type, start_ts, end_ts]
+        if account_id:
+            query += " AND account_id = ?"
+            params.append(account_id)
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return 0
+        if not rows:
+            return 0
+        return int(rows[0].get("total") or 0)
+
+    @staticmethod
+    def _percent_pp(numerator: int, denominator: int) -> int:
+        safe_denominator = max(1, int(denominator))
+        safe_numerator = max(0, int(numerator))
+        return int((safe_numerator * 100 + (safe_denominator // 2)) // safe_denominator)
 
     def event_count(
         self,
@@ -1373,6 +1417,68 @@ class KnowledgeAnalytics:
             report["surprise_rate"] = surprise_rate
             report["accuracy_pct"] = round((1 - surprise_rate) * 100)
         return report
+
+    def weekly_accuracy_progress(
+        self,
+        *,
+        account_email: str,
+        now_ts: float,
+        window_days: int,
+    ) -> WeeklyAccuracyProgress | None:
+        if not account_email:
+            return None
+        try:
+            window_days = max(1, int(window_days))
+        except (TypeError, ValueError):
+            window_days = 7
+        current_start = now_ts - (window_days * 86400)
+        prev_start = now_ts - (window_days * 2 * 86400)
+
+        current_decisions = self._event_count_between(
+            account_id=account_email,
+            event_type=EventType.DELIVERY_POLICY_APPLIED.value,
+            start_ts=current_start,
+            end_ts=now_ts,
+        )
+        prev_decisions = self._event_count_between(
+            account_id=account_email,
+            event_type=EventType.DELIVERY_POLICY_APPLIED.value,
+            start_ts=prev_start,
+            end_ts=current_start,
+        )
+        if current_decisions < 25 or prev_decisions < 25:
+            return None
+
+        current_surprises = self._event_count_between(
+            account_id=account_email,
+            event_type=EventType.SURPRISE_DETECTED.value,
+            start_ts=current_start,
+            end_ts=now_ts,
+        )
+        prev_surprises = self._event_count_between(
+            account_id=account_email,
+            event_type=EventType.SURPRISE_DETECTED.value,
+            start_ts=prev_start,
+            end_ts=current_start,
+        )
+        current_corrections = self._event_count_between(
+            account_id=account_email,
+            event_type=EventType.PRIORITY_CORRECTION_RECORDED.value,
+            start_ts=current_start,
+            end_ts=now_ts,
+        )
+
+        current_rate_pp = self._percent_pp(current_surprises, current_decisions)
+        prev_rate_pp = self._percent_pp(prev_surprises, prev_decisions)
+        delta_pp = prev_rate_pp - current_rate_pp
+        return WeeklyAccuracyProgress(
+            current_surprise_rate_pp=current_rate_pp,
+            prev_surprise_rate_pp=prev_rate_pp,
+            delta_pp=delta_pp,
+            current_decisions=int(current_decisions),
+            prev_decisions=int(prev_decisions),
+            current_corrections=int(current_corrections),
+        )
 
     def weekly_surprise_breakdown(
         self,
