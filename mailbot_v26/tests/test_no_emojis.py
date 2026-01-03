@@ -34,6 +34,7 @@ def test_telegram_render_emoji_whitelist_premium_clarity() -> None:
         confidence_available=True,
         confidence_dots_mode="auto",
         confidence_dots_threshold=75,
+        confidence_dots_scale=10,
         extraction_failed=False,
     )
     _assert_whitelist(rendered)

@@ -9,6 +9,7 @@ from pathlib import Path
 class PremiumClarityConfig:
     confidence_dots_mode: str = "auto"
     confidence_dots_threshold: int = 75
+    confidence_dots_scale: int = 10
 
 
 def load_premium_clarity_config(
@@ -34,9 +35,18 @@ def load_premium_clarity_config(
     except ValueError:
         threshold = 75
     threshold = max(0, min(100, threshold))
+    try:
+        scale = section.getint(
+            "premium_clarity_confidence_dots_scale", fallback=10
+        )
+    except ValueError:
+        scale = 10
+    if scale not in {5, 10}:
+        scale = 10
     return PremiumClarityConfig(
         confidence_dots_mode=mode,
         confidence_dots_threshold=threshold,
+        confidence_dots_scale=scale,
     )
 
 

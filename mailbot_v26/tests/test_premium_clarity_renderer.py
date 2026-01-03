@@ -20,6 +20,7 @@ def _render(
     confidence_available: bool = True,
     confidence_dots_mode: str = "auto",
     confidence_dots_threshold: int = 75,
+    confidence_dots_scale: int = 10,
     insight_digest: InsightDigest | None = None,
     subject: str = "Тема письма",
     received_at: datetime | None = None,
@@ -46,6 +47,7 @@ def _render(
         confidence_available=confidence_available,
         confidence_dots_mode=confidence_dots_mode,
         confidence_dots_threshold=confidence_dots_threshold,
+        confidence_dots_scale=confidence_dots_scale,
         extraction_failed=extraction_failed,
     )
 
@@ -366,6 +368,55 @@ def test_premium_clarity_confidence_dots_always_mode() -> None:
     )
     dots = _extract_dots(rendered)
     assert len(dots) == 10
+
+
+def test_premium_clarity_confidence_dots_scale_five() -> None:
+    digest = InsightDigest(
+        headline="Контакт в зоне риска.",
+        status_label="Risk Zone",
+        short_explanation="Есть просрочки.",
+    )
+    cases = [
+        (0, 0),
+        (20, 1),
+        (40, 2),
+        (60, 3),
+        (80, 4),
+        (100, 5),
+    ]
+    for percent, filled in cases:
+        rendered = _render(
+            insight_digest=digest,
+            confidence_percent=percent,
+            confidence_available=True,
+            confidence_dots_mode="always",
+            confidence_dots_scale=5,
+        )
+        dots = _extract_dots(rendered)
+        assert dots == ("●" * filled + "○" * (5 - filled))
+
+
+def test_premium_clarity_confidence_dots_scale_ten() -> None:
+    digest = InsightDigest(
+        headline="Контакт в зоне риска.",
+        status_label="Risk Zone",
+        short_explanation="Есть просрочки.",
+    )
+    cases = [
+        (0, 0),
+        (50, 5),
+        (100, 10),
+    ]
+    for percent, filled in cases:
+        rendered = _render(
+            insight_digest=digest,
+            confidence_percent=percent,
+            confidence_available=True,
+            confidence_dots_mode="always",
+            confidence_dots_scale=10,
+        )
+        dots = _extract_dots(rendered)
+        assert dots == ("●" * filled + "○" * (10 - filled))
 
 
 def test_premium_clarity_line_budget_enforced_and_html_valid() -> None:
