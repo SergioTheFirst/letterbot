@@ -5,6 +5,7 @@ from collections import Counter
 from typing import Any
 
 from mailbot_v26.telegram_utils import escape_tg_html
+from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.text.sanitize import is_binaryish
 
 _ATTACHMENT_SNIPPET_LIMIT = 240
@@ -12,7 +13,8 @@ _BASE64_FRAGMENT = re.compile(r"[A-Za-z0-9+/]{80,}={0,2}")
 
 
 def _escape_dynamic(text: str | None) -> str:
-    return escape_tg_html(str(text or ""))
+    cleaned = strip_disallowed_emojis(str(text or ""))
+    return escape_tg_html(cleaned)
 
 
 def _normalize_attachment_text(text: Any) -> str:
@@ -119,6 +121,8 @@ def _attachment_type_summary(attachments: list[dict[str, Any]]) -> str:
 
 
 def format_priority_line(priority: str, from_email: str) -> str:
+    if priority not in {"🔴", "🟡", "🔵"}:
+        priority = "🔵"
     safe_sender = _escape_dynamic(from_email or "неизвестно")
     return f"{priority} от {safe_sender}:"
 

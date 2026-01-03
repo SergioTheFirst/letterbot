@@ -38,6 +38,7 @@ class EventType(str, Enum):
     DAILY_DIGEST_SENT = "daily_digest_sent"
     WEEKLY_DIGEST_SENT = "weekly_digest_sent"
     ANOMALY_DETECTED = "anomaly_detected"
+    TG_RENDER_RECORDED = "tg_render_recorded"
 
 
 @dataclass(frozen=True, slots=True)

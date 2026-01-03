@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from datetime import datetime
+from types import SimpleNamespace
+
+from mailbot_v26.events.contract import EventType
+from mailbot_v26.pipeline import processor
+from mailbot_v26.worker.telegram_sender import DeliveryResult
+
+
+class _Collector:
+    def __init__(self) -> None:
+        self.events = []
+
+    def emit(self, event) -> None:
+        self.events.append(event)
+
+
+def test_delivery_policy_event_payload_and_render_record(monkeypatch) -> None:
+    llm_result = SimpleNamespace(
+        priority="🔴",
+        action_line="Срочно ответить",
+        body_summary="Краткое описание письма.",
+        attachment_summaries=[],
+        llm_provider="cloudflare",
+    )
+    monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
+    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor,
+        "feature_flags",
+        SimpleNamespace(
+            ENABLE_AUTO_PRIORITY=False,
+            ENABLE_AUTO_ACTIONS=False,
+            AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+            ENABLE_SHADOW_PERSISTENCE=False,
+            ENABLE_PREVIEW_ACTIONS=False,
+            ENABLE_PREMIUM_CLARITY_V1=False,
+            ENABLE_CIRCADIAN_DELIVERY=True,
+            ENABLE_FLOW_PROTECTION=False,
+            ENABLE_ATTENTION_DEBT=False,
+            ENABLE_PRIORITY_V2=False,
+        ),
+    )
+    collector = _Collector()
+    monkeypatch.setattr(processor, "contract_event_emitter", collector)
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=99,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 1, 12, 0),
+        body_text="Body",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    event_types = [event.event_type for event in collector.events]
+    assert EventType.DELIVERY_POLICY_APPLIED in event_types
+    assert EventType.TG_RENDER_RECORDED in event_types
+
+    decision_event = next(
+        event for event in collector.events if event.event_type == EventType.DELIVERY_POLICY_APPLIED
+    )
+    payload = decision_event.payload
+    assert "subject" not in payload
+    assert "sender" not in payload
+    assert payload["priority"] == "🔴"
+    assert "sources" in payload
+
+    render_event = next(
+        event for event in collector.events if event.event_type == EventType.TG_RENDER_RECORDED
+    )
+    render_payload = render_event.payload
+    assert "fingerprint_hash" in render_payload
+    assert "line_count" in render_payload
