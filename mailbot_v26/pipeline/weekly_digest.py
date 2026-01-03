@@ -434,7 +434,7 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
                 if surprise_rate is not None:
                     accuracy_pct = round((1 - float(surprise_rate)) * 100)
             accuracy_pct = int(accuracy_pct or 0)
-            lines.append("📊 <b>Отчёт точности (7 дней)</b>")
+            lines.append("<b>Отчёт точности (7 дней)</b>")
             lines.append(f"• Писем обработано: {emails}")
             lines.append(f"• Коррекции приоритета: {corrections}")
             lines.append(f"• Сюрпризы: {surprises} (точность: {accuracy_pct}%)")

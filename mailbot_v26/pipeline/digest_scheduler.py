@@ -582,6 +582,7 @@ def _run_weekly_digest(
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
+    include_weekly_accuracy_report: bool = False,
 ) -> None:
     week_key = weekly_digest._iso_week_key(now)
 
@@ -652,28 +653,7 @@ def _run_weekly_digest(
         contract_event_emitter=storage.contract_event_emitter,
         now=now,
     )
-    has_content = _has_weekly_content(data)
-    if not has_content:
-        logger.info(
-            "digest_tick_checked",
-            digest_type="weekly",
-            decision="skipped",
-            reason="no_content",
-            account_email=account_email,
-            week_key=week_key,
-        )
-        if storage.event_emitter:
-            storage.event_emitter.emit(
-                type="weekly_digest_skipped",
-                timestamp=now,
-                email_id=0,
-                payload={
-                    "reason": "no_content",
-                    "week_key": week_key,
-                    "account_email": account_email,
-                },
-            )
-        return
+    has_content = True
 
     policy_decision = _evaluate_policy(
         policy_inputs=policy_inputs,
