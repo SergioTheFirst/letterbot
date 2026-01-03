@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 import re
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Iterable, List, Optional
 
 CONFIG_DIR = Path(__file__).resolve().parent / "config"
 
@@ -195,14 +195,32 @@ def resolve_account_scope(
     return scopes.get(account_email)
 
 
-def get_account_scope(account_email: str) -> tuple[str, list[str]] | None:
-    scope = resolve_account_scope(account_email)
-    if scope is None or not scope.chat_id:
-        return None
-    account_emails = list(scope.account_emails)
-    if account_email and account_email not in account_emails:
-        account_emails.append(account_email)
-    return (f"tg:{scope.chat_id}", account_emails)
+def _normalize_account_emails(account_emails: Iterable[str] | None) -> list[str]:
+    if not account_emails:
+        return []
+    cleaned = {
+        str(email).strip()
+        for email in account_emails
+        if str(email or "").strip()
+    }
+    return sorted(cleaned)
+
+
+def get_account_scope(
+    *,
+    chat_id: str | None,
+    account_email: str | None = None,
+    account_emails: Iterable[str] | None = None,
+) -> dict[str, object]:
+    if not chat_id or not str(chat_id).strip():
+        return {}
+    scope: dict[str, object] = {"chat_scope": f"tg:{chat_id}"}
+    if account_email:
+        scope["account_email"] = account_email
+    normalized_emails = _normalize_account_emails(account_emails)
+    if normalized_emails:
+        scope["account_emails"] = normalized_emails
+    return scope
 
 
 def load_keys_config(base_dir: Path = CONFIG_DIR) -> KeysConfig:

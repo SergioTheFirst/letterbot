@@ -174,7 +174,7 @@ password = secret
         received_at=datetime(2024, 1, 1, 12, 0),
         body_text="Body",
         attachments=[],
-        telegram_chat_id="chat",
+        telegram_chat_id="",
     )
 
     decision_event = next(
