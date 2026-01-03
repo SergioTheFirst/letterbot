@@ -106,3 +106,4 @@ Working set (files / tables / tests):
 - 2026-01-06: premium clarity v1.2 attachment provenance disambiguation, numeric-safe attachment summaries, TG render flags.
 - 2026-01-06: digest scheduler deduped by chat_id, daily_digest_sent payload includes chat_scope/account_emails, test added.
 2026-01-07: verified chat_id digest dedup test coverage and daily_digest_sent payload fields.
+2026-01-07: weekly_digest_sent now includes chat_scope/account_emails (chat_id dedup scope) for events_v1.
