@@ -1128,6 +1128,8 @@ def _collect_fact_items(
     items: list[_FactItem] = []
     items.extend(_fact_items_from_text(subject, tag="тема"))
     items.extend(_fact_items_from_text(body_text, tag="письмо"))
+    attachment_items: list[_FactItem] = []
+    attachment_tags: dict[tuple[str, str], set[str]] = {}
     for attachment in attachments:
         raw_filename = str(attachment.get("filename") or "").strip()
         if not raw_filename:
@@ -1139,7 +1141,16 @@ def _collect_fact_items(
         if not attachment_text.strip():
             continue
         tag = _escape_dynamic(strip_disallowed_emojis(raw_filename))
-        items.extend(_fact_items_from_text(attachment_text, tag=tag))
+        for item in _fact_items_from_text(attachment_text, tag=tag):
+            attachment_items.append(item)
+            key = (item.label, item.value)
+            attachment_tags.setdefault(key, set()).add(tag)
+    for item in attachment_items:
+        tags = attachment_tags.get((item.label, item.value), set())
+        if len(tags) <= 1:
+            items.append(item)
+        else:
+            items.append(_FactItem(label=item.label, value=item.value, tag=""))
     return items
 
 
@@ -1150,6 +1161,14 @@ def _contains_numeric_fact(text: str) -> bool:
 def _strip_numeric_facts(text: str) -> str:
     cleaned = _SUMMARY_NUMBER_PATTERN.sub(" ", text or "")
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _strip_attachment_numeric_summary(text: str) -> str:
+    cleaned = _strip_numeric_facts(text)
+    cleaned = re.sub(r"[№#]+", " ", cleaned)
+    cleaned = re.sub(r"[₽$€]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned.strip(" -–—:;,.")
 
 
 def _should_suppress_numeric_facts(
@@ -1222,6 +1241,8 @@ def _fact_type_label(label: str) -> str:
 
 
 def _fact_source_tag(tag: str) -> str:
+    if not tag:
+        return ""
     if tag == "тема":
         return "subject"
     if tag == "письмо":
@@ -1248,6 +1269,8 @@ def _confidence_bucket(
 def _build_premium_clarity_attachments(
     attachments: list[dict[str, Any]],
     attachment_summaries: list[dict[str, Any]],
+    *,
+    suppress_numeric_facts: bool,
 ) -> list[str]:
     summary_by_name: dict[str, str] = {}
     for summary in attachment_summaries:
@@ -1266,6 +1289,8 @@ def _build_premium_clarity_attachments(
         summary_text = _normalize_attachment_text(summary_text)
         if summary_text:
             summary_text = _truncate_attachment_text(summary_text)
+        if summary_text and suppress_numeric_facts:
+            summary_text = _strip_attachment_numeric_summary(summary_text)
         if summary_text:
             safe_text = _escape_dynamic(strip_disallowed_emojis(summary_text))
             lines.append(f"• {filename} — {safe_text}")
@@ -1519,6 +1544,7 @@ def _build_premium_clarity_text(
     attachment_lines = _build_premium_clarity_attachments(
         attachments,
         attachment_summaries,
+        suppress_numeric_facts=suppress_numeric_facts,
     )
     action_prefix = _pick_action_emoji(action_text)
     action_line_rendered = f"{action_prefix} {safe_action}"
@@ -3979,8 +4005,12 @@ def process_message(
         if fact_type not in shown_fact_types:
             shown_fact_types.append(fact_type)
         source = _fact_source_tag(item.tag)
-        if source not in fact_sources:
+        if source and source not in fact_sources:
             fact_sources.append(source)
+    has_attachment_fact_provenance = any(
+        item.tag and item.tag not in {"тема", "письмо"}
+        for item in shown_fact_items
+    )
     if high_impact or low_confidence or extraction_failed:
         _emit_contract_event(
             EventType.TG_RENDER_RECORDED,
@@ -3997,6 +4027,8 @@ def process_message(
                     confidence_percent=confidence_percent,
                 ),
                 "attachments_count": len(attachments),
+                "suppressed_numeric_facts": suppress_numeric_facts,
+                "has_attachment_fact_provenance": has_attachment_fact_provenance,
             },
         )
     relationship_health_delta: float | None = None
