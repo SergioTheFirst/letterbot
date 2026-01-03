@@ -69,6 +69,7 @@ enable_commitment_chain_digest = false
 [premium_clarity]
 premium_clarity_confidence_dots = auto
 premium_clarity_confidence_threshold = 75
+premium_clarity_confidence_dots_scale = 10
 
 [daily_digest]
 hour = 9

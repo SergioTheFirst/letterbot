@@ -1303,9 +1303,10 @@ def _build_premium_clarity_attachments(
     return lines
 
 
-def _format_confidence_dots(confidence_percent: int) -> str:
-    filled = max(0, min(10, int(confidence_percent / 10)))
-    empty = 10 - filled
+def _format_confidence_dots(confidence_percent: int, scale: int) -> str:
+    dots_scale = scale if scale in {5, 10} else 10
+    filled = min(dots_scale, (confidence_percent * dots_scale) // 100)
+    empty = dots_scale - filled
     return f"{'●' * filled}{'○' * empty}"
 
 
@@ -1480,6 +1481,7 @@ def _build_premium_clarity_text(
     confidence_available: bool,
     confidence_dots_mode: str,
     confidence_dots_threshold: int,
+    confidence_dots_scale: int,
     extraction_failed: bool,
 ) -> str:
     priority = strip_disallowed_emojis(priority or "")
@@ -1599,7 +1601,10 @@ def _build_premium_clarity_text(
         confidence_available=confidence_available,
         confidence_percent=confidence_percent,
     ):
-        dots_text = _format_confidence_dots(confidence_percent)
+        dots_text = _format_confidence_dots(
+            confidence_percent,
+            confidence_dots_scale,
+        )
 
     limited_lines = _enforce_premium_clarity_line_budget(
         base_lines=lines,
@@ -3941,6 +3946,9 @@ def process_message(
                 confidence_dots_mode=premium_clarity_config.confidence_dots_mode,
                 confidence_dots_threshold=(
                     premium_clarity_config.confidence_dots_threshold
+                ),
+                confidence_dots_scale=(
+                    premium_clarity_config.confidence_dots_scale
                 ),
                 extraction_failed=extraction_failed,
             ),
