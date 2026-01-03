@@ -4,7 +4,7 @@ import configparser
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 from mailbot_v26.behavior.silence_detector import run_silence_scan
 from mailbot_v26.config.regret_minimization import (
@@ -377,6 +377,26 @@ def _send_payload(
     return telegram_sender(payload)
 
 
+def _group_accounts_by_chat_id(accounts) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+    for account in accounts:
+        chat_id = account.telegram_chat_id
+        if not chat_id:
+            continue
+        groups.setdefault(chat_id, []).append(account.login)
+    return groups
+
+
+def _is_primary_account(
+    *,
+    account_email: str,
+    chat_id: str,
+    chat_groups: dict[str, list[str]],
+) -> bool:
+    group = chat_groups.get(chat_id, [])
+    return bool(group) and group[0] == account_email
+
+
 def run_digest_tick(
     *,
     now: datetime,
@@ -400,6 +420,8 @@ def run_digest_tick(
         uncertainty_queue_config = load_uncertainty_queue_config(_CONFIG_PATH.parent)
         silence_policy = load_silence_policy_config(_CONFIG_PATH.parent)
         policy_inputs = _collect_policy_inputs(storage, logger)
+
+        chat_groups = _group_accounts_by_chat_id(config.accounts)
 
         for account in config.accounts:
             account_email = account.login
@@ -427,28 +449,44 @@ def run_digest_tick(
                 flags.ENABLE_DAILY_DIGEST, overrides.digest_enabled
             )
             if daily_enabled:
-                _run_daily_digest(
-                    now=now,
-                    config=daily_config,
+                if not _is_primary_account(
                     account_email=account_email,
                     chat_id=chat_id,
-                    bot_token=bot_token,
-                    storage=storage,
-                    telegram_sender=telegram_sender,
-                    logger=logger,
-                    policy_inputs=policy_inputs,
-                    flags=flags,
-                    silence_policy=silence_policy,
-                    digest_insights_config=digest_insights_config,
-                    behavior_metrics_config=behavior_metrics_config,
-                    commitment_chain_digest_config=commitment_chain_digest_config,
-                    uncertainty_queue_config=uncertainty_queue_config,
-                    trust_bootstrap_config=trust_bootstrap_config,
-                    regret_minimization_config=regret_minimization_config,
-                    include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
-                    include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
-                    include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
-                )
+                    chat_groups=chat_groups,
+                ):
+                    logger.info(
+                        "digest_tick_checked",
+                        digest_type="daily",
+                        decision="skipped",
+                        reason="dedup_chat_id_already_processed",
+                        account_email=account_email,
+                        chat_id=chat_id,
+                    )
+                else:
+                    _run_daily_digest(
+                        now=now,
+                        config=daily_config,
+                        account_email=account_email,
+                        account_emails=chat_groups[chat_id],
+                        chat_scope=f"tg:{chat_id}",
+                        chat_id=chat_id,
+                        bot_token=bot_token,
+                        storage=storage,
+                        telegram_sender=telegram_sender,
+                        logger=logger,
+                        policy_inputs=policy_inputs,
+                        flags=flags,
+                        silence_policy=silence_policy,
+                        digest_insights_config=digest_insights_config,
+                        behavior_metrics_config=behavior_metrics_config,
+                        commitment_chain_digest_config=commitment_chain_digest_config,
+                        uncertainty_queue_config=uncertainty_queue_config,
+                        trust_bootstrap_config=trust_bootstrap_config,
+                        regret_minimization_config=regret_minimization_config,
+                        include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
+                        include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
+                        include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
+                    )
             else:
                 logger.info(
                     "digest_tick_checked",
@@ -462,27 +500,42 @@ def run_digest_tick(
                 flags.ENABLE_WEEKLY_DIGEST, overrides.digest_enabled
             )
             if weekly_enabled:
-                _run_weekly_digest(
-                    now=now,
-                    config=weekly_config,
-                    weekly_accuracy_window_days=weekly_accuracy_report_config.window_days,
-                    weekly_calibration_window_days=weekly_calibration_report_config.window_days,
-                    weekly_calibration_top_n=weekly_calibration_report_config.top_n,
-                    weekly_calibration_min_corrections=weekly_calibration_report_config.min_corrections,
+                if not _is_primary_account(
                     account_email=account_email,
                     chat_id=chat_id,
-                    bot_token=bot_token,
-                    storage=storage,
-                    telegram_sender=telegram_sender,
-                    logger=logger,
-                    policy_inputs=policy_inputs,
-                    flags=flags,
-                    include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
-                    include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
-                    include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
-                    include_weekly_accuracy_report=flags.ENABLE_WEEKLY_ACCURACY_REPORT,
-                    include_weekly_calibration_report=flags.ENABLE_WEEKLY_CALIBRATION_REPORT,
-                )
+                    chat_groups=chat_groups,
+                ):
+                    logger.info(
+                        "digest_tick_checked",
+                        digest_type="weekly",
+                        decision="skipped",
+                        reason="dedup_chat_id_already_processed",
+                        account_email=account_email,
+                        chat_id=chat_id,
+                    )
+                else:
+                    _run_weekly_digest(
+                        now=now,
+                        config=weekly_config,
+                        weekly_accuracy_window_days=weekly_accuracy_report_config.window_days,
+                        weekly_calibration_window_days=weekly_calibration_report_config.window_days,
+                        weekly_calibration_top_n=weekly_calibration_report_config.top_n,
+                        weekly_calibration_min_corrections=weekly_calibration_report_config.min_corrections,
+                        account_email=account_email,
+                        account_emails=chat_groups[chat_id],
+                        chat_id=chat_id,
+                        bot_token=bot_token,
+                        storage=storage,
+                        telegram_sender=telegram_sender,
+                        logger=logger,
+                        policy_inputs=policy_inputs,
+                        flags=flags,
+                        include_anomalies=flags.ENABLE_ANOMALY_ALERTS,
+                        include_attention_economics=flags.ENABLE_ATTENTION_ECONOMICS,
+                        include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
+                        include_weekly_accuracy_report=flags.ENABLE_WEEKLY_ACCURACY_REPORT,
+                        include_weekly_calibration_report=flags.ENABLE_WEEKLY_CALIBRATION_REPORT,
+                    )
             else:
                 logger.info(
                     "digest_tick_checked",
@@ -508,6 +561,8 @@ def _run_daily_digest(
     now: datetime,
     config: DailyDigestConfig,
     account_email: str,
+    account_emails: Iterable[str],
+    chat_scope: str,
     chat_id: str,
     bot_token: str,
     storage: DigestStorage,
@@ -637,10 +692,11 @@ def _run_daily_digest(
         return
 
     if result.delivered:
-        storage.knowledge_db.set_last_digest_sent_at(
-            account_email=account_email,
-            sent_at=now,
-        )
+        for email in account_emails:
+            storage.knowledge_db.set_last_digest_sent_at(
+                account_email=email,
+                sent_at=now,
+            )
         logger.info(
             "digest_sent",
             digest_type="daily",
@@ -656,7 +712,8 @@ def _run_daily_digest(
                         entity_id=None,
                         email_id=0,
                         payload={
-                            "account_email": account_email,
+                            "account_emails": list(account_emails),
+                            "chat_scope": chat_scope,
                         },
                     )
                 )
@@ -686,6 +743,7 @@ def _run_weekly_digest(
     weekly_calibration_top_n: int,
     weekly_calibration_min_corrections: int,
     account_email: str,
+    account_emails: Iterable[str],
     chat_id: str,
     bot_token: str,
     storage: DigestStorage,
@@ -835,11 +893,12 @@ def _run_weekly_digest(
         return
 
     if result.delivered:
-        storage.knowledge_db.set_last_weekly_digest_state(
-            account_email=account_email,
-            week_key=week_key,
-            sent_at=now,
-        )
+        for email in account_emails:
+            storage.knowledge_db.set_last_weekly_digest_state(
+                account_email=email,
+                week_key=week_key,
+                sent_at=now,
+            )
         logger.info(
             "digest_sent",
             digest_type="weekly",
