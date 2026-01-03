@@ -11,6 +11,9 @@ class TrustBootstrapConfig:
     min_samples: int = 50
     max_allowed_surprise_rate: float = 0.30
     hide_action_templates_until_ready: bool = True
+    templates_window_days: int = 7
+    templates_min_corrections: int = 20
+    templates_max_surprise_rate: float = 0.15
 
 
 def load_trust_bootstrap_config(
@@ -26,6 +29,9 @@ def load_trust_bootstrap_config(
     min_samples = 50
     max_allowed_surprise_rate = 0.30
     hide_action_templates_until_ready = True
+    templates_window_days = 7
+    templates_min_corrections = 20
+    templates_max_surprise_rate = 0.15
 
     if section is not None:
         try:
@@ -50,12 +56,37 @@ def load_trust_bootstrap_config(
             )
         except ValueError:
             hide_action_templates_until_ready = True
+        try:
+            templates_window_days = max(
+                1, section.getint("templates_window_days", fallback=7)
+            )
+        except ValueError:
+            templates_window_days = 7
+        try:
+            templates_min_corrections = max(
+                1, section.getint("templates_min_corrections", fallback=20)
+            )
+        except ValueError:
+            templates_min_corrections = 20
+        try:
+            templates_max_surprise_rate = max(
+                0.0,
+                min(
+                    1.0,
+                    section.getfloat("templates_max_surprise_rate", fallback=0.15),
+                ),
+            )
+        except ValueError:
+            templates_max_surprise_rate = 0.15
 
     return TrustBootstrapConfig(
         learning_days=learning_days,
         min_samples=min_samples,
         max_allowed_surprise_rate=max_allowed_surprise_rate,
         hide_action_templates_until_ready=hide_action_templates_until_ready,
+        templates_window_days=templates_window_days,
+        templates_min_corrections=templates_min_corrections,
+        templates_max_surprise_rate=templates_max_surprise_rate,
     )
 
 
