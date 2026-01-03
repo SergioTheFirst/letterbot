@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import sqlite3
@@ -1144,38 +1143,112 @@ def _collect_fact_items(
     return items
 
 
-def _build_premium_clarity_facts(
+def _contains_numeric_fact(text: str) -> bool:
+    return bool(_SUMMARY_NUMBER_PATTERN.search(text or ""))
+
+
+def _strip_numeric_facts(text: str) -> str:
+    cleaned = _SUMMARY_NUMBER_PATTERN.sub(" ", text or "")
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _should_suppress_numeric_facts(
+    *,
+    extraction_failed: bool,
+    confidence_available: bool,
+    confidence_percent: int,
+    confidence_dots_threshold: int,
+) -> bool:
+    if extraction_failed:
+        return True
+    if not confidence_available:
+        return True
+    return confidence_percent < confidence_dots_threshold
+
+
+def _select_premium_clarity_fact_items(
     *,
     subject: str,
     body_text: str,
     attachments: list[dict[str, Any]],
-) -> str:
+    suppress_numeric_facts: bool,
+) -> list[_FactItem]:
+    if suppress_numeric_facts:
+        return []
     items = _collect_fact_items(
         subject=subject,
         body_text=body_text,
         attachments=attachments,
     )
     seen: set[tuple[str, str, str]] = set()
-    rendered: list[str] = []
+    selected: list[_FactItem] = []
     for item in items:
         key = (item.label, item.value, item.tag)
         if key in seen:
             continue
         seen.add(key)
-        rendered.append(
-            f"{item.label}: {item.value}{_render_fact_tag(item.tag)}"
-        )
-        if len(rendered) >= 2:
+        selected.append(item)
+        if len(selected) >= 2:
             break
+    return selected
+
+
+def _build_premium_clarity_facts(
+    *,
+    subject: str,
+    body_text: str,
+    attachments: list[dict[str, Any]],
+    suppress_numeric_facts: bool,
+) -> str:
+    selected = _select_premium_clarity_fact_items(
+        subject=subject,
+        body_text=body_text,
+        attachments=attachments,
+        suppress_numeric_facts=suppress_numeric_facts,
+    )
+    rendered = [
+        f"{item.label}: {item.value}{_render_fact_tag(item.tag)}"
+        for item in selected
+    ]
     return "; ".join(rendered)
+
+
+def _fact_type_label(label: str) -> str:
+    return {
+        "Сумма": "amount",
+        "Дата": "date",
+        "Номер": "doc_number",
+    }.get(label, "other")
+
+
+def _fact_source_tag(tag: str) -> str:
+    if tag == "тема":
+        return "subject"
+    if tag == "письмо":
+        return "body"
+    return "attachment"
+
+
+def _confidence_bucket(
+    *,
+    confidence_available: bool,
+    confidence_percent: int,
+) -> str:
+    if not confidence_available:
+        return "na"
+    if confidence_percent >= 75:
+        return "hi"
+    if confidence_percent >= 50:
+        return "med"
+    return "low"
+
+
 
 
 def _build_premium_clarity_attachments(
     attachments: list[dict[str, Any]],
     attachment_summaries: list[dict[str, Any]],
 ) -> list[str]:
-    if not attachments:
-        return []
     summary_by_name: dict[str, str] = {}
     for summary in attachment_summaries:
         filename = str(summary.get("filename") or "").strip()
@@ -1200,7 +1273,7 @@ def _build_premium_clarity_attachments(
             lines.append(f"• {filename}")
     remaining = len(attachments) - 3
     if remaining > 0:
-        lines.append(f"... ещё {remaining}")
+        lines.append(f"... и ещё {remaining}")
     return lines
 
 
@@ -1391,9 +1464,15 @@ def _build_premium_clarity_text(
     else:
         sender_display = from_email or from_name or "неизвестно"
     safe_sender = _escape_dynamic(strip_disallowed_emojis(sender_display))
+    subject_has_numbers = _contains_numeric_fact(subject or "")
     safe_subject = _escape_dynamic(strip_disallowed_emojis(subject or "(без темы)"))
+    if subject_has_numbers:
+        safe_subject = f"{safe_subject} (тема)"
     action_text = _resolve_action_line(action_line)
     action_text = strip_disallowed_emojis(action_text)
+    action_text = _strip_numeric_facts(action_text)
+    if not action_text:
+        action_text = "Действий не требуется"
     safe_action = _escape_dynamic(action_text)
 
     raw_summary = (body_summary or "").strip()
@@ -1402,11 +1481,22 @@ def _build_premium_clarity_text(
         subject=subject or "",
         body_text=body_text or "",
     )
-    if not _is_meaningful_summary(raw_summary) or not summary_numbers_ok:
-        essence = subject or "(без темы)"
-        essence = _escape_dynamic(strip_disallowed_emojis(essence))
+    suppress_numeric_facts = _should_suppress_numeric_facts(
+        extraction_failed=extraction_failed,
+        confidence_available=confidence_available,
+        confidence_percent=confidence_percent,
+        confidence_dots_threshold=confidence_dots_threshold,
+    )
+    summary_has_numbers = _contains_numeric_fact(raw_summary)
+    if suppress_numeric_facts:
+        essence = "Письмо"
+    elif _is_meaningful_summary(raw_summary) and summary_numbers_ok and not summary_has_numbers:
+        essence = raw_summary
+    elif subject and not subject_has_numbers:
+        essence = subject
     else:
-        essence = _escape_dynamic(strip_disallowed_emojis(raw_summary))
+        essence = "Письмо"
+    essence = _escape_dynamic(strip_disallowed_emojis(essence))
 
     lines = [
         f"{priority} {essence}",
@@ -1418,6 +1508,7 @@ def _build_premium_clarity_text(
         subject=subject or "",
         body_text=body_text or "",
         attachments=attachments,
+        suppress_numeric_facts=suppress_numeric_facts,
     )
     primary_fact_line = ""
     if facts_line:
@@ -1430,11 +1521,13 @@ def _build_premium_clarity_text(
         attachment_summaries,
     )
     action_prefix = _pick_action_emoji(action_text)
-    action_line_text = safe_action if safe_action else "Действий не требуется"
-    action_line_rendered = f"{action_prefix} {action_line_text}"
+    action_line_rendered = f"{action_prefix} {safe_action}"
 
     optional_lines: list[str] = []
-    if raw_summary and not summary_numbers_ok:
+    manual_check_needed = suppress_numeric_facts or (
+        raw_summary and (not summary_numbers_ok or summary_has_numbers)
+    )
+    if manual_check_needed:
         optional_lines.append("Проверьте вручную")
     why_reasons: list[str] = []
     if extraction_failed:
@@ -3865,9 +3958,30 @@ def process_message(
     )
     low_confidence = confidence_percent <= 40
     extraction_failed = render_result.extracted_text_len <= 0 and len(attachments) > 0
+    suppress_numeric_facts = _should_suppress_numeric_facts(
+        extraction_failed=extraction_failed,
+        confidence_available=confidence_score is not None,
+        confidence_percent=confidence_percent,
+        confidence_dots_threshold=premium_clarity_config.confidence_dots_threshold,
+    )
+    shown_fact_items: list[_FactItem] = []
+    if render_result.premium_clarity_enabled:
+        shown_fact_items = _select_premium_clarity_fact_items(
+            subject=subject or "",
+            body_text=body_text or "",
+            attachments=attachments or [],
+            suppress_numeric_facts=suppress_numeric_facts,
+        )
+    shown_fact_types: list[str] = []
+    fact_sources: list[str] = []
+    for item in shown_fact_items:
+        fact_type = _fact_type_label(item.label)
+        if fact_type not in shown_fact_types:
+            shown_fact_types.append(fact_type)
+        source = _fact_source_tag(item.tag)
+        if source not in fact_sources:
+            fact_sources.append(source)
     if high_impact or low_confidence or extraction_failed:
-        rendered_text = render_result.payload.html_text or ""
-        fingerprint_hash = hashlib.sha256(rendered_text.encode("utf-8")).hexdigest()
         _emit_contract_event(
             EventType.TG_RENDER_RECORDED,
             ts_utc=received_at.timestamp(),
@@ -3875,16 +3989,14 @@ def process_message(
             entity_id=contract_event_entity_id,
             email_id=message_id,
             payload={
-                "render_version": (
-                    "premium_clarity_v1"
-                    if render_result.premium_clarity_enabled
-                    else "legacy"
+                "shown_fact_types": shown_fact_types,
+                "fact_sources": fact_sources,
+                "extraction_failed": extraction_failed,
+                "confidence_bucket": _confidence_bucket(
+                    confidence_available=confidence_score is not None,
+                    confidence_percent=confidence_percent,
                 ),
-                "line_count": len(rendered_text.splitlines()),
-                "has_spoiler": "<tg-spoiler>" in rendered_text,
-                "confidence_percent": confidence_percent,
-                "attachment_count": len(attachments),
-                "fingerprint_hash": fingerprint_hash,
+                "attachments_count": len(attachments),
             },
         )
     relationship_health_delta: float | None = None

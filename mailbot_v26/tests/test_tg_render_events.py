@@ -78,5 +78,14 @@ def test_delivery_policy_event_payload_and_render_record(monkeypatch) -> None:
         event for event in collector.events if event.event_type == EventType.TG_RENDER_RECORDED
     )
     render_payload = render_event.payload
-    assert "fingerprint_hash" in render_payload
-    assert "line_count" in render_payload
+    assert set(render_payload.keys()) == {
+        "shown_fact_types",
+        "fact_sources",
+        "extraction_failed",
+        "confidence_bucket",
+        "attachments_count",
+    }
+    assert render_payload["confidence_bucket"] in {"hi", "med", "low", "na"}
+    assert isinstance(render_payload["attachments_count"], int)
+    assert render_payload["shown_fact_types"] == []
+    assert render_payload["fact_sources"] == []
