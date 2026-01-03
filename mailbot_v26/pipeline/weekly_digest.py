@@ -58,6 +58,7 @@ _WEEKDAY_ALIASES = {
     "sunday": 6,
     "воскресенье": 6,
 }
+_BAR_CHART = "\N{BAR CHART}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,6 +284,7 @@ def _collect_weekly_data(
     include_quality_metrics: bool = False,
     include_notification_sla: bool = False,
     include_weekly_accuracy_report: bool = False,
+    weekly_accuracy_window_days: int = 7,
     event_emitter: EventEmitter | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
     now: datetime | None = None,
@@ -352,8 +354,9 @@ def _collect_weekly_data(
         try:
             weekly_accuracy_report = analytics.weekly_accuracy_report(
                 account_email=account_email,
-                days=7,
+                days=weekly_accuracy_window_days,
             )
+            weekly_accuracy_report["window_days"] = weekly_accuracy_window_days
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("weekly_accuracy_report_failed", error=str(exc))
 
@@ -428,13 +431,14 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         if corrections > 0:
             emails = int(report.get("emails_received") or 0)
             surprises = int(report.get("surprises") or 0)
+            window_days = int(report.get("window_days") or 7)
             accuracy_pct = report.get("accuracy_pct")
             if accuracy_pct is None:
                 surprise_rate = report.get("surprise_rate")
                 if surprise_rate is not None:
                     accuracy_pct = round((1 - float(surprise_rate)) * 100)
             accuracy_pct = int(accuracy_pct or 0)
-            lines.append("<b>Отчёт точности (7 дней)</b>")
+            lines.append(f"{_BAR_CHART} <b>Отчёт точности ({window_days} дней)</b>")
             lines.append(f"• Писем обработано: {emails}")
             lines.append(f"• Коррекции приоритета: {corrections}")
             lines.append(f"• Сюрпризы: {surprises} (точность: {accuracy_pct}%)")
@@ -475,6 +479,7 @@ def maybe_send_weekly_digest(
     include_quality_metrics: bool = False,
     include_notification_sla: bool = False,
     include_weekly_accuracy_report: bool = False,
+    weekly_accuracy_window_days: int = 7,
 ) -> None:
     current_time = now or datetime.now(timezone.utc)
     config = _load_weekly_digest_config()
@@ -532,6 +537,7 @@ def maybe_send_weekly_digest(
         include_quality_metrics=include_quality_metrics,
         include_notification_sla=include_notification_sla,
         include_weekly_accuracy_report=include_weekly_accuracy_report,
+        weekly_accuracy_window_days=weekly_accuracy_window_days,
         event_emitter=event_emitter,
         contract_event_emitter=contract_event_emitter,
         now=current_time,

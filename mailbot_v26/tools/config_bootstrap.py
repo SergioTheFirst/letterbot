@@ -70,6 +70,9 @@ weekday = mon
 hour = 9
 minute = 0
 
+[weekly_accuracy_report]
+window_days = 7
+
 [digest_insights]
 window_days = 7
 max_items = 3

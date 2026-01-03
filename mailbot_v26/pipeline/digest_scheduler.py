@@ -64,6 +64,11 @@ class WeeklyDigestConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class WeeklyAccuracyReportConfig:
+    window_days: int
+
+
+@dataclass(frozen=True, slots=True)
 class DigestInsightsConfig:
     window_days: int
     max_items: int
@@ -117,6 +122,24 @@ def _load_weekly_digest_config() -> WeeklyDigestConfig:
         except ValueError:
             minute = 0
     return WeeklyDigestConfig(weekday=weekday, hour=hour, minute=minute)
+
+
+def _load_weekly_accuracy_report_config() -> WeeklyAccuracyReportConfig:
+    window_days = 7
+    parser = configparser.ConfigParser()
+    if _CONFIG_PATH.exists():
+        parser.read(_CONFIG_PATH, encoding="utf-8")
+    section = (
+        parser["weekly_accuracy_report"]
+        if "weekly_accuracy_report" in parser
+        else None
+    )
+    if section is not None:
+        try:
+            window_days = max(1, section.getint("window_days", fallback=7))
+        except ValueError:
+            window_days = 7
+    return WeeklyAccuracyReportConfig(window_days=window_days)
 
 
 def _load_digest_insights_config() -> DigestInsightsConfig:
@@ -302,6 +325,7 @@ def run_digest_tick(
         overrides = RuntimeOverrideStore(storage.knowledge_db.path).get_overrides()
         daily_config = _load_daily_digest_config()
         weekly_config = _load_weekly_digest_config()
+        weekly_accuracy_report_config = _load_weekly_accuracy_report_config()
         digest_insights_config = _load_digest_insights_config()
         behavior_metrics_config = _load_behavior_metrics_digest_config()
         trust_bootstrap_config = _load_trust_bootstrap_config()
@@ -369,6 +393,7 @@ def run_digest_tick(
                 _run_weekly_digest(
                     now=now,
                     config=weekly_config,
+                    weekly_accuracy_window_days=weekly_accuracy_report_config.window_days,
                     account_email=account_email,
                     chat_id=chat_id,
                     bot_token=bot_token,
@@ -571,6 +596,7 @@ def _run_weekly_digest(
     *,
     now: datetime,
     config: WeeklyDigestConfig,
+    weekly_accuracy_window_days: int,
     account_email: str,
     chat_id: str,
     bot_token: str,
@@ -649,6 +675,7 @@ def _run_weekly_digest(
         include_attention_economics=include_attention_economics,
         include_quality_metrics=include_quality_metrics,
         include_weekly_accuracy_report=include_weekly_accuracy_report,
+        weekly_accuracy_window_days=weekly_accuracy_window_days,
         event_emitter=storage.event_emitter,
         contract_event_emitter=storage.contract_event_emitter,
         now=now,
