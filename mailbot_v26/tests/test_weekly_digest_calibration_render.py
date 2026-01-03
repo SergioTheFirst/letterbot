@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mailbot_v26.pipeline import weekly_digest
+from mailbot_v26.storage.analytics import WeeklyAccuracyProgress
 
 
 def _base_weekly_kwargs() -> dict[str, object]:
@@ -18,6 +19,8 @@ def _base_weekly_kwargs() -> dict[str, object]:
         notification_sla=None,
         previous_week_sla=None,
         weekly_accuracy_report=None,
+        weekly_calibration_report=None,
+        weekly_accuracy_progress=None,
     )
 
 
@@ -41,6 +44,14 @@ def test_weekly_calibration_report_block_renders_when_enabled() -> None:
                     {"label": "entity-b", "count": 2},
                 ],
             },
+            "weekly_accuracy_progress": WeeklyAccuracyProgress(
+                current_surprise_rate_pp=10,
+                prev_surprise_rate_pp=20,
+                delta_pp=10,
+                current_decisions=30,
+                prev_decisions=30,
+                current_corrections=5,
+            ),
         }
     )
     text = weekly_digest._build_weekly_digest_text(data)
@@ -50,3 +61,23 @@ def test_weekly_calibration_report_block_renders_when_enabled() -> None:
     assert "• Где чаще всего случалось:" in text
     assert "  - entity-a — 3" in text
     assert "  - entity-b — 2" in text
+    assert "Рост точности: +10 п.п. (сюрпризы 20% → 10%), коррекции: 5 за период" in text
+
+
+def test_weekly_calibration_report_progress_hidden_without_data() -> None:
+    data = weekly_digest.WeeklyDigestData(
+        **{
+            **_base_weekly_kwargs(),
+            "weekly_calibration_report": {
+                "window_days": 7,
+                "corrections": 12,
+                "surprises": 6,
+                "accuracy_pct": 50,
+                "top": [],
+            },
+            "weekly_accuracy_progress": None,
+        }
+    )
+    text = weekly_digest._build_weekly_digest_text(data)
+    assert "Рост точности:" not in text
+    assert "Падение точности:" not in text

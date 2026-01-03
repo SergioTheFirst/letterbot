@@ -126,3 +126,76 @@ def test_weekly_surprise_breakdown_counts_accuracy_and_top(tmp_path) -> None:
         {"label": "entity-b", "count": 2},
         {"label": "контакт", "count": 1},
     ]
+
+
+def test_weekly_accuracy_progress_compares_windows(tmp_path) -> None:
+    db_path = tmp_path / "calibration.sqlite"
+    KnowledgeDB(db_path)
+    emitter = ContractEventEmitter(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    now = datetime(2025, 1, 15, tzinfo=timezone.utc)
+    now_ts = now.timestamp()
+    window_days = 7
+
+    prev_base = now_ts - (10 * 86400)
+    for offset in range(30):
+        _emit_event(
+            emitter,
+            event_type=EventType.DELIVERY_POLICY_APPLIED,
+            ts_utc=prev_base + offset,
+            account_email="acc@example.com",
+            entity_id=None,
+            payload={"mode": "IMMEDIATE"},
+        )
+    for offset in range(6):
+        _emit_event(
+            emitter,
+            event_type=EventType.SURPRISE_DETECTED,
+            ts_utc=prev_base + 100 + offset,
+            account_email="acc@example.com",
+            entity_id=None,
+            payload={},
+        )
+
+    current_base = now_ts - (3 * 86400)
+    for offset in range(30):
+        _emit_event(
+            emitter,
+            event_type=EventType.DELIVERY_POLICY_APPLIED,
+            ts_utc=current_base + offset,
+            account_email="acc@example.com",
+            entity_id=None,
+            payload={"mode": "IMMEDIATE"},
+        )
+    for offset in range(3):
+        _emit_event(
+            emitter,
+            event_type=EventType.SURPRISE_DETECTED,
+            ts_utc=current_base + 200 + offset,
+            account_email="acc@example.com",
+            entity_id=None,
+            payload={},
+        )
+    for offset in range(5):
+        _emit_event(
+            emitter,
+            event_type=EventType.PRIORITY_CORRECTION_RECORDED,
+            ts_utc=current_base + 400 + offset,
+            account_email="acc@example.com",
+            entity_id=None,
+            payload={"old_priority": "low", "new_priority": "high"},
+        )
+
+    progress = analytics.weekly_accuracy_progress(
+        account_email="acc@example.com",
+        now_ts=now_ts,
+        window_days=window_days,
+    )
+
+    assert progress is not None
+    assert progress.current_surprise_rate_pp == 10
+    assert progress.prev_surprise_rate_pp == 20
+    assert progress.delta_pp == 10
+    assert progress.current_decisions == 30
+    assert progress.prev_decisions == 30
+    assert progress.current_corrections == 5

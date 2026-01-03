@@ -111,3 +111,4 @@ Working set (files / tables / tests):
 2026-01-07: scoped learning events (delivery_policy_applied/priority_correction/surprise) with chat_scope+account_emails for multi-account single user.
 2026-01-07: scoped learning events (delivery_policy_applied/priority_correction/surprise) with optional chat_scope+account_emails when chat_id is configured.
 2026-01-07: scoped learning events (delivery_policy_applied/priority_correction/surprise) with optional chat_scope+account_emails for single-user multi-account.
+2026-01-08: weekly digest calibration now includes gated “рост точности” (events-only surprise-rate delta vs previous window).
