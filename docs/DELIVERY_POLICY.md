@@ -34,3 +34,8 @@
 - low_signal
 - default_batch
 - defer_to_morning
+
+## Telegram UX (per-email)
+- Одно письмо → одно Telegram сообщение.
+- Progressive disclosure только через spoiler внутри того же сообщения (без кнопок).
+- Эмодзи ограничены закрытым списком (🔴 🟡 🔵 ⚡ 💬 ⏸️ 📎).

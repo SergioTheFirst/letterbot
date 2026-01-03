@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -70,6 +71,7 @@ from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.observability import get_logger
 from mailbot_v26.telegram_utils import escape_tg_html
+from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.observability.metrics import (
@@ -108,6 +110,12 @@ from .stage_llm import run_llm_stage
 from .stage_telegram import enqueue_tg, send_preview_to_telegram, send_system_notice
 from .telegram_payload import TelegramPayload
 from . import tg_renderer
+from .tg_renderer import (
+    _escape_dynamic,
+    _is_binary_leak,
+    _normalize_attachment_text,
+    _truncate_attachment_text,
+)
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.context_layer import ContextStore
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
@@ -611,6 +619,7 @@ class RenderResult:
     attachment_summary: str
     extracted_text_len: int
     body_summary: str
+    premium_clarity_enabled: bool
 
 
 class TelegramRenderMode(Enum):
@@ -922,11 +931,50 @@ def _sanitize_preview_line(text: str) -> str:
     return " ".join(cleaned.split())
 
 
+def _render_sources(
+    *,
+    subject: str,
+    body_text: str,
+    attachments: list[dict[str, Any]],
+) -> list[str]:
+    sources: list[str] = []
+    if subject:
+        sources.append("subject")
+    if body_text:
+        sources.append("body")
+    if attachments:
+        sources.append("attachment_filename")
+    if any(_attachment_text_length(attachment) > 0 for attachment in attachments):
+        sources.append("attachment_text")
+    return sources
+
+
+def _deadline_within_days(
+    commitments: list[Commitment],
+    *,
+    received_at: datetime,
+    days: int,
+) -> bool:
+    if days <= 0:
+        return False
+    for commitment in commitments:
+        if not commitment.deadline_iso:
+            continue
+        try:
+            deadline_date = datetime.fromisoformat(commitment.deadline_iso).date()
+        except ValueError:
+            continue
+        delta_days = (deadline_date - received_at.date()).days
+        if 0 <= delta_days <= days:
+            return True
+    return False
+
+
 _TELEGRAM_BODY_LIMIT = 800
 _MIN_TELEGRAM_LEN = 40
 _MIN_SUMMARY_WORDS = 2
 _MIN_SUMMARY_CHARS = 12
-_ALLOWED_TG_TAGS = {"<b>", "</b>", "<i>", "</i>"}
+_ALLOWED_TG_TAGS = {"<b>", "</b>", "<i>", "</i>", "<tg-spoiler>", "</tg-spoiler>"}
 _SUMMARY_PLACEHOLDER_PATTERNS = (
     "проверить письмо",
     "проверь письмо",
@@ -1000,6 +1048,177 @@ def _build_no_llm_summary(
     commitments_present: bool,
 ) -> str:
     return ""
+
+
+def _build_premium_clarity_facts(
+    *,
+    body_summary: str,
+) -> str:
+    summary_text = (body_summary or "").strip()
+    if _is_meaningful_summary(summary_text):
+        return strip_disallowed_emojis(summary_text)
+    return ""
+
+
+def _build_premium_clarity_attachments(
+    attachments: list[dict[str, Any]],
+) -> list[str]:
+    if not attachments:
+        return []
+    lines = [f"📎 Вложения ({len(attachments)}):"]
+    for attachment in attachments[:3]:
+        filename = _escape_dynamic(
+            strip_disallowed_emojis(attachment.get("filename") or "вложение")
+        )
+        extracted_text = _normalize_attachment_text(attachment.get("text"))
+        if extracted_text and not _is_binary_leak(extracted_text):
+            extracted_text = _truncate_attachment_text(extracted_text)
+        else:
+            extracted_text = ""
+        if extracted_text:
+            safe_text = _escape_dynamic(strip_disallowed_emojis(extracted_text))
+            lines.append(f"• {filename} — {safe_text}")
+        else:
+            lines.append(f"• {filename} — не извлечено")
+    remaining = len(attachments) - 3
+    if remaining > 0:
+        lines.append(f"... ещё {remaining}")
+    return lines
+
+
+def _build_premium_clarity_spoiler(
+    lines: list[str],
+) -> str:
+    if not lines:
+        return ""
+    sanitized = []
+    for line in lines:
+        cleaned = (line or "").strip()
+        if cleaned:
+            sanitized.append(_escape_dynamic(strip_disallowed_emojis(cleaned)))
+    if not sanitized:
+        return ""
+    limited = sanitized[:6]
+    return "\n".join(["<tg-spoiler>", "Подробнее:", *limited, "</tg-spoiler>"])
+
+
+def _pick_action_emoji(action_text: str) -> str:
+    if _is_urgent_action(action_text):
+        return "⚡"
+    if not action_text:
+        return "⚡"
+    lowered_action = action_text.lower()
+    if any(token in lowered_action for token in ("ответ", "напис", "сообщ", "reply")):
+        return "💬"
+    if any(token in lowered_action for token in ("позже", "отлож", "pause")):
+        return "⏸️"
+    return "⚡"
+
+
+def _is_urgent_action(action_text: str) -> bool:
+    lowered_action = (action_text or "").lower()
+    if not lowered_action:
+        return False
+    urgency_tokens = (
+        "срочно",
+        "немед",
+        "как можно скорее",
+        "сегодня",
+        "оплат",
+        "счет",
+        "invoice",
+        "до конца дня",
+    )
+    return any(token in lowered_action for token in urgency_tokens)
+
+
+def _build_premium_clarity_text(
+    *,
+    priority: str,
+    from_email: str,
+    from_name: str | None,
+    subject: str,
+    action_line: str,
+    body_summary: str,
+    attachments: list[dict[str, Any]],
+    insights: list[Insight],
+    insight_digest: InsightDigest | None,
+    commitments: list[Commitment],
+    attachments_count: int,
+    extracted_text_len: int,
+    confidence_percent: int,
+    extraction_failed: bool,
+) -> str:
+    priority = strip_disallowed_emojis(priority or "")
+    if priority not in {"🔴", "🟡", "🔵"}:
+        priority = "🔵"
+    if from_name and from_email:
+        sender_display = f"{from_name} <{from_email}>"
+    else:
+        sender_display = from_email or from_name or "неизвестно"
+    safe_sender = _escape_dynamic(strip_disallowed_emojis(sender_display))
+    safe_subject = _escape_dynamic(strip_disallowed_emojis(subject or "(без темы)"))
+    action_text = _resolve_action_line(action_line)
+    action_text = strip_disallowed_emojis(action_text)
+    safe_action = _escape_dynamic(action_text)
+
+    essence = (body_summary or "").strip()
+    if not _is_meaningful_summary(essence):
+        essence = subject or "(без темы)"
+        essence = _escape_dynamic(strip_disallowed_emojis(essence))
+    else:
+        essence = _escape_dynamic(strip_disallowed_emojis(essence))
+
+    lines = [
+        f"{priority} {essence}",
+        f"От: {safe_sender}",
+        f"Тема: {safe_subject}",
+    ]
+
+    facts_line = _build_premium_clarity_facts(
+        body_summary=body_summary,
+    )
+    if facts_line:
+        lines.append(_escape_dynamic(facts_line))
+
+    if not facts_line and extracted_text_len <= 0 and attachments_count > 0:
+        lines.append("не извлечено")
+
+    lines.extend(_build_premium_clarity_attachments(attachments))
+    action_prefix = _pick_action_emoji(action_text)
+    action_line_text = safe_action if safe_action else "Действий не требуется"
+    lines.append(f"{action_prefix} {action_line_text}")
+
+    if priority == "🔴":
+        reason_line = ""
+        if extraction_failed:
+            reason_line = "извлечение не выполнено"
+        elif confidence_percent <= 40:
+            reason_line = "низкая уверенность"
+        else:
+            reason_line = "критический приоритет"
+        if reason_line:
+            safe_reason = _escape_dynamic(strip_disallowed_emojis(reason_line))
+            lines.append(f"Причина: {safe_reason}")
+
+    spoiler_lines: list[str] = []
+    if insight_digest:
+        if insight_digest.status_label:
+            spoiler_lines.append(insight_digest.status_label)
+        if insight_digest.headline:
+            spoiler_lines.append(insight_digest.headline)
+        for detail in (insight_digest.short_explanation or "").split("\n"):
+            if detail.strip():
+                spoiler_lines.append(detail.strip())
+    if commitments:
+        spoiler_lines.append("Есть обязательства по письму")
+
+    spoiler = _build_premium_clarity_spoiler(spoiler_lines)
+    if spoiler:
+        lines.append(spoiler)
+
+    limited_lines = lines[:18]
+    return "\n".join(limited_lines)
 
 
 def _trim_telegram_body(text: str) -> str:
@@ -2601,6 +2820,7 @@ def _render_notification(
     received_at: datetime,
     priority: str,
     from_email: str,
+    from_name: str | None,
     subject: str,
     action_line: str,
     body_summary: str,
@@ -2614,6 +2834,7 @@ def _render_notification(
     account_email: str,
     attachment_summaries: list[dict[str, Any]],
     commitments: list[Commitment],
+    enable_premium_clarity: bool,
 ) -> RenderResult:
     attachment_details = _build_attachment_details(attachments)
     attachment_summary = _build_attachment_summary(attachment_details)
@@ -2673,6 +2894,7 @@ def _render_notification(
         attachment_summary=attachment_summary,
         extracted_text_len=extracted_text_len,
         body_summary=body_summary,
+        premium_clarity_enabled=enable_premium_clarity,
     )
 
 
@@ -3256,11 +3478,15 @@ def process_message(
             )
             anomalies = []
 
+    enable_premium_clarity = bool(
+        getattr(feature_flags, "ENABLE_PREMIUM_CLARITY_V1", False)
+    )
     render_result = _render_notification(
         message_id=message_id,
         received_at=received_at,
         priority=priority,
         from_email=from_email,
+        from_name=from_name,
         subject=subject,
         action_line=action_line,
         body_summary=body_summary,
@@ -3274,6 +3500,7 @@ def process_message(
         account_email=account_email,
         attachment_summaries=attachment_summaries,
         commitments=commitments,
+        enable_premium_clarity=enable_premium_clarity,
     )
     payload = render_result.payload
     render_mode = render_result.render_mode
@@ -3297,6 +3524,46 @@ def process_message(
         extracted_text_len=render_result.extracted_text_len,
         priority=priority,
     )
+    if render_result.premium_clarity_enabled:
+        extraction_failed = render_result.extracted_text_len <= 0 and len(attachments) > 0
+        premium_payload = TelegramPayload(
+            html_text=_build_premium_clarity_text(
+                priority=priority,
+                from_email=from_email,
+                from_name=from_name,
+                subject=subject,
+                action_line=action_line,
+                body_summary=body_summary,
+                attachments=attachments,
+                insights=analytics_result.aggregated_insights,
+                insight_digest=analytics_result.insight_digest,
+                commitments=commitments,
+                attachments_count=len(attachments),
+                extracted_text_len=render_result.extracted_text_len,
+                confidence_percent=confidence_percent,
+                extraction_failed=extraction_failed,
+            ),
+            priority=priority,
+            metadata=render_result.payload.metadata,
+        )
+        if len(premium_payload.html_text.splitlines()) > 18:
+            premium_lines = premium_payload.html_text.splitlines()[:18]
+            premium_payload = TelegramPayload(
+                html_text="\n".join(premium_lines),
+                priority=premium_payload.priority,
+                metadata=premium_payload.metadata,
+            )
+        render_result = RenderResult(
+            payload=premium_payload,
+            render_mode=render_result.render_mode,
+            payload_invalid=render_result.payload_invalid,
+            attachment_details=render_result.attachment_details,
+            attachment_summary=render_result.attachment_summary,
+            extracted_text_len=render_result.extracted_text_len,
+            body_summary=render_result.body_summary,
+            premium_clarity_enabled=render_result.premium_clarity_enabled,
+        )
+        payload = render_result.payload
     priority_engine_for_event = "shadow"
     if auto_priority_outcome.applied:
         priority_engine_for_event = "rules"
@@ -3316,6 +3583,36 @@ def process_message(
             "engine": priority_engine_for_event,
         },
     )
+    action_text = strip_disallowed_emojis(_resolve_action_line(action_line))
+    high_impact = (
+        priority == "🔴"
+        or _deadline_within_days(commitments, received_at=received_at, days=3)
+        or _is_urgent_action(action_text)
+    )
+    low_confidence = confidence_percent <= 40
+    extraction_failed = render_result.extracted_text_len <= 0 and len(attachments) > 0
+    if high_impact or low_confidence or extraction_failed:
+        rendered_text = render_result.payload.html_text or ""
+        fingerprint_hash = hashlib.sha256(rendered_text.encode("utf-8")).hexdigest()
+        _emit_contract_event(
+            EventType.TG_RENDER_RECORDED,
+            ts_utc=received_at.timestamp(),
+            account_id=account_email,
+            entity_id=contract_event_entity_id,
+            email_id=message_id,
+            payload={
+                "render_version": (
+                    "premium_clarity_v1"
+                    if render_result.premium_clarity_enabled
+                    else "legacy"
+                ),
+                "line_count": len(rendered_text.splitlines()),
+                "has_spoiler": "<tg-spoiler>" in rendered_text,
+                "confidence_percent": confidence_percent,
+                "attachment_count": len(attachments),
+                "fingerprint_hash": fingerprint_hash,
+            },
+        )
     relationship_health_delta: float | None = None
     if analytics_result.health_snapshot is not None:
         value = analytics_result.health_snapshot.components_breakdown.get("trend_delta")
@@ -3362,6 +3659,7 @@ def process_message(
     )
     behavior_enabled = enable_circadian or enable_attention_debt or enable_flow_protection
     delivery_decision: DeliveryDecision | None = None
+    delivery_context: DeliveryContext | None = None
 
     if behavior_enabled:
         try:
@@ -3392,6 +3690,7 @@ def process_message(
                 enable_flow_protection=enable_flow_protection,
                 immediate_sent_last_hour=immediate_sent_last_hour,
             )
+            delivery_context = context
             delivery_decision = decide_delivery(
                 scores=scores,
                 context=context,
@@ -3420,21 +3719,6 @@ def process_message(
                     },
                 )
 
-            _emit_contract_event(
-                EventType.DELIVERY_POLICY_APPLIED,
-                ts_utc=received_at.timestamp(),
-                account_id=account_email,
-                entity_id=entity_resolution.entity_id if entity_resolution else None,
-                email_id=message_id,
-                payload={
-                    "mode": delivery_decision.mode.value,
-                    "reason_codes": delivery_decision.reason_codes,
-                    "thresholds_used": delivery_decision.thresholds_used,
-                    "attention_debt": delivery_decision.attention_debt,
-                    "quiet_hours": context.is_quiet_hours,
-                    "weekend": context.is_weekend,
-                },
-            )
         except Exception as exc:  # pragma: no cover - defensive fallback
             logger.error(
                 "[BEHAVIOR-ENGINE] failed",
@@ -3444,6 +3728,36 @@ def process_message(
             behavior_enabled = False
             delivery_decision = None
             attention_reason = "behavior_failed"
+
+    sources = _render_sources(
+        subject=subject or "",
+        body_text=body_text or "",
+        attachments=attachments,
+    )
+    extraction_success = not (
+        render_result.extracted_text_len <= 0 and len(attachments) > 0
+    )
+    if behavior_enabled and delivery_decision and delivery_context:
+        _emit_contract_event(
+            EventType.DELIVERY_POLICY_APPLIED,
+            ts_utc=received_at.timestamp(),
+            account_id=account_email,
+            entity_id=entity_resolution.entity_id if entity_resolution else None,
+            email_id=message_id,
+            payload={
+                "mode": delivery_decision.mode.value,
+                "reason_codes": delivery_decision.reason_codes,
+                "thresholds_used": delivery_decision.thresholds_used,
+                "attention_debt": delivery_decision.attention_debt,
+                "quiet_hours": delivery_context.is_quiet_hours,
+                "weekend": delivery_context.is_weekend,
+                "priority": priority,
+                "confidence_percent": confidence_percent,
+                "extraction_success": extraction_success,
+                "attachment_count": len(attachments),
+                "sources": sources,
+            },
+        )
 
     if not behavior_enabled and attention_gate_deferred:
         if analytics_result.email_row_id is None:
@@ -3698,7 +4012,7 @@ def process_message(
             telegram_delivered=telegram_delivered,
         )
 
-    if feature_flags.ENABLE_PREVIEW_ACTIONS:
+    if feature_flags.ENABLE_PREVIEW_ACTIONS and not enable_premium_clarity:
         if not policy_decision.allow_preview:
             preview_skip_reason = (
                 "system_degraded_no_llm"

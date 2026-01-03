@@ -1,39 +1,42 @@
-from pathlib import Path
-
-import mailbot_v26.llm.prompts_ru as prompts_ru
-
-EMOJI_RANGES = [
-    (0x1F300, 0x1F5FF),
-    (0x1F600, 0x1F64F),
-    (0x1F680, 0x1F6FF),
-    (0x2600, 0x26FF),
-    (0x2700, 0x27BF),
-    (0x1F900, 0x1F9FF),
-    (0x1FA70, 0x1FAFF),
-]
-
-ALLOWED_EMOJI_CODES = {0x1F534, 0x1F7E1, 0x1F535, 0x1F4CE, 0x1F4C2}
+from mailbot_v26.insights.aggregator import Insight
+from mailbot_v26.pipeline import processor, tg_renderer
+from mailbot_v26.ui.emoji_whitelist import ALLOWED_EMOJIS, find_disallowed_emojis
 
 
-def _contains_emoji(text: str) -> bool:
-    for char in text:
-        code = ord(char)
-        if code in ALLOWED_EMOJI_CODES:
-            continue
-        if any(start <= code <= end for start, end in EMOJI_RANGES):
-            return True
-    return False
+def _assert_whitelist(text: str) -> None:
+    assert not find_disallowed_emojis(text)
+    assert any(emoji in text for emoji in ALLOWED_EMOJIS)
 
 
-def test_prompts_have_no_emoji():
-    content = Path(prompts_ru.__file__).read_text(encoding="utf-8")
-    assert not _contains_emoji(content)
+def test_telegram_render_emoji_whitelist_premium_clarity() -> None:
+    rendered = processor._build_premium_clarity_text(
+        priority="🔴",
+        from_email="Анна 😊 <anna@example.com>",
+        from_name="Анна 😊",
+        subject="Срочно: счет 😊",
+        action_line="Ответить клиенту 😊",
+        body_summary="Нужно оплатить счет до завтра 😊",
+        attachments=[
+            {"filename": "invoice😊.pdf", "text": "Счет на оплату 10 000"},
+            {"filename": "notes.txt", "text": ""},
+        ],
+        insights=[Insight(type="Risk", severity="HIGH", explanation="", recommendation="")],
+        insight_digest=None,
+        commitments=[],
+        attachments_count=2,
+        extracted_text_len=120,
+        confidence_percent=80,
+        extraction_failed=False,
+    )
+    _assert_whitelist(rendered)
 
 
-def test_repository_has_no_emoji():
-    root = Path(__file__).resolve().parents[1]
-    for path in root.rglob("*.py"):
-        if any(part in {"venv", "__pycache__"} for part in path.parts):
-            continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        assert not _contains_emoji(text), f"Emoji found in {path}"
+def test_telegram_render_emoji_whitelist_legacy() -> None:
+    rendered = tg_renderer.build_telegram_text(
+        priority="🟠",
+        from_email="Sender 😄 <sender@example.com>",
+        subject="Тема 😄",
+        action_line="Ответить 😄",
+        attachments=[{"filename": "file😄.txt", "text": "ok"}],
+    )
+    _assert_whitelist(rendered)

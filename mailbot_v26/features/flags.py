@@ -51,6 +51,7 @@ class FeatureFlags:
         self.ENABLE_SILENCE_AS_SIGNAL = "shadow"
         self.ENABLE_DEADLOCK_DETECTION = "shadow"
         self.ENABLE_PREMIUM_PROCESSOR = False
+        self.ENABLE_PREMIUM_CLARITY_V1 = False
         self.ENABLE_BEHAVIOR_METRICS_DIGEST = False
         self.ENABLE_DIGEST_ACTION_TEMPLATES = False
         self.ENABLE_TRUST_BOOTSTRAP = False
@@ -129,6 +130,9 @@ class FeatureFlags:
         )
         self.ENABLE_PREMIUM_PROCESSOR = self._get_flag(
             parser, "enable_premium_processor"
+        )
+        self.ENABLE_PREMIUM_CLARITY_V1 = self._get_flag(
+            parser, "enable_premium_clarity_v1"
         )
         self.ENABLE_BEHAVIOR_METRICS_DIGEST = self._get_flag(
             parser, "enable_behavior_metrics_digest"
