@@ -97,3 +97,4 @@ Working set (files / tables / tests):
 
 2026-01-03: weekly calibration (surprise breakdown) behind enable_weekly_calibration_report.
 2026-01-03: uncertainty queue (digest-only) behind enable_uncertainty_queue.
+2026-01-03: commitment chain digest (facts-only) behind enable_commitment_chain_digest.

@@ -11,6 +11,10 @@ from mailbot_v26.config.regret_minimization import (
     RegretMinimizationConfig,
     load_regret_minimization_config,
 )
+from mailbot_v26.config.commitment_chain_digest import (
+    CommitmentChainDigestConfig,
+    load_commitment_chain_digest_config,
+)
 from mailbot_v26.config.trust_bootstrap import (
     TrustBootstrapConfig,
     load_trust_bootstrap_config,
@@ -239,6 +243,10 @@ def _load_regret_minimization_config() -> RegretMinimizationDigestConfig:
     return RegretMinimizationDigestConfig(settings=settings)
 
 
+def _load_commitment_chain_digest_config() -> CommitmentChainDigestConfig:
+    return load_commitment_chain_digest_config(_CONFIG_PATH.parent)
+
+
 def _is_daily_due(now: datetime, config: DailyDigestConfig) -> bool:
     if now.hour < config.hour:
         return False
@@ -388,6 +396,7 @@ def run_digest_tick(
         behavior_metrics_config = _load_behavior_metrics_digest_config()
         trust_bootstrap_config = _load_trust_bootstrap_config()
         regret_minimization_config = _load_regret_minimization_config()
+        commitment_chain_digest_config = _load_commitment_chain_digest_config()
         uncertainty_queue_config = load_uncertainty_queue_config(_CONFIG_PATH.parent)
         silence_policy = load_silence_policy_config(_CONFIG_PATH.parent)
         policy_inputs = _collect_policy_inputs(storage, logger)
@@ -432,6 +441,7 @@ def run_digest_tick(
                     silence_policy=silence_policy,
                     digest_insights_config=digest_insights_config,
                     behavior_metrics_config=behavior_metrics_config,
+                    commitment_chain_digest_config=commitment_chain_digest_config,
                     uncertainty_queue_config=uncertainty_queue_config,
                     trust_bootstrap_config=trust_bootstrap_config,
                     regret_minimization_config=regret_minimization_config,
@@ -508,6 +518,7 @@ def _run_daily_digest(
     silence_policy: SilencePolicyConfig,
     digest_insights_config: DigestInsightsConfig,
     behavior_metrics_config: BehaviorMetricsDigestConfig,
+    commitment_chain_digest_config: CommitmentChainDigestConfig,
     uncertainty_queue_config: UncertaintyQueueConfig,
     trust_bootstrap_config: TrustBootstrapDigestConfig,
     regret_minimization_config: RegretMinimizationDigestConfig,
@@ -563,6 +574,8 @@ def _run_daily_digest(
         behavior_metrics_window_days=behavior_metrics_config.window_days,
         include_uncertainty_queue=flags.ENABLE_UNCERTAINTY_QUEUE,
         uncertainty_queue_config=uncertainty_queue_config,
+        include_commitment_chain_digest=flags.ENABLE_COMMITMENT_CHAIN_DIGEST,
+        commitment_chain_digest_config=commitment_chain_digest_config,
         include_trust_bootstrap=flags.ENABLE_TRUST_BOOTSTRAP,
         trust_bootstrap_config=trust_bootstrap_config.settings,
         include_regret_minimization=flags.ENABLE_REGRET_MINIMIZATION,

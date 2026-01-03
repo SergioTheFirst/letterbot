@@ -1131,6 +1131,146 @@ class KnowledgeAnalytics:
             "expired": int(row.get("expired_count") or 0),
         }
 
+    def commitment_chain_digest_items(
+        self,
+        account_email: str,
+        *,
+        since_ts: float,
+        max_entities: int,
+        max_items_per_entity: int,
+    ) -> list[dict[str, object]]:
+        if not account_email:
+            return []
+        try:
+            resolved_since_ts = float(since_ts)
+        except (TypeError, ValueError):
+            return []
+        try:
+            resolved_entities = max(0, int(max_entities))
+        except (TypeError, ValueError):
+            resolved_entities = 0
+        try:
+            resolved_items = max(0, int(max_items_per_entity))
+        except (TypeError, ValueError):
+            resolved_items = 0
+        if resolved_entities <= 0 or resolved_items <= 0:
+            return []
+
+        try:
+            rows = self._execute_select(
+                """
+                SELECT event_type, ts_utc, account_id, entity_id, email_id, payload, payload_json
+                FROM events_v1
+                WHERE account_id = ?
+                  AND event_type IN (
+                    'commitment_created',
+                    'commitment_status_changed',
+                    'commitment_expired'
+                  )
+                  AND ts_utc >= ?
+                ORDER BY ts_utc DESC
+                """,
+                (account_email, resolved_since_ts),
+            )
+        except sqlite3.OperationalError:
+            return []
+
+        def _status_label(payload: dict[str, object]) -> str | None:
+            raw = payload.get("new_status") or payload.get("status") or ""
+            status = str(raw).strip().lower()
+            if status == "pending":
+                return "ожидает"
+            if status == "expired":
+                return "просрочено"
+            if status == "fulfilled":
+                return "выполнено"
+            return None
+
+        entries: dict[str, dict[str, object]] = {}
+        for row in rows:
+            payload = self._event_payload(row)
+            status_label = _status_label(payload)
+            if not status_label:
+                continue
+            text = str(payload.get("commitment_text") or "").strip()
+            if not text:
+                continue
+            due_raw = str(payload.get("deadline_iso") or "").strip()
+            due = due_raw if due_raw else None
+            entity_id = str(row.get("entity_id") or "").strip()
+            sender_email = str(payload.get("from_email") or "").strip()
+            entity_key = entity_id or sender_email
+            if not entity_key:
+                continue
+            if entity_id:
+                try:
+                    label = self.entity_label(entity_id=entity_id)
+                except sqlite3.OperationalError:
+                    label = None
+            else:
+                label = None
+            if not label:
+                label = entity_id or sender_email
+            if not label:
+                continue
+
+            entry = entries.get(entity_key)
+            if entry is None:
+                entry = {
+                    "label": label,
+                    "items": [],
+                    "has_pending": False,
+                    "has_expired": False,
+                    "latest_ts": 0.0,
+                }
+                entries[entity_key] = entry
+            else:
+                if entity_id and label != entry["label"]:
+                    entry["label"] = label
+
+            ts_utc = float(row.get("ts_utc") or 0.0)
+            if ts_utc > entry["latest_ts"]:
+                entry["latest_ts"] = ts_utc
+            if status_label == "просрочено":
+                entry["has_expired"] = True
+            if status_label == "ожидает":
+                entry["has_pending"] = True
+
+            if len(entry["items"]) < resolved_items:
+                entry["items"].append(
+                    {
+                        "text": text,
+                        "status": status_label,
+                        "due": due,
+                    }
+                )
+
+        candidates: list[dict[str, object]] = []
+        for entry in entries.values():
+            if not (entry["has_pending"] or entry["has_expired"]):
+                continue
+            items = entry["items"]
+            if not items:
+                continue
+            candidates.append(entry)
+
+        candidates.sort(
+            key=lambda entry: (
+                0 if entry["has_expired"] else 1,
+                -float(entry["latest_ts"] or 0.0),
+            )
+        )
+
+        output: list[dict[str, object]] = []
+        for entry in candidates[:resolved_entities]:
+            output.append(
+                {
+                    "entity_label": str(entry["label"]),
+                    "items": list(entry["items"])[:resolved_items],
+                }
+            )
+        return output
+
     def has_daily_digest_sent(self, *, account_email: str, day: datetime) -> bool:
         if not account_email:
             return False

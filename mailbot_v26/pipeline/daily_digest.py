@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from mailbot_v26.behavior.trust_bootstrap import (
@@ -8,6 +8,7 @@ from mailbot_v26.behavior.trust_bootstrap import (
     compute_trust_bootstrap_snapshot,
     is_ready_for_action_templates,
 )
+from mailbot_v26.config.commitment_chain_digest import CommitmentChainDigestConfig
 from mailbot_v26.config.uncertainty_queue import UncertaintyQueueConfig
 from mailbot_v26.config.regret_minimization import RegretMinimizationConfig
 from mailbot_v26.config.trust_bootstrap import TrustBootstrapConfig
@@ -67,6 +68,7 @@ class DigestData:
     digest_insights_enabled: bool
     digest_insights_max_items: int
     digest_action_templates_enabled: bool
+    commitment_chain_digest_items: list[dict[str, object]] = field(default_factory=list)
     behavior_metrics: dict[str, object] | None = None
     behavior_metrics_enabled: bool = False
     behavior_metrics_window_days: int = 7
@@ -166,6 +168,8 @@ def _collect_digest_data(
     behavior_metrics_window_days: int = 7,
     include_uncertainty_queue: bool = False,
     uncertainty_queue_config: UncertaintyQueueConfig | None = None,
+    include_commitment_chain_digest: bool = False,
+    commitment_chain_digest_config: CommitmentChainDigestConfig | None = None,
     include_trust_bootstrap: bool = False,
     trust_bootstrap_config: TrustBootstrapConfig | None = None,
     include_regret_minimization: bool = False,
@@ -179,6 +183,7 @@ def _collect_digest_data(
     trust_delta = analytics.latest_trust_score_delta()
     health_delta = analytics.latest_relationship_health_delta()
     uncertainty_queue_items: list[dict[str, object]] = []
+    commitment_chain_items: list[dict[str, object]] = []
 
     trust_value: float | None = None
     if trust_delta is not None:
@@ -309,6 +314,33 @@ def _collect_digest_data(
                 }
             )
 
+    if include_commitment_chain_digest:
+        resolved_config = commitment_chain_digest_config or CommitmentChainDigestConfig()
+        try:
+            window_days = max(1, int(resolved_config.window_days))
+        except (TypeError, ValueError):
+            window_days = 30
+        try:
+            max_entities = max(0, int(resolved_config.max_entities))
+        except (TypeError, ValueError):
+            max_entities = 3
+        try:
+            max_items = max(0, int(resolved_config.max_items_per_entity))
+        except (TypeError, ValueError):
+            max_items = 2
+        since_ts = (now or datetime.now(timezone.utc)).timestamp() - (
+            window_days * 24 * 60 * 60
+        )
+        try:
+            commitment_chain_items = analytics.commitment_chain_digest_items(
+                account_email,
+                since_ts=since_ts,
+                max_entities=max_entities,
+                max_items_per_entity=max_items,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("commitment_chain_digest_failed", error=str(exc))
+
     trust_bootstrap_snapshot: TrustBootstrapSnapshot | None = None
     trust_bootstrap_min_samples = 0
     trust_bootstrap_hide_action_templates = False
@@ -398,6 +430,7 @@ def _collect_digest_data(
         digest_insights_enabled=insights_enabled,
         digest_insights_max_items=insights_max_items,
         digest_action_templates_enabled=digest_action_templates_enabled,
+        commitment_chain_digest_items=commitment_chain_items,
         behavior_metrics=behavior_metrics,
         behavior_metrics_enabled=bool(include_behavior_metrics_digest),
         behavior_metrics_window_days=behavior_metrics_window,
@@ -474,6 +507,24 @@ def _build_digest_text(data: DigestData) -> str:
                 f"в похожих случаях за {stats.window_days} дней снижение доверия было "
                 f"в {stats.drops} из {stats.total} ({stats.pct}%)."
             )
+        if data.commitment_chain_digest_items:
+            lines.append("<b>Контекст по обязательствам</b>")
+            for entry in data.commitment_chain_digest_items:
+                label = escape_tg_html(str(entry.get("entity_label") or ""))
+                if not label:
+                    continue
+                lines.append(f"• {label}")
+                items = entry.get("items") or []
+                for item in items:
+                    status = escape_tg_html(str(item.get("status") or ""))
+                    text = escape_tg_html(str(item.get("text") or ""))
+                    if not status or not text:
+                        continue
+                    line = f"  - {status}: {text}"
+                    due = item.get("due")
+                    if due:
+                        line += f" (срок: {escape_tg_html(str(due))})"
+                    lines.append(line)
     if data.trust_delta is not None and abs(data.trust_delta) > _TRUST_DELTA_THRESHOLD:
         delta_pp = data.trust_delta * 100.0
         sign = "+" if delta_pp >= 0 else ""
@@ -661,6 +712,8 @@ def _has_digest_content(data: DigestData) -> bool:
         return True
     if data.commitments_pending > 0 or data.commitments_expired > 0:
         return True
+    if data.commitment_chain_digest_items:
+        return True
     if data.trust_delta is not None and abs(data.trust_delta) > _TRUST_DELTA_THRESHOLD:
         return True
     if data.health_delta is not None and abs(data.health_delta) >= _RELATIONSHIP_HEALTH_DELTA_THRESHOLD:
@@ -692,6 +745,8 @@ def maybe_send_daily_digest(
     include_notification_sla: bool = False,
     include_behavior_metrics_digest: bool = False,
     behavior_metrics_window_days: int = 7,
+    include_commitment_chain_digest: bool = False,
+    commitment_chain_digest_config: CommitmentChainDigestConfig | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
@@ -705,6 +760,8 @@ def maybe_send_daily_digest(
         now=now,
         include_behavior_metrics_digest=include_behavior_metrics_digest,
         behavior_metrics_window_days=behavior_metrics_window_days,
+        include_commitment_chain_digest=include_commitment_chain_digest,
+        commitment_chain_digest_config=commitment_chain_digest_config,
         contract_event_emitter=contract_event_emitter,
     )
     already_sent = analytics.has_daily_digest_sent(

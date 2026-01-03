@@ -56,6 +56,7 @@ class FeatureFlags:
         self.ENABLE_TRUST_BOOTSTRAP = False
         self.ENABLE_REGRET_MINIMIZATION = False
         self.ENABLE_UNCERTAINTY_QUEUE = False
+        self.ENABLE_COMMITMENT_CHAIN_DIGEST = False
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -143,6 +144,9 @@ class FeatureFlags:
         )
         self.ENABLE_UNCERTAINTY_QUEUE = self._get_flag(
             parser, "enable_uncertainty_queue"
+        )
+        self.ENABLE_COMMITMENT_CHAIN_DIGEST = self._get_flag(
+            parser, "enable_commitment_chain_digest"
         )
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6
