@@ -184,9 +184,19 @@ def _collect_digest_data(
     )
     if not scope_account_emails and account_email:
         scope_account_emails = [account_email]
-    deferred = analytics.deferred_digest_counts(account_email=account_email)
-    deferred_items = analytics.deferred_digest_items(account_email=account_email, limit=5)
-    commitments = analytics.commitment_status_counts(account_email=account_email)
+    deferred = analytics.deferred_digest_counts(
+        account_email=account_email,
+        account_emails=scope_account_emails,
+    )
+    deferred_items = analytics.deferred_digest_items(
+        account_email=account_email,
+        account_emails=scope_account_emails,
+        limit=5,
+    )
+    commitments = analytics.commitment_status_counts(
+        account_email=account_email,
+        account_emails=scope_account_emails,
+    )
     trust_delta = analytics.latest_trust_score_delta()
     health_delta = analytics.latest_relationship_health_delta()
     uncertainty_queue_items: list[dict[str, object]] = []
