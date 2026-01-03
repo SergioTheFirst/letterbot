@@ -240,12 +240,16 @@ password = secret
         contract_event_emitter=contract_emitter,
         engine="priority_v2_shadow",
         source="preview_buttons",
+        surprise_mode="shadow",
     )
 
     with sqlite3.connect(db_path) as conn:
         event_rows = conn.execute(
             "SELECT event_type, payload FROM events_v1"
         ).fetchall()
-    payload = json.loads(event_rows[0][1])
-    assert "chat_scope" not in payload
-    assert "account_emails" not in payload
+    payloads = {row[0]: json.loads(row[1]) for row in event_rows}
+    assert "priority_correction_recorded" in payloads
+    assert "surprise_detected" in payloads
+    for payload in payloads.values():
+        assert "chat_scope" not in payload
+        assert "account_emails" not in payload

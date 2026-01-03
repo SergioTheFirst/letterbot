@@ -114,3 +114,4 @@ Working set (files / tables / tests):
 2026-01-08: weekly digest calibration now includes gated “рост точности” (events-only surprise-rate delta vs previous window).
 
 2026-01-08: added optional chat_scope/account_emails to delivery_policy/correction/surprise events for single-user multi-account learning scope.
+2026-01-08: unified chat_scope/account_emails propagation for surprise/correction/delivery events and restored scope test coverage.
