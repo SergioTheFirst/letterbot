@@ -63,6 +63,7 @@ enable_behavior_metrics_digest = false
 enable_trust_bootstrap = false
 enable_regret_minimization = false
 enable_uncertainty_queue = false
+enable_commitment_chain_digest = false
 
 [daily_digest]
 hour = 9
@@ -84,6 +85,11 @@ min_corrections = 10
 [digest_insights]
 window_days = 7
 max_items = 3
+
+[commitment_chain_digest]
+window_days = 30
+max_entities = 3
+max_items_per_entity = 2
 
 [behavior_metrics_digest]
 window_days = 7
