@@ -94,3 +94,5 @@ Working set (files / tables / tests):
 2026-01-03: weekly accuracy report behind enable_weekly_accuracy_report.
 2026-01-03: regret minimization (commitments evidence) behind enable_regret_minimization.
 2026-01-03: action templates gated by events accuracy behind enable_trust_bootstrap.
+
+2026-01-03: weekly calibration (surprise breakdown) behind enable_weekly_calibration_report.
