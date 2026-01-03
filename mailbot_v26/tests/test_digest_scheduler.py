@@ -344,6 +344,84 @@ def test_scheduler_dedup_chat_id_daily(monkeypatch, tmp_path) -> None:
     assert payload["chat_scope"] == "tg:chat"
 
 
+def test_scheduler_dedup_chat_id_weekly_event_payload(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.ini"
+    _write_config(config_path, daily_enabled=False, weekly_enabled=True)
+    monkeypatch.setattr(digest_scheduler, "_CONFIG_PATH", config_path)
+
+    config = _build_config_with_accounts(
+        tmp_path,
+        [
+            AccountConfig(
+                account_id="acc",
+                login="account@example.com",
+                password="pass",
+                host="",
+                port=993,
+                use_ssl=True,
+                telegram_chat_id="chat",
+            ),
+            AccountConfig(
+                account_id="acc2",
+                login="alt@example.com",
+                password="pass",
+                host="",
+                port=993,
+                use_ssl=True,
+                telegram_chat_id="chat",
+            ),
+        ],
+    )
+    storage = _build_storage(tmp_path)
+
+    sent: list[dict[str, object]] = []
+
+    def _sender(payload) -> DeliveryResult:
+        sent.append({"payload": payload})
+        return DeliveryResult(delivered=True, retryable=False)
+
+    now = datetime(2025, 12, 29, 9, 0, tzinfo=timezone.utc)
+    logger = DummyLogger()
+
+    digest_scheduler.run_digest_tick(
+        now=now,
+        config=config,
+        storage=storage,
+        telegram_sender=_sender,
+        logger=logger,
+    )
+
+    assert len(sent) == 1
+    assert storage.knowledge_db.get_last_weekly_digest_key(
+        account_email="account@example.com"
+    ) == "2026-W01"
+    assert storage.knowledge_db.get_last_weekly_digest_key(
+        account_email="alt@example.com"
+    ) == "2026-W01"
+    assert storage.knowledge_db.get_last_weekly_digest_sent_at(
+        account_email="account@example.com"
+    ) == now
+    assert storage.knowledge_db.get_last_weekly_digest_sent_at(
+        account_email="alt@example.com"
+    ) == now
+
+    with sqlite3.connect(storage.knowledge_db.path) as conn:
+        rows = list(
+            conn.execute(
+                "SELECT payload_json FROM events_v1 WHERE event_type = ?",
+                (EventType.WEEKLY_DIGEST_SENT.value,),
+            )
+        )
+    assert len(rows) == 1
+    payload = json.loads(rows[0][0])
+    assert payload["chat_scope"] == "tg:chat"
+    assert payload["account_emails"] == ["account@example.com", "alt@example.com"]
+    assert payload["week_key"] == "2026-W01"
+    assert payload["account_email"] == "account@example.com"
+    assert "total_emails" in payload
+    assert "deferred_emails" in payload
+
+
 def test_digest_override_disables_dispatch(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.ini"
     _write_config(config_path, daily_enabled=True, weekly_enabled=False)
