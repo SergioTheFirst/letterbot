@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
+from mailbot_v26.events.contract import EventType
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,19 @@ class KnowledgeAnalytics:
         if not rows:
             return 0
         return int(rows[0].get("total") or 0)
+
+    def event_count(
+        self,
+        *,
+        account_id: str | None,
+        event_type: EventType,
+        since_ts: float | None = None,
+    ) -> int:
+        return self._event_count(
+            account_id=account_id,
+            event_type=event_type.value,
+            since_ts=since_ts,
+        )
 
     def bootstrap_start_ts(self, *, account_email: str) -> float | None:
         if not account_email:

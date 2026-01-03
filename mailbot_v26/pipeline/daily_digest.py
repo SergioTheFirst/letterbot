@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from mailbot_v26.behavior.trust_bootstrap import (
     TrustBootstrapSnapshot,
     compute_trust_bootstrap_snapshot,
+    is_ready_for_action_templates,
 )
 from mailbot_v26.config.regret_minimization import RegretMinimizationConfig
 from mailbot_v26.config.trust_bootstrap import TrustBootstrapConfig
@@ -269,6 +270,7 @@ def _collect_digest_data(
     trust_bootstrap_snapshot: TrustBootstrapSnapshot | None = None
     trust_bootstrap_min_samples = 0
     trust_bootstrap_hide_action_templates = False
+    templates_ready_for_action = True
     if include_trust_bootstrap:
         resolved_config = trust_bootstrap_config or TrustBootstrapConfig()
         trust_bootstrap_min_samples = resolved_config.min_samples
@@ -285,6 +287,17 @@ def _collect_digest_data(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("trust_bootstrap_snapshot_failed", error=str(exc))
             trust_bootstrap_snapshot = None
+        if include_digest_action_templates:
+            try:
+                templates_ready_for_action = is_ready_for_action_templates(
+                    account_email,
+                    (now or datetime.now(timezone.utc)).timestamp(),
+                    analytics=analytics,
+                    config=resolved_config,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("trust_bootstrap_templates_ready_failed", error=str(exc))
+                templates_ready_for_action = True
 
     regret_minimization_stats: RegretMinimizationStats | None = None
     if include_regret_minimization:
@@ -310,13 +323,19 @@ def _collect_digest_data(
                 )
 
     digest_action_templates_enabled = bool(include_digest_action_templates)
-    if (
-        digest_action_templates_enabled
-        and trust_bootstrap_snapshot
-        and trust_bootstrap_snapshot.active
-        and trust_bootstrap_hide_action_templates
-    ):
-        digest_action_templates_enabled = False
+    if digest_action_templates_enabled and include_trust_bootstrap:
+        if (
+            trust_bootstrap_snapshot
+            and trust_bootstrap_snapshot.active
+            and trust_bootstrap_hide_action_templates
+        ):
+            digest_action_templates_enabled = False
+        elif (
+            trust_bootstrap_snapshot
+            and not trust_bootstrap_snapshot.active
+            and not templates_ready_for_action
+        ):
+            digest_action_templates_enabled = False
 
     return DigestData(
         deferred_total=int(deferred.get("total", 0)),

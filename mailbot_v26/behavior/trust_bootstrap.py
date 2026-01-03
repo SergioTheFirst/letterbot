@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mailbot_v26.config.trust_bootstrap import TrustBootstrapConfig
+from mailbot_v26.events.contract import EventType
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
 _DAY_SECONDS = 24 * 60 * 60
@@ -98,4 +99,40 @@ def is_bootstrap_active(
     return snapshot.active
 
 
-__all__ = ["TrustBootstrapSnapshot", "compute_trust_bootstrap_snapshot", "is_bootstrap_active"]
+def is_ready_for_action_templates(
+    account_email: str,
+    now_ts: float,
+    *,
+    analytics: KnowledgeAnalytics,
+    config: TrustBootstrapConfig,
+) -> bool:
+    if not account_email:
+        return False
+    window_days = max(1, config.templates_window_days)
+    since_ts = now_ts - (window_days * _DAY_SECONDS)
+    corrections_count = analytics.event_count(
+        account_id=account_email,
+        event_type=EventType.PRIORITY_CORRECTION_RECORDED,
+        since_ts=since_ts,
+    )
+    if corrections_count < config.templates_min_corrections:
+        return False
+    if corrections_count == 0:
+        return False
+    surprises_count = analytics.event_count(
+        account_id=account_email,
+        event_type=EventType.SURPRISE_DETECTED,
+        since_ts=since_ts,
+    )
+    surprise_rate = surprises_count / corrections_count
+    if surprise_rate > config.templates_max_surprise_rate:
+        return False
+    return True
+
+
+__all__ = [
+    "TrustBootstrapSnapshot",
+    "compute_trust_bootstrap_snapshot",
+    "is_bootstrap_active",
+    "is_ready_for_action_templates",
+]
