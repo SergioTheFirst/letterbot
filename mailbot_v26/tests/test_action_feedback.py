@@ -150,30 +150,18 @@ telegram_chat_id = chat
     assert payload["account_emails"] == ["account@example.com", "alt@example.com"]
 
 
-def test_get_account_scope(tmp_path, monkeypatch) -> None:
-    _write_accounts(
-        tmp_path,
-        """[primary]
-login = account@example.com
-password = secret
-telegram_chat_id = chat
-
-[alt]
-login = alt@example.com
-password = secret
-telegram_chat_id = chat
-
-[nochat]
-login = nochat@example.com
-password = secret
-""",
+def test_get_account_scope() -> None:
+    scope = config_loader.get_account_scope(
+        chat_id="chat",
+        account_email="account@example.com",
+        account_emails=["alt@example.com", "account@example.com", ""],
     )
-    monkeypatch.setattr(config_loader, "CONFIG_DIR", tmp_path)
-    config_loader._load_account_scopes.cache_clear()
-
-    scope = config_loader.get_account_scope("account@example.com")
-    assert scope == ("tg:chat", ["account@example.com", "alt@example.com"])
-    assert config_loader.get_account_scope("nochat@example.com") is None
+    assert scope == {
+        "chat_scope": "tg:chat",
+        "account_email": "account@example.com",
+        "account_emails": ["account@example.com", "alt@example.com"],
+    }
+    assert config_loader.get_account_scope(chat_id="") == {}
 
 
 def test_surprise_event_emitted_when_enabled(tmp_path, monkeypatch) -> None:

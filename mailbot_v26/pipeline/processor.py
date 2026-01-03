@@ -28,7 +28,7 @@ from mailbot_v26.config.flow_protection import (
     load_flow_protection_config,
 )
 from mailbot_v26.config.premium_clarity import load_premium_clarity_config
-from mailbot_v26.config_loader import get_account_scope
+from mailbot_v26.config_loader import get_account_scope, resolve_account_scope
 from mailbot_v26.facts.fact_extractor import FactExtractor
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
@@ -4157,13 +4157,15 @@ def process_message(
         render_result.extracted_text_len <= 0 and len(attachments) > 0
     )
     if behavior_enabled and delivery_decision and delivery_context:
-        scope = get_account_scope(account_email)
-        scope_payload: dict[str, Any] = {}
-        if scope:
-            scope_payload = {
-                "chat_scope": scope[0],
-                "account_emails": scope[1],
-            }
+        resolved_scope = resolve_account_scope(account_email)
+        scope_chat_id = telegram_chat_id or (resolved_scope.chat_id if resolved_scope else None)
+        scope_emails = list(resolved_scope.account_emails) if resolved_scope else None
+        if not scope_emails and account_email:
+            scope_emails = [account_email]
+        scope_payload = get_account_scope(
+            chat_id=scope_chat_id,
+            account_emails=scope_emails,
+        )
         _emit_contract_event(
             EventType.DELIVERY_POLICY_APPLIED,
             ts_utc=received_at.timestamp(),
