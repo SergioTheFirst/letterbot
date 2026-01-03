@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from mailbot_v26.insights.digest import InsightDigest
+from mailbot_v26.insights.commitment_tracker import Commitment
 from mailbot_v26.pipeline import processor
 
 
@@ -10,6 +13,7 @@ def _render(
     attachments: list[dict[str, object]] | None = None,
     attachment_summaries: list[dict[str, object]] | None = None,
     body_summary: str = "Краткий факт письма.",
+    body_text: str = "Краткий факт письма.",
     extraction_failed: bool = False,
     confidence_percent: int = 80,
     confidence_available: bool = True,
@@ -17,19 +21,24 @@ def _render(
     confidence_dots_threshold: int = 75,
     insight_digest: InsightDigest | None = None,
     subject: str = "Тема письма",
+    received_at: datetime | None = None,
+    commitments: list[Commitment] | None = None,
+    insights: list[processor.Insight] | None = None,
 ) -> str:
     return processor._build_premium_clarity_text(
         priority=priority,
+        received_at=received_at or datetime(2026, 1, 1),
         from_email="sender@example.com",
         from_name="Sender",
         subject=subject,
         action_line="Ответить клиенту",
         body_summary=body_summary,
+        body_text=body_text,
         attachments=attachments or [],
         attachment_summaries=attachment_summaries or [],
-        insights=[],
+        insights=insights or [],
         insight_digest=insight_digest,
-        commitments=[],
+        commitments=commitments or [],
         attachments_count=len(attachments or []),
         extracted_text_len=0 if extraction_failed else 120,
         confidence_percent=confidence_percent,
@@ -140,6 +149,97 @@ def test_premium_clarity_attachment_summary_status() -> None:
     summaries = [{"filename": "invoice.pdf", "summary": "Счёт"}]
     rendered = _render(attachments=attachments, attachment_summaries=summaries)
     assert "• invoice.pdf — Счёт" in rendered
+
+
+def test_premium_clarity_fact_provenance_subject() -> None:
+    rendered = _render(
+        subject="Счет на 12 000 ₽",
+        body_summary="Проверьте счет.",
+        body_text="",
+    )
+    assert "Сумма: 12 000 ₽ (тема)" in rendered
+
+
+def test_premium_clarity_fact_provenance_body() -> None:
+    rendered = _render(
+        body_summary="Срок оплаты указан.",
+        body_text="Оплатить до 12.02.2025.",
+    )
+    assert "Дата: 12.02.2025 (письмо)" in rendered
+
+
+def test_premium_clarity_fact_provenance_attachment() -> None:
+    attachments = [{"filename": "invoice.pdf", "text": "Сумма 5 000 руб."}]
+    rendered = _render(
+        attachments=attachments,
+        body_summary="Есть счет.",
+        body_text="",
+    )
+    assert "Сумма: 5 000 руб. (invoice.pdf)" in rendered
+
+
+def test_premium_clarity_fact_provenance_omitted_when_unknown() -> None:
+    rendered = _render(body_summary="Общий обзор.", body_text="Без деталей.")
+    assert "(тема)" not in rendered
+    assert "(письмо)" not in rendered
+    assert "(invoice.pdf)" not in rendered
+
+
+def test_premium_clarity_why_line_for_low_confidence() -> None:
+    rendered = _render(confidence_percent=30, confidence_dots_threshold=75)
+    why_lines = [line for line in rendered.splitlines() if line.startswith("Почему:")]
+    assert len(why_lines) == 1
+
+
+def test_premium_clarity_why_line_for_deadline() -> None:
+    commitments = [
+        Commitment(
+            commitment_text="Согласовать",
+            deadline_iso="2026-01-03",
+            status="pending",
+            source="heuristic",
+            confidence=0.9,
+        )
+    ]
+    rendered = _render(
+        commitments=commitments,
+        received_at=datetime(2026, 1, 1),
+    )
+    assert any(line.startswith("Почему:") for line in rendered.splitlines())
+
+
+def test_premium_clarity_why_line_for_high_risk() -> None:
+    rendered = _render(
+        insights=[
+            processor.Insight(
+                type="High-Risk Window",
+                severity="HIGH",
+                explanation="",
+                recommendation="",
+            )
+        ]
+    )
+    assert any(line.startswith("Почему:") for line in rendered.splitlines())
+
+
+def test_premium_clarity_why_line_absent_when_not_needed() -> None:
+    rendered = _render(confidence_percent=90, confidence_dots_threshold=75)
+    assert all(
+        not line.startswith("Почему:") for line in rendered.splitlines()
+    )
+
+
+def test_premium_clarity_line_budget_with_extraction_failure_and_low_confidence() -> None:
+    attachments = [{"filename": f"file-{idx}.pdf", "text": ""} for idx in range(5)]
+    rendered = _render(
+        attachments=attachments,
+        extraction_failed=True,
+        confidence_percent=10,
+        confidence_dots_threshold=75,
+        body_summary="",
+        body_text="",
+    )
+    assert len(rendered.splitlines()) <= 18
 
 
 def test_premium_clarity_confidence_dots_never_mode() -> None:

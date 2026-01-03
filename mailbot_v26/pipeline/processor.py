@@ -29,6 +29,7 @@ from mailbot_v26.config.flow_protection import (
     load_flow_protection_config,
 )
 from mailbot_v26.config.premium_clarity import load_premium_clarity_config
+from mailbot_v26.facts.fact_extractor import FactExtractor
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
 from mailbot_v26.features import FeatureFlags
@@ -983,6 +984,26 @@ _SUMMARY_PLACEHOLDER_PATTERNS = (
     "check mail",
 )
 
+_FACT_EXTRACTOR = FactExtractor()
+_SUMMARY_NUMBER_PATTERN = re.compile(r"\d+(?:[ \u00A0]?\d+)*(?:[.,]\d+)?")
+_DATE_VALUE_PATTERN = re.compile(r"\b\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})\b")
+
+
+@dataclass(frozen=True, slots=True)
+class _FactItem:
+    label: str
+    value: str
+    tag: str
+
+
+def _has_high_risk(insights: list[Insight]) -> bool:
+    for insight in insights:
+        if insight.severity.upper() != "HIGH":
+            continue
+        if "risk" in insight.type.lower():
+            return True
+    return False
+
 
 def _attachment_kind(attachment: dict[str, Any]) -> str:
     content_type = str(attachment.get("content_type") or attachment.get("type") or "").lower()
@@ -1051,14 +1072,102 @@ def _build_no_llm_summary(
     return ""
 
 
+def _normalize_fact_value(value: str) -> str:
+    cleaned = " ".join((value or "").split())
+    cleaned = strip_disallowed_emojis(cleaned)
+    return cleaned
+
+
+def _render_fact_tag(tag: str) -> str:
+    if not tag:
+        return ""
+    return f" ({tag})"
+
+
+def _fact_items_from_text(text: str, *, tag: str) -> list[_FactItem]:
+    if not text:
+        return []
+    facts = _FACT_EXTRACTOR.extract_facts(text)
+    date_matches = {
+        match.group(0) for match in _DATE_VALUE_PATTERN.finditer(text)
+    }
+    items: list[_FactItem] = []
+    for amount in facts.amounts:
+        value = _normalize_fact_value(amount)
+        if value:
+            if date_matches and any(value in date for date in date_matches):
+                continue
+            items.append(_FactItem(label="Сумма", value=value, tag=tag))
+    for date_value in facts.dates:
+        value = _normalize_fact_value(date_value)
+        if value:
+            items.append(_FactItem(label="Дата", value=value, tag=tag))
+    for doc_number in facts.doc_numbers:
+        value = _normalize_fact_value(doc_number)
+        if value:
+            items.append(_FactItem(label="Номер", value=value, tag=tag))
+    return items
+
+
+def _summary_numbers_supported(summary: str, *, subject: str, body_text: str) -> bool:
+    summary_numbers = {match.group(0) for match in _SUMMARY_NUMBER_PATTERN.finditer(summary or "")}
+    if not summary_numbers:
+        return True
+    source_text = f"{subject}\n{body_text}".strip()
+    source_numbers = {
+        match.group(0) for match in _SUMMARY_NUMBER_PATTERN.finditer(source_text)
+    }
+    return summary_numbers.issubset(source_numbers)
+
+
+def _collect_fact_items(
+    *,
+    subject: str,
+    body_text: str,
+    attachments: list[dict[str, Any]],
+) -> list[_FactItem]:
+    items: list[_FactItem] = []
+    items.extend(_fact_items_from_text(subject, tag="тема"))
+    items.extend(_fact_items_from_text(body_text, tag="письмо"))
+    for attachment in attachments:
+        raw_filename = str(attachment.get("filename") or "").strip()
+        if not raw_filename:
+            continue
+        attachment_text = attachment.get("text") or ""
+        if isinstance(attachment_text, bytes):
+            attachment_text = attachment_text.decode(errors="ignore")
+        attachment_text = str(attachment_text)
+        if not attachment_text.strip():
+            continue
+        tag = _escape_dynamic(strip_disallowed_emojis(raw_filename))
+        items.extend(_fact_items_from_text(attachment_text, tag=tag))
+    return items
+
+
 def _build_premium_clarity_facts(
     *,
-    body_summary: str,
+    subject: str,
+    body_text: str,
+    attachments: list[dict[str, Any]],
 ) -> str:
-    summary_text = (body_summary or "").strip()
-    if _is_meaningful_summary(summary_text):
-        return strip_disallowed_emojis(summary_text)
-    return ""
+    items = _collect_fact_items(
+        subject=subject,
+        body_text=body_text,
+        attachments=attachments,
+    )
+    seen: set[tuple[str, str, str]] = set()
+    rendered: list[str] = []
+    for item in items:
+        key = (item.label, item.value, item.tag)
+        if key in seen:
+            continue
+        seen.add(key)
+        rendered.append(
+            f"{item.label}: {item.value}{_render_fact_tag(item.tag)}"
+        )
+        if len(rendered) >= 2:
+            break
+    return "; ".join(rendered)
 
 
 def _build_premium_clarity_attachments(
@@ -1254,11 +1363,13 @@ def _is_urgent_action(action_text: str) -> bool:
 def _build_premium_clarity_text(
     *,
     priority: str,
+    received_at: datetime,
     from_email: str,
     from_name: str | None,
     subject: str,
     action_line: str,
     body_summary: str,
+    body_text: str,
     attachments: list[dict[str, Any]],
     attachment_summaries: list[dict[str, Any]],
     insights: list[Insight],
@@ -1285,12 +1396,17 @@ def _build_premium_clarity_text(
     action_text = strip_disallowed_emojis(action_text)
     safe_action = _escape_dynamic(action_text)
 
-    essence = (body_summary or "").strip()
-    if not _is_meaningful_summary(essence):
+    raw_summary = (body_summary or "").strip()
+    summary_numbers_ok = _summary_numbers_supported(
+        raw_summary,
+        subject=subject or "",
+        body_text=body_text or "",
+    )
+    if not _is_meaningful_summary(raw_summary) or not summary_numbers_ok:
         essence = subject or "(без темы)"
         essence = _escape_dynamic(strip_disallowed_emojis(essence))
     else:
-        essence = _escape_dynamic(strip_disallowed_emojis(essence))
+        essence = _escape_dynamic(strip_disallowed_emojis(raw_summary))
 
     lines = [
         f"{priority} {essence}",
@@ -1299,7 +1415,9 @@ def _build_premium_clarity_text(
     ]
 
     facts_line = _build_premium_clarity_facts(
-        body_summary=body_summary,
+        subject=subject or "",
+        body_text=body_text or "",
+        attachments=attachments,
     )
     primary_fact_line = ""
     if facts_line:
@@ -1316,6 +1434,20 @@ def _build_premium_clarity_text(
     action_line_rendered = f"{action_prefix} {action_line_text}"
 
     optional_lines: list[str] = []
+    if raw_summary and not summary_numbers_ok:
+        optional_lines.append("Проверьте вручную")
+    why_reasons: list[str] = []
+    if extraction_failed:
+        why_reasons.append("не удалось извлечь текст")
+    if _deadline_within_days(commitments, received_at=received_at, days=3):
+        why_reasons.append("срок близко")
+    if _has_high_risk(insights):
+        why_reasons.append("повышенный риск")
+    if confidence_available and confidence_percent < confidence_dots_threshold:
+        why_reasons.append("низкая уверенность")
+    if why_reasons:
+        why_text = ", ".join(why_reasons[:2])
+        optional_lines.append(f"Почему: {why_text}")
     if priority == "🔴":
         reason_line = ""
         if extraction_failed:
@@ -3670,11 +3802,13 @@ def process_message(
         premium_payload = TelegramPayload(
             html_text=_build_premium_clarity_text(
                 priority=priority,
+                received_at=received_at,
                 from_email=from_email,
                 from_name=from_name,
                 subject=subject,
                 action_line=action_line,
                 body_summary=body_summary,
+                body_text=body_text or "",
                 attachments=attachments,
                 attachment_summaries=attachment_summaries,
                 insights=analytics_result.aggregated_insights,
