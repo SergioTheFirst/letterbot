@@ -19,6 +19,7 @@ ALLOWED_EMOJIS: tuple[str, ...] = (
 )
 
 _EMOJI_RANGES = (
+    (0x2300, 0x23FF),
     (0x1F300, 0x1F5FF),
     (0x1F600, 0x1F64F),
     (0x1F680, 0x1F6FF),

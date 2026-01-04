@@ -63,8 +63,9 @@ def test_new_doc_type_emojis_allowed() -> None:
 
 
 def test_disallowed_emoji_removed() -> None:
-    text = "Привет 🚀"
+    text = "Привет 🚀⌛"
     cleaned = strip_disallowed_emojis(text)
     assert "🚀" not in cleaned
+    assert "⌛" not in cleaned
     assert cleaned != text
     assert not find_disallowed_emojis(cleaned)
