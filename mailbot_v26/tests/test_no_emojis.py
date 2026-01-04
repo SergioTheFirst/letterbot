@@ -2,7 +2,11 @@ from datetime import datetime
 
 from mailbot_v26.insights.aggregator import Insight
 from mailbot_v26.pipeline import processor, tg_renderer
-from mailbot_v26.ui.emoji_whitelist import ALLOWED_EMOJIS, find_disallowed_emojis
+from mailbot_v26.ui.emoji_whitelist import (
+    ALLOWED_EMOJIS,
+    find_disallowed_emojis,
+    strip_disallowed_emojis,
+)
 
 
 def _assert_whitelist(text: str) -> None:
@@ -49,3 +53,18 @@ def test_telegram_render_emoji_whitelist_legacy() -> None:
         attachments=[{"filename": "file😄.txt", "text": "ok"}],
     )
     _assert_whitelist(rendered)
+
+
+def test_new_doc_type_emojis_allowed() -> None:
+    text = "Документы: 💰 📄 ⏰ ⚠️ 📦 📧"
+    cleaned = strip_disallowed_emojis(text)
+    assert cleaned == text
+    assert not find_disallowed_emojis(cleaned)
+
+
+def test_disallowed_emoji_removed() -> None:
+    text = "Привет 🚀"
+    cleaned = strip_disallowed_emojis(text)
+    assert "🚀" not in cleaned
+    assert cleaned != text
+    assert not find_disallowed_emojis(cleaned)
