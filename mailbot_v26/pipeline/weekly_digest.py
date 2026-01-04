@@ -360,10 +360,27 @@ def _collect_weekly_data(
     contract_event_emitter: ContractEventEmitter | None = None,
     now: datetime | None = None,
 ) -> WeeklyDigestData:
-    volume = analytics.weekly_email_volume(account_email=account_email, days=7)
-    attention = analytics.weekly_attention_entities(account_email=account_email, days=7)
-    commitment_counts = analytics.weekly_commitment_counts(account_email=account_email, days=7)
-    overdue = analytics.weekly_overdue_commitments(account_email=account_email, days=7, limit=5)
+    volume = analytics.weekly_email_volume(
+        account_email=account_email,
+        account_emails=account_emails,
+        days=7,
+    )
+    attention = analytics.weekly_attention_entities(
+        account_email=account_email,
+        account_emails=account_emails,
+        days=7,
+    )
+    commitment_counts = analytics.weekly_commitment_counts(
+        account_email=account_email,
+        account_emails=account_emails,
+        days=7,
+    )
+    overdue = analytics.weekly_overdue_commitments(
+        account_email=account_email,
+        account_emails=account_emails,
+        days=7,
+        limit=5,
+    )
     trust_deltas = analytics.weekly_trust_score_deltas(days=7)
 
     attention_economics: AttentionEconomicsResult | None = None
@@ -754,6 +771,22 @@ def maybe_send_weekly_digest(
             )
             if contract_event_emitter is not None:
                 try:
+                    contract_payload = {
+                        "week_key": week_key,
+                        "account_email": account_email,
+                        "total_emails": data.total_emails,
+                        "deferred_emails": data.deferred_emails,
+                    }
+                    if account_emails:
+                        scoped_emails = sorted(
+                            {
+                                str(email).strip()
+                                for email in account_emails
+                                if str(email).strip()
+                            }
+                        )
+                        if scoped_emails:
+                            contract_payload["account_emails"] = scoped_emails
                     contract_event_emitter.emit(
                         EventV1(
                             event_type=EventType.WEEKLY_DIGEST_SENT,
@@ -761,12 +794,7 @@ def maybe_send_weekly_digest(
                             account_id=account_email,
                             entity_id=None,
                             email_id=email_id,
-                            payload={
-                                "week_key": week_key,
-                                "account_email": account_email,
-                                "total_emails": data.total_emails,
-                                "deferred_emails": data.deferred_emails,
-                            },
+                            payload=contract_payload,
                         )
                     )
                 except Exception as exc:  # pragma: no cover - defensive logging
