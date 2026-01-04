@@ -128,18 +128,45 @@ def test_collect_weekly_data_accepts_account_emails() -> None:
         def __init__(self) -> None:
             self.seen: dict[str, object] = {}
 
-        def weekly_email_volume(self, *, account_email: str, days: int = 7) -> dict[str, int]:
+        def weekly_email_volume(
+            self,
+            *,
+            account_email: str,
+            days: int = 7,
+            account_emails: list[str] | None = None,
+        ) -> dict[str, int]:
+            self.seen["volume"] = account_emails
             return {"total": 0, "deferred": 0}
 
-        def weekly_attention_entities(self, *, account_email: str, days: int = 7) -> list[dict[str, object]]:
+        def weekly_attention_entities(
+            self,
+            *,
+            account_email: str,
+            days: int = 7,
+            account_emails: list[str] | None = None,
+        ) -> list[dict[str, object]]:
+            self.seen["attention"] = account_emails
             return []
 
-        def weekly_commitment_counts(self, *, account_email: str, days: int = 7) -> dict[str, int]:
+        def weekly_commitment_counts(
+            self,
+            *,
+            account_email: str,
+            days: int = 7,
+            account_emails: list[str] | None = None,
+        ) -> dict[str, int]:
+            self.seen["commitments"] = account_emails
             return {}
 
         def weekly_overdue_commitments(
-            self, *, account_email: str, days: int = 7, limit: int = 5
+            self,
+            *,
+            account_email: str,
+            days: int = 7,
+            limit: int = 5,
+            account_emails: list[str] | None = None,
         ) -> list[dict[str, object]]:
+            self.seen["overdue"] = account_emails
             return []
 
         def weekly_trust_score_deltas(self, *, days: int = 7) -> dict[str, list[dict[str, object]]]:
@@ -205,3 +232,7 @@ def test_collect_weekly_data_accepts_account_emails() -> None:
     assert analytics.seen["accuracy"] == account_emails
     assert analytics.seen["calibration"] == account_emails
     assert analytics.seen["progress"] == account_emails
+    assert analytics.seen["volume"] == account_emails
+    assert analytics.seen["attention"] == account_emails
+    assert analytics.seen["commitments"] == account_emails
+    assert analytics.seen["overdue"] == account_emails

@@ -1515,40 +1515,32 @@ class KnowledgeAnalytics:
                 return True
         return False
 
-    def weekly_email_volume(self, *, account_email: str, days: int = 7) -> dict[str, int]:
-        if not account_email:
+    def weekly_email_volume(
+        self,
+        *,
+        account_email: str,
+        days: int = 7,
+        account_emails: Iterable[str] | None = None,
+    ) -> dict[str, int]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return {"total": 0, "deferred": 0}
         since_ts = self._window_start_ts(days)
-        try:
-            total_rows = self._execute_select(
-                """
-                SELECT COUNT(*) AS total
-                FROM events_v1
-                WHERE account_id = ?
-                  AND event_type = 'email_received'
-                  AND ts_utc >= ?
-                """,
-                (account_email, since_ts),
-            )
-            deferred_rows = self._execute_select(
-                """
-                SELECT COUNT(*) AS total
-                FROM events_v1
-                WHERE account_id = ?
-                  AND event_type = 'attention_deferred_for_digest'
-                  AND ts_utc >= ?
-                """,
-                (account_email, since_ts),
-            )
-        except sqlite3.OperationalError:
-            return {"total": 0, "deferred": 0}
-        row = {
-            "total": int(total_rows[0].get("total") or 0) if total_rows else 0,
-            "deferred": int(deferred_rows[0].get("total") or 0) if deferred_rows else 0,
-        }
         return {
-            "total": int(row.get("total") or 0),
-            "deferred": int(row.get("deferred") or 0),
+            "total": int(
+                self._event_count_scoped(
+                    account_ids=account_ids,
+                    event_type="email_received",
+                    since_ts=since_ts,
+                )
+            ),
+            "deferred": int(
+                self._event_count_scoped(
+                    account_ids=account_ids,
+                    event_type="attention_deferred_for_digest",
+                    since_ts=since_ts,
+                )
+            ),
         }
 
     def weekly_accuracy_report(
@@ -1874,13 +1866,18 @@ class KnowledgeAnalytics:
         return report
 
     def weekly_attention_entities(
-        self, *, account_email: str, days: int = 7
+        self,
+        *,
+        account_email: str,
+        days: int = 7,
+        account_emails: Iterable[str] | None = None,
     ) -> list[dict[str, object]]:
-        if not account_email:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return []
         since_ts = self._window_start_ts(days)
-        rows = self._event_rows(
-            account_id=account_email,
+        rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="email_received",
             since_ts=since_ts,
         )
@@ -2058,18 +2055,23 @@ class KnowledgeAnalytics:
         return metrics
 
     def weekly_commitment_counts(
-        self, *, account_email: str, days: int = 7
+        self,
+        *,
+        account_email: str,
+        days: int = 7,
+        account_emails: Iterable[str] | None = None,
     ) -> dict[str, int]:
-        if not account_email:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return {"created": 0, "fulfilled": 0, "overdue": 0}
         since_ts = self._window_start_ts(days)
-        created_rows = self._event_rows(
-            account_id=account_email,
+        created_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="commitment_created",
             since_ts=since_ts,
         )
-        status_rows = self._event_rows(
-            account_id=account_email,
+        status_rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="commitment_status_changed",
             since_ts=since_ts,
         )
@@ -2094,13 +2096,19 @@ class KnowledgeAnalytics:
         }
 
     def weekly_overdue_commitments(
-        self, *, account_email: str, days: int = 7, limit: int = 5
+        self,
+        *,
+        account_email: str,
+        days: int = 7,
+        limit: int = 5,
+        account_emails: Iterable[str] | None = None,
     ) -> list[dict[str, object]]:
-        if not account_email:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
             return []
         since_ts = self._window_start_ts(days)
-        rows = self._event_rows(
-            account_id=account_email,
+        rows = self._event_rows_scoped(
+            account_ids=account_ids,
             event_type="commitment_status_changed",
             since_ts=since_ts,
         )

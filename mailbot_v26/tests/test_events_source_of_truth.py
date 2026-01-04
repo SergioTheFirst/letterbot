@@ -163,6 +163,264 @@ def test_analytics_from_events(tmp_path) -> None:
     assert commitments["fulfilled"] == 1
 
 
+def test_weekly_metrics_scoped_multi_account(tmp_path) -> None:
+    db_path = tmp_path / "weekly_scoped.sqlite"
+    KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    contract_emitter = ContractEventEmitter(db_path)
+
+    now = datetime.now(timezone.utc)
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=201,
+            payload={
+                "from_email": "primary@example.com",
+                "subject": "Hello world",
+                "body_summary": "",
+                "attachments_count": 0,
+            },
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=now.timestamp(),
+            account_id="alt@example.com",
+            entity_id=None,
+            email_id=202,
+            payload={
+                "from_email": "alt@example.com",
+                "subject": "Alt subject",
+                "body_summary": "Three word summary",
+                "attachments_count": 0,
+            },
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=201,
+            payload={"reason": "test", "attachments_only": False, "attachments_count": 0},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+            ts_utc=now.timestamp(),
+            account_id="alt@example.com",
+            entity_id=None,
+            email_id=202,
+            payload={"reason": "test", "attachments_only": False, "attachments_count": 0},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_CREATED,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=301,
+            payload={"commitment_text": "primary task"},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_CREATED,
+            ts_utc=now.timestamp(),
+            account_id="alt@example.com",
+            entity_id=None,
+            email_id=302,
+            payload={"commitment_text": "alt task"},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_STATUS_CHANGED,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=301,
+            payload={"new_status": "fulfilled"},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_STATUS_CHANGED,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=301,
+            payload={
+                "new_status": "expired",
+                "from_email": "primary@example.com",
+                "commitment_text": "primary task",
+                "deadline_iso": "2025-01-10",
+            },
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_STATUS_CHANGED,
+            ts_utc=now.timestamp(),
+            account_id="alt@example.com",
+            entity_id=None,
+            email_id=302,
+            payload={
+                "new_status": "expired",
+                "from_email": "alt@example.com",
+                "commitment_text": "alt task",
+                "deadline_iso": "2025-01-05",
+            },
+        )
+    )
+
+    scope = ["account@example.com", "alt@example.com"]
+
+    volume = analytics.weekly_email_volume(
+        account_email="account@example.com",
+        account_emails=scope,
+        days=7,
+    )
+    assert volume == {"total": 2, "deferred": 2}
+
+    attention = analytics.weekly_attention_entities(
+        account_email="account@example.com",
+        account_emails=scope,
+        days=7,
+    )
+    attention_map = {item["entity"]: item["words"] for item in attention}
+    assert attention_map["primary@example.com"] == 2
+    assert attention_map["alt@example.com"] == 3
+
+    commitments = analytics.weekly_commitment_counts(
+        account_email="account@example.com",
+        account_emails=scope,
+        days=7,
+    )
+    assert commitments == {"created": 2, "fulfilled": 1, "overdue": 2}
+
+    overdue = analytics.weekly_overdue_commitments(
+        account_email="account@example.com",
+        account_emails=scope,
+        days=7,
+        limit=5,
+    )
+    assert [item["from_email"] for item in overdue] == [
+        "alt@example.com",
+        "primary@example.com",
+    ]
+
+
+def test_weekly_metrics_empty_scope_fallback(tmp_path) -> None:
+    db_path = tmp_path / "weekly_empty_scope.sqlite"
+    KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    contract_emitter = ContractEventEmitter(db_path)
+
+    now = datetime.now(timezone.utc)
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=401,
+            payload={
+                "from_email": "primary@example.com",
+                "subject": "Hello world",
+                "body_summary": "",
+                "attachments_count": 0,
+            },
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=now.timestamp(),
+            account_id="alt@example.com",
+            entity_id=None,
+            email_id=402,
+            payload={
+                "from_email": "alt@example.com",
+                "subject": "Alt subject",
+                "body_summary": "",
+                "attachments_count": 0,
+            },
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=401,
+            payload={"reason": "test", "attachments_only": False, "attachments_count": 0},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_CREATED,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=501,
+            payload={"commitment_text": "primary task"},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_CREATED,
+            ts_utc=now.timestamp(),
+            account_id="alt@example.com",
+            entity_id=None,
+            email_id=502,
+            payload={"commitment_text": "alt task"},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_STATUS_CHANGED,
+            ts_utc=now.timestamp(),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=501,
+            payload={"new_status": "fulfilled"},
+        )
+    )
+    contract_emitter.emit(
+        EventV1(
+            event_type=EventType.COMMITMENT_STATUS_CHANGED,
+            ts_utc=now.timestamp(),
+            account_id="alt@example.com",
+            entity_id=None,
+            email_id=502,
+            payload={"new_status": "expired"},
+        )
+    )
+
+    volume = analytics.weekly_email_volume(
+        account_email="account@example.com",
+        account_emails=[],
+        days=7,
+    )
+    assert volume == {"total": 1, "deferred": 1}
+
+    commitments = analytics.weekly_commitment_counts(
+        account_email="account@example.com",
+        account_emails=[],
+        days=7,
+    )
+    assert commitments == {"created": 1, "fulfilled": 1, "overdue": 0}
+
+
 def test_scoped_deferred_commitments_aggregate(tmp_path) -> None:
     db_path = tmp_path / "scoped.sqlite"
     db = KnowledgeDB(db_path)
