@@ -45,6 +45,22 @@ minute = 0
     )
 
 
+def _write_accounts(path: Path) -> None:
+    (path / "accounts.ini").write_text(
+        """[primary]
+login = account@example.com
+password = pass
+telegram_chat_id = chat
+
+[secondary]
+login = alt@example.com
+password = pass
+telegram_chat_id = chat
+""",
+        encoding="utf-8",
+    )
+
+
 def _build_config(tmp_path: Path) -> BotConfig:
     return BotConfig(
         general=GeneralConfig(
@@ -88,6 +104,7 @@ def _build_storage(tmp_path: Path) -> digest_scheduler.DigestStorage:
 def test_silence_scan_runs_when_flag_enabled(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.ini"
     _write_config(config_path, silence_mode="shadow")
+    _write_accounts(tmp_path)
     monkeypatch.setattr(digest_scheduler, "_CONFIG_PATH", config_path)
 
     calls: list[dict[str, object]] = []
@@ -107,6 +124,10 @@ def test_silence_scan_runs_when_flag_enabled(monkeypatch, tmp_path) -> None:
     )
 
     assert len(calls) == 1
+    assert calls[0]["account_emails"] == [
+        "account@example.com",
+        "alt@example.com",
+    ]
 
 
 def test_silence_scan_skipped_when_flag_disabled(monkeypatch, tmp_path) -> None:

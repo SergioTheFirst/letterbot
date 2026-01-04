@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timezone
+from typing import Iterable
 
 from mailbot_v26.config.silence_policy import SilencePolicyConfig
 from mailbot_v26.events.contract import EventType, EventV1
@@ -16,45 +17,48 @@ def run_silence_scan(
     knowledge_db,
     event_emitter,
     account_email: str,
+    account_emails: Iterable[str] | None = None,
     now_ts: float,
     policy: SilencePolicyConfig,
 ) -> int:
     try:
+        scope_emails = _normalize_account_scope(account_email, account_emails)
+        placeholders = ",".join("?" for _ in scope_emails)
         cutoff_ts = now_ts - (policy.lookback_days * 86400)
         cutoff_iso = datetime.fromtimestamp(
             cutoff_ts, tz=timezone.utc
         ).isoformat()
         with sqlite3.connect(knowledge_db.path) as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT
                     from_email,
                     MIN(received_at),
                     MAX(received_at),
                     COUNT(*)
                 FROM emails
-                WHERE account_email = ?
+                WHERE account_email IN ({placeholders})
                   AND received_at >= ?
                   AND from_email IS NOT NULL
                   AND from_email != ''
                 GROUP BY from_email
                 HAVING COUNT(*) >= ?
                 """,
-                (account_email, cutoff_iso, policy.min_messages),
+                (*scope_emails, cutoff_iso, policy.min_messages),
             ).fetchall()
 
             cooldown_ts = now_ts - (policy.cooldown_hours * 3600)
             recent_events = conn.execute(
-                """
+                f"""
                 SELECT payload
                 FROM events_v1
                 WHERE event_type = ?
-                  AND account_id = ?
+                  AND account_id IN ({placeholders})
                   AND ts_utc >= ?
                 """,
                 (
                     EventType.SILENCE_SIGNAL_DETECTED.value,
-                    account_email,
+                    *scope_emails,
                     cooldown_ts,
                 ),
             ).fetchall()
@@ -151,6 +155,26 @@ def _load_contact(payload_raw: str | None) -> str | None:
     payload = json.loads(payload_raw)
     contact = payload.get("contact")
     return str(contact) if contact else None
+
+
+def _normalize_account_scope(
+    account_email: str,
+    account_emails: Iterable[str] | None,
+) -> list[str]:
+    if account_emails:
+        cleaned = {
+            str(email).strip()
+            for email in account_emails
+            if str(email or "").strip()
+        }
+    else:
+        cleaned = set()
+    scope = sorted(cleaned)
+    if not scope:
+        fallback = str(account_email or "").strip()
+        if fallback:
+            return [fallback]
+    return scope
 
 
 __all__ = ["run_silence_scan"]
