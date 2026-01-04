@@ -213,3 +213,67 @@ def test_silence_respects_max_per_run_ordering(tmp_path) -> None:
     assert row is not None
     payload = json.loads(row[0])
     assert payload["contact"] == "older@example.com"
+
+
+def test_silence_scope_aggregates_and_dedupes(tmp_path) -> None:
+    db_path = tmp_path / "silence.sqlite"
+    knowledge_db = KnowledgeDB(db_path)
+    emitter = ContractEventEmitter(db_path)
+    policy = SilencePolicyConfig(
+        lookback_days=60,
+        min_messages=3,
+        silence_factor=2.0,
+        min_silence_days=7,
+        cooldown_hours=72,
+        max_per_run=20,
+    )
+    now = datetime(2024, 1, 20, tzinfo=timezone.utc)
+    received_at = now - timedelta(days=20)
+    _seed_emails(
+        db_path,
+        account_email="account-a@example.com",
+        from_email="contact@example.com",
+        received_at_list=[received_at, received_at],
+    )
+    _seed_emails(
+        db_path,
+        account_email="account-b@example.com",
+        from_email="contact@example.com",
+        received_at_list=[received_at, received_at],
+    )
+
+    first = run_silence_scan(
+        knowledge_db=knowledge_db,
+        event_emitter=emitter,
+        account_email="account-a@example.com",
+        account_emails=[
+            "account-b@example.com",
+            " account-a@example.com ",
+            "account-a@example.com",
+        ],
+        now_ts=now.timestamp(),
+        policy=policy,
+    )
+    second = run_silence_scan(
+        knowledge_db=knowledge_db,
+        event_emitter=emitter,
+        account_email="account-b@example.com",
+        account_emails=["account-b@example.com", "account-a@example.com"],
+        now_ts=(now + timedelta(hours=1)).timestamp(),
+        policy=policy,
+    )
+
+    assert first == 1
+    assert second == 0
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT payload
+            FROM events_v1
+            WHERE event_type = ?
+            """,
+            (EventType.SILENCE_SIGNAL_DETECTED.value,),
+        ).fetchone()
+    assert row is not None
+    payload = json.loads(row[0])
+    assert payload["count_window"] == 4

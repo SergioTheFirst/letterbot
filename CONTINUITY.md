@@ -114,3 +114,4 @@ Working set (files / tables / tests):
 2026-01-03: daily digest digest-insights (deadlock/silence) now aggregate by chat-scope account_emails (single-user multi-account).
 2026-01-03: daily+weekly digest attention economics + daily commitment-chain + regret-minimization now aggregate by chat-scope account_emails (single-user multi-account).
 2026-01-04: weekly digest base metrics now aggregate by chat-scope account_emails (single-user multi-account).
+2026-01-04: silence detector now aggregates by chat-scope account_emails (single-user multi-account).

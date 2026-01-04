@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from mailbot_v26.behavior.silence_detector import run_silence_scan
+from mailbot_v26.config_loader import resolve_account_scope
 from mailbot_v26.config.regret_minimization import (
     RegretMinimizationConfig,
     load_regret_minimization_config,
@@ -583,6 +584,13 @@ def _run_daily_digest(
     include_quality_metrics: bool = False,
     include_weekly_accuracy_report: bool = False,
 ) -> None:
+    resolved_scope = resolve_account_scope(
+        account_email, base_dir=_CONFIG_PATH.parent
+    )
+    scope_account_emails = (
+        resolved_scope.account_emails if resolved_scope else None
+    )
+
     if not _is_daily_due(now, config):
         logger.info(
             "digest_tick_checked",
@@ -610,6 +618,7 @@ def _run_daily_digest(
                     knowledge_db=storage.knowledge_db,
                     event_emitter=storage.contract_event_emitter,
                     account_email=account_email,
+                    account_emails=scope_account_emails,
                     now_ts=now.timestamp(),
                     policy=silence_policy,
                 )
