@@ -249,3 +249,35 @@ CREATE INDEX IF NOT EXISTS idx_commitments_status
 
 CREATE INDEX IF NOT EXISTS idx_commitments_deadline_iso
     ON commitments(deadline_iso);
+
+CREATE TABLE IF NOT EXISTS processing_spans (
+    span_id TEXT PRIMARY KEY,
+    ts_start_utc REAL NOT NULL,
+    ts_end_utc REAL NOT NULL,
+    total_duration_ms INTEGER NOT NULL,
+    account_id TEXT NOT NULL,
+    email_id INTEGER,
+    stage_durations_json TEXT NOT NULL DEFAULT '{}',
+    llm_provider TEXT,
+    llm_model TEXT,
+    llm_latency_ms INTEGER,
+    llm_quality_score REAL,
+    fallback_used INTEGER NOT NULL DEFAULT 0,
+    outcome TEXT NOT NULL,
+    error_code TEXT NOT NULL DEFAULT '',
+    health_snapshot_id TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS system_health_snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    ts_utc REAL NOT NULL,
+    payload_json TEXT NOT NULL,
+    gates_state TEXT,
+    metrics_brief TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_spans_account_ts
+    ON processing_spans(account_id, ts_start_utc);
+
+CREATE INDEX IF NOT EXISTS idx_processing_spans_email_id
+    ON processing_spans(email_id);
