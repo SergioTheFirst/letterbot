@@ -120,9 +120,28 @@ class ProcessingSpanRecorder:
                         ts_utc REAL NOT NULL,
                         payload_json TEXT NOT NULL,
                         gates_state TEXT,
-                        metrics_brief TEXT
+                        metrics_brief TEXT,
+                        system_mode TEXT
                     );
                     """
+                )
+                self._ensure_column(
+                    conn,
+                    table="system_health_snapshots",
+                    column="gates_state",
+                    definition="TEXT",
+                )
+                self._ensure_column(
+                    conn,
+                    table="system_health_snapshots",
+                    column="metrics_brief",
+                    definition="TEXT",
+                )
+                self._ensure_column(
+                    conn,
+                    table="system_health_snapshots",
+                    column="system_mode",
+                    definition="TEXT",
                 )
                 conn.execute(
                     """
@@ -348,8 +367,9 @@ class ProcessingSpanRecorder:
                             ts_utc,
                             payload_json,
                             gates_state,
-                            metrics_brief
-                        ) VALUES (?, ?, ?, ?, ?)
+                            metrics_brief,
+                            system_mode
+                        ) VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         (
                             snapshot_id,
@@ -357,6 +377,7 @@ class ProcessingSpanRecorder:
                             canonical_json,
                             _extract_gates_state(sanitized_payload),
                             _extract_metrics_brief(sanitized_payload),
+                            _extract_system_mode(sanitized_payload),
                         ),
                     )
                     conn.commit()
@@ -430,6 +451,16 @@ def _extract_metrics_brief(payload: Mapping[str, Any]) -> str:
     try:
         return json.dumps(brief, ensure_ascii=False, separators=(",", ":"))
     except (TypeError, ValueError):
+        return ""
+
+
+def _extract_system_mode(payload: Mapping[str, Any]) -> str:
+    mode = payload.get("mode") if isinstance(payload, Mapping) else None
+    if mode is None:
+        return ""
+    try:
+        return str(mode)
+    except Exception:
         return ""
 
 

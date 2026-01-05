@@ -8,7 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from mailbot_v26.events.contract import EventType
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
@@ -93,6 +93,18 @@ class KnowledgeAnalytics:
         if cleaned_primary:
             return [cleaned_primary]
         return []
+
+    @staticmethod
+    def _parse_json_dict(raw: object) -> dict[str, object]:
+        if raw is None:
+            return {}
+        try:
+            loaded = json.loads(str(raw))
+            if isinstance(loaded, dict):
+                return loaded
+        except (TypeError, ValueError):
+            return {}
+        return {}
 
     @staticmethod
     def _account_scope_clause(account_ids: Sequence[str]) -> tuple[str, list[object]]:
@@ -2815,3 +2827,80 @@ class KnowledgeAnalytics:
 
         errors.sort(key=lambda item: float(item.get("ts_start") or 0.0), reverse=True)
         return errors[: max(0, int(limit))]
+
+    @staticmethod
+    def _build_health_entry(row: Mapping[str, object]) -> dict[str, object]:
+        gates_state = KnowledgeAnalytics._parse_json_dict(row.get("gates_state"))
+        metrics_brief = KnowledgeAnalytics._parse_json_dict(row.get("metrics_brief"))
+        ts_value = row.get("ts_end_utc") or row.get("ts_end")
+        try:
+            ts_end_utc = float(ts_value) if ts_value is not None else None
+        except (TypeError, ValueError):
+            ts_end_utc = None
+        return {
+            "ts_end_utc": ts_end_utc,
+            "snapshot_id": row.get("snapshot_id"),
+            "system_mode": row.get("system_mode") or "",
+            "gates_state": gates_state,
+            "metrics_brief": metrics_brief,
+        }
+
+    def processing_spans_health_current(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+    ) -> dict[str, object] | None:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return None
+        since_ts = self._window_start_ts(window_days)
+        query = """
+        SELECT ps.ts_end_utc, ps.health_snapshot_id AS snapshot_id,
+               sh.gates_state, sh.metrics_brief, sh.system_mode
+        FROM processing_spans ps
+        JOIN system_health_snapshots sh ON ps.health_snapshot_id = sh.snapshot_id
+        WHERE ps.health_snapshot_id != '' AND ps.ts_end_utc >= ?
+        """
+        clause, clause_params = self._account_scope_clause(account_ids)
+        params: list[object] = [since_ts, *clause_params]
+        query += clause
+        query += " ORDER BY ps.ts_end_utc DESC, ps.span_id DESC LIMIT 1"
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return None
+        if not rows:
+            return None
+        return self._build_health_entry(rows[0])
+
+    def processing_spans_health_timeline(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+        limit: int = 200,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return []
+        since_ts = self._window_start_ts(window_days)
+        resolved_limit = min(500, max(1, int(limit)))
+        query = """
+        SELECT ps.ts_end_utc, ps.health_snapshot_id AS snapshot_id,
+               sh.gates_state, sh.metrics_brief, sh.system_mode
+        FROM processing_spans ps
+        JOIN system_health_snapshots sh ON ps.health_snapshot_id = sh.snapshot_id
+        WHERE ps.health_snapshot_id != '' AND ps.ts_end_utc >= ?
+        """
+        clause, clause_params = self._account_scope_clause(account_ids)
+        params: list[object] = [since_ts, *clause_params, resolved_limit]
+        query += clause
+        query += " ORDER BY ps.ts_end_utc DESC, ps.span_id DESC LIMIT ?"
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return []
+        return [self._build_health_entry(row) for row in rows]

@@ -273,7 +273,8 @@ CREATE TABLE IF NOT EXISTS system_health_snapshots (
     ts_utc REAL NOT NULL,
     payload_json TEXT NOT NULL,
     gates_state TEXT,
-    metrics_brief TEXT
+    metrics_brief TEXT,
+    system_mode TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_processing_spans_account_ts
