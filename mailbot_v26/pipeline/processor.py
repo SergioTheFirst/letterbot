@@ -82,6 +82,7 @@ from mailbot_v26.observability.metrics import (
     SystemGates,
     SystemHealthSnapshotter,
 )
+from mailbot_v26.observability.processing_span import ProcessingSpanRecorder
 from mailbot_v26.observability.notification_sla import (
     NotificationAlertStore,
     NotificationSLAResult,
@@ -164,6 +165,7 @@ auto_priority_quality_gate = AutoPriorityQualityGate(
 metrics_aggregator = MetricsAggregator(DB_PATH)
 system_gates = SystemGates()
 system_snapshotter = SystemHealthSnapshotter(metrics_aggregator, system_gates)
+processing_span_recorder = ProcessingSpanRecorder(DB_PATH)
 feature_flags = FeatureFlags()
 runtime_flag_store = RuntimeFlagStore()
 trust_score_calculator = TrustScoreCalculator(analytics)
@@ -414,6 +416,23 @@ def _collect_policy_inputs() -> PolicyInputs:
         runtime_flags=runtime_flags,
         notification_sla=notification_sla,
     )
+
+
+def _build_health_snapshot_payload() -> dict[str, Any]:
+    try:
+        metrics = metrics_aggregator.snapshot()
+        gates_eval = system_gates.evaluate(metrics)
+        return {
+            "metrics": metrics,
+            "gates": {
+                "passed": gates_eval.passed if gates_eval else False,
+                "failed": list(gates_eval.failed_reasons) if gates_eval else [],
+            },
+            "system_mode": system_health.mode.value,
+        }
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("health_snapshot_payload_failed", error=str(exc))
+        return {}
 
 
 def _evaluate_policy(
@@ -2686,6 +2705,7 @@ def _record_analytics(
             or ""
         )
         llm_model = _read_llm_field(llm_result, "llm_model", "") or ""
+        llm_model_for_span = llm_model or None
 
         decision_trace_writer.write(
             email_id=str(message_id),
@@ -3317,296 +3337,301 @@ def process_message(
     NOTE: Поведение Telegram и LLM НЕ МЕНЯЕМ
     """
 
-    try:
-        system_snapshotter.maybe_log()
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("system_health_snapshot_failed", error=str(exc))
-    policy_inputs = _collect_policy_inputs()
+    span = processing_span_recorder.start(
+        account_id=account_email, email_id=message_id
+    )
+    outcome = "ok"
+    error_code = ""
+    llm_provider_for_span: str | None = None
+    llm_model_for_span: str | None = None
+    llm_latency_ms: int | None = None
+    llm_quality_score: float | None = None
+    health_snapshot_payload: dict[str, Any] | None = None
+    fallback_used = False
+    telegram_delivered = False
+    parse_timer_start = time.perf_counter()
 
-    # ---------- Stage PARSE (Commitment Tracker) ----------
-    logger.info(
-        "email_received",
-        email_id=message_id,
-        account=account_email,
-        from_email=from_email,
-        subject=subject,
-        received_at=received_at.isoformat(),
-    )
-    thread_key = compute_thread_key(
-        account_email=account_email,
-        rfc_message_id=rfc_message_id,
-        in_reply_to=in_reply_to,
-        references=references,
-        subject=subject,
-        from_email=from_email,
-    )
-    mail_type: str | None = None
-    mail_type_reasons: list[str] = []
-    hierarchy_enabled = getattr(feature_flags, "ENABLE_HIERARCHICAL_MAIL_TYPES", False)
-    mail_type_attachments = [
-        MailTypeAttachment(
-            filename=attachment.get("filename"),
-            content_type=attachment.get("content_type") or attachment.get("type") or "",
-        )
-        for attachment in attachments or []
-    ]
     try:
-        mail_type, mail_type_reasons = MailTypeClassifier.classify_detailed(
-            subject=subject,
-            body=body_text or "",
-            attachments=mail_type_attachments,
-            enable_hierarchy=hierarchy_enabled,
-        )
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error(
-            "mail_type_classification_failed",
-            email_id=message_id,
-            error=str(exc),
-        )
-        mail_type = MailTypeClassifier.classify(
-            subject=subject,
-            body=body_text or "",
-            attachments=mail_type_attachments,
-        )
-        mail_type_reasons = ["mt.base=fallback"]
-    if mail_type:
-        logger.info(
-            "mail_type_classified",
-            email_id=message_id,
-            mail_type=mail_type,
-            reason_codes=mail_type_reasons,
-            hierarchy_enabled=hierarchy_enabled,
-        )
-    commitments: list[Commitment] = []
-    enable_commitments = getattr(feature_flags, "ENABLE_COMMITMENT_TRACKER", False)
-    if enable_commitments:
         try:
-            commitments = detect_commitments(body_text or "")
-            if commitments:
-                logger.info(
-                    "commitment_detected",
-                    email_id=message_id,
-                    account=account_email,
-                    sender=from_email,
-                    count=len(commitments),
-                    has_deadlines=any(c.deadline_iso for c in commitments),
-                )
+            system_snapshotter.maybe_log()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("system_health_snapshot_failed", error=str(exc))
+        policy_inputs = _collect_policy_inputs()
+
+        # ---------- Stage PARSE (Commitment Tracker) ----------
+        logger.info(
+            "email_received",
+            email_id=message_id,
+            account=account_email,
+            from_email=from_email,
+            subject=subject,
+            received_at=received_at.isoformat(),
+        )
+        thread_key = compute_thread_key(
+            account_email=account_email,
+            rfc_message_id=rfc_message_id,
+            in_reply_to=in_reply_to,
+            references=references,
+            subject=subject,
+            from_email=from_email,
+        )
+        mail_type: str | None = None
+        mail_type_reasons: list[str] = []
+        hierarchy_enabled = getattr(feature_flags, "ENABLE_HIERARCHICAL_MAIL_TYPES", False)
+        mail_type_attachments = [
+            MailTypeAttachment(
+                filename=attachment.get("filename"),
+                content_type=attachment.get("content_type") or attachment.get("type") or "",
+            )
+            for attachment in attachments or []
+        ]
+        try:
+            mail_type, mail_type_reasons = MailTypeClassifier.classify_detailed(
+                subject=subject,
+                body=body_text or "",
+                attachments=mail_type_attachments,
+                enable_hierarchy=hierarchy_enabled,
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error(
-                "commitment_detection_failed",
+                "mail_type_classification_failed",
                 email_id=message_id,
                 error=str(exc),
             )
-
-    try:
-        event_emitter.emit(
-            type="email_received",
-            timestamp=received_at,
-            email_id=message_id,
-            payload={
-                "account_email": account_email,
-                "from_email": from_email,
-                "subject": subject,
-                "mail_type": mail_type,
-                "mail_type_reasons": mail_type_reasons,
-            },
-        )
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("event_emit_failed", error=str(exc))
-
-    # ---------- Stage LLM ----------
-    llm_context = _build_context(
-        message_id=message_id,
-        from_email=from_email,
-        from_name=from_name,
-        subject=subject,
-        received_at=received_at,
-        body_text=body_text or "",
-    )
-    entity_resolution = llm_context.entity_resolution
-    signal_quality = llm_context.signal_quality
-    contract_event_entity_id = (
-        entity_resolution.entity_id if entity_resolution else None
-    )
-    contract_event_payload = {
-        "from_email": from_email,
-        "subject": subject,
-        "attachments_count": len(attachments),
-        "occurred_at_utc": received_at.timestamp(),
-        "thread_key": thread_key,
-    }
-    for attachment in attachments:
-        _emit_contract_event(
-            EventType.ATTACHMENT_EXTRACTED,
-            ts_utc=received_at.timestamp(),
-            account_id=account_email,
-            entity_id=entity_resolution.entity_id if entity_resolution else None,
-            email_id=message_id,
-            payload={
-                "filename": attachment.get("filename"),
-                "content_type": attachment.get("content_type") or attachment.get("type"),
-                "size_bytes": _attachment_size_bytes(attachment),
-                "text_length": _attachment_text_length(attachment),
-            },
-        )
-    llm_body_text = llm_context.llm_body_text
-    fallback_used = llm_context.fallback_used
-    llm_start = time.perf_counter()
-    try:
-        llm_result = run_llm_stage(
-            subject=subject,
-            from_email=from_email,
-            body_text=llm_body_text,
-            attachments=attachments,
-        )
-    except Exception as exc:
-        change = system_health.update_component(
-            "LLM",
-            False,
-            reason=str(exc) or "LLM stage failed",
-        )
-        _notify_system_mode_change(
-            change=change,
-            chat_id=telegram_chat_id,
-            account_email=account_email,
-        )
-        logger.error(
-            "processing_error",
-            stage="llm",
-            email_id=message_id,
-            error=str(exc),
-        )
-        raise
-    llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
-
-    if not llm_result:
-        change = system_health.update_component(
-            "LLM",
-            False,
-            reason="LLM returned empty result",
-        )
-        _notify_system_mode_change(
-            change=change,
-            chat_id=telegram_chat_id,
-            account_email=account_email,
-        )
-        logger.warning("llm_empty_result", email_id=message_id)
+            mail_type = MailTypeClassifier.classify(
+                subject=subject,
+                body=body_text or "",
+                attachments=mail_type_attachments,
+            )
+            mail_type_reasons = ["mt.base=fallback"]
+        if mail_type:
+            logger.info(
+                "mail_type_classified",
+                email_id=message_id,
+                mail_type=mail_type,
+                reason_codes=mail_type_reasons,
+                hierarchy_enabled=hierarchy_enabled,
+            )
+        commitments: list[Commitment] = []
+        enable_commitments = getattr(feature_flags, "ENABLE_COMMITMENT_TRACKER", False)
+        if enable_commitments:
+            try:
+                commitments = detect_commitments(body_text or "")
+                if commitments:
+                    logger.info(
+                        "commitment_detected",
+                        email_id=message_id,
+                        account=account_email,
+                        sender=from_email,
+                        count=len(commitments),
+                        has_deadlines=any(c.deadline_iso for c in commitments),
+                    )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "commitment_detection_failed",
+                    email_id=message_id,
+                    error=str(exc),
+                )
+    
         try:
+            event_emitter.emit(
+                type="email_received",
+                timestamp=received_at,
+                email_id=message_id,
+                payload={
+                    "account_email": account_email,
+                    "from_email": from_email,
+                    "subject": subject,
+                    "mail_type": mail_type,
+                    "mail_type_reasons": mail_type_reasons,
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("event_emit_failed", error=str(exc))
+
+        span.record_stage(
+            "parse", int((time.perf_counter() - parse_timer_start) * 1000)
+        )
+
+        # ---------- Stage LLM ----------
+        llm_context = _build_context(
+            message_id=message_id,
+            from_email=from_email,
+            from_name=from_name,
+            subject=subject,
+            received_at=received_at,
+            body_text=body_text or "",
+        )
+        entity_resolution = llm_context.entity_resolution
+        signal_quality = llm_context.signal_quality
+        llm_quality_score = signal_quality.quality_score
+        contract_event_entity_id = (
+            entity_resolution.entity_id if entity_resolution else None
+        )
+        contract_event_payload = {
+            "from_email": from_email,
+            "subject": subject,
+            "attachments_count": len(attachments),
+            "occurred_at_utc": received_at.timestamp(),
+            "thread_key": thread_key,
+        }
+        for attachment in attachments:
             _emit_contract_event(
-                EventType.EMAIL_RECEIVED,
+                EventType.ATTACHMENT_EXTRACTED,
                 ts_utc=received_at.timestamp(),
                 account_id=account_email,
-                entity_id=contract_event_entity_id,
+                entity_id=entity_resolution.entity_id if entity_resolution else None,
                 email_id=message_id,
-                payload={**contract_event_payload, "engine": "llm"},
+                payload={
+                    "filename": attachment.get("filename"),
+                    "content_type": attachment.get("content_type") or attachment.get("type"),
+                    "size_bytes": _attachment_size_bytes(attachment),
+                    "text_length": _attachment_text_length(attachment),
+                },
             )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("contract_event_emit_failed", error=str(exc))
-        return
-    change = system_health.update_component("LLM", True)
-    _notify_system_mode_change(
-        change=change,
-        chat_id=telegram_chat_id,
-        account_email=account_email,
-    )
-
-    priority = llm_result.priority
-    original_priority: str | None = None
-    priority_reason: str | None = None
-    action_line = llm_result.action_line
-    body_summary = llm_result.body_summary
-    attachment_summaries = llm_result.attachment_summaries
-    llm_provider: str | None = None
-    if hasattr(llm_result, "llm_provider"):
-        llm_provider = getattr(llm_result, "llm_provider")
-    elif isinstance(llm_result, dict):
-        llm_provider = llm_result.get("llm_provider")
-
-    # ---------- Shadow Priority (read-only, dry run) ----------
-    priority_v2_result = None
-    priority_v2_enabled = bool(getattr(feature_flags, "ENABLE_PRIORITY_V2", False))
-    if priority_v2_enabled:
+        llm_body_text = llm_context.llm_body_text
+        fallback_used = llm_context.fallback_used
+        llm_start = time.perf_counter()
         try:
-            priority_v2_result = priority_engine_v2.compute(
+            llm_result = run_llm_stage(
                 subject=subject,
-                body_text=body_text or "",
                 from_email=from_email,
-                mail_type=mail_type or "",
-                received_at=received_at,
-                commitments=commitments,
+                body_text=llm_body_text,
+                attachments=attachments,
             )
-            logger.info(
-                "priority_v2_computed",
+        except Exception as exc:
+            change = system_health.update_component(
+                "LLM",
+                False,
+                reason=str(exc) or "LLM stage failed",
+            )
+            _notify_system_mode_change(
+                change=change,
+                chat_id=telegram_chat_id,
+                account_email=account_email,
+            )
+            logger.error(
+                "processing_error",
+                stage="llm",
                 email_id=message_id,
-                score=priority_v2_result.score,
-                priority=priority_v2_result.priority,
-                reasons=priority_v2_result.reason_codes[:5],
-                model_version=priority_v2_result.model_version,
+                error=str(exc),
             )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("priority_v2_failed", error=str(exc))
-            priority_v2_result = None
-
-    shadow_priority, shadow_reason = shadow_priority_engine.compute(
-        llm_priority=priority,
-        from_email=from_email,
-    )
-    if priority_v2_result and _is_shadow_higher(
-        priority_v2_result.priority,
-        shadow_priority,
-    ):
-        shadow_priority = priority_v2_result.priority
-        shadow_reason = "Priority v2: " + ", ".join(
-            priority_v2_result.reason_codes[:5]
+            raise
+        llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
+        span.record_stage("llm", llm_latency_ms)
+    
+        if not llm_result:
+            change = system_health.update_component(
+                "LLM",
+                False,
+                reason="LLM returned empty result",
+            )
+            _notify_system_mode_change(
+                change=change,
+                chat_id=telegram_chat_id,
+                account_email=account_email,
+            )
+            logger.warning("llm_empty_result", email_id=message_id)
+            outcome = "partial"
+            error_code = "llm_empty"
+            try:
+                _emit_contract_event(
+                    EventType.EMAIL_RECEIVED,
+                    ts_utc=received_at.timestamp(),
+                    account_id=account_email,
+                    entity_id=contract_event_entity_id,
+                    email_id=message_id,
+                    payload={**contract_event_payload, "engine": "llm"},
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("contract_event_emit_failed", error=str(exc))
+            return
+        change = system_health.update_component("LLM", True)
+        _notify_system_mode_change(
+            change=change,
+            chat_id=telegram_chat_id,
+            account_email=account_email,
         )
-    if shadow_priority != priority:
-        logger.info(
-            "shadow_priority_computed",
-            from_email=from_email or "",
-            current_priority=priority,
-            shadow_priority=shadow_priority,
-            reason=shadow_reason or "",
-        )
-
-    priority_engine_label = "priority_v2_shadow" if priority_v2_result else "llm"
-
-    # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged + runtime) ----------
-    confidence_score: float | None = None
-    confidence_decision: str | None = None
-    llm_priority_for_confidence = priority
-    should_score_confidence = _is_shadow_higher(shadow_priority, priority) and (
-        feature_flags.ENABLE_AUTO_PRIORITY or feature_flags.ENABLE_AUTO_ACTIONS
-    )
-    if should_score_confidence:
-        confidence_score = priority_confidence_engine.score(
+        if fallback_used and outcome == "ok":
+            outcome = "fallback"
+    
+        priority = llm_result.priority
+        original_priority: str | None = None
+        priority_reason: str | None = None
+        action_line = llm_result.action_line
+        body_summary = llm_result.body_summary
+        attachment_summaries = llm_result.attachment_summaries
+        llm_provider: str | None = None
+        if hasattr(llm_result, "llm_provider"):
+            llm_provider = getattr(llm_result, "llm_provider")
+        elif isinstance(llm_result, dict):
+            llm_provider = llm_result.get("llm_provider")
+        llm_provider_for_span = llm_provider
+    
+        # ---------- Shadow Priority (read-only, dry run) ----------
+        priority_v2_result = None
+        priority_v2_enabled = bool(getattr(feature_flags, "ENABLE_PRIORITY_V2", False))
+        if priority_v2_enabled:
+            try:
+                priority_v2_result = priority_engine_v2.compute(
+                    subject=subject,
+                    body_text=body_text or "",
+                    from_email=from_email,
+                    mail_type=mail_type or "",
+                    received_at=received_at,
+                    commitments=commitments,
+                )
+                logger.info(
+                    "priority_v2_computed",
+                    email_id=message_id,
+                    score=priority_v2_result.score,
+                    priority=priority_v2_result.priority,
+                    reasons=priority_v2_result.reason_codes[:5],
+                    model_version=priority_v2_result.model_version,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("priority_v2_failed", error=str(exc))
+                priority_v2_result = None
+    
+        shadow_priority, shadow_reason = shadow_priority_engine.compute(
             llm_priority=priority,
-            shadow_priority=shadow_priority,
-            sender_stats=_lookup_sender_stats(from_email),
-            recent_history=_recent_history(from_email),
+            from_email=from_email,
         )
-
-    policy_decision = _evaluate_policy(policy_inputs)
-    auto_priority_outcome = AutoPriorityOutcome(
-        final_priority=priority,
-        original_priority=None,
-        priority_reason=None,
-        confidence_score=confidence_score,
-        confidence_decision=None,
-        gate_decision=None,
-        applied=False,
-        skipped_reason=None,
-    )
-    if policy_decision.allow_auto_priority:
-        try:
-            auto_priority_outcome = auto_priority_engine.evaluate(
+        if priority_v2_result and _is_shadow_higher(
+            priority_v2_result.priority,
+            shadow_priority,
+        ):
+            shadow_priority = priority_v2_result.priority
+            shadow_reason = "Priority v2: " + ", ".join(
+                priority_v2_result.reason_codes[:5]
+            )
+        if shadow_priority != priority:
+            logger.info(
+                "shadow_priority_computed",
+                from_email=from_email or "",
+                current_priority=priority,
+                shadow_priority=shadow_priority,
+                reason=shadow_reason or "",
+            )
+    
+        priority_engine_label = "priority_v2_shadow" if priority_v2_result else "llm"
+    
+        # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged + runtime) ----------
+        confidence_score: float | None = None
+        confidence_decision: str | None = None
+        llm_priority_for_confidence = priority
+        should_score_confidence = _is_shadow_higher(shadow_priority, priority) and (
+            feature_flags.ENABLE_AUTO_PRIORITY or feature_flags.ENABLE_AUTO_ACTIONS
+        )
+        if should_score_confidence:
+            confidence_score = priority_confidence_engine.score(
                 llm_priority=priority,
                 shadow_priority=shadow_priority,
-                shadow_reason=shadow_reason,
-                confidence_score=confidence_score,
+                sender_stats=_lookup_sender_stats(from_email),
+                recent_history=_recent_history(from_email),
             )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("auto_priority_error", error=str(exc))
-    elif feature_flags.ENABLE_AUTO_PRIORITY:
+    
+        policy_decision = _evaluate_policy(policy_inputs)
         auto_priority_outcome = AutoPriorityOutcome(
             final_priority=priority,
             original_priority=None,
@@ -3615,726 +3640,805 @@ def process_message(
             confidence_decision=None,
             gate_decision=None,
             applied=False,
-            skipped_reason="policy_denied",
+            skipped_reason=None,
         )
-        logger.info(
-            "auto_priority_skipped",
-            reason="policy_denied",
-            email_id=message_id,
-            system_mode=policy_decision.mode.value,
-        )
-
-    if auto_priority_outcome.applied:
-        original_priority = auto_priority_outcome.original_priority
-        priority = auto_priority_outcome.final_priority
-        priority_reason = auto_priority_outcome.priority_reason
-        confidence_decision = auto_priority_outcome.confidence_decision
-        priority_engine_label = "priority_v2_auto"
-    elif auto_priority_outcome.confidence_decision:
-        confidence_decision = auto_priority_outcome.confidence_decision
-
-    if policy_decision.allow_auto_priority and should_score_confidence:
-        logger.info(
-            "auto_priority_confidence_scored",
-            llm_priority=llm_priority_for_confidence,
-            shadow_priority=shadow_priority,
-            confidence=confidence_score or 0.0,
-            threshold=AutoPriorityGates.MIN_CONFIDENCE,
-            decision=confidence_decision or "SKIPPED",
-        )
-
-    logger.info(
-        "auto_priority_summary",
-        enabled=auto_priority_outcome.applied,
-        applied=auto_priority_outcome.applied,
-        llm_priority=llm_priority_for_confidence,
-        shadow_priority=shadow_priority,
-        final_priority=priority,
-        confidence=confidence_score or 0.0,
-    )
-
-    logger.info(
-        "llm_decision",
-        email_id=message_id,
-        llm_provider=llm_provider or "unknown",
-        priority_llm=llm_result.priority,
-        priority_shadow=shadow_priority,
-        final_priority=priority,
-        confidence=confidence_score or 0.0,
-        action_line=action_line,
-        latency_ms=llm_latency_ms,
-    )
-
-    try:
-        _emit_contract_event(
-            EventType.EMAIL_RECEIVED,
-            ts_utc=received_at.timestamp(),
-            account_id=account_email,
-            entity_id=contract_event_entity_id,
-            email_id=message_id,
-            payload={**contract_event_payload, "engine": priority_engine_label},
-        )
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("contract_event_emit_failed", error=str(exc))
-
-    if policy_decision.allow_auto_priority or feature_flags.ENABLE_AUTO_PRIORITY:
-        logger.info(
-            "auto_priority_evaluated",
-            email_id=message_id,
-            enabled=auto_priority_outcome.applied,
-            original_priority=original_priority or llm_result.priority,
-            final_priority=priority,
-            reason=priority_reason or "",
-            skipped_reason=auto_priority_outcome.skipped_reason or "",
-        )
-
-    # ---------- Shadow Action (read-only, dry run) ----------
-    shadow_tasks = shadow_action_engine.compute(
-        account_email=account_email,
-        from_email=from_email,
-    )
-    shadow_action_line: str | None = None
-    shadow_action_reason: str | None = None
-    if shadow_tasks:
-        shadow_action_line, shadow_action_reason = shadow_tasks[0]
-    for task, reason in shadow_tasks:
-        logger.info(
-            "shadow_action_candidate",
-            from_email=from_email or "",
-            task=task or "",
-            reason=reason or "",
-        )
-
-    shadow_priority_to_persist: str | None = None
-    shadow_priority_reason_to_persist: str | None = None
-    shadow_action_line_to_persist: str | None = None
-    shadow_action_reason_to_persist: str | None = None
-    confidence_score_to_persist: float | None = None
-    confidence_decision_to_persist: str | None = None
-    proposed_action_type_to_persist: str | None = None
-    proposed_action_text_to_persist: str | None = None
-    proposed_action_confidence_to_persist: float | None = None
-    proposed_action: dict | None = None
-    if feature_flags.ENABLE_AUTO_ACTIONS:
-        proposed_action = auto_action_engine.propose(
-            llm_action_line=action_line,
-            shadow_action=shadow_action_line,
-            priority=priority,
-            confidence=confidence_score or 0.0,
-        )
-
-        if proposed_action:
-            logger.info(
-                "auto_action_stored",
-                action_type=proposed_action.get("type", ""),
-                confidence=proposed_action.get("confidence", 0.0),
-                source=proposed_action.get("source", ""),
-            )
-        else:
-            logger.info("auto_action_skipped", reason="conditions_not_met")
-
-    if getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False) and proposed_action:
-        if not policy_decision.allow_preview:
-            preview_skip_reason = (
-                "system_degraded_no_llm"
-                if policy_decision.mode == OperationalMode.DEGRADED_NO_LLM
-                else "policy_denied"
-            )
-            logger.info(
-                "preview_actions_skipped",
-                reason=preview_skip_reason,
-                email_id=message_id,
-                account_email=account_email,
-                system_mode=policy_decision.mode.value,
-            )
-        else:
-            preview_reasons = [
-                reason
-                for reason in (shadow_action_reason, shadow_reason, priority_reason)
-                if reason
-            ]
-            preview = {
-            "email_id": message_id,
-            "original_priority": original_priority or llm_result.priority,
-            "final_priority": priority,
-            "proposed_actions": [proposed_action],
-            "confidence": proposed_action.get("confidence", 0.0),
-            "reasons": preview_reasons,
-        }
-            logger.info("preview_action_generated", preview=preview)
+        if policy_decision.allow_auto_priority:
             try:
-                knowledge_db.save_preview_action(
-                    email_id=message_id,
-                    proposed_action=proposed_action,
-                    confidence=proposed_action.get("confidence"),
+                auto_priority_outcome = auto_priority_engine.evaluate(
+                    llm_priority=priority,
+                    shadow_priority=shadow_priority,
+                    shadow_reason=shadow_reason,
+                    confidence_score=confidence_score,
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
-                logger.error("preview_action_persist_failed", error=str(exc))
-
-    if feature_flags.ENABLE_SHADOW_PERSISTENCE:
-        shadow_priority_to_persist = shadow_priority
-        shadow_priority_reason_to_persist = shadow_reason
-        shadow_action_line_to_persist = shadow_action_line
-        shadow_action_reason_to_persist = shadow_action_reason
-        confidence_score_to_persist = confidence_score
-        confidence_decision_to_persist = confidence_decision
-        proposed_action_type_to_persist = (
-            proposed_action.get("type") if proposed_action else None
-        )
-        proposed_action_text_to_persist = (
-            proposed_action.get("text") if proposed_action else None
-        )
-        proposed_action_confidence_to_persist = (
-            proposed_action.get("confidence") if proposed_action else None
-        )
-
-    analytics_result = _record_analytics(
-        account_email=account_email,
-        message_id=message_id,
-        from_email=from_email,
-        from_name=from_name,
-        subject=subject,
-        received_at=received_at,
-        body_text=body_text,
-        llm_result=llm_result,
-        llm_provider=llm_provider,
-        priority=priority,
-        original_priority=original_priority,
-        priority_reason=priority_reason,
-        shadow_priority_to_persist=shadow_priority_to_persist,
-        shadow_priority_reason_to_persist=shadow_priority_reason_to_persist,
-        shadow_action_line_to_persist=shadow_action_line_to_persist,
-        shadow_action_reason_to_persist=shadow_action_reason_to_persist,
-        confidence_score_to_persist=confidence_score_to_persist,
-        confidence_decision_to_persist=confidence_decision_to_persist,
-        proposed_action_type_to_persist=proposed_action_type_to_persist,
-        proposed_action_text_to_persist=proposed_action_text_to_persist,
-        proposed_action_confidence_to_persist=proposed_action_confidence_to_persist,
-        confidence_score=confidence_score,
-        shadow_priority=shadow_priority,
-        action_line=action_line,
-        body_summary=body_summary,
-        attachment_summaries=attachment_summaries,
-        rfc_message_id=rfc_message_id,
-        in_reply_to=in_reply_to,
-        references=references,
-        thread_key=thread_key,
-        commitments=commitments,
-        enable_commitments=enable_commitments,
-        entity_resolution=entity_resolution,
-        signal_quality=signal_quality,
-        fallback_used=fallback_used,
-        telegram_chat_id=telegram_chat_id,
-    )
-
-    narrative: NarrativeResult | None = None
-    if getattr(feature_flags, "ENABLE_NARRATIVE_BINDING", True):
-        narrative = compose_narrative(
-            email_id=message_id,
-            subject=subject,
-            body_text=body_text or "",
-            from_email=from_email,
-            mail_type=mail_type or "",
-            received_at=received_at,
-            attachments=attachments or [],
-            entity_id=entity_resolution.entity_id if entity_resolution else None,
-            analytics=analytics,
-            commitments=commitments,
-            enable_patterns=getattr(feature_flags, "ENABLE_NARRATIVE_PATTERNS", True),
-        )
-        if narrative:
-            append_narrative_insight(
-                analytics_result.aggregated_insights,
-                fact=narrative.fact,
-                pattern=narrative.pattern,
-                action=narrative.action,
-            )
-
-    policy_decision = _evaluate_policy(policy_inputs)
-    anomalies: list[Anomaly] = []
-    if policy_decision.allow_anomaly_alerts and entity_resolution:
-        try:
-            anomalies = compute_anomalies(
-                entity_id=entity_resolution.entity_id,
-                analytics=analytics,
-                now_dt=received_at,
+                logger.error("auto_priority_error", error=str(exc))
+        elif feature_flags.ENABLE_AUTO_PRIORITY:
+            auto_priority_outcome = AutoPriorityOutcome(
+                final_priority=priority,
+                original_priority=None,
+                priority_reason=None,
+                confidence_score=confidence_score,
+                confidence_decision=None,
+                gate_decision=None,
+                applied=False,
+                skipped_reason="policy_denied",
             )
             logger.info(
-                "anomaly_computed",
+                "auto_priority_skipped",
+                reason="policy_denied",
                 email_id=message_id,
-                entity_id=entity_resolution.entity_id,
-                count=len(anomalies),
-                max_severity=max_anomaly_severity(anomalies),
+                system_mode=policy_decision.mode.value,
+            )
+    
+        if auto_priority_outcome.applied:
+            original_priority = auto_priority_outcome.original_priority
+            priority = auto_priority_outcome.final_priority
+            priority_reason = auto_priority_outcome.priority_reason
+            confidence_decision = auto_priority_outcome.confidence_decision
+            priority_engine_label = "priority_v2_auto"
+        elif auto_priority_outcome.confidence_decision:
+            confidence_decision = auto_priority_outcome.confidence_decision
+    
+        if policy_decision.allow_auto_priority and should_score_confidence:
+            logger.info(
+                "auto_priority_confidence_scored",
+                llm_priority=llm_priority_for_confidence,
+                shadow_priority=shadow_priority,
+                confidence=confidence_score or 0.0,
+                threshold=AutoPriorityGates.MIN_CONFIDENCE,
+                decision=confidence_decision or "SKIPPED",
+            )
+    
+        logger.info(
+            "auto_priority_summary",
+            enabled=auto_priority_outcome.applied,
+            applied=auto_priority_outcome.applied,
+            llm_priority=llm_priority_for_confidence,
+            shadow_priority=shadow_priority,
+            final_priority=priority,
+            confidence=confidence_score or 0.0,
+        )
+    
+        logger.info(
+            "llm_decision",
+            email_id=message_id,
+            llm_provider=llm_provider or "unknown",
+            priority_llm=llm_result.priority,
+            priority_shadow=shadow_priority,
+            final_priority=priority,
+            confidence=confidence_score or 0.0,
+            action_line=action_line,
+            latency_ms=llm_latency_ms,
+        )
+    
+        try:
+            _emit_contract_event(
+                EventType.EMAIL_RECEIVED,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=contract_event_entity_id,
+                email_id=message_id,
+                payload={**contract_event_payload, "engine": priority_engine_label},
             )
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error(
-                "anomaly_compute_failed",
+            logger.error("contract_event_emit_failed", error=str(exc))
+    
+        if policy_decision.allow_auto_priority or feature_flags.ENABLE_AUTO_PRIORITY:
+            logger.info(
+                "auto_priority_evaluated",
                 email_id=message_id,
-                entity_id=entity_resolution.entity_id,
-                error=str(exc),
+                enabled=auto_priority_outcome.applied,
+                original_priority=original_priority or llm_result.priority,
+                final_priority=priority,
+                reason=priority_reason or "",
+                skipped_reason=auto_priority_outcome.skipped_reason or "",
             )
-            anomalies = []
-
-    enable_premium_clarity = bool(
-        getattr(feature_flags, "ENABLE_PREMIUM_CLARITY_V1", False)
-    )
-    render_result = _render_notification(
-        message_id=message_id,
-        received_at=received_at,
-        priority=priority,
-        from_email=from_email,
-        from_name=from_name,
-        subject=subject,
-        action_line=action_line,
-        body_summary=body_summary,
-        body_text=body_text or "",
-        attachments=attachments,
-        llm_result=llm_result,
-        signal_quality=signal_quality,
-        aggregated_insights=analytics_result.aggregated_insights,
-        insight_digest=analytics_result.insight_digest,
-        telegram_chat_id=telegram_chat_id,
-        account_email=account_email,
-        attachment_summaries=attachment_summaries,
-        commitments=commitments,
-        enable_premium_clarity=enable_premium_clarity,
-    )
-    payload = render_result.payload
-    render_mode = render_result.render_mode
-    payload_invalid = render_result.payload_invalid
-    logger.info(
-        "tg_render_mode_selected",
-        email_id=message_id,
-        mode=render_mode.name,
-        extracted_text_len=render_result.extracted_text_len,
-        attachments=len(attachments),
-    )
-    deadlines_count = sum(
-        1 for commitment in commitments if commitment.deadline_iso
-    )
-    attachments_only = render_result.extracted_text_len <= 0 and len(attachments) > 0
-    confidence_percent = _priority_confidence_percent(
-        confidence_score=confidence_score,
-        deadlines_count=deadlines_count,
-        commitments_count=len(commitments),
-        attachments_only=attachments_only,
-        extracted_text_len=render_result.extracted_text_len,
-        priority=priority,
-    )
-    if render_result.premium_clarity_enabled:
-        confidence_available = confidence_score is not None
-        extraction_failed = render_result.extracted_text_len <= 0 and len(attachments) > 0
-        premium_payload = TelegramPayload(
-            html_text=_build_premium_clarity_text(
-                priority=priority,
-                received_at=received_at,
-                from_email=from_email,
-                from_name=from_name,
-                subject=subject,
-                action_line=action_line,
-                body_summary=body_summary,
-                body_text=body_text or "",
-                attachments=attachments,
-                attachment_summaries=attachment_summaries,
-                insights=analytics_result.aggregated_insights,
-                insight_digest=analytics_result.insight_digest,
-                commitments=commitments,
-                attachments_count=len(attachments),
-                extracted_text_len=render_result.extracted_text_len,
-                confidence_percent=confidence_percent,
-                confidence_available=confidence_available,
-                confidence_dots_mode=premium_clarity_config.confidence_dots_mode,
-                confidence_dots_threshold=(
-                    premium_clarity_config.confidence_dots_threshold
-                ),
-                confidence_dots_scale=(
-                    premium_clarity_config.confidence_dots_scale
-                ),
-                extraction_failed=extraction_failed,
-            ),
-            priority=priority,
-            metadata=render_result.payload.metadata,
+    
+        # ---------- Shadow Action (read-only, dry run) ----------
+        shadow_tasks = shadow_action_engine.compute(
+            account_email=account_email,
+            from_email=from_email,
         )
-        render_result = RenderResult(
-            payload=premium_payload,
-            render_mode=render_result.render_mode,
-            payload_invalid=render_result.payload_invalid,
-            attachment_details=render_result.attachment_details,
-            attachment_summary=render_result.attachment_summary,
-            extracted_text_len=render_result.extracted_text_len,
-            body_summary=render_result.body_summary,
-            premium_clarity_enabled=render_result.premium_clarity_enabled,
+        shadow_action_line: str | None = None
+        shadow_action_reason: str | None = None
+        if shadow_tasks:
+            shadow_action_line, shadow_action_reason = shadow_tasks[0]
+        for task, reason in shadow_tasks:
+            logger.info(
+                "shadow_action_candidate",
+                from_email=from_email or "",
+                task=task or "",
+                reason=reason or "",
+            )
+    
+        shadow_priority_to_persist: str | None = None
+        shadow_priority_reason_to_persist: str | None = None
+        shadow_action_line_to_persist: str | None = None
+        shadow_action_reason_to_persist: str | None = None
+        confidence_score_to_persist: float | None = None
+        confidence_decision_to_persist: str | None = None
+        proposed_action_type_to_persist: str | None = None
+        proposed_action_text_to_persist: str | None = None
+        proposed_action_confidence_to_persist: float | None = None
+        proposed_action: dict | None = None
+        if feature_flags.ENABLE_AUTO_ACTIONS:
+            proposed_action = auto_action_engine.propose(
+                llm_action_line=action_line,
+                shadow_action=shadow_action_line,
+                priority=priority,
+                confidence=confidence_score or 0.0,
+            )
+    
+            if proposed_action:
+                logger.info(
+                    "auto_action_stored",
+                    action_type=proposed_action.get("type", ""),
+                    confidence=proposed_action.get("confidence", 0.0),
+                    source=proposed_action.get("source", ""),
+                )
+            else:
+                logger.info("auto_action_skipped", reason="conditions_not_met")
+    
+        if getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False) and proposed_action:
+            if not policy_decision.allow_preview:
+                preview_skip_reason = (
+                    "system_degraded_no_llm"
+                    if policy_decision.mode == OperationalMode.DEGRADED_NO_LLM
+                    else "policy_denied"
+                )
+                logger.info(
+                    "preview_actions_skipped",
+                    reason=preview_skip_reason,
+                    email_id=message_id,
+                    account_email=account_email,
+                    system_mode=policy_decision.mode.value,
+                )
+            else:
+                preview_reasons = [
+                    reason
+                    for reason in (shadow_action_reason, shadow_reason, priority_reason)
+                    if reason
+                ]
+                preview = {
+                "email_id": message_id,
+                "original_priority": original_priority or llm_result.priority,
+                "final_priority": priority,
+                "proposed_actions": [proposed_action],
+                "confidence": proposed_action.get("confidence", 0.0),
+                "reasons": preview_reasons,
+            }
+                logger.info("preview_action_generated", preview=preview)
+                try:
+                    knowledge_db.save_preview_action(
+                        email_id=message_id,
+                        proposed_action=proposed_action,
+                        confidence=proposed_action.get("confidence"),
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error("preview_action_persist_failed", error=str(exc))
+    
+        if feature_flags.ENABLE_SHADOW_PERSISTENCE:
+            shadow_priority_to_persist = shadow_priority
+            shadow_priority_reason_to_persist = shadow_reason
+            shadow_action_line_to_persist = shadow_action_line
+            shadow_action_reason_to_persist = shadow_action_reason
+            confidence_score_to_persist = confidence_score
+            confidence_decision_to_persist = confidence_decision
+            proposed_action_type_to_persist = (
+                proposed_action.get("type") if proposed_action else None
+            )
+            proposed_action_text_to_persist = (
+                proposed_action.get("text") if proposed_action else None
+            )
+            proposed_action_confidence_to_persist = (
+                proposed_action.get("confidence") if proposed_action else None
+            )
+    
+        analytics_result = _record_analytics(
+            account_email=account_email,
+            message_id=message_id,
+            from_email=from_email,
+            from_name=from_name,
+            subject=subject,
+            received_at=received_at,
+            body_text=body_text,
+            llm_result=llm_result,
+            llm_provider=llm_provider,
+            priority=priority,
+            original_priority=original_priority,
+            priority_reason=priority_reason,
+            shadow_priority_to_persist=shadow_priority_to_persist,
+            shadow_priority_reason_to_persist=shadow_priority_reason_to_persist,
+            shadow_action_line_to_persist=shadow_action_line_to_persist,
+            shadow_action_reason_to_persist=shadow_action_reason_to_persist,
+            confidence_score_to_persist=confidence_score_to_persist,
+            confidence_decision_to_persist=confidence_decision_to_persist,
+            proposed_action_type_to_persist=proposed_action_type_to_persist,
+            proposed_action_text_to_persist=proposed_action_text_to_persist,
+            proposed_action_confidence_to_persist=proposed_action_confidence_to_persist,
+            confidence_score=confidence_score,
+            shadow_priority=shadow_priority,
+            action_line=action_line,
+            body_summary=body_summary,
+            attachment_summaries=attachment_summaries,
+            rfc_message_id=rfc_message_id,
+            in_reply_to=in_reply_to,
+            references=references,
+            thread_key=thread_key,
+            commitments=commitments,
+            enable_commitments=enable_commitments,
+            entity_resolution=entity_resolution,
+            signal_quality=signal_quality,
+            fallback_used=fallback_used,
+            telegram_chat_id=telegram_chat_id,
+        )
+    
+        narrative: NarrativeResult | None = None
+        if getattr(feature_flags, "ENABLE_NARRATIVE_BINDING", True):
+            narrative = compose_narrative(
+                email_id=message_id,
+                subject=subject,
+                body_text=body_text or "",
+                from_email=from_email,
+                mail_type=mail_type or "",
+                received_at=received_at,
+                attachments=attachments or [],
+                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                analytics=analytics,
+                commitments=commitments,
+                enable_patterns=getattr(feature_flags, "ENABLE_NARRATIVE_PATTERNS", True),
+            )
+            if narrative:
+                append_narrative_insight(
+                    analytics_result.aggregated_insights,
+                    fact=narrative.fact,
+                    pattern=narrative.pattern,
+                    action=narrative.action,
+                )
+    
+        policy_decision = _evaluate_policy(policy_inputs)
+        anomalies: list[Anomaly] = []
+        if policy_decision.allow_anomaly_alerts and entity_resolution:
+            try:
+                anomalies = compute_anomalies(
+                    entity_id=entity_resolution.entity_id,
+                    analytics=analytics,
+                    now_dt=received_at,
+                )
+                logger.info(
+                    "anomaly_computed",
+                    email_id=message_id,
+                    entity_id=entity_resolution.entity_id,
+                    count=len(anomalies),
+                    max_severity=max_anomaly_severity(anomalies),
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "anomaly_compute_failed",
+                    email_id=message_id,
+                    entity_id=entity_resolution.entity_id,
+                    error=str(exc),
+                )
+                anomalies = []
+    
+        enable_premium_clarity = bool(
+            getattr(feature_flags, "ENABLE_PREMIUM_CLARITY_V1", False)
+        )
+        render_start = time.perf_counter()
+        render_result = _render_notification(
+            message_id=message_id,
+            received_at=received_at,
+            priority=priority,
+            from_email=from_email,
+            from_name=from_name,
+            subject=subject,
+            action_line=action_line,
+            body_summary=body_summary,
+            body_text=body_text or "",
+            attachments=attachments,
+            llm_result=llm_result,
+            signal_quality=signal_quality,
+            aggregated_insights=analytics_result.aggregated_insights,
+            insight_digest=analytics_result.insight_digest,
+            telegram_chat_id=telegram_chat_id,
+            account_email=account_email,
+            attachment_summaries=attachment_summaries,
+            commitments=commitments,
+            enable_premium_clarity=enable_premium_clarity,
         )
         payload = render_result.payload
-    priority_engine_for_event = "shadow"
-    if auto_priority_outcome.applied:
-        priority_engine_for_event = "rules"
-    elif priority_v2_result:
-        priority_engine_for_event = "priority_v2"
-    _emit_contract_event(
-        EventType.PRIORITY_DECISION_RECORDED,
-        ts_utc=received_at.timestamp(),
-        account_id=account_email,
-        entity_id=contract_event_entity_id,
-        email_id=message_id,
-        payload={
-            "priority": priority,
-            "confidence": confidence_percent,
-            "sender": from_email or "",
-            "subject": subject or "",
-            "engine": priority_engine_for_event,
-        },
-    )
-    action_text = strip_disallowed_emojis(_resolve_action_line(action_line))
-    high_impact = (
-        priority == "🔴"
-        or _deadline_within_days(commitments, received_at=received_at, days=3)
-        or _is_urgent_action(action_text)
-    )
-    low_confidence = confidence_percent <= 40
-    extraction_failed = render_result.extracted_text_len <= 0 and len(attachments) > 0
-    suppress_numeric_facts = _should_suppress_numeric_facts(
-        extraction_failed=extraction_failed,
-        confidence_available=confidence_score is not None,
-        confidence_percent=confidence_percent,
-        confidence_dots_threshold=premium_clarity_config.confidence_dots_threshold,
-    )
-    shown_fact_items: list[_FactItem] = []
-    if render_result.premium_clarity_enabled:
-        shown_fact_items = _select_premium_clarity_fact_items(
-            subject=subject or "",
-            body_text=body_text or "",
-            attachments=attachments or [],
-            suppress_numeric_facts=suppress_numeric_facts,
+        render_mode = render_result.render_mode
+        payload_invalid = render_result.payload_invalid
+        logger.info(
+            "tg_render_mode_selected",
+            email_id=message_id,
+            mode=render_mode.name,
+            extracted_text_len=render_result.extracted_text_len,
+            attachments=len(attachments),
         )
-    shown_fact_types: list[str] = []
-    fact_sources: list[str] = []
-    for item in shown_fact_items:
-        fact_type = _fact_type_label(item.label)
-        if fact_type not in shown_fact_types:
-            shown_fact_types.append(fact_type)
-        source = _fact_source_tag(item.tag)
-        if source and source not in fact_sources:
-            fact_sources.append(source)
-    has_attachment_fact_provenance = any(
-        item.tag and item.tag not in {"тема", "письмо"}
-        for item in shown_fact_items
-    )
-    if high_impact or low_confidence or extraction_failed:
+        deadlines_count = sum(
+            1 for commitment in commitments if commitment.deadline_iso
+        )
+        attachments_only = render_result.extracted_text_len <= 0 and len(attachments) > 0
+        confidence_percent = _priority_confidence_percent(
+            confidence_score=confidence_score,
+            deadlines_count=deadlines_count,
+            commitments_count=len(commitments),
+            attachments_only=attachments_only,
+            extracted_text_len=render_result.extracted_text_len,
+            priority=priority,
+        )
+        if render_result.premium_clarity_enabled:
+            confidence_available = confidence_score is not None
+            extraction_failed = render_result.extracted_text_len <= 0 and len(attachments) > 0
+            premium_payload = TelegramPayload(
+                html_text=_build_premium_clarity_text(
+                    priority=priority,
+                    received_at=received_at,
+                    from_email=from_email,
+                    from_name=from_name,
+                    subject=subject,
+                    action_line=action_line,
+                    body_summary=body_summary,
+                    body_text=body_text or "",
+                    attachments=attachments,
+                    attachment_summaries=attachment_summaries,
+                    insights=analytics_result.aggregated_insights,
+                    insight_digest=analytics_result.insight_digest,
+                    commitments=commitments,
+                    attachments_count=len(attachments),
+                    extracted_text_len=render_result.extracted_text_len,
+                    confidence_percent=confidence_percent,
+                    confidence_available=confidence_available,
+                    confidence_dots_mode=premium_clarity_config.confidence_dots_mode,
+                    confidence_dots_threshold=(
+                        premium_clarity_config.confidence_dots_threshold
+                    ),
+                    confidence_dots_scale=(
+                        premium_clarity_config.confidence_dots_scale
+                    ),
+                    extraction_failed=extraction_failed,
+                ),
+                priority=priority,
+                metadata=render_result.payload.metadata,
+            )
+            render_result = RenderResult(
+                payload=premium_payload,
+                render_mode=render_result.render_mode,
+                payload_invalid=render_result.payload_invalid,
+                attachment_details=render_result.attachment_details,
+                attachment_summary=render_result.attachment_summary,
+                extracted_text_len=render_result.extracted_text_len,
+                body_summary=render_result.body_summary,
+                premium_clarity_enabled=render_result.premium_clarity_enabled,
+            )
+            payload = render_result.payload
+        span.record_stage("render", int((time.perf_counter() - render_start) * 1000))
+        priority_engine_for_event = "shadow"
+        if auto_priority_outcome.applied:
+            priority_engine_for_event = "rules"
+        elif priority_v2_result:
+            priority_engine_for_event = "priority_v2"
         _emit_contract_event(
-            EventType.TG_RENDER_RECORDED,
+            EventType.PRIORITY_DECISION_RECORDED,
             ts_utc=received_at.timestamp(),
             account_id=account_email,
             entity_id=contract_event_entity_id,
             email_id=message_id,
             payload={
-                "shown_fact_types": shown_fact_types,
-                "fact_sources": fact_sources,
-                "extraction_failed": extraction_failed,
-                "confidence_bucket": _confidence_bucket(
-                    confidence_available=confidence_score is not None,
-                    confidence_percent=confidence_percent,
-                ),
-                "attachments_count": len(attachments),
-                "suppressed_numeric_facts": suppress_numeric_facts,
-                "has_attachment_fact_provenance": has_attachment_fact_provenance,
+                "priority": priority,
+                "confidence": confidence_percent,
+                "sender": from_email or "",
+                "subject": subject or "",
+                "engine": priority_engine_for_event,
             },
         )
-    relationship_health_delta: float | None = None
-    if analytics_result.health_snapshot is not None:
-        value = analytics_result.health_snapshot.components_breakdown.get("trend_delta")
-        try:
-            relationship_health_delta = float(value)
-        except (TypeError, ValueError):
-            relationship_health_delta = None
-    attention_gate_deferred = False
-    attention_reason = "default_send"
-    try:
-        gate_result = apply_attention_gate(
-            AttentionGateInput(
-                priority=priority,
-                commitments=commitments,
-                deadlines_count=deadlines_count,
-                insight_severity=max_insight_severity(
-                    analytics_result.aggregated_insights
-                ),
-                attachments_only=render_result.extracted_text_len <= 0
-                and len(attachments) > 0,
-                relationship_health_delta=relationship_health_delta,
+        action_text = strip_disallowed_emojis(_resolve_action_line(action_line))
+        high_impact = (
+            priority == "🔴"
+            or _deadline_within_days(commitments, received_at=received_at, days=3)
+            or _is_urgent_action(action_text)
+        )
+        low_confidence = confidence_percent <= 40
+        extraction_failed = render_result.extracted_text_len <= 0 and len(attachments) > 0
+        suppress_numeric_facts = _should_suppress_numeric_facts(
+            extraction_failed=extraction_failed,
+            confidence_available=confidence_score is not None,
+            confidence_percent=confidence_percent,
+            confidence_dots_threshold=premium_clarity_config.confidence_dots_threshold,
+        )
+        shown_fact_items: list[_FactItem] = []
+        if render_result.premium_clarity_enabled:
+            shown_fact_items = _select_premium_clarity_fact_items(
+                subject=subject or "",
+                body_text=body_text or "",
+                attachments=attachments or [],
+                suppress_numeric_facts=suppress_numeric_facts,
+            )
+        shown_fact_types: list[str] = []
+        fact_sources: list[str] = []
+        for item in shown_fact_items:
+            fact_type = _fact_type_label(item.label)
+            if fact_type not in shown_fact_types:
+                shown_fact_types.append(fact_type)
+            source = _fact_source_tag(item.tag)
+            if source and source not in fact_sources:
+                fact_sources.append(source)
+        has_attachment_fact_provenance = any(
+            item.tag and item.tag not in {"тема", "письмо"}
+            for item in shown_fact_items
+        )
+        if high_impact or low_confidence or extraction_failed:
+            _emit_contract_event(
+                EventType.TG_RENDER_RECORDED,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=contract_event_entity_id,
                 email_id=message_id,
+                payload={
+                    "shown_fact_types": shown_fact_types,
+                    "fact_sources": fact_sources,
+                    "extraction_failed": extraction_failed,
+                    "confidence_bucket": _confidence_bucket(
+                        confidence_available=confidence_score is not None,
+                        confidence_percent=confidence_percent,
+                    ),
+                    "attachments_count": len(attachments),
+                    "suppressed_numeric_facts": suppress_numeric_facts,
+                    "has_attachment_fact_provenance": has_attachment_fact_provenance,
+                },
             )
-        )
-        attention_gate_deferred = gate_result.deferred
-        attention_reason = gate_result.reason
-    except Exception as exc:  # pragma: no cover - defensive fallback
-        logger.error(
-            "[ATTENTION-GATE] failed",
-            email_id=message_id,
-            error=str(exc),
-        )
+        relationship_health_delta: float | None = None
+        if analytics_result.health_snapshot is not None:
+            value = analytics_result.health_snapshot.components_breakdown.get("trend_delta")
+            try:
+                relationship_health_delta = float(value)
+            except (TypeError, ValueError):
+                relationship_health_delta = None
         attention_gate_deferred = False
-        attention_reason = "gate_failed"
-
-    enable_circadian = bool(
-        getattr(feature_flags, "ENABLE_CIRCADIAN_DELIVERY", False)
-    )
-    enable_flow_protection = bool(
-        getattr(feature_flags, "ENABLE_FLOW_PROTECTION", False)
-    )
-    enable_attention_debt = bool(
-        getattr(feature_flags, "ENABLE_ATTENTION_DEBT", False)
-    )
-    behavior_enabled = enable_circadian or enable_attention_debt or enable_flow_protection
-    delivery_decision: DeliveryDecision | None = None
-    delivery_context: DeliveryContext | None = None
-
-    if behavior_enabled:
+        attention_reason = "default_send"
         try:
-            policy_config = load_delivery_policy_config()
-            flow_config = (
-                load_flow_protection_config() if enable_flow_protection else None
-            )
-            now_local = received_at.astimezone()
-            immediate_sent_last_hour = 0
-            if enable_attention_debt:
-                since_ts = time.time() - 3600
-                immediate_sent_last_hour = _count_recent_immediate_deliveries(
-                    account_email=account_email,
-                    since_ts=since_ts,
-                )
-            scores = score_email(
-                priority=priority,
-                commitments_count=len(commitments),
-                deadlines_count=deadlines_count,
-                insight_severity=max_insight_severity(analytics_result.aggregated_insights),
-                relationship_health_delta=relationship_health_delta,
-            )
-            context = _build_delivery_context(
-                now_local=now_local,
-                policy_config=policy_config,
-                flow_config=flow_config,
-                enable_circadian=enable_circadian,
-                enable_flow_protection=enable_flow_protection,
-                immediate_sent_last_hour=immediate_sent_last_hour,
-            )
-            delivery_context = context
-            delivery_decision = decide_delivery(
-                scores=scores,
-                context=context,
-                policy=policy_config,
-                attention_gate_deferred=attention_gate_deferred,
-            )
-            attention_reason = ",".join(delivery_decision.reason_codes) or attention_reason
-
-            if enable_attention_debt:
-                debt_bucket = "low"
-                if delivery_decision.attention_debt >= 70:
-                    debt_bucket = "high"
-                elif delivery_decision.attention_debt >= 30:
-                    debt_bucket = "medium"
-                _emit_contract_event(
-                    EventType.ATTENTION_DEBT_UPDATED,
-                    ts_utc=received_at.timestamp(),
-                    account_id=account_email,
-                    entity_id=entity_resolution.entity_id if entity_resolution else None,
+            gate_result = apply_attention_gate(
+                AttentionGateInput(
+                    priority=priority,
+                    commitments=commitments,
+                    deadlines_count=deadlines_count,
+                    insight_severity=max_insight_severity(
+                        analytics_result.aggregated_insights
+                    ),
+                    attachments_only=render_result.extracted_text_len <= 0
+                    and len(attachments) > 0,
+                    relationship_health_delta=relationship_health_delta,
                     email_id=message_id,
-                    payload={
-                        "attention_debt": delivery_decision.attention_debt,
-                        "bucket": debt_bucket,
-                        "immediate_last_hour": immediate_sent_last_hour,
-                        "max_per_hour": policy_config.max_immediate_per_hour,
-                    },
                 )
-
+            )
+            attention_gate_deferred = gate_result.deferred
+            attention_reason = gate_result.reason
         except Exception as exc:  # pragma: no cover - defensive fallback
             logger.error(
-                "[BEHAVIOR-ENGINE] failed",
+                "[ATTENTION-GATE] failed",
                 email_id=message_id,
                 error=str(exc),
             )
-            behavior_enabled = False
-            delivery_decision = None
-            attention_reason = "behavior_failed"
-
-    sources = _render_sources(
-        subject=subject or "",
-        body_text=body_text or "",
-        attachments=attachments,
-    )
-    extraction_success = not (
-        render_result.extracted_text_len <= 0 and len(attachments) > 0
-    )
-    if behavior_enabled and delivery_decision and delivery_context:
-        resolved_scope = resolve_account_scope(account_email)
-        scope_chat_id = telegram_chat_id or (resolved_scope.chat_id if resolved_scope else None)
-        scope_emails = list(resolved_scope.account_emails) if resolved_scope else None
-        if not scope_emails and account_email:
-            scope_emails = [account_email]
-        scope_payload = get_account_scope(
-            chat_id=scope_chat_id,
-            account_emails=scope_emails,
+            attention_gate_deferred = False
+            attention_reason = "gate_failed"
+    
+        enable_circadian = bool(
+            getattr(feature_flags, "ENABLE_CIRCADIAN_DELIVERY", False)
         )
-        _emit_contract_event(
-            EventType.DELIVERY_POLICY_APPLIED,
-            ts_utc=received_at.timestamp(),
-            account_id=account_email,
-            entity_id=entity_resolution.entity_id if entity_resolution else None,
-            email_id=message_id,
-            payload={
-                "mode": delivery_decision.mode.value,
-                "reason_codes": delivery_decision.reason_codes,
-                "thresholds_used": delivery_decision.thresholds_used,
-                "attention_debt": delivery_decision.attention_debt,
-                "quiet_hours": delivery_context.is_quiet_hours,
-                "weekend": delivery_context.is_weekend,
-                "priority": priority,
-                "confidence_percent": confidence_percent,
-                "extraction_success": extraction_success,
-                "attachment_count": len(attachments),
-                "sources": sources,
-                **scope_payload,
-            },
+        enable_flow_protection = bool(
+            getattr(feature_flags, "ENABLE_FLOW_PROTECTION", False)
         )
-
-    if not behavior_enabled and attention_gate_deferred:
-        if analytics_result.email_row_id is None:
-            logger.error(
-                "[ATTENTION-GATE] persistence_failed",
+        enable_attention_debt = bool(
+            getattr(feature_flags, "ENABLE_ATTENTION_DEBT", False)
+        )
+        behavior_enabled = enable_circadian or enable_attention_debt or enable_flow_protection
+        delivery_decision: DeliveryDecision | None = None
+        delivery_context: DeliveryContext | None = None
+    
+        if behavior_enabled:
+            try:
+                policy_config = load_delivery_policy_config()
+                flow_config = (
+                    load_flow_protection_config() if enable_flow_protection else None
+                )
+                now_local = received_at.astimezone()
+                immediate_sent_last_hour = 0
+                if enable_attention_debt:
+                    since_ts = time.time() - 3600
+                    immediate_sent_last_hour = _count_recent_immediate_deliveries(
+                        account_email=account_email,
+                        since_ts=since_ts,
+                    )
+                scores = score_email(
+                    priority=priority,
+                    commitments_count=len(commitments),
+                    deadlines_count=deadlines_count,
+                    insight_severity=max_insight_severity(analytics_result.aggregated_insights),
+                    relationship_health_delta=relationship_health_delta,
+                )
+                context = _build_delivery_context(
+                    now_local=now_local,
+                    policy_config=policy_config,
+                    flow_config=flow_config,
+                    enable_circadian=enable_circadian,
+                    enable_flow_protection=enable_flow_protection,
+                    immediate_sent_last_hour=immediate_sent_last_hour,
+                )
+                delivery_context = context
+                delivery_decision = decide_delivery(
+                    scores=scores,
+                    context=context,
+                    policy=policy_config,
+                    attention_gate_deferred=attention_gate_deferred,
+                )
+                attention_reason = ",".join(delivery_decision.reason_codes) or attention_reason
+    
+                if enable_attention_debt:
+                    debt_bucket = "low"
+                    if delivery_decision.attention_debt >= 70:
+                        debt_bucket = "high"
+                    elif delivery_decision.attention_debt >= 30:
+                        debt_bucket = "medium"
+                    _emit_contract_event(
+                        EventType.ATTENTION_DEBT_UPDATED,
+                        ts_utc=received_at.timestamp(),
+                        account_id=account_email,
+                        entity_id=entity_resolution.entity_id if entity_resolution else None,
+                        email_id=message_id,
+                        payload={
+                            "attention_debt": delivery_decision.attention_debt,
+                            "bucket": debt_bucket,
+                            "immediate_last_hour": immediate_sent_last_hour,
+                            "max_per_hour": policy_config.max_immediate_per_hour,
+                        },
+                    )
+    
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                logger.error(
+                    "[BEHAVIOR-ENGINE] failed",
+                    email_id=message_id,
+                    error=str(exc),
+                )
+                behavior_enabled = False
+                delivery_decision = None
+                attention_reason = "behavior_failed"
+    
+        sources = _render_sources(
+            subject=subject or "",
+            body_text=body_text or "",
+            attachments=attachments,
+        )
+        extraction_success = not (
+            render_result.extracted_text_len <= 0 and len(attachments) > 0
+        )
+        if behavior_enabled and delivery_decision and delivery_context:
+            resolved_scope = resolve_account_scope(account_email)
+            scope_chat_id = telegram_chat_id or (resolved_scope.chat_id if resolved_scope else None)
+            scope_emails = list(resolved_scope.account_emails) if resolved_scope else None
+            if not scope_emails and account_email:
+                scope_emails = [account_email]
+            scope_payload = get_account_scope(
+                chat_id=scope_chat_id,
+                account_emails=scope_emails,
+            )
+            _emit_contract_event(
+                EventType.DELIVERY_POLICY_APPLIED,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=entity_resolution.entity_id if entity_resolution else None,
                 email_id=message_id,
-                reason="missing_email_row_id",
-                attention_reason=attention_reason,
+                payload={
+                    "mode": delivery_decision.mode.value,
+                    "reason_codes": delivery_decision.reason_codes,
+                    "thresholds_used": delivery_decision.thresholds_used,
+                    "attention_debt": delivery_decision.attention_debt,
+                    "quiet_hours": delivery_context.is_quiet_hours,
+                    "weekend": delivery_context.is_weekend,
+                    "priority": priority,
+                    "confidence_percent": confidence_percent,
+                    "extraction_success": extraction_success,
+                    "attachment_count": len(attachments),
+                    "sources": sources,
+                    **scope_payload,
+                },
             )
-        else:
-            persisted = knowledge_db.mark_deferred_for_digest(
-                email_row_id=analytics_result.email_row_id,
-                deferred=True,
-            )
-            if not persisted:
+    
+        if not behavior_enabled and attention_gate_deferred:
+            if analytics_result.email_row_id is None:
                 logger.error(
                     "[ATTENTION-GATE] persistence_failed",
                     email_id=message_id,
-                    reason="crm_update_failed",
+                    reason="missing_email_row_id",
                     attention_reason=attention_reason,
                 )
             else:
-                logger.info(
-                    "[ATTENTION-GATE] persisted",
-                    email_id=message_id,
-                    attention_reason=attention_reason,
+                persisted = knowledge_db.mark_deferred_for_digest(
+                    email_row_id=analytics_result.email_row_id,
+                    deferred=True,
                 )
-        logger.info(
-            "telegram_deferred_for_digest",
-            email_id=message_id,
-            reason=attention_reason,
-        )
-        _emit_contract_event(
-            EventType.ATTENTION_DEFERRED_FOR_DIGEST,
-            ts_utc=received_at.timestamp(),
-            account_id=account_email,
-            entity_id=entity_resolution.entity_id if entity_resolution else None,
-            email_id=message_id,
-            payload={
-                "reason": attention_reason,
-                "attachments_only": render_result.extracted_text_len <= 0 and len(attachments) > 0,
-                "attachments_count": len(attachments),
-            },
-        )
-    elif behavior_enabled and delivery_decision.mode in {DeliveryMode.BATCH_TODAY, DeliveryMode.DEFER_TO_MORNING}:
-        if analytics_result.email_row_id is None:
-            logger.error(
-                "[ATTENTION-GATE] persistence_failed",
+                if not persisted:
+                    logger.error(
+                        "[ATTENTION-GATE] persistence_failed",
+                        email_id=message_id,
+                        reason="crm_update_failed",
+                        attention_reason=attention_reason,
+                    )
+                else:
+                    logger.info(
+                        "[ATTENTION-GATE] persisted",
+                        email_id=message_id,
+                        attention_reason=attention_reason,
+                    )
+            logger.info(
+                "telegram_deferred_for_digest",
                 email_id=message_id,
-                reason="missing_email_row_id",
-                attention_reason=attention_reason,
+                reason=attention_reason,
             )
-        else:
-            persisted = knowledge_db.mark_deferred_for_digest(
-                email_row_id=analytics_result.email_row_id,
-                deferred=True,
+            _emit_contract_event(
+                EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                email_id=message_id,
+                payload={
+                    "reason": attention_reason,
+                    "attachments_only": render_result.extracted_text_len <= 0 and len(attachments) > 0,
+                    "attachments_count": len(attachments),
+                },
             )
-            if not persisted:
+        elif behavior_enabled and delivery_decision.mode in {DeliveryMode.BATCH_TODAY, DeliveryMode.DEFER_TO_MORNING}:
+            if analytics_result.email_row_id is None:
                 logger.error(
                     "[ATTENTION-GATE] persistence_failed",
                     email_id=message_id,
-                    reason="crm_update_failed",
+                    reason="missing_email_row_id",
                     attention_reason=attention_reason,
                 )
             else:
-                logger.info(
-                    "[ATTENTION-GATE] persisted",
-                    email_id=message_id,
-                    attention_reason=attention_reason,
+                persisted = knowledge_db.mark_deferred_for_digest(
+                    email_row_id=analytics_result.email_row_id,
+                    deferred=True,
                 )
-        logger.info(
-            "telegram_deferred_for_digest",
-            email_id=message_id,
-            reason=attention_reason,
-            mode=delivery_decision.mode.value,
-        )
-        _emit_contract_event(
-            EventType.ATTENTION_DEFERRED_FOR_DIGEST,
-            ts_utc=received_at.timestamp(),
-            account_id=account_email,
-            entity_id=entity_resolution.entity_id if entity_resolution else None,
-            email_id=message_id,
-            payload={
-                "reason": attention_reason,
-                "mode": delivery_decision.mode.value,
-                "attachments_only": render_result.extracted_text_len <= 0 and len(attachments) > 0,
-                "attachments_count": len(attachments),
-            },
-        )
-    elif behavior_enabled and delivery_decision.mode == DeliveryMode.SILENT_LOG:
-        logger.info(
-            "telegram_delivery_suppressed",
-            email_id=message_id,
-            reason=attention_reason,
-            mode=delivery_decision.mode.value,
-        )
-    else:
-        telegram_delivered = False
-        delivery_ts = time.time()
-        consecutive_tg_failures = 0
-        delivery_result: DeliveryResult | None = None
-        try:
-            result = _coerce_delivery_result(
-                enqueue_tg(email_id=message_id, payload=payload),
+                if not persisted:
+                    logger.error(
+                        "[ATTENTION-GATE] persistence_failed",
+                        email_id=message_id,
+                        reason="crm_update_failed",
+                        attention_reason=attention_reason,
+                    )
+                else:
+                    logger.info(
+                        "[ATTENTION-GATE] persisted",
+                        email_id=message_id,
+                        attention_reason=attention_reason,
+                    )
+            logger.info(
+                "telegram_deferred_for_digest",
                 email_id=message_id,
+                reason=attention_reason,
+                mode=delivery_decision.mode.value,
             )
-            delivery_result = result
-            if not result.delivered:
-                if result.retryable:
-                    raise RuntimeError(result.error or "Telegram delivery failed")
-                logger.error(
-                    "telegram_delivery_non_retryable",
+            _emit_contract_event(
+                EventType.ATTENTION_DEFERRED_FOR_DIGEST,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                email_id=message_id,
+                payload={
+                    "reason": attention_reason,
+                    "mode": delivery_decision.mode.value,
+                    "attachments_only": render_result.extracted_text_len <= 0 and len(attachments) > 0,
+                    "attachments_count": len(attachments),
+                },
+            )
+        elif behavior_enabled and delivery_decision.mode == DeliveryMode.SILENT_LOG:
+            logger.info(
+                "telegram_delivery_suppressed",
+                email_id=message_id,
+                reason=attention_reason,
+                mode=delivery_decision.mode.value,
+            )
+        else:
+            send_start = time.perf_counter()
+            telegram_delivered = False
+            delivery_ts = time.time()
+            consecutive_tg_failures = 0
+            delivery_result: DeliveryResult | None = None
+            try:
+                result = _coerce_delivery_result(
+                    enqueue_tg(email_id=message_id, payload=payload),
                     email_id=message_id,
-                    chat_id=telegram_chat_id,
-                    error=result.error or "unknown error",
                 )
+                delivery_result = result
+                if not result.delivered:
+                    if result.retryable:
+                        raise RuntimeError(result.error or "Telegram delivery failed")
+                    logger.error(
+                        "telegram_delivery_non_retryable",
+                        email_id=message_id,
+                        chat_id=telegram_chat_id,
+                        error=result.error or "unknown error",
+                    )
+                    change = system_health.update_component(
+                        "Telegram",
+                        False,
+                        reason=result.error or "Telegram send failed",
+                    )
+                    _notify_system_mode_change(
+                        change=change,
+                        chat_id=telegram_chat_id,
+                        account_email=account_email,
+                    )
+                    fallback_metadata = dict(payload.metadata)
+                    fallback_metadata.setdefault("chat_id", telegram_chat_id)
+                    fallback_metadata.setdefault("account_email", account_email)
+                    fallback_payload = TelegramPayload(
+                        html_text="Telegram delivery failed. Check email client.",
+                        priority="🔴",
+                        metadata=fallback_metadata,
+                    )
+                    enqueue_tg(email_id=message_id, payload=fallback_payload)
+                    event_emitter.emit(
+                        type="telegram_delivery_failed",
+                        timestamp=received_at,
+                        email_id=message_id,
+                        payload={"error": result.error or "non-retryable failure"},
+                    )
+                    _emit_contract_event(
+                        EventType.TELEGRAM_FAILED,
+                        ts_utc=delivery_ts,
+                        account_id=account_email,
+                        entity_id=entity_resolution.entity_id if entity_resolution else None,
+                        email_id=message_id,
+                        payload={
+                            "error": result.error or "non-retryable failure",
+                            "delivered": False,
+                            "occurred_at_utc": delivery_ts,
+                            "mode": result.mode,
+                            "retry_count": result.retry_count,
+                        },
+                    )
+                    consecutive_tg_failures = notification_alert_store.record_failure(
+                        datetime.fromtimestamp(delivery_ts, tz=timezone.utc)
+                    )
+                else:
+                    telegram_delivered = True
+                    change = system_health.update_component("Telegram", True)
+                    _notify_system_mode_change(
+                        change=change,
+                        chat_id=telegram_chat_id,
+                        account_email=account_email,
+                    )
+                    if render_mode != TelegramRenderMode.FULL or payload_invalid:
+                        logger.warning(
+                            "telegram_fallback_sent",
+                            email_id=message_id,
+                            chat_id=telegram_chat_id,
+                            success=True,
+                        )
+                    logger.info(
+                        "telegram_sent",
+                        email_id=message_id,
+                        chat_id=telegram_chat_id,
+                        success=True,
+                    )
+            except Exception as exc:
                 change = system_health.update_component(
                     "Telegram",
                     False,
-                    reason=result.error or "Telegram send failed",
+                    reason=str(exc) or "Telegram send failed",
                 )
                 _notify_system_mode_change(
                     change=change,
                     chat_id=telegram_chat_id,
                     account_email=account_email,
                 )
-                fallback_metadata = dict(payload.metadata)
-                fallback_metadata.setdefault("chat_id", telegram_chat_id)
-                fallback_metadata.setdefault("account_email", account_email)
-                fallback_payload = TelegramPayload(
-                    html_text="Telegram delivery failed. Check email client.",
-                    priority="🔴",
-                    metadata=fallback_metadata,
-                )
-                enqueue_tg(email_id=message_id, payload=fallback_payload)
                 event_emitter.emit(
                     type="telegram_delivery_failed",
                     timestamp=received_at,
                     email_id=message_id,
-                    payload={"error": result.error or "non-retryable failure"},
+                    payload={"error": str(exc)},
                 )
                 _emit_contract_event(
                     EventType.TELEGRAM_FAILED,
@@ -4343,205 +4447,169 @@ def process_message(
                     entity_id=entity_resolution.entity_id if entity_resolution else None,
                     email_id=message_id,
                     payload={
-                        "error": result.error or "non-retryable failure",
+                        "error": str(exc),
                         "delivered": False,
                         "occurred_at_utc": delivery_ts,
-                        "mode": result.mode,
-                        "retry_count": result.retry_count,
+                        "mode": "html",
+                        "retry_count": 0,
                     },
                 )
                 consecutive_tg_failures = notification_alert_store.record_failure(
                     datetime.fromtimestamp(delivery_ts, tz=timezone.utc)
                 )
-            else:
-                telegram_delivered = True
-                change = system_health.update_component("Telegram", True)
-                _notify_system_mode_change(
-                    change=change,
-                    chat_id=telegram_chat_id,
-                    account_email=account_email,
-                )
-                if render_mode != TelegramRenderMode.FULL or payload_invalid:
-                    logger.warning(
-                        "telegram_fallback_sent",
-                        email_id=message_id,
-                        chat_id=telegram_chat_id,
-                        success=True,
-                    )
-                logger.info(
-                    "telegram_sent",
+                logger.error(
+                    "processing_error",
+                    stage="telegram",
                     email_id=message_id,
-                    chat_id=telegram_chat_id,
-                    success=True,
+                    error=str(exc),
                 )
-        except Exception as exc:
-            change = system_health.update_component(
-                "Telegram",
-                False,
-                reason=str(exc) or "Telegram send failed",
+                raise
+            if telegram_delivered:
+                notification_alert_store.reset_failures()
+                event_emitter.emit(
+                    type="telegram_delivery_succeeded",
+                    timestamp=received_at,
+                    email_id=message_id,
+                    payload={"render_mode": render_mode.name},
+                )
+                _emit_contract_event(
+                    EventType.TELEGRAM_DELIVERED,
+                    ts_utc=delivery_ts,
+                    account_id=account_email,
+                    entity_id=entity_resolution.entity_id if entity_resolution else None,
+                    email_id=message_id,
+                    payload={
+                        "render_mode": render_mode.name,
+                        "priority": priority,
+                        "mail_type": mail_type or "",
+                        "from_email": from_email,
+                        "delivered": True,
+                        "occurred_at_utc": delivery_ts,
+                        "mode": result.mode,
+                        "retry_count": result.retry_count,
+                    },
+                )
+    
+            _maybe_alert_notification_sla(
+                account_email=account_email,
+                telegram_chat_id=telegram_chat_id,
+                sla_result=policy_decision.notification_sla,
+                consecutive_failures=consecutive_tg_failures,
+                telegram_delivered=telegram_delivered,
             )
-            _notify_system_mode_change(
-                change=change,
+            span.record_stage("send", int((time.perf_counter() - send_start) * 1000))
+    
+        if feature_flags.ENABLE_PREVIEW_ACTIONS and not enable_premium_clarity:
+            if not policy_decision.allow_preview:
+                preview_skip_reason = (
+                    "system_degraded_no_llm"
+                    if policy_decision.mode == OperationalMode.DEGRADED_NO_LLM
+                    else "policy_denied"
+                )
+                logger.info(
+                    "preview_actions_skipped",
+                    reason=preview_skip_reason,
+                    email_id=message_id,
+                    account_email=account_email,
+                    system_mode=policy_decision.mode.value,
+                )
+                return
+    
+            preview_actions = _extract_preview_actions(proposed_action)
+            preview_actions = [action for action in preview_actions if action]
+            if not preview_actions:
+                logger.info(
+                    "preview_actions_skipped",
+                    reason="no_proposals",
+                    email_id=message_id,
+                    account_email=account_email,
+                    system_mode=policy_decision.mode.value,
+                )
+                return
+    
+            priority_explain_lines: list[str] = []
+            try:
+                priority_explain_lines = _build_priority_explain_lines(
+                    mail_type=mail_type,
+                    mail_type_reasons=mail_type_reasons,
+                    priority_v2_result=priority_v2_result,
+                    commitments=commitments,
+                    received_at=received_at,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("preview_priority_explain_failed", error=str(exc))
+                priority_explain_lines = []
+            preview_text = _build_preview_message(
+                action_text=preview_actions[0],
+                reasons=[reason for reason in (shadow_action_reason, shadow_reason, priority_reason) if reason],
+                confidence=proposed_action.get("confidence") if proposed_action else None,
+                priority_explain_lines=priority_explain_lines,
+            )
+            if enable_commitments and (
+                commitments or analytics_result.commitment_status_updates
+            ):
+                preview_commitments = list(commitments)
+                preview_commitments.extend(
+                    [
+                        Commitment(
+                            commitment_text=update.commitment_text,
+                            deadline_iso=update.deadline_iso,
+                            status=update.new_status,
+                            source="crm",
+                            confidence=1.0,
+                        )
+                        for update in analytics_result.commitment_status_updates
+                    ]
+                )
+                preview_text = _append_commitments_preview(
+                    preview_text, preview_commitments
+                )
+                logger.info(
+                    "commitments_preview_shown",
+                    email_id=message_id,
+                    count=len(preview_commitments),
+                )
+            if analytics_result.commitment_signal_preview:
+                preview_text = _append_commitment_signal_preview(
+                    preview_text,
+                    from_email=from_email,
+                    score=int(analytics_result.commitment_signal_preview["score"]),
+                    label=str(analytics_result.commitment_signal_preview["label"]),
+                    fulfilled_count=int(
+                        analytics_result.commitment_signal_preview["fulfilled_count"]
+                    ),
+                    expired_count=int(
+                        analytics_result.commitment_signal_preview["expired_count"]
+                    ),
+                )
+            preview_text = _append_narrative_preview(preview_text, narrative)
+            send_preview_to_telegram(
                 chat_id=telegram_chat_id,
+                preview_text=preview_text,
                 account_email=account_email,
-            )
-            event_emitter.emit(
-                type="telegram_delivery_failed",
-                timestamp=received_at,
-                email_id=message_id,
-                payload={"error": str(exc)},
-            )
-            _emit_contract_event(
-                EventType.TELEGRAM_FAILED,
-                ts_utc=delivery_ts,
-                account_id=account_email,
-                entity_id=entity_resolution.entity_id if entity_resolution else None,
-                email_id=message_id,
-                payload={
-                    "error": str(exc),
-                    "delivered": False,
-                    "occurred_at_utc": delivery_ts,
-                    "mode": "html",
-                    "retry_count": 0,
-                },
-            )
-            consecutive_tg_failures = notification_alert_store.record_failure(
-                datetime.fromtimestamp(delivery_ts, tz=timezone.utc)
-            )
-            logger.error(
-                "processing_error",
-                stage="telegram",
-                email_id=message_id,
-                error=str(exc),
-            )
-            raise
-        if telegram_delivered:
-            notification_alert_store.reset_failures()
-            event_emitter.emit(
-                type="telegram_delivery_succeeded",
-                timestamp=received_at,
-                email_id=message_id,
-                payload={"render_mode": render_mode.name},
-            )
-            _emit_contract_event(
-                EventType.TELEGRAM_DELIVERED,
-                ts_utc=delivery_ts,
-                account_id=account_email,
-                entity_id=entity_resolution.entity_id if entity_resolution else None,
-                email_id=message_id,
-                payload={
-                    "render_mode": render_mode.name,
-                    "priority": priority,
-                    "mail_type": mail_type or "",
-                    "from_email": from_email,
-                    "delivered": True,
-                    "occurred_at_utc": delivery_ts,
-                    "mode": result.mode,
-                    "retry_count": result.retry_count,
-                },
-            )
-
-        _maybe_alert_notification_sla(
-            account_email=account_email,
-            telegram_chat_id=telegram_chat_id,
-            sla_result=policy_decision.notification_sla,
-            consecutive_failures=consecutive_tg_failures,
-            telegram_delivered=telegram_delivered,
-        )
-
-    if feature_flags.ENABLE_PREVIEW_ACTIONS and not enable_premium_clarity:
-        if not policy_decision.allow_preview:
-            preview_skip_reason = (
-                "system_degraded_no_llm"
-                if policy_decision.mode == OperationalMode.DEGRADED_NO_LLM
-                else "policy_denied"
             )
             logger.info(
-                "preview_actions_skipped",
-                reason=preview_skip_reason,
+                "preview_shown",
                 email_id=message_id,
-                account_email=account_email,
+                action_type=proposed_action.get("type", "") if proposed_action else "",
+                confidence=proposed_action.get("confidence", 0.0) if proposed_action else 0.0,
                 system_mode=policy_decision.mode.value,
             )
-            return
-
-        preview_actions = _extract_preview_actions(proposed_action)
-        preview_actions = [action for action in preview_actions if action]
-        if not preview_actions:
-            logger.info(
-                "preview_actions_skipped",
-                reason="no_proposals",
-                email_id=message_id,
-                account_email=account_email,
-                system_mode=policy_decision.mode.value,
-            )
-            return
-
-        priority_explain_lines: list[str] = []
-        try:
-            priority_explain_lines = _build_priority_explain_lines(
-                mail_type=mail_type,
-                mail_type_reasons=mail_type_reasons,
-                priority_v2_result=priority_v2_result,
-                commitments=commitments,
-                received_at=received_at,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("preview_priority_explain_failed", error=str(exc))
-            priority_explain_lines = []
-        preview_text = _build_preview_message(
-            action_text=preview_actions[0],
-            reasons=[reason for reason in (shadow_action_reason, shadow_reason, priority_reason) if reason],
-            confidence=proposed_action.get("confidence") if proposed_action else None,
-            priority_explain_lines=priority_explain_lines,
-        )
-        if enable_commitments and (
-            commitments or analytics_result.commitment_status_updates
-        ):
-            preview_commitments = list(commitments)
-            preview_commitments.extend(
-                [
-                    Commitment(
-                        commitment_text=update.commitment_text,
-                        deadline_iso=update.deadline_iso,
-                        status=update.new_status,
-                        source="crm",
-                        confidence=1.0,
-                    )
-                    for update in analytics_result.commitment_status_updates
-                ]
-            )
-            preview_text = _append_commitments_preview(
-                preview_text, preview_commitments
-            )
-            logger.info(
-                "commitments_preview_shown",
-                email_id=message_id,
-                count=len(preview_commitments),
-            )
-        if analytics_result.commitment_signal_preview:
-            preview_text = _append_commitment_signal_preview(
-                preview_text,
-                from_email=from_email,
-                score=int(analytics_result.commitment_signal_preview["score"]),
-                label=str(analytics_result.commitment_signal_preview["label"]),
-                fulfilled_count=int(
-                    analytics_result.commitment_signal_preview["fulfilled_count"]
-                ),
-                expired_count=int(
-                    analytics_result.commitment_signal_preview["expired_count"]
-                ),
-            )
-        preview_text = _append_narrative_preview(preview_text, narrative)
-        send_preview_to_telegram(
-            chat_id=telegram_chat_id,
-            preview_text=preview_text,
-            account_email=account_email,
-        )
-        logger.info(
-            "preview_shown",
-            email_id=message_id,
-            action_type=proposed_action.get("type", "") if proposed_action else "",
-            confidence=proposed_action.get("confidence", 0.0) if proposed_action else 0.0,
-            system_mode=policy_decision.mode.value,
+    except Exception as exc:
+        outcome = "error"
+        error_code = exc.__class__.__name__
+        raise
+    finally:
+        if health_snapshot_payload is None:
+            health_snapshot_payload = _build_health_snapshot_payload()
+        processing_span_recorder.finalize(
+            span,
+            llm_provider=llm_provider_for_span,
+            llm_model=llm_model_for_span,
+            llm_latency_ms=llm_latency_ms,
+            llm_quality_score=llm_quality_score,
+            fallback_used=fallback_used,
+            outcome=outcome,
+            error_code=error_code,
+            health_snapshot_payload=health_snapshot_payload,
         )
