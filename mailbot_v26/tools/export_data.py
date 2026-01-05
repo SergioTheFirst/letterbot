@@ -214,7 +214,7 @@ def _fetch_system_health_snapshots(
     try:
         cursor = conn.execute(
             """
-            SELECT snapshot_id, ts_utc, payload_json, gates_state, metrics_brief
+            SELECT snapshot_id, ts_utc, payload_json, gates_state, metrics_brief, system_mode
             FROM system_health_snapshots
             WHERE ts_utc >= ?
             ORDER BY ts_utc ASC
@@ -231,6 +231,7 @@ def _fetch_system_health_snapshots(
             "payload": _load_payload(row[2]),
             "gates_state": row[3],
             "metrics_brief": row[4],
+            "system_mode": row[5] if len(row) > 5 else None,
         }
 
 

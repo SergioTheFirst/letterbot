@@ -6,8 +6,9 @@ import html
 import logging
 import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Mapping, Optional
 
 try:
     from flask import (
@@ -200,6 +201,99 @@ def _slow_block(slowest: list[dict[str, object]]) -> str:
     )
 
 
+def _format_ts_utc(value: object) -> str:
+    try:
+        ts = float(value)
+    except (TypeError, ValueError):
+        return "–"
+    try:
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return "–"
+    return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _summarize_mapping(data: Mapping[str, object] | None, *, limit: int = 4) -> str:
+    if not data:
+        return "–"
+    items: list[str] = []
+    for key in sorted(data.keys()):
+        if len(items) >= max(1, limit):
+            break
+        value = data.get(key)
+        value_str = html.escape(str(value)) if value is not None else "–"
+        items.append(f"{html.escape(str(key))}: {value_str}")
+    return "; ".join(items) if items else "–"
+
+
+def _short_id(value: object, length: int = 8) -> str:
+    if not value:
+        return ""
+    text = str(value)
+    return text[:length]
+
+
+def _health_current_block(current: dict[str, object] | None) -> str:
+    if not current:
+        return '<div class="empty-state">No health snapshots in this window.</div>'
+    system_mode = html.escape(str(current.get("system_mode") or ""))
+    gates_state = current.get("gates_state") if isinstance(current, dict) else {}
+    metrics_brief = current.get("metrics_brief") if isinstance(current, dict) else {}
+    rows = []
+    gates_summary = _summarize_mapping(gates_state)
+    metrics_summary = _summarize_mapping(metrics_brief)
+    rows.append(
+        """
+        <div class="metric"><div class="label">System mode</div><div class="value"><span class="badge">{}</span></div></div>
+        """.format(system_mode or "–")
+    )
+    rows.append(
+        """
+        <div class="metric"><div class="label">Last check (UTC)</div><div class="value">{}</div></div>
+        """.format(_format_ts_utc(current.get("ts_end_utc")))
+    )
+    rows.append(
+        """
+        <div class="metric"><div class="label">Gates</div><div class="value">{}</div></div>
+        """.format(gates_summary)
+    )
+    rows.append(
+        """
+        <div class="metric"><div class="label">Metrics</div><div class="value">{}</div></div>
+        """.format(metrics_summary)
+    )
+    return f"<div class=\"metrics-grid\">{''.join(rows)}</div>"
+
+
+def _health_timeline_block(timeline: list[dict[str, object]]) -> str:
+    if not timeline:
+        return '<div class="empty-state">No health timeline entries in this window.</div>'
+    rows = []
+    for item in timeline:
+        rows.append(
+            """
+            <tr>
+              <td>{}</td>
+              <td><span class="badge">{}</span></td>
+              <td>{}</td>
+              <td>{}</td>
+              <td>{}</td>
+            </tr>
+            """.format(
+                html.escape(_format_ts_utc(item.get("ts_end_utc"))),
+                html.escape(str(item.get("system_mode") or "")),
+                _summarize_mapping(item.get("gates_state"), limit=3),
+                _summarize_mapping(item.get("metrics_brief"), limit=3),
+                html.escape(_short_id(item.get("snapshot_id"), 10)),
+            )
+        )
+    return (
+        "<table class=\"data-table\">"
+        "<thead><tr><th>Timestamp (UTC)</th><th>Mode</th><th>Gates</th><th>Metrics</th><th>Snapshot</th></tr></thead>"
+        + f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
 def _load_credentials(config_dir: Path) -> tuple[str, str]:
     parser = configparser.ConfigParser()
     config_path = config_dir / "config.ini"
@@ -364,6 +458,35 @@ def create_app(
             }
         )
 
+    @app.route("/api/v1/observability/health_timeline", methods=["GET"])
+    def api_health_timeline():
+        account_email, account_emails, window_days, error = _validate_latency_params(
+            args=request.args, require_account=True
+        )
+        if error:
+            return jsonify({"error": error}), 400
+        analytics = _analytics()
+        resolved_window = window_days or 7
+        current = analytics.processing_spans_health_current(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=resolved_window,
+        )
+        timeline = analytics.processing_spans_health_timeline(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=resolved_window,
+        )
+        return jsonify(
+            {
+                "window_days": resolved_window,
+                "account_email": account_email,
+                "account_emails": account_emails,
+                "current": current,
+                "timeline": timeline,
+            }
+        )
+
     @app.route("/latency", methods=["GET"])
     def latency():
         accounts = _available_accounts(app.config["DB_PATH"])
@@ -415,6 +538,31 @@ def create_app(
 
     @app.route("/health", methods=["GET"])
     def health():
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_email, account_emails, window_days, error = _validate_latency_params(
+            args=request.args, require_account=False, default_account=default_account
+        )
+        error_block = (
+            f'<div class="alert">{html.escape(error)}</div>' if error else ""
+        )
+        analytics = _analytics()
+        current: dict[str, object] | None = None
+        timeline: list[dict[str, object]] = []
+        if not error and account_email:
+            resolved_window = window_days or 7
+            current = analytics.processing_spans_health_current(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=resolved_window,
+            )
+            timeline = analytics.processing_spans_health_timeline(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=resolved_window,
+            )
+        account_options = _build_select_options(accounts, account_email)
+        window_options = _build_window_options(window_days or 7)
         return _render_template(
             app,
             "health.html",
@@ -422,7 +570,12 @@ def create_app(
             static_url=_static_url(),
             latency_url=url_for("latency"),
             health_url=url_for("health"),
-            error_block="",
+            error_block=error_block,
+            account_options=account_options,
+            account_emails_value=",".join(account_emails),
+            window_options=window_options,
+            current_block=_health_current_block(current),
+            timeline_block=_health_timeline_block(timeline),
         )
 
     return app

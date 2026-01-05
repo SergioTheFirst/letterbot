@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import json
 import re
 from dataclasses import dataclass
 
@@ -23,6 +24,7 @@ class DeliveryResult:
     error: str | None = None
     mode: str = "html"
     retry_count: int = 0
+    message_id: int | None = None
 
 
 def _is_retryable_status(status_code: int) -> bool:
@@ -55,6 +57,26 @@ def _post_message(
     return requests.post(url, json=payload, timeout=15)
 
 
+def _extract_message_id(resp: "requests.Response") -> int | None:
+    json_loader = getattr(resp, "json", None)
+    if not callable(json_loader):
+        return None
+    try:
+        payload = json_loader()
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    result = payload.get("result")
+    if isinstance(result, dict):
+        message_id = result.get("message_id")
+        try:
+            return int(message_id)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def send_telegram(payload: TelegramPayload) -> DeliveryResult:
     """
     Отправляет сообщение в Telegram.
@@ -71,6 +93,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             error="missing required fields",
             mode="html",
             retry_count=0,
+            message_id=None,
         )
 
     if requests is None:
@@ -81,6 +104,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             error="requests module not available",
             mode="html",
             retry_count=0,
+            message_id=None,
         )
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -108,6 +132,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             error=str(exc),
             mode="html",
             retry_count=1,
+            message_id=None,
         )
 
     if resp.status_code != 200:
@@ -144,8 +169,10 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                     error=str(exc),
                     mode="plain_salvage",
                     retry_count=1,
+                    message_id=None,
                 )
             if salvage_resp.status_code == 200:
+                salvage_message_id = _extract_message_id(salvage_resp)
                 log.info(
                     "tg_salvage_sent",
                     extra={"chat_id": chat_id},
@@ -156,6 +183,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                         "delivered": True,
                         "retryable": False,
                         "error": None,
+                        "message_id": salvage_message_id,
                     },
                 )
                 return DeliveryResult(
@@ -164,6 +192,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                     error=None,
                     mode="plain_salvage",
                     retry_count=1,
+                    message_id=salvage_message_id,
                 )
             log.error(
                 "Telegram salvage HTTP error %s: %s",
@@ -185,6 +214,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                 error=salvage_resp.text,
                 mode="plain_salvage",
                 retry_count=1,
+                message_id=None,
             )
         retryable = _is_retryable_status(resp.status_code)
         log.info(
@@ -201,14 +231,17 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             error=resp.text,
             mode="html",
             retry_count=0,
+            message_id=None,
         )
 
+    message_id = _extract_message_id(resp)
     log.info(
         "tg_delivery_final",
         extra={
             "delivered": True,
             "retryable": False,
             "error": None,
+            "message_id": message_id,
         },
     )
     return DeliveryResult(
@@ -217,7 +250,53 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
         error=None,
         mode="html",
         retry_count=0,
+        message_id=message_id,
     )
+
+
+def edit_telegram_message(
+    *,
+    bot_token: str,
+    chat_id: str,
+    message_id: int,
+    html_text: str,
+) -> bool:
+    if not bot_token or not chat_id or not message_id or not html_text:
+        log.error(
+            "telegram_edit_failed",
+            chat_id=chat_id,
+            message_id=message_id,
+            reason="missing required fields",
+        )
+        return False
+    if requests is None:
+        log.error("Telegram edit failed: requests module not available")
+        return False
+    url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+    payload: dict[str, object] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": html_text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=15)
+    except Exception as exc:
+        log.error("Telegram edit exception: %s", exc)
+        return False
+    if resp.status_code != 200:
+        log.error(
+            "Telegram edit HTTP error %s: %s",
+            resp.status_code,
+            resp.text,
+        )
+        return False
+    log.info(
+        "tg_edit_applied",
+        extra={"chat_id": chat_id, "message_id": message_id},
+    )
+    return True
 
 
 def ping_telegram(bot_token: str) -> tuple[bool, str]:

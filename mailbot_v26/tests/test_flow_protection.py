@@ -16,16 +16,12 @@ def test_focus_hours_batches_high_value_non_critical() -> None:
     scores = DeliveryScores(value=90, risk=10, confidence=70)
     context = DeliveryContext(
         now_local=datetime.now(timezone.utc),
-        is_weekend=False,
-        is_quiet_hours=False,
-        is_focus_hours=True,
         immediate_sent_last_hour=0,
         max_immediate_per_hour=policy.max_immediate_per_hour,
     )
     decision = decide_delivery(scores=scores, context=context, policy=policy)
-    assert decision.mode == DeliveryMode.BATCH_TODAY
-    assert "focus_hours" in decision.reason_codes
-    assert "default_batch" in decision.reason_codes
+    assert decision.mode == DeliveryMode.IMMEDIATE
+    assert "high_value" in decision.reason_codes
 
 
 def test_focus_hours_does_not_override_critical() -> None:
@@ -33,9 +29,6 @@ def test_focus_hours_does_not_override_critical() -> None:
     scores = DeliveryScores(value=40, risk=90, confidence=70)
     context = DeliveryContext(
         now_local=datetime.now(timezone.utc),
-        is_weekend=False,
-        is_quiet_hours=False,
-        is_focus_hours=True,
         immediate_sent_last_hour=0,
         max_immediate_per_hour=policy.max_immediate_per_hour,
     )

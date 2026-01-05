@@ -8,10 +8,18 @@ from mailbot_v26.worker import telegram_sender
 
 
 class DummyResponse:
-    def __init__(self, status_code: int = 200, text: str = "ok") -> None:
+    def __init__(
+        self, status_code: int = 200, text: str = "ok", payload: dict | None = None
+    ) -> None:
         self.status_code = status_code
         self.text = text
         self.content = text.encode()
+        self._payload = payload
+
+    def json(self) -> dict:
+        if self._payload is not None:
+            return self._payload
+        raise ValueError("no payload")
 
 
 def _payload(text: str, *, token: str = "token", chat_id: str = "123") -> TelegramPayload:
@@ -122,3 +130,43 @@ def test_salvage_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.delivered is True
     assert calls[0]["parse_mode"] == "HTML"
     assert "parse_mode" not in calls[1]
+
+
+def test_send_telegram_extracts_message_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
+        return DummyResponse(
+            status_code=200, text="ok", payload={"result": {"message_id": 4242}}
+        )
+
+    monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
+    result = telegram_sender.send_telegram(_payload("hello"))
+    assert result.delivered is True
+    assert result.message_id == 4242
+
+
+def test_edit_telegram_message_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
+        captured.update(json)
+        return DummyResponse(status_code=200, text="ok")
+
+    monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
+    ok = telegram_sender.edit_telegram_message(
+        bot_token="token", chat_id="123", message_id=7, html_text="<b>text</b>"
+    )
+    assert ok is True
+    assert captured["chat_id"] == "123"
+    assert captured["message_id"] == 7
+    assert captured["text"] == "<b>text</b>"
+
+
+def test_edit_telegram_message_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
+        return DummyResponse(status_code=500, text="server error")
+
+    monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
+    ok = telegram_sender.edit_telegram_message(
+        bot_token="token", chat_id="123", message_id=7, html_text="<b>text</b>"
+    )
+    assert ok is False
