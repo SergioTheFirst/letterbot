@@ -118,3 +118,4 @@ Working set (files / tables / tests):
 2026-01-04: updated CONSTITUTION.md (Подробнее button exception, emoji doc types, trust dots threshold) and enforced emoji whitelist.
 2026-01-04: emoji whitelist now treats U+23xx as emoji for strict allowlist enforcement.
 2026-01-05: processing spans + health snapshots stored in SQLite for observability (latency/LLM quality/system health), no UX change.
+2026-01-05: observability analytics + export for processing spans (scoped by account_emails), PII-guarded.

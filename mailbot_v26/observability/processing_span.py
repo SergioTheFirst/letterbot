@@ -17,9 +17,15 @@ logger = get_logger("mailbot")
 _BANNED_KEYS = {
     "subject",
     "body",
+    "body_text",
+    "raw_body",
     "telegram_text",
     "rendered_message",
     "digest_text",
+    "html_text",
+    "attachment_text",
+    "payload_json",
+    "email_raw",
 }
 
 
@@ -123,9 +129,19 @@ class ProcessingSpanRecorder:
     ) -> None:
         ts_end_utc = time.time()
         total_duration_ms = int((time.perf_counter() - span.start_monotonic) * 1000)
-        stage_durations = dict(span.stage_durations_ms)
+        stage_durations = {
+            key: int(value)
+            for key, value in span.stage_durations_ms.items()
+            if str(key).lower() not in _BANNED_KEYS
+        }
         if stage_durations_override:
-            stage_durations.update({k: int(v) for k, v in stage_durations_override.items()})
+            stage_durations.update(
+                {
+                    k: int(v)
+                    for k, v in stage_durations_override.items()
+                    if str(k).lower() not in _BANNED_KEYS
+                }
+            )
         try:
             stage_durations_json = json.dumps(stage_durations, ensure_ascii=False)
         except (TypeError, ValueError):
@@ -230,7 +246,7 @@ def _sanitize_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
             return {
                 k: _clean(v)
                 for k, v in obj.items()
-                if str(k) not in _BANNED_KEYS
+                if str(k).lower() not in _BANNED_KEYS
             }
         if isinstance(obj, list):
             return [_clean(item) for item in obj]

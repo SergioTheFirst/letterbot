@@ -160,6 +160,80 @@ def _fetch_relationship_snapshots(
     return results
 
 
+def _parse_stage_durations(raw: str | None) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
+
+
+def _fetch_processing_spans(
+    conn: sqlite3.Connection, since_ts: float
+) -> Iterable[dict[str, Any]]:
+    try:
+        cursor = conn.execute(
+            """
+            SELECT span_id, ts_start_utc, ts_end_utc, total_duration_ms, account_id, email_id,
+                   stage_durations_json, llm_provider, llm_model, llm_latency_ms, llm_quality_score,
+                   fallback_used, outcome, error_code, health_snapshot_id
+            FROM processing_spans
+            WHERE ts_start_utc >= ?
+            ORDER BY ts_start_utc ASC
+            """,
+            (since_ts,),
+        )
+    except sqlite3.Error:
+        return []
+    for row in cursor.fetchall():
+        yield {
+            "record_type": "processing_span",
+            "span_id": row[0],
+            "ts_start_utc": row[1],
+            "ts_end_utc": row[2],
+            "total_duration_ms": row[3],
+            "account_id": row[4],
+            "email_id": row[5],
+            "stage_durations": _parse_stage_durations(row[6]),
+            "llm_provider": row[7],
+            "llm_model": row[8],
+            "llm_latency_ms": row[9],
+            "llm_quality_score": row[10],
+            "fallback_used": row[11],
+            "outcome": row[12],
+            "error_code": row[13],
+            "health_snapshot_id": row[14],
+        }
+
+
+def _fetch_system_health_snapshots(
+    conn: sqlite3.Connection, since_ts: float
+) -> Iterable[dict[str, Any]]:
+    try:
+        cursor = conn.execute(
+            """
+            SELECT snapshot_id, ts_utc, payload_json, gates_state, metrics_brief
+            FROM system_health_snapshots
+            WHERE ts_utc >= ?
+            ORDER BY ts_utc ASC
+            """,
+            (since_ts,),
+        )
+    except sqlite3.Error:
+        return []
+    for row in cursor.fetchall():
+        yield {
+            "record_type": "system_health_snapshot",
+            "snapshot_id": row[0],
+            "ts_utc": row[1],
+            "payload": _load_payload(row[2]),
+            "gates_state": row[3],
+            "metrics_brief": row[4],
+        }
+
+
 def _quality_metrics_record(db_path: Path, since_dt: datetime, *, now: datetime) -> dict[str, Any]:
     analytics = KnowledgeAnalytics(db_path)
     window_days = max(1, int((now - since_dt).total_seconds() // 86400))
@@ -247,6 +321,14 @@ def export_data(
             handle.write("\n")
             record_count += 1
         for record in _fetch_relationship_snapshots(conn, since_dt):
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
+            handle.write("\n")
+            record_count += 1
+        for record in _fetch_processing_spans(conn, since_ts):
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
+            handle.write("\n")
+            record_count += 1
+        for record in _fetch_system_health_snapshots(conn, since_ts):
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
             handle.write("\n")
             record_count += 1

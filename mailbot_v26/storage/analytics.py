@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -53,6 +54,25 @@ class KnowledgeAnalytics:
     def _window_start_ts(self, days: int) -> float:
         anchor = datetime.now(timezone.utc).timestamp()
         return anchor - (days * 24 * 60 * 60)
+
+    @staticmethod
+    def _percentile(values: list[float], percentile: float) -> float | None:
+        if not values:
+            return None
+        if percentile <= 0:
+            return float(sorted(values)[0])
+        if percentile >= 100:
+            return float(sorted(values)[-1])
+        ordered = sorted(values)
+        if len(ordered) == 1:
+            return float(ordered[0])
+        position = (percentile / 100) * (len(ordered) - 1)
+        lower = int(math.floor(position))
+        upper = int(math.ceil(position))
+        if lower == upper:
+            return float(ordered[lower])
+        fraction = position - lower
+        return float(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction)
 
     @staticmethod
     def _normalize_account_scope(
@@ -2537,3 +2557,138 @@ class KnowledgeAnalytics:
             previous_ts, previous_score = entries[1]
             candidates.append((entity_id, current_score, previous_score, current_ts))
         return candidates
+
+    def _processing_span_rows_scoped(
+        self, *, account_ids: Sequence[str], since_ts: float
+    ) -> list[dict[str, object]]:
+        if not account_ids:
+            return []
+        query = """
+        SELECT span_id, ts_start_utc, ts_end_utc, total_duration_ms, stage_durations_json,
+               llm_latency_ms, llm_quality_score, fallback_used, outcome, error_code,
+               llm_provider, llm_model
+        FROM processing_spans
+        WHERE ts_start_utc >= ?
+        """
+        clause, clause_params = self._account_scope_clause(account_ids)
+        params: list[object] = [since_ts, *clause_params]
+        query += clause
+        query += " ORDER BY ts_start_utc DESC"
+        try:
+            return self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return []
+
+    def processing_spans_metrics_digest(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        window_days: int = 7,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        since_ts = self._window_start_ts(window_days)
+        rows = self._processing_span_rows_scoped(account_ids=account_ids, since_ts=since_ts)
+
+        span_count = len(rows)
+        total_durations: list[float] = []
+        llm_latencies: list[float] = []
+        llm_quality_scores: list[float] = []
+        fallback_count = 0
+        error_count = 0
+        outcome_counts: dict[str, int] = {}
+
+        for row in rows:
+            total_value = row.get("total_duration_ms")
+            if total_value is not None:
+                try:
+                    total_durations.append(float(total_value))
+                except (TypeError, ValueError):
+                    pass
+            llm_value = row.get("llm_latency_ms")
+            if llm_value is not None:
+                try:
+                    llm_latencies.append(float(llm_value))
+                except (TypeError, ValueError):
+                    pass
+            quality_value = row.get("llm_quality_score")
+            if quality_value is not None:
+                try:
+                    llm_quality_scores.append(float(quality_value))
+                except (TypeError, ValueError):
+                    pass
+            if int(row.get("fallback_used") or 0):
+                fallback_count += 1
+            outcome = str(row.get("outcome") or "").strip()
+            if outcome:
+                outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+            if outcome.lower() == "error" or str(row.get("error_code") or ""):
+                error_count += 1
+
+        total_p50 = self._percentile(total_durations, 50)
+        total_p90 = self._percentile(total_durations, 90)
+        llm_p50 = self._percentile(llm_latencies, 50)
+        llm_p90 = self._percentile(llm_latencies, 90)
+        llm_quality_avg = (
+            sum(llm_quality_scores) / len(llm_quality_scores)
+            if llm_quality_scores
+            else None
+        )
+
+        error_rate = (error_count / span_count) if span_count else 0.0
+        fallback_rate = (fallback_count / span_count) if span_count else 0.0
+
+        return {
+            "span_count": span_count,
+            "total_duration_ms_p50": total_p50,
+            "total_duration_ms_p90": total_p90,
+            "llm_latency_ms_p50": llm_p50,
+            "llm_latency_ms_p90": llm_p90,
+            "llm_quality_avg": llm_quality_avg,
+            "error_rate": error_rate,
+            "fallback_rate": fallback_rate,
+            "outcome_counts": outcome_counts,
+        }
+
+    def processing_spans_recent_errors(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        window_days: int = 7,
+        limit: int = 10,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        since_ts = self._window_start_ts(window_days)
+        rows = self._processing_span_rows_scoped(account_ids=account_ids, since_ts=since_ts)
+
+        errors: list[dict[str, object]] = []
+        for row in rows:
+            outcome = str(row.get("outcome") or "").lower()
+            error_code = str(row.get("error_code") or "")
+            if outcome != "error" and not error_code:
+                continue
+            try:
+                durations = json.loads(str(row.get("stage_durations_json") or "{}"))
+                if not isinstance(durations, dict):
+                    durations = {}
+            except (TypeError, ValueError):
+                durations = {}
+            errors.append(
+                {
+                    "span_id": row.get("span_id"),
+                    "ts_start": row.get("ts_start_utc"),
+                    "total_duration_ms": row.get("total_duration_ms"),
+                    "llm_latency_ms": row.get("llm_latency_ms"),
+                    "llm_quality_score": row.get("llm_quality_score"),
+                    "fallback_used": bool(row.get("fallback_used")),
+                    "outcome": row.get("outcome"),
+                    "error_code": error_code,
+                    "llm_provider": row.get("llm_provider"),
+                    "llm_model": row.get("llm_model"),
+                    "stage_durations": durations,
+                }
+            )
+
+        errors.sort(key=lambda item: float(item.get("ts_start") or 0.0), reverse=True)
+        return errors[: max(0, int(limit))]
