@@ -250,15 +250,6 @@ def _emit_contract_event(
         logger.error("contract_event_emit_failed", event_type=event_type.value, error=str(exc))
 
 
-def _is_quiet_hours(now_local: datetime, *, start_hour: int, end_hour: int) -> bool:
-    hour = now_local.hour
-    if start_hour == end_hour:
-        return False
-    if start_hour < end_hour:
-        return start_hour <= hour < end_hour
-    return hour >= start_hour or hour < end_hour
-
-
 def _build_delivery_context(
     *,
     now_local: datetime,
@@ -268,24 +259,8 @@ def _build_delivery_context(
     enable_flow_protection: bool,
     immediate_sent_last_hour: int,
 ) -> DeliveryContext:
-    is_quiet_hours = enable_circadian and _is_quiet_hours(
-        now_local,
-        start_hour=policy_config.night_start_hour,
-        end_hour=policy_config.night_end_hour,
-    )
-    is_focus_hours = False
-    if enable_flow_protection:
-        resolved_flow_config = flow_config or FlowProtectionConfig()
-        is_focus_hours = _is_quiet_hours(
-            now_local,
-            start_hour=resolved_flow_config.focus_start_hour,
-            end_hour=resolved_flow_config.focus_end_hour,
-        )
     return DeliveryContext(
         now_local=now_local,
-        is_weekend=now_local.weekday() >= 5,
-        is_quiet_hours=is_quiet_hours,
-        is_focus_hours=is_focus_hours,
         immediate_sent_last_hour=immediate_sent_last_hour,
         max_immediate_per_hour=policy_config.max_immediate_per_hour,
     )
@@ -4233,8 +4208,6 @@ def process_message(
                     "reason_codes": delivery_decision.reason_codes,
                     "thresholds_used": delivery_decision.thresholds_used,
                     "attention_debt": delivery_decision.attention_debt,
-                    "quiet_hours": delivery_context.is_quiet_hours,
-                    "weekend": delivery_context.is_weekend,
                     "priority": priority,
                     "confidence_percent": confidence_percent,
                     "extraction_success": extraction_success,
