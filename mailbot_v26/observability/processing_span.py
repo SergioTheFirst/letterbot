@@ -6,15 +6,16 @@ import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, MutableMapping
 
 from mailbot_v26.observability import get_logger
 
 logger = get_logger("mailbot")
 
 
-_BANNED_KEYS = {
+_FORBIDDEN_KEYS = {
     "subject",
     "body",
     "body_text",
@@ -27,6 +28,14 @@ _BANNED_KEYS = {
     "payload_json",
     "email_raw",
 }
+
+_PRUNE_STATE: dict[str, str] = {}
+_UTC_DATE_FORMAT = "%Y-%m-%d"
+
+_SPANS_RETENTION_DAYS_DEFAULT = 90
+_SPANS_MAX_ROWS_DEFAULT = 250_000
+_HEALTH_RETENTION_DAYS_DEFAULT = 30
+_HEALTH_MAX_ROWS_DEFAULT = 50_000
 
 
 @dataclass
@@ -49,6 +58,7 @@ class ProcessingSpanRecorder:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._maybe_prune()
 
     def _init_db(self) -> None:
         try:
@@ -98,9 +108,39 @@ class ProcessingSpanRecorder:
                         ON processing_spans(email_id);
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_processing_spans_ts_start
+                        ON processing_spans(ts_start_utc);
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_system_health_snapshots_ts
+                        ON system_health_snapshots(ts_utc);
+                    """
+                )
                 conn.commit()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("processing_span_init_failed", error=str(exc))
+
+    def _maybe_prune(self) -> None:
+        try:
+            utc_date = datetime.now(timezone.utc).strftime(_UTC_DATE_FORMAT)
+            cached = _PRUNE_STATE.get("date")
+            if cached == utc_date:
+                return
+            _PRUNE_STATE["date"] = utc_date
+            with sqlite3.connect(self.path) as conn:
+                _prune_observability(
+                    conn,
+                    spans_retention_days=_SPANS_RETENTION_DAYS_DEFAULT,
+                    spans_max_rows=_SPANS_MAX_ROWS_DEFAULT,
+                    health_retention_days=_HEALTH_RETENTION_DAYS_DEFAULT,
+                    health_max_rows=_HEALTH_MAX_ROWS_DEFAULT,
+                )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("observability_prune_failed", error=str(exc))
 
     def start(self, *, account_id: str, email_id: int | None) -> ProcessingSpan:
         span_id = uuid.uuid4().hex
@@ -129,21 +169,47 @@ class ProcessingSpanRecorder:
     ) -> None:
         ts_end_utc = time.time()
         total_duration_ms = int((time.perf_counter() - span.start_monotonic) * 1000)
-        stage_durations = {
-            key: int(value)
-            for key, value in span.stage_durations_ms.items()
-            if str(key).lower() not in _BANNED_KEYS
-        }
+        scrubbed_stage_keys = 0
+        stage_durations = {}
+        for key, value in span.stage_durations_ms.items():
+            key_lower = str(key).lower()
+            if key_lower in _FORBIDDEN_KEYS:
+                scrubbed_stage_keys += 1
+                continue
+            try:
+                stage_durations[key] = int(value)
+            except (TypeError, ValueError):
+                continue
         if stage_durations_override:
-            stage_durations.update(
-                {
-                    k: int(v)
-                    for k, v in stage_durations_override.items()
-                    if str(k).lower() not in _BANNED_KEYS
-                }
-            )
+            for k, v in stage_durations_override.items():
+                key_lower = str(k).lower()
+                if key_lower in _FORBIDDEN_KEYS:
+                    scrubbed_stage_keys += 1
+                    continue
+                try:
+                    stage_durations[str(k)] = int(v)
+                except (TypeError, ValueError):
+                    continue
+        stage_durations["total"] = total_duration_ms
+        sanitized_stage_durations = _sanitize_payload(
+            stage_durations, base_scrubbed_count=scrubbed_stage_keys
+        )
+        stage_markers = {
+            key: sanitized_stage_durations.get(key)
+            for key in ("scrubbed", "scrubbed_keys_count")
+            if key in sanitized_stage_durations
+        }
+        clean_stage_durations: MutableMapping[str, Any] = {}
+        for key, value in sanitized_stage_durations.items():
+            if key in stage_markers:
+                continue
+            try:
+                clean_stage_durations[str(key)] = int(value)
+            except (TypeError, ValueError):
+                continue
+        clean_stage_durations.update(stage_markers)
         try:
-            stage_durations_json = json.dumps(stage_durations, ensure_ascii=False)
+            stage_durations_json = json.dumps(clean_stage_durations, ensure_ascii=False)
         except (TypeError, ValueError):
             stage_durations_json = "{}"
 
@@ -240,21 +306,42 @@ class ProcessingSpanRecorder:
         return snapshot_id
 
 
-def _sanitize_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
-    def _clean(obj: Any) -> Any:
-        if isinstance(obj, Mapping):
-            return {
-                k: _clean(v)
-                for k, v in obj.items()
-                if str(k).lower() not in _BANNED_KEYS
-            }
-        if isinstance(obj, list):
-            return [_clean(item) for item in obj]
-        return obj
-
+def _sanitize_payload(
+    payload: Mapping[str, Any], *, base_scrubbed_count: int = 0
+) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         return {}
-    return _clean(payload)
+    sanitized, scrubbed_count = _sanitize_mapping(payload)
+    scrubbed_total = scrubbed_count + max(base_scrubbed_count, 0)
+    if scrubbed_total > 0 and isinstance(sanitized, MutableMapping):
+        sanitized = dict(sanitized)
+        sanitized["scrubbed"] = True
+        sanitized["scrubbed_keys_count"] = scrubbed_total
+    return sanitized if isinstance(sanitized, Mapping) else {}
+
+
+def _sanitize_mapping(obj: Any) -> tuple[Any, int]:
+    if isinstance(obj, Mapping):
+        cleaned: dict[str, Any] = {}
+        scrubbed = 0
+        for k, v in obj.items():
+            key_lower = str(k).lower()
+            if key_lower in _FORBIDDEN_KEYS:
+                scrubbed += 1
+                continue
+            child_cleaned, child_scrubbed = _sanitize_mapping(v)
+            scrubbed += child_scrubbed
+            cleaned[k] = child_cleaned
+        return cleaned, scrubbed
+    if isinstance(obj, list):
+        cleaned_list = []
+        scrubbed = 0
+        for item in obj:
+            child_cleaned, child_scrubbed = _sanitize_mapping(item)
+            scrubbed += child_scrubbed
+            cleaned_list.append(child_cleaned)
+        return cleaned_list, scrubbed
+    return obj, 0
 
 
 def _extract_gates_state(payload: Mapping[str, Any]) -> str:
@@ -285,3 +372,70 @@ def _extract_metrics_brief(payload: Mapping[str, Any]) -> str:
         return json.dumps(brief, ensure_ascii=False, separators=(",", ":"))
     except (TypeError, ValueError):
         return ""
+
+
+def _prune_observability(
+    conn: sqlite3.Connection,
+    *,
+    spans_retention_days: int,
+    spans_max_rows: int,
+    health_retention_days: int,
+    health_max_rows: int,
+) -> None:
+    _prune_by_age(conn, "processing_spans", "ts_start_utc", spans_retention_days)
+    _prune_by_age(conn, "system_health_snapshots", "ts_utc", health_retention_days)
+    _prune_by_max_rows(
+        conn,
+        table="processing_spans",
+        ts_column="ts_start_utc",
+        pk_column="span_id",
+        max_rows=spans_max_rows,
+    )
+    _prune_by_max_rows(
+        conn,
+        table="system_health_snapshots",
+        ts_column="ts_utc",
+        pk_column="snapshot_id",
+        max_rows=health_max_rows,
+    )
+    conn.commit()
+
+
+def _prune_by_age(
+    conn: sqlite3.Connection, table: str, ts_column: str, retention_days: int
+) -> None:
+    if retention_days <= 0:
+        return
+    cutoff = time.time() - (retention_days * 86400)
+    conn.execute(
+        f"DELETE FROM {table} WHERE {ts_column} < ?",
+        (cutoff,),
+    )
+
+
+def _prune_by_max_rows(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    ts_column: str,
+    pk_column: str,
+    max_rows: int,
+) -> None:
+    if max_rows <= 0:
+        return
+    row = conn.execute(f"SELECT COUNT(1) FROM {table}").fetchone()
+    total_rows = int(row[0]) if row else 0
+    if total_rows <= max_rows:
+        return
+    conn.execute(
+        f"""
+        DELETE FROM {table}
+        WHERE {pk_column} NOT IN (
+            SELECT {pk_column}
+            FROM {table}
+            ORDER BY {ts_column} DESC, {pk_column} DESC
+            LIMIT ?
+        )
+        """,
+        (max_rows,),
+    )

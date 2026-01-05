@@ -281,3 +281,9 @@ CREATE INDEX IF NOT EXISTS idx_processing_spans_account_ts
 
 CREATE INDEX IF NOT EXISTS idx_processing_spans_email_id
     ON processing_spans(email_id);
+
+CREATE INDEX IF NOT EXISTS idx_processing_spans_ts_start
+    ON processing_spans(ts_start_utc);
+
+CREATE INDEX IF NOT EXISTS idx_system_health_snapshots_ts
+    ON system_health_snapshots(ts_utc);

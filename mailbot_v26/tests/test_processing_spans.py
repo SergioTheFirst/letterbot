@@ -65,6 +65,8 @@ def test_health_snapshot_pii_guard(tmp_path: Path) -> None:
         "rendered_message": "render",
         "digest_text": "digest",
         "attachment_text": "attachment text",
+        "html_text": "html",
+        "email_raw": "raw",
         "payload_json": {"nested": "value"},
         "metrics": {"days_7": {"shadow_accuracy": 0.7}},
         "gates": {"passed": False, "failed": ["llm_failure_rate"]},
@@ -87,8 +89,12 @@ def test_health_snapshot_pii_guard(tmp_path: Path) -> None:
         "digest_text",
         "attachment_text",
         "payload_json",
+        "html_text",
+        "email_raw",
     }
     assert not banned_keys.intersection(stored.keys())
+    assert stored.get("scrubbed") is True
+    assert stored.get("scrubbed_keys_count") == len(banned_keys)
 
 
 def test_stage_durations_pii_guard(tmp_path: Path) -> None:
@@ -117,6 +123,8 @@ def test_stage_durations_pii_guard(tmp_path: Path) -> None:
     assert "body_text" not in durations
     assert "rendered_message" not in durations
     assert durations.get("parse") == 5
+    assert durations.get("scrubbed") is True
+    assert durations.get("scrubbed_keys_count") == 2
 
 
 def test_processing_span_basic_fields(tmp_path: Path) -> None:
