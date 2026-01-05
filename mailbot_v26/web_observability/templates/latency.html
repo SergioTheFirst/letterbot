@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ static_url }}">
+</head>
+<body>
+  <header class="navbar">
+    <div class="brand">{{ title }}</div>
+    <nav>
+      <a href="{{ latency_url }}" class="active">Latency</a>
+      <a href="{{ health_url }}">Health</a>
+    </nav>
+  </header>
+  <main class="container">
+    {{ error_block }}
+    <section class="filters">
+      <form method="get" action="{{ latency_url }}" class="filter-form">
+        <div class="form-group">
+          <label for="account_email">Account</label>
+          <select id="account_email" name="account_email">{{ account_options }}</select>
+        </div>
+        <div class="form-group">
+          <label for="account_emails">Scope (comma-separated)</label>
+          <input id="account_emails" name="account_emails" type="text" value="{{ account_emails_value }}" placeholder="optional, comma separated">
+        </div>
+        <div class="form-group">
+          <label for="window_days">Window</label>
+          <select id="window_days" name="window_days">{{ window_options }}</select>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Apply</button>
+        </div>
+      </form>
+    </section>
+
+    <section>
+      <h2>Latency summary</h2>
+      {{ metrics_block }}
+    </section>
+
+    <section>
+      <h2>Recent errors</h2>
+      {{ errors_block }}
+    </section>
+
+    <section>
+      <h2>Slowest spans</h2>
+      {{ slow_block }}
+    </section>
+  </main>
+</body>
+</html>

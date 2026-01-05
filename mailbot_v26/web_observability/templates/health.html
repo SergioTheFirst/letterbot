@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ static_url }}">
+</head>
+<body>
+  <header class="navbar">
+    <div class="brand">{{ title }}</div>
+    <nav>
+      <a href="{{ latency_url }}">Latency</a>
+      <a href="{{ health_url }}" class="active">Health</a>
+    </nav>
+  </header>
+  <main class="container">
+    <section>
+      <h2>Health</h2>
+      <p class="muted">Not implemented yet.</p>
+    </section>
+  </main>
+</body>
+</html>

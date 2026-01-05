@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="navbar">
+    <div class="brand">{{ title }}</div>
+    <nav>
+      <a href="{{ url_for('latency') }}" class="{% if request.path == '/latency' or request.path == '/' %}active{% endif %}">Latency</a>
+      <a href="{{ url_for('health') }}" class="{% if request.path == '/health' %}active{% endif %}">Health</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% if error %}
+      <div class="alert">{{ error }}</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
