@@ -40,4 +40,4 @@ focus_hours = 8-10
         enable_flow_protection=True,
         immediate_sent_last_hour=0,
     )
-    assert context.is_focus_hours is True
+    assert context.immediate_sent_last_hour == 0

@@ -232,10 +232,41 @@ def build_tg_short_template(*, priority: str, subject: str, from_email: str) -> 
     )
 
 
+def build_minimal_telegram_text(
+    *,
+    priority: str,
+    from_email: str,
+    subject: str,
+    attachments: list[dict[str, Any]],
+    max_attachment_names: int = 3,
+) -> str:
+    base_text = build_tg_short_template(
+        priority=priority, subject=subject, from_email=from_email
+    )
+    if not attachments:
+        return base_text
+    minimal_attachments: list[dict[str, Any]] = []
+    for attachment in attachments[:max_attachment_names]:
+        minimal_attachments.append(
+            {
+                "filename": attachment.get("filename") or "вложение",
+                "content_type": attachment.get("content_type")
+                or attachment.get("type")
+                or "",
+                "text": "",
+            }
+        )
+    attachments_block = format_attachments_block(minimal_attachments)
+    if len(attachments) > max_attachment_names:
+        attachments_block = f"{attachments_block}\n… и ещё {len(attachments) - len(minimal_attachments)}"
+    return "\n\n".join([base_text, attachments_block])
+
+
 __all__ = [
     "build_telegram_text",
     "build_tg_fallback",
     "build_tg_short_template",
+    "build_minimal_telegram_text",
     "format_priority_line",
     "format_subject",
     "format_main_action",

@@ -25,9 +25,6 @@ class DeliveryDecision:
 @dataclass(frozen=True, slots=True)
 class DeliveryContext:
     now_local: datetime
-    is_weekend: bool
-    is_quiet_hours: bool
-    is_focus_hours: bool
     immediate_sent_last_hour: int
     max_immediate_per_hour: int
 
@@ -129,67 +126,10 @@ def decide_delivery(
             attention_debt=attention_debt,
         )
 
-    if context.is_focus_hours:
-        reason_codes.append("focus_hours")
-        if context.is_quiet_hours:
-            reason_codes.append("defer_to_morning")
-            return DeliveryDecision(
-                mode=DeliveryMode.DEFER_TO_MORNING,
-                reason_codes=reason_codes,
-                thresholds_used=thresholds_used,
-                attention_debt=attention_debt,
-            )
-        reason_codes.append("default_batch")
-        return DeliveryDecision(
-            mode=DeliveryMode.BATCH_TODAY,
-            reason_codes=reason_codes,
-            thresholds_used=thresholds_used,
-            attention_debt=attention_debt,
-        )
-
-    if context.is_quiet_hours:
-        reason_codes.append("quiet_hours")
-        if scores.value >= policy.immediate_value_threshold:
-            reason_codes.append("high_value")
-            return DeliveryDecision(
-                mode=DeliveryMode.DEFER_TO_MORNING,
-                reason_codes=reason_codes,
-                thresholds_used=thresholds_used,
-                attention_debt=attention_debt,
-            )
-        if scores.value >= policy.batch_value_threshold:
-            reason_codes.append("default_batch")
-            return DeliveryDecision(
-                mode=DeliveryMode.DEFER_TO_MORNING,
-                reason_codes=reason_codes,
-                thresholds_used=thresholds_used,
-                attention_debt=attention_debt,
-            )
-        reason_codes.append("low_signal")
-        return DeliveryDecision(
-            mode=DeliveryMode.SILENT_LOG,
-            reason_codes=reason_codes,
-            thresholds_used=thresholds_used,
-            attention_debt=attention_debt,
-        )
-
     if context.max_immediate_per_hour > 0 and (
         context.immediate_sent_last_hour >= context.max_immediate_per_hour
     ):
         reason_codes.append("attention_debt")
-        return DeliveryDecision(
-            mode=DeliveryMode.BATCH_TODAY,
-            reason_codes=reason_codes,
-            thresholds_used=thresholds_used,
-            attention_debt=attention_debt,
-        )
-
-    if (
-        context.is_weekend
-        and scores.value >= policy.immediate_value_threshold
-        and scores.risk < policy.critical_risk_threshold
-    ):
-        reason_codes.append("weekend_batch")
         return DeliveryDecision(
             mode=DeliveryMode.BATCH_TODAY,
             reason_codes=reason_codes,
