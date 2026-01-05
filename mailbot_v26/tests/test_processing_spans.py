@@ -59,9 +59,13 @@ def test_health_snapshot_pii_guard(tmp_path: Path) -> None:
     payload = {
         "subject": "secret subject",
         "body": "full body",
+        "body_text": "extra text",
+        "raw_body": "raw body",
         "telegram_text": "text",
         "rendered_message": "render",
         "digest_text": "digest",
+        "attachment_text": "attachment text",
+        "payload_json": {"nested": "value"},
         "metrics": {"days_7": {"shadow_accuracy": 0.7}},
         "gates": {"passed": False, "failed": ["llm_failure_rate"]},
     }
@@ -73,8 +77,46 @@ def test_health_snapshot_pii_guard(tmp_path: Path) -> None:
             "SELECT payload_json FROM system_health_snapshots LIMIT 1"
         ).fetchone()
     stored = json.loads(row[0])
-    banned_keys = {"subject", "body", "telegram_text", "rendered_message", "digest_text"}
+    banned_keys = {
+        "subject",
+        "body",
+        "body_text",
+        "raw_body",
+        "telegram_text",
+        "rendered_message",
+        "digest_text",
+        "attachment_text",
+        "payload_json",
+    }
     assert not banned_keys.intersection(stored.keys())
+
+
+def test_stage_durations_pii_guard(tmp_path: Path) -> None:
+    db_path = tmp_path / "db.sqlite"
+    recorder = ProcessingSpanRecorder(db_path)
+    payload = {"metrics": {"days_7": {"shadow_accuracy": 0.9}}}
+
+    span = recorder.start(account_id="acc", email_id=5)
+    span.record_stage("parse", 5)
+    recorder.finalize(
+        span,
+        llm_provider=None,
+        llm_model=None,
+        llm_latency_ms=None,
+        llm_quality_score=None,
+        fallback_used=False,
+        outcome="ok",
+        error_code="",
+        health_snapshot_payload=payload,
+        stage_durations_override={"body_text": 999, "rendered_message": 123},
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute("SELECT stage_durations_json FROM processing_spans LIMIT 1").fetchone()
+    durations = json.loads(row[0])
+    assert "body_text" not in durations
+    assert "rendered_message" not in durations
+    assert durations.get("parse") == 5
 
 
 def test_processing_span_basic_fields(tmp_path: Path) -> None:
