@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.behavior.attention_engine import (
@@ -124,7 +124,7 @@ from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
-from mailbot_v26.worker.telegram_sender import DeliveryResult
+from mailbot_v26.worker.telegram_sender import DeliveryResult, edit_telegram_message
 from .signal_quality import evaluate_signal_quality
 from mailbot_v26.ui.i18n import (
     DEFAULT_LOCALE,
@@ -190,6 +190,7 @@ auto_action_engine = AutoActionEngine(
 )
 system_orchestrator = SystemOrchestrator()
 notification_alert_store = NotificationAlertStore(DB_PATH)
+MAX_TELEGRAM_WAIT_SECONDS = 180
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +226,14 @@ class AttachmentSummary:
 class MailTypeAttachment:
     filename: str | None
     content_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeliverySLAOutcome:
+    result: DeliveryResult
+    delivery_mode: str
+    elapsed_to_first_send_seconds: float
+    edit_applied: bool
 
 
 def _emit_contract_event(
@@ -336,6 +345,42 @@ def _coerce_delivery_result(result: object, *, email_id: int) -> DeliveryResult:
         error=None,
         mode="html",
         retry_count=0,
+    )
+
+
+def _apply_delivery_sla(
+    *,
+    processing_started_at: float,
+    wait_budget_seconds: float,
+    minimal_payload: TelegramPayload,
+    final_payload: TelegramPayload,
+    send_func: Callable[[TelegramPayload], DeliveryResult],
+    edit_func: Callable[[int, TelegramPayload], bool] | None,
+    on_edit_failure: Callable[[str], None] | None,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> DeliverySLAOutcome:
+    initial_elapsed = monotonic() - processing_started_at
+    delivery_mode = "final_first_send"
+    first_payload = final_payload
+    if initial_elapsed > wait_budget_seconds:
+        delivery_mode = "minimal_then_edit"
+        first_payload = minimal_payload
+    result = send_func(first_payload)
+    elapsed_to_first_send_seconds = max(0.0, monotonic() - processing_started_at)
+    edit_applied = False
+    if delivery_mode == "minimal_then_edit" and result.delivered:
+        message_id = result.message_id
+        if message_id and edit_func:
+            edit_applied = bool(edit_func(message_id, final_payload))
+            if not edit_applied and on_edit_failure:
+                on_edit_failure("edit_failed")
+        elif on_edit_failure:
+            on_edit_failure("missing_message_id")
+    return DeliverySLAOutcome(
+        result=result,
+        delivery_mode=delivery_mode,
+        elapsed_to_first_send_seconds=elapsed_to_first_send_seconds,
+        edit_applied=edit_applied,
     )
 
 
@@ -1630,6 +1675,35 @@ def _looks_like_subject_only(text: str, subject: str) -> bool:
     if normalized_subject and normalized_subject in normalized:
         return len(normalized) <= len(normalized_subject) + 10
     return len(lines) == 1
+
+
+def _build_minimal_telegram_payload(
+    *,
+    priority: str,
+    from_email: str,
+    subject: str,
+    attachments: list[dict[str, Any]],
+    metadata: dict[str, Any],
+) -> TelegramPayload:
+    minimal_attachments: list[dict[str, Any]] = []
+    for attachment in attachments:
+        minimal_attachments.append(
+            {
+                "filename": attachment.get("filename") or "",
+                "content_type": attachment.get("content_type")
+                or attachment.get("type")
+                or "",
+                "text": "",
+            }
+        )
+    minimal_text = tg_renderer.build_minimal_telegram_text(
+        priority=priority,
+        from_email=from_email,
+        subject=subject,
+        attachments=minimal_attachments,
+    )
+    trimmed_text = _trim_telegram_body(minimal_text)
+    return TelegramPayload(html_text=trimmed_text, priority=priority, metadata=metadata)
 
 
 def _build_telegram_text(
@@ -3315,6 +3389,7 @@ def process_message(
     span = processing_span_recorder.start(
         account_id=account_email, email_id=message_id
     )
+    processing_started_at = time.monotonic()
     outcome = "ok"
     error_code = ""
     llm_provider_for_span: str | None = None
@@ -3324,6 +3399,9 @@ def process_message(
     health_snapshot_payload: dict[str, Any] | None = None
     fallback_used = False
     telegram_delivered = False
+    delivery_mode_for_span = ""
+    elapsed_to_first_send_seconds = 0.0
+    edit_applied = False
     parse_timer_start = time.perf_counter()
 
     try:
@@ -4318,25 +4396,83 @@ def process_message(
             delivery_ts = time.time()
             consecutive_tg_failures = 0
             delivery_result: DeliveryResult | None = None
-            try:
-                result = _coerce_delivery_result(
-                    enqueue_tg(email_id=message_id, payload=payload),
+            wait_budget_seconds = MAX_TELEGRAM_WAIT_SECONDS
+            delivery_mode_for_span = "final_first_send"
+            elapsed_to_first_send_seconds = 0.0
+            edit_applied = False
+            minimal_payload = _build_minimal_telegram_payload(
+                priority=priority,
+                from_email=from_email,
+                subject=subject,
+                attachments=attachments,
+                metadata=dict(payload.metadata),
+            )
+            edit_errors: list[str] = []
+
+            def _on_edit_failure(reason: str) -> None:
+                edit_errors.append(reason)
+                event_emitter.emit(
+                    type="telegram_edit_failed",
+                    timestamp=received_at,
+                    email_id=message_id,
+                    payload={"reason": reason, "chat_id": telegram_chat_id},
+                )
+
+            def _edit_payload(message_id: int, final_payload: TelegramPayload) -> bool:
+                bot_token = str(
+                    payload.metadata.get("bot_token")
+                    or minimal_payload.metadata.get("bot_token")
+                    or ""
+                )
+                chat_id = str(
+                    payload.metadata.get("chat_id")
+                    or minimal_payload.metadata.get("chat_id")
+                    or ""
+                )
+                return edit_telegram_message(
+                    bot_token=bot_token,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    html_text=final_payload.html_text,
+                )
+
+            def _send_payload(message_payload: TelegramPayload) -> DeliveryResult:
+                return _coerce_delivery_result(
+                    enqueue_tg(email_id=message_id, payload=message_payload),
                     email_id=message_id,
                 )
-                delivery_result = result
-                if not result.delivered:
-                    if result.retryable:
-                        raise RuntimeError(result.error or "Telegram delivery failed")
+
+            sla_outcome = _apply_delivery_sla(
+                processing_started_at=processing_started_at,
+                wait_budget_seconds=wait_budget_seconds,
+                minimal_payload=minimal_payload,
+                final_payload=payload,
+                send_func=_send_payload,
+                edit_func=_edit_payload,
+                on_edit_failure=_on_edit_failure,
+            )
+            delivery_result = sla_outcome.result
+            delivery_mode_for_span = sla_outcome.delivery_mode
+            elapsed_to_first_send_seconds = sla_outcome.elapsed_to_first_send_seconds
+            edit_applied = sla_outcome.edit_applied
+            try:
+                if delivery_result is None:
+                    raise RuntimeError("telegram_delivery_result_missing")
+                if not delivery_result.delivered:
+                    if delivery_result.retryable:
+                        raise RuntimeError(
+                            delivery_result.error or "Telegram delivery failed"
+                        )
                     logger.error(
                         "telegram_delivery_non_retryable",
                         email_id=message_id,
                         chat_id=telegram_chat_id,
-                        error=result.error or "unknown error",
+                        error=delivery_result.error or "unknown error",
                     )
                     change = system_health.update_component(
                         "Telegram",
                         False,
-                        reason=result.error or "Telegram send failed",
+                        reason=delivery_result.error or "Telegram send failed",
                     )
                     _notify_system_mode_change(
                         change=change,
@@ -4356,7 +4492,7 @@ def process_message(
                         type="telegram_delivery_failed",
                         timestamp=received_at,
                         email_id=message_id,
-                        payload={"error": result.error or "non-retryable failure"},
+                        payload={"error": delivery_result.error or "non-retryable failure"},
                     )
                     _emit_contract_event(
                         EventType.TELEGRAM_FAILED,
@@ -4365,11 +4501,11 @@ def process_message(
                         entity_id=entity_resolution.entity_id if entity_resolution else None,
                         email_id=message_id,
                         payload={
-                            "error": result.error or "non-retryable failure",
+                            "error": delivery_result.error or "non-retryable failure",
                             "delivered": False,
                             "occurred_at_utc": delivery_ts,
-                            "mode": result.mode,
-                            "retry_count": result.retry_count,
+                            "mode": delivery_result.mode,
+                            "retry_count": delivery_result.retry_count,
                         },
                     )
                     consecutive_tg_failures = notification_alert_store.record_failure(
@@ -4443,7 +4579,12 @@ def process_message(
                     type="telegram_delivery_succeeded",
                     timestamp=received_at,
                     email_id=message_id,
-                    payload={"render_mode": render_mode.name},
+                    payload={
+                        "render_mode": render_mode.name,
+                        "delivery_mode": delivery_mode_for_span,
+                        "edit_applied": edit_applied,
+                        "message_id": delivery_result.message_id if delivery_result else None,
+                    },
                 )
                 _emit_contract_event(
                     EventType.TELEGRAM_DELIVERED,
@@ -4458,11 +4599,27 @@ def process_message(
                         "from_email": from_email,
                         "delivered": True,
                         "occurred_at_utc": delivery_ts,
-                        "mode": result.mode,
-                        "retry_count": result.retry_count,
+                        "mode": delivery_result.mode if delivery_result else "html",
+                        "retry_count": delivery_result.retry_count if delivery_result else 0,
+                        "message_id": delivery_result.message_id if delivery_result else None,
+                        "chat_id": telegram_chat_id,
+                        "delivery_mode": delivery_mode_for_span,
                     },
                 )
-    
+
+            event_emitter.emit(
+                type="telegram_delivery_sla",
+                timestamp=received_at,
+                email_id=message_id,
+                payload={
+                    "delivery_mode": delivery_mode_for_span,
+                    "wait_budget_seconds": wait_budget_seconds,
+                    "elapsed_to_first_send_seconds": elapsed_to_first_send_seconds,
+                    "edit_applied": edit_applied,
+                    "edit_errors": edit_errors,
+                },
+            )
+
             _maybe_alert_notification_sla(
                 account_email=account_email,
                 telegram_chat_id=telegram_chat_id,
@@ -4585,4 +4742,8 @@ def process_message(
             outcome=outcome,
             error_code=error_code,
             health_snapshot_payload=health_snapshot_payload,
+            delivery_mode=delivery_mode_for_span,
+            wait_budget_seconds=MAX_TELEGRAM_WAIT_SECONDS,
+            elapsed_to_first_send_ms=int(elapsed_to_first_send_seconds * 1000),
+            edit_applied=edit_applied,
         )

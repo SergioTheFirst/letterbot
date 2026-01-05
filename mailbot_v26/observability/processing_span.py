@@ -81,9 +81,37 @@ class ProcessingSpanRecorder:
                         fallback_used INTEGER NOT NULL DEFAULT 0,
                         outcome TEXT NOT NULL,
                         error_code TEXT NOT NULL DEFAULT '',
-                        health_snapshot_id TEXT NOT NULL DEFAULT ''
+                        health_snapshot_id TEXT NOT NULL DEFAULT '',
+                        delivery_mode TEXT DEFAULT '',
+                        wait_budget_seconds INTEGER DEFAULT 0,
+                        elapsed_to_first_send_ms INTEGER DEFAULT 0,
+                        edit_applied INTEGER NOT NULL DEFAULT 0
                     );
                     """
+                )
+                self._ensure_column(
+                    conn,
+                    table="processing_spans",
+                    column="delivery_mode",
+                    definition="TEXT DEFAULT ''",
+                )
+                self._ensure_column(
+                    conn,
+                    table="processing_spans",
+                    column="wait_budget_seconds",
+                    definition="INTEGER DEFAULT 0",
+                )
+                self._ensure_column(
+                    conn,
+                    table="processing_spans",
+                    column="elapsed_to_first_send_ms",
+                    definition="INTEGER DEFAULT 0",
+                )
+                self._ensure_column(
+                    conn,
+                    table="processing_spans",
+                    column="edit_applied",
+                    definition="INTEGER NOT NULL DEFAULT 0",
                 )
                 conn.execute(
                     """
@@ -123,6 +151,25 @@ class ProcessingSpanRecorder:
                 conn.commit()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("processing_span_init_failed", error=str(exc))
+
+    @staticmethod
+    def _ensure_column(
+        conn: sqlite3.Connection, *, table: str, column: str, definition: str
+    ) -> None:
+        try:
+            existing = conn.execute(
+                "PRAGMA table_info({})".format(table)
+            ).fetchall()
+            if any(row[1] == column for row in existing):
+                return
+            conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {definition};"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            return
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("processing_span_alter_failed", error=str(exc))
 
     def _maybe_prune(self) -> None:
         try:
@@ -166,6 +213,10 @@ class ProcessingSpanRecorder:
         error_code: str,
         health_snapshot_payload: Mapping[str, Any] | None,
         stage_durations_override: Mapping[str, int] | None = None,
+        delivery_mode: str | None = None,
+        wait_budget_seconds: int | None = None,
+        elapsed_to_first_send_ms: int | None = None,
+        edit_applied: bool = False,
     ) -> None:
         ts_end_utc = time.time()
         total_duration_ms = int((time.perf_counter() - span.start_monotonic) * 1000)
@@ -239,9 +290,13 @@ class ProcessingSpanRecorder:
                         fallback_used,
                         outcome,
                         error_code,
-                        health_snapshot_id
+                        health_snapshot_id,
+                        delivery_mode,
+                        wait_budget_seconds,
+                        elapsed_to_first_send_ms,
+                        edit_applied
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         span.span_id,
@@ -259,6 +314,10 @@ class ProcessingSpanRecorder:
                         outcome,
                         error_code,
                         health_snapshot_id,
+                        delivery_mode or "",
+                        int(wait_budget_seconds or 0),
+                        int(elapsed_to_first_send_ms or 0),
+                        1 if edit_applied else 0,
                     ),
                 )
                 conn.commit()

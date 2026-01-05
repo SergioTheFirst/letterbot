@@ -122,3 +122,4 @@ Working set (files / tables / tests):
 2026-01-05: observability retention + size caps + stricter PII scrubbing for spans/health snapshots.
 2026-01-11: local read-only web observability console added.
 2026-01-12: removed quiet/focus/weekend delivery deferrals; DeliveryContext simplified; telegram sender returns message_id with edit helper.
+2026-01-05: delivery SLA budget with minimal Tier-1 then edit-in-place.
