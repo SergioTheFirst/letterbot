@@ -1,0 +1,170 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  background: #f5f5f5;
+  color: #1f2933;
+}
+
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #0f172a;
+  color: #fff;
+  padding: 12px 18px;
+}
+
+.navbar a {
+  color: #cbd5e1;
+  margin-left: 12px;
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.navbar a.active,
+.navbar a:hover {
+  background: #1d2b4f;
+  color: #fff;
+}
+
+.brand {
+  font-weight: bold;
+}
+
+.container {
+  padding: 20px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.alert {
+  background: #fde68a;
+  color: #92400e;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.filters {
+  background: #fff;
+  padding: 16px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  margin-bottom: 16px;
+}
+
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+}
+
+.form-actions {
+  display: flex;
+  align-items: flex-end;
+}
+
+input, select, button {
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  font-size: 14px;
+}
+
+button {
+  background: #0f172a;
+  color: #fff;
+  cursor: pointer;
+  border: none;
+}
+
+button:hover {
+  background: #1d2b4f;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.metric {
+  background: #fff;
+  padding: 12px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.metric .label {
+  color: #475569;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.metric .value {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.data-table th,
+.data-table td {
+  padding: 10px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  font-size: 14px;
+}
+
+.data-table th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
+.auth-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: #e2e8f0;
+}
+
+.auth-card {
+  background: #fff;
+  padding: 24px;
+  border-radius: 10px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.15);
+  width: 320px;
+}
+
+.auth-card h1 {
+  margin-top: 0;
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

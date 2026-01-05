@@ -120,3 +120,4 @@ Working set (files / tables / tests):
 2026-01-05: processing spans + health snapshots stored in SQLite for observability (latency/LLM quality/system health), no UX change.
 2026-01-05: observability analytics + export for processing spans (scoped by account_emails), PII-guarded.
 2026-01-05: observability retention + size caps + stricter PII scrubbing for spans/health snapshots.
+2026-01-11: local read-only web observability console added.

@@ -2579,6 +2579,12 @@ class KnowledgeAnalytics:
         except sqlite3.OperationalError:
             return []
 
+    @staticmethod
+    def _mean(values: list[float]) -> float | None:
+        if not values:
+            return None
+        return float(sum(values) / len(values))
+
     def processing_spans_metrics_digest(
         self,
         *,
@@ -2597,6 +2603,7 @@ class KnowledgeAnalytics:
         fallback_count = 0
         error_count = 0
         outcome_counts: dict[str, int] = {}
+        stage_durations: dict[str, list[float]] = {}
 
         for row in rows:
             total_value = row.get("total_duration_ms")
@@ -2624,11 +2631,27 @@ class KnowledgeAnalytics:
                 outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
             if outcome.lower() == "error" or str(row.get("error_code") or ""):
                 error_count += 1
+            try:
+                durations = json.loads(str(row.get("stage_durations_json") or "{}"))
+                if not isinstance(durations, dict):
+                    durations = {}
+            except (TypeError, ValueError):
+                durations = {}
+            for stage, value in durations.items():
+                try:
+                    numeric_value = float(value)
+                except (TypeError, ValueError):
+                    continue
+                stage_durations.setdefault(str(stage), []).append(numeric_value)
 
         total_p50 = self._percentile(total_durations, 50)
         total_p90 = self._percentile(total_durations, 90)
+        total_p95 = self._percentile(total_durations, 95)
+        total_avg = self._mean(total_durations)
         llm_p50 = self._percentile(llm_latencies, 50)
         llm_p90 = self._percentile(llm_latencies, 90)
+        llm_p95 = self._percentile(llm_latencies, 95)
+        llm_avg = self._mean(llm_latencies)
         llm_quality_avg = (
             sum(llm_quality_scores) / len(llm_quality_scores)
             if llm_quality_scores
@@ -2640,15 +2663,115 @@ class KnowledgeAnalytics:
 
         return {
             "span_count": span_count,
+            "total_duration_ms_avg": total_avg,
             "total_duration_ms_p50": total_p50,
             "total_duration_ms_p90": total_p90,
+            "total_duration_ms_p95": total_p95,
+            "llm_latency_ms_avg": llm_avg,
             "llm_latency_ms_p50": llm_p50,
             "llm_latency_ms_p90": llm_p90,
+            "llm_latency_ms_p95": llm_p95,
             "llm_quality_avg": llm_quality_avg,
             "error_rate": error_rate,
             "fallback_rate": fallback_rate,
             "outcome_counts": outcome_counts,
+            "stage_durations": {
+                stage: {
+                    "avg": self._mean(values),
+                    "p50": self._percentile(values, 50),
+                    "p90": self._percentile(values, 90),
+                    "p95": self._percentile(values, 95),
+                }
+                for stage, values in sorted(stage_durations.items())
+            },
         }
+
+    def processing_spans_slowest(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str],
+        window_days: int,
+        limit: int = 5,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return []
+        resolved_limit = max(0, int(limit))
+        if resolved_limit <= 0:
+            return []
+        since_ts = self._window_start_ts(window_days)
+        query = """
+        SELECT span_id, ts_start_utc, ts_end_utc, total_duration_ms,
+               account_id, email_id, llm_provider, llm_model, outcome,
+               llm_latency_ms, health_snapshot_id
+        FROM processing_spans
+        WHERE ts_start_utc >= ?
+        """
+        clause, clause_params = self._account_scope_clause(account_ids)
+        params: list[object] = [since_ts, *clause_params, resolved_limit]
+        query += clause
+        query += """
+        ORDER BY COALESCE(total_duration_ms, (ts_end_utc - ts_start_utc) * 1000.0) DESC,
+                 ts_start_utc DESC,
+                 span_id ASC
+        LIMIT ?
+        """
+        rows: list[sqlite3.Row]
+        with self._connect_readonly() as conn:
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = list(conn.execute(query, params).fetchall())
+            except sqlite3.OperationalError:
+                return []
+        allowed_keys = {
+            "span_id": "span_id",
+            "email_uid": "email_id",
+            "account_email": "account_id",
+            "started_at": "ts_start_utc",
+            "finished_at": "ts_end_utc",
+            "total_ms": "total_duration_ms",
+            "outcome": "outcome",
+            "llm_provider": "llm_provider",
+            "llm_model": "llm_model",
+            "llm_status": None,
+            "llm_latency_ms": "llm_latency_ms",
+            "health_snapshot_id": "health_snapshot_id",
+        }
+        results: list[dict[str, object]] = []
+        for row in rows:
+            row_dict = dict(row)
+            start_value = row_dict.get("ts_start_utc")
+            end_value = row_dict.get("ts_end_utc")
+            try:
+                total_raw = row_dict.get("total_duration_ms")
+                if total_raw is None and start_value is not None and end_value is not None:
+                    total_ms = (float(end_value) - float(start_value)) * 1000.0
+                else:
+                    total_ms = float(total_raw) if total_raw is not None else None
+            except (TypeError, ValueError):
+                total_ms = None
+            entry: dict[str, object] = {}
+            for public_key, column in allowed_keys.items():
+                if column is None:
+                    continue
+                if column not in row_dict.keys():
+                    continue
+                value = row_dict.get(column)
+                if public_key == "total_ms":
+                    value = total_ms
+                elif public_key == "account_email":
+                    value = row_dict.get(column)
+                elif public_key in {"started_at", "finished_at"}:
+                    try:
+                        value = float(value) if value is not None else None
+                    except (TypeError, ValueError):
+                        value = None
+                if value is None and public_key == "total_ms":
+                    continue
+                entry[public_key] = value
+            results.append(entry)
+        return results
 
     def processing_spans_recent_errors(
         self,

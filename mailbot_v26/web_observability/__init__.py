@@ -1,0 +1,1 @@
+"""Web observability console package."""
