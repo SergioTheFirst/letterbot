@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ static_url }}">
+</head>
+<body>
+  <header class="navbar">
+    <div class="brand">{{ title }}</div>
+    <nav>
+      <a href="{{ latency_url }}">Latency</a>
+      <a href="{{ health_url }}">Health</a>
+      <a href="{{ attention_url }}" class="active">Attention</a>
+      <a href="{{ events_url }}">Events</a>
+      <a href="{{ relationships_url }}">Relationships</a>
+    </nav>
+  </header>
+  <main class="container">
+    {{ error_block|safe }}
+    <section class="filters">
+      <form method="get" action="{{ attention_url }}" class="filter-form">
+        <div class="form-group">
+          <label for="account_email">Account</label>
+          <select id="account_email" name="account_email">{{ account_options|safe }}</select>
+        </div>
+        <div class="form-group">
+          <label for="account_emails">Scope (comma-separated)</label>
+          <input id="account_emails" name="account_emails" type="text" value="{{ account_emails_value }}" placeholder="optional, comma separated">
+        </div>
+        <div class="form-group">
+          <label for="window_days">Window</label>
+          <select id="window_days" name="window_days">{{ window_options|safe }}</select>
+        </div>
+        <div class="form-group">
+          <label for="limit">Limit</label>
+          <input id="limit" name="limit" type="number" min="5" max="200" value="{{ limit_value }}">
+        </div>
+        <div class="form-group" style="min-width: 150px;">
+          <label for="include_anomalies">Anomalies</label>
+          <div>
+            <input id="include_anomalies" name="include_anomalies" type="checkbox" value="1" {{ include_anomalies_checked }}> include anomalies (safe)
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Обновить</button>
+        </div>
+      </form>
+      {% if attention_cost_per_hour and attention_cost_per_hour > 0 %}
+        <div class="muted" style="margin-top:8px;">Attention cost per hour: {{ attention_cost_per_hour }}</div>
+      {% endif %}
+    </section>
+
+    <section>
+      <h2>Итоги</h2>
+      <div class="metrics-grid">
+        <div class="metric"><div class="label">Estimated read minutes</div><div class="value">{{ summary.totals.estimated_read_minutes|round(1) }}</div></div>
+        <div class="metric"><div class="label">Emails</div><div class="value">{{ summary.totals.message_count }}</div></div>
+        <div class="metric"><div class="label">Attachments</div><div class="value">{{ summary.totals.attachment_count }}</div></div>
+        <div class="metric"><div class="label">Deferred</div><div class="value">{{ summary.totals.deferred_count }}</div></div>
+        {% if summary.totals.estimated_cost is defined %}
+          <div class="metric"><div class="label">Estimated cost</div><div class="value">{{ summary.totals.estimated_cost }}</div></div>
+        {% endif %}
+      </div>
+      <div class="muted" style="margin-top:8px;">Обновлено: {{ summary.generated_at_utc }}</div>
+    </section>
+
+    <section>
+      <h2>Контакты</h2>
+      {% if summary.entities %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Контакт</th>
+              <th>Минуты</th>
+              <th>Emails</th>
+              <th>Attachments</th>
+              <th>Deferred</th>
+              <th>Trust Δ</th>
+              <th>Health Δ</th>
+              {% if summary.entities[0].anomalies is defined %}<th>Anomalies</th>{% endif %}
+              {% if summary.entities[0].estimated_cost is defined %}<th>Cost</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for entity in summary.entities %}
+              <tr>
+                <td>{{ entity.entity_label }}</td>
+                <td>{{ entity.estimated_read_minutes|round(1) }}</td>
+                <td>{{ entity.message_count }}</td>
+                <td>{{ entity.attachment_count }}</td>
+                <td>{{ entity.deferred_count }}</td>
+                <td>{% if entity.trust_delta is defined %}{{ entity.trust_delta|round(2) }}{% else %}–{% endif %}</td>
+                <td>{% if entity.health_delta is defined %}{{ entity.health_delta|round(2) }}{% else %}–{% endif %}</td>
+                {% if entity.anomalies is defined %}
+                  <td>
+                    {% if entity.anomalies %}
+                      <ul class="simple-list">
+                        {% for anomaly in entity.anomalies %}<li>{{ anomaly }}</li>{% endfor %}
+                      </ul>
+                    {% else %}–{% endif %}
+                  </td>
+                {% endif %}
+                {% if entity.estimated_cost is defined %}
+                  <td>{{ entity.estimated_cost }}</td>
+                {% endif %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">Пока недостаточно статистики за выбранный период.</div>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

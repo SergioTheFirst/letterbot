@@ -14,6 +14,7 @@ max_zip_uncompressed_mb = 80
 max_extracted_chars = 50000
 max_extracted_total_chars = 120000
 admin_chat_id =
+attention_cost_per_hour = 0
 
 [storage]
 db_path = data/mailbot.sqlite
