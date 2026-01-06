@@ -10,15 +10,15 @@
   <header class="navbar">
     <div class="brand">{{ title }}</div>
     <nav>
-      <a href="{{ latency_url }}" class="active">Latency</a>
+      <a href="{{ latency_url }}">Latency</a>
       <a href="{{ health_url }}">Health</a>
-      <a href="{{ events_url }}">Events</a>
+      <a href="{{ events_url }}" class="active">Events</a>
     </nav>
   </header>
   <main class="container">
     {{ error_block }}
     <section class="filters">
-      <form method="get" action="{{ latency_url }}" class="filter-form">
+      <form method="get" action="{{ events_url }}" class="filter-form">
         <div class="form-group">
           <label for="account_email">Account</label>
           <select id="account_email" name="account_email">{{ account_options }}</select>
@@ -31,6 +31,14 @@
           <label for="window_days">Window</label>
           <select id="window_days" name="window_days">{{ window_options }}</select>
         </div>
+        <div class="form-group">
+          <label for="limit">Limit</label>
+          <select id="limit" name="limit">
+            <option value="50"{% if limit_value == '50' %} selected{% endif %}>50</option>
+            <option value="200"{% if limit_value == '200' %} selected{% endif %}>200</option>
+            <option value="500"{% if limit_value == '500' %} selected{% endif %}>500</option>
+          </select>
+        </div>
         <div class="form-actions">
           <button type="submit">Apply</button>
         </div>
@@ -38,18 +46,8 @@
     </section>
 
     <section>
-      <h2>Latency summary</h2>
-      {{ metrics_block }}
-    </section>
-
-    <section>
-      <h2>Recent errors</h2>
-      {{ errors_block }}
-    </section>
-
-    <section>
-      <h2>Slowest spans</h2>
-      {{ slow_block }}
+      <h2>Events timeline</h2>
+      {{ events_block }}
     </section>
   </main>
 </body>

@@ -126,3 +126,4 @@ Working set (files / tables / tests):
 2026-01-05: web health dashboard/API read-only with scoped account filters.
 
 2026-01-06: web health default window=30 + system_mode persistence fix + web health tests.
+2026-01-12: web events timeline (read-only, scoped, PII-guarded).

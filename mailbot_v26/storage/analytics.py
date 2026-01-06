@@ -298,6 +298,84 @@ class KnowledgeAnalytics:
             since_ts=since_ts,
         )
 
+    @staticmethod
+    def _sanitize_event_payload(payload: dict[str, object]) -> dict[str, object]:
+        allowed_keys = {
+            "priority",
+            "confidence",
+            "confidence_score",
+            "decision",
+            "outcome",
+            "error_code",
+            "delivery_mode",
+            "wait_budget_seconds",
+            "elapsed_to_first_send_seconds",
+            "edit_applied",
+            "system_mode",
+            "stage",
+            "stage_ms",
+            "provider",
+            "model",
+        }
+        forbidden_substrings = [
+            "subject",
+            "sender",
+            "from",
+            "to",
+            "cc",
+            "bcc",
+            "body",
+            "text",
+            "html",
+            "raw",
+            "telegram",
+            "rendered",
+            "digest",
+            "attachment_name",
+            "filename",
+            "url",
+        ]
+        if not isinstance(payload, Mapping):
+            return {}
+
+        def _safe_value(value: object) -> object:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, (int, float)):
+                return value
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return value[:120]
+            text = str(value)
+            return text[:120]
+
+        sanitized: dict[str, object] = {}
+        for key, value in payload.items():
+            key_str = str(key)
+            lowered = key_str.lower()
+            if any(token in lowered for token in forbidden_substrings):
+                continue
+            if key_str not in allowed_keys:
+                continue
+            sanitized[key_str] = _safe_value(value)
+        if not sanitized:
+            return {}
+        return {key: sanitized[key] for key in sorted(sanitized.keys())}
+
+    def _event_summary(self, event_type: str, details: dict[str, object]) -> str:
+        priority_marker = self._priority_emoji(details.get("priority")) if details else None
+        prefix = f"{event_type}{f' {priority_marker}' if priority_marker else ''}"
+        if not details:
+            return prefix
+        pairs: list[str] = []
+        for key in sorted(details.keys()):
+            if len(pairs) >= 3:
+                break
+            value = details.get(key)
+            pairs.append(f"{key}={value}")
+        return f"{prefix}: " + "; ".join(pairs)
+
     def bootstrap_start_ts(
         self,
         *,
@@ -342,6 +420,69 @@ class KnowledgeAnalytics:
             event_type="email_received",
             since_ts=start_ts,
         )
+
+    def events_timeline_rows_scoped(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return []
+        since_ts = self._window_start_ts(window_days)
+        resolved_limit = max(0, int(limit))
+        if resolved_limit <= 0:
+            return []
+        query = """
+        SELECT event_type, ts_utc, account_id, entity_id, email_id, payload, payload_json
+        FROM events_v1
+        WHERE ts_utc >= ?
+        """
+        params: list[object] = [since_ts]
+        clause, clause_params = self._account_scope_clause(account_ids)
+        query += clause
+        query += "\n        ORDER BY ts_utc DESC, event_type ASC, email_id DESC, entity_id DESC"
+        query += "\n        LIMIT ?"
+        params.extend(clause_params)
+        params.append(resolved_limit)
+        try:
+            return self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return []
+
+    def events_timeline(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        rows = self.events_timeline_rows_scoped(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=window_days,
+            limit=limit,
+        )
+        items: list[dict[str, object]] = []
+        for row in rows:
+            payload = self._event_payload(row)
+            details = self._sanitize_event_payload(payload)
+            summary = self._event_summary(str(row.get("event_type") or ""), details)
+            items.append(
+                {
+                    "ts_utc": row.get("ts_utc"),
+                    "event_type": row.get("event_type"),
+                    "email_id": row.get("email_id"),
+                    "entity_id": row.get("entity_id"),
+                    "summary": summary,
+                    "details": details,
+                }
+            )
+        return items
 
     def bootstrap_corrections_count(
         self,
