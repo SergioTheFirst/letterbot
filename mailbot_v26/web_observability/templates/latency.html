@@ -1,58 +1,151 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title }}</title>
-  <link rel="stylesheet" href="{{ static_url }}">
-</head>
-<body>
-  <header class="navbar">
-    <div class="brand">{{ title }}</div>
-    <nav>
-      <a href="{{ latency_url }}" class="active">Latency</a>
-      <a href="{{ health_url }}">Health</a>
-      <a href="{{ attention_url }}">Attention</a>
-      <a href="{{ events_url }}">Events</a>
-      <a href="{{ url_for('relationships') }}">Relationships</a>
-    </nav>
-  </header>
-  <main class="container">
-    {{ error_block }}
-    <section class="filters">
-      <form method="get" action="{{ latency_url }}" class="filter-form">
-        <div class="form-group">
-          <label for="account_email">Account</label>
-          <select id="account_email" name="account_email">{{ account_options }}</select>
-        </div>
-        <div class="form-group">
-          <label for="account_emails">Scope (comma-separated)</label>
-          <input id="account_emails" name="account_emails" type="text" value="{{ account_emails_value }}" placeholder="optional, comma separated">
-        </div>
-        <div class="form-group">
-          <label for="window_days">Window</label>
-          <select id="window_days" name="window_days">{{ window_options }}</select>
-        </div>
-        <div class="form-actions">
-          <button type="submit">Apply</button>
-        </div>
-      </form>
-    </section>
+{% extends "base.html" %}
+{% block title %}Latency — {{ title }}{% endblock %}
+{% block content %}
+  <div class="card">
+    <form method="get" action="{{ url_for('latency') }}" class="filters">
+      <div class="filter-group">
+        <label for="account_email">Account</label>
+        <select id="account_email" name="account_email">
+          <option value="">Select account</option>
+          {% for option in account_options %}
+          <option value="{{ option }}" {% if option == account_email %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="account_emails">Scope (comma-separated)</label>
+        <input id="account_emails" name="account_emails" type="text" value="{{ account_emails_value }}" placeholder="optional, comma separated">
+      </div>
+      <div class="filter-group">
+        <label for="window_days">Window</label>
+        <select id="window_days" name="window_days">
+          {% for option in window_options %}
+          <option value="{{ option }}" {% if option == window_days %}selected{% endif %}>Last {{ option }} days</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filter-group" style="justify-content: flex-end;">
+        <button type="submit">Apply</button>
+      </div>
+    </form>
+  </div>
 
-    <section>
-      <h2>Latency summary</h2>
-      {{ metrics_block }}
-    </section>
+  <div class="stack">
+    <div class="section-title">
+      <h2>Pipeline latency</h2>
+      {% if sample_size %}<span class="hint">Sample size: {{ sample_size }}</span>{% endif %}
+    </div>
+    {% if metrics_cards %}
+    <div class="metric-grid">
+      {% for metric in metrics_cards %}
+      <div class="metric-card">
+        <div class="label">{{ metric.label }}</div>
+        <div class="value">{{ metric.value }}{% if metric.suffix %}<small> {{ metric.suffix }}</small>{% endif %}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="hint">Adjust filters to view latency.</div>
+    {% endif %}
+  </div>
 
-    <section>
+  {% if stage_breakdown %}
+  <div class="card" style="margin-top: 14px;">
+    <div class="section-title">
+      <h2>Stage breakdown</h2>
+      <span class="hint">Share of average pipeline time</span>
+    </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Stage</th>
+          <th>Avg (ms)</th>
+          <th>p50</th>
+          <th>p90</th>
+          <th>p95</th>
+          <th width="160">Share</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for stage in stage_breakdown %}
+        <tr>
+          <td>{{ stage.name }}</td>
+          <td>{{ stage.avg }}</td>
+          <td>{{ stage.p50 }}</td>
+          <td>{{ stage.p90 }}</td>
+          <td>{{ stage.p95 }}</td>
+          <td>
+            <div class="bar-track">
+              <div class="bar-fill" style="width: {{ stage.share }}%"></div>
+            </div>
+            <small>{{ stage.share }}%</small>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if slowest_spans %}
+  <div class="card" style="margin-top: 14px;">
+    <div class="section-title">
+      <h2>Top slow spans</h2>
+      <span class="hint">Sorted by duration, stable tie-breaks</span>
+    </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Started (UTC)</th>
+          <th>Total ms</th>
+          <th>Outcome</th>
+          <th>LLM</th>
+          <th>Health snapshot</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for span in slowest_spans %}
+        <tr>
+          <td>{{ span.started }}</td>
+          <td>{{ span.total_ms }}</td>
+          <td>{{ span.outcome }}</td>
+          <td>{{ span.llm }}</td>
+          <td>{{ span.snapshot }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if recent_errors %}
+  <div class="card" style="margin-top: 14px;">
+    <div class="section-title">
       <h2>Recent errors</h2>
-      {{ errors_block }}
-    </section>
-
-    <section>
-      <h2>Slowest spans</h2>
-      {{ slow_block }}
-    </section>
-  </main>
-</body>
-</html>
+      <span class="hint">Latest error spans</span>
+    </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Timestamp (UTC)</th>
+          <th>Outcome</th>
+          <th>Error</th>
+          <th>LLM</th>
+          <th>Total ms</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for error in recent_errors %}
+        <tr>
+          <td>{{ error.ts }}</td>
+          <td>{{ error.outcome }}</td>
+          <td>{{ error.error_code }}</td>
+          <td>{{ error.llm }}</td>
+          <td>{{ error.total_ms }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+{% endblock %}

@@ -92,126 +92,18 @@ def _format_number(value: object) -> str:
     return f"{number:.2f}"
 
 
-def _metrics_block(summary: dict[str, object] | None) -> str:
-    if not summary:
-        return ""
-    cards = []
-    cards.append(
-        """
-        <div class="metric"><div class="label">Total avg (ms)</div><div class="value">{}</div></div>
-        """.format(_format_number(summary.get("total_duration_ms_avg")))
-    )
-    cards.append(
-        """
-        <div class="metric"><div class="label">Total p50 / p90 / p95 (ms)</div>
-        <div class="value">{} / {} / {}</div></div>
-        """.format(
-            _format_number(summary.get("total_duration_ms_p50")),
-            _format_number(summary.get("total_duration_ms_p90")),
-            _format_number(summary.get("total_duration_ms_p95")),
-        )
-    )
-    cards.append(
-        """
-        <div class="metric"><div class="label">LLM avg (ms)</div><div class="value">{}</div></div>
-        """.format(_format_number(summary.get("llm_latency_ms_avg")))
-    )
-    cards.append(
-        """
-        <div class="metric"><div class="label">LLM p50 / p90 / p95 (ms)</div>
-        <div class="value">{} / {} / {}</div></div>
-        """.format(
-            _format_number(summary.get("llm_latency_ms_p50")),
-            _format_number(summary.get("llm_latency_ms_p90")),
-            _format_number(summary.get("llm_latency_ms_p95")),
-        )
-    )
-    error_rate = summary.get("error_rate")
-    fallback_rate = summary.get("fallback_rate")
-    cards.append(
-        """
-        <div class="metric"><div class="label">Error rate</div><div class="value">{}%</div></div>
-        """.format(
-            _format_number(float(error_rate) * 100) if error_rate is not None else "–"
-        )
-    )
-    cards.append(
-        """
-        <div class="metric"><div class="label">Fallback rate</div><div class="value">{}%</div></div>
-        """.format(
-            _format_number(float(fallback_rate) * 100) if fallback_rate is not None else "–"
-        )
-    )
-
-    stage_rows = ""
-    stage_data = summary.get("stage_durations") if isinstance(summary, dict) else None
-    if isinstance(stage_data, dict) and stage_data:
-        rows = []
-        for stage, stats in stage_data.items():
-            rows.append(
-                """
-                <tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>
-                """.format(
-                    html.escape(str(stage)),
-                    _format_number(stats.get("avg")),
-                    _format_number(stats.get("p50")),
-                    _format_number(stats.get("p90")),
-                    _format_number(stats.get("p95")),
-                )
-            )
-        stage_rows = (
-            "<h3>Stage durations</h3>"
-            + "<table class=\"data-table\"><thead><tr><th>Stage</th><th>Avg (ms)</th><th>p50</th><th>p90</th><th>p95</th></tr></thead>"
-            + f"<tbody>{''.join(rows)}</tbody></table>"
-        )
-    return f"<div class=\"metrics-grid\">{''.join(cards)}</div>{stage_rows}"
+def _safe_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
-def _errors_block(recent_errors: list[dict[str, object]]) -> str:
-    if not recent_errors:
-        return ""
-    rows = []
-    for item in recent_errors:
-        rows.append(
-            """
-            <tr><td>{}</td><td>{}</td><td>{}</td><td>{} {}</td><td>{}</td></tr>
-            """.format(
-                html.escape(str(item.get("ts_start") or "")),
-                html.escape(str(item.get("outcome") or "")),
-                html.escape(str(item.get("error_code") or "")),
-                html.escape(str(item.get("llm_provider") or "")),
-                html.escape(str(item.get("llm_model") or "")),
-                _format_number(item.get("total_duration_ms")),
-            )
-        )
-    return (
-        "<table class=\"data-table\"><thead><tr><th>Timestamp (UTC)</th><th>Outcome</th><th>Error</th><th>LLM</th><th>Total ms</th></tr></thead>"
-        + f"<tbody>{''.join(rows)}</tbody></table>"
-    )
-
-
-def _slow_block(slowest: list[dict[str, object]]) -> str:
-    if not slowest:
-        return ""
-    rows = []
-    for item in slowest:
-        rows.append(
-            """
-            <tr><td>{}</td><td>{}</td><td>{}</td><td>{} {}</td><td>{}</td></tr>
-            """.format(
-                html.escape(str(item.get("started_at") or "")),
-                _format_number(item.get("total_ms")),
-                html.escape(str(item.get("outcome") or "")),
-                html.escape(str(item.get("llm_provider") or "")),
-                html.escape(str(item.get("llm_model") or "")),
-                html.escape(str(item.get("health_snapshot_id") or "")),
-            )
-        )
-    return (
-        "<table class=\"data-table\"><thead><tr><th>Started</th><th>Total ms</th><th>Outcome</th><th>LLM</th><th>Health snapshot</th></tr></thead>"
-        + f"<tbody>{''.join(rows)}</tbody></table>"
-    )
-
+def _format_percent(value: object) -> str:
+    numeric = _safe_float(value)
+    if numeric is None:
+        return "–"
+    return _format_number(numeric * 100)
 
 def _format_ts_utc(value: object) -> str:
     try:
@@ -579,14 +471,14 @@ def create_app(
                 session.permanent = False
                 next_path = request.args.get("next")
                 return redirect(next_path or url_for("latency"))
-            error = "Invalid password"
-        error_block = f'<div class="alert">{html.escape(error)}</div>' if error else ""
+            error = "Incorrect password. Please try again."
         return _render_template(
             app,
             "login.html",
             title=app.config["APP_TITLE"],
-            error_block=error_block,
-            static_url=_static_url(),
+            page_title="Login",
+            hide_nav=True,
+            error=error,
         )
 
     @app.route("/")
@@ -814,7 +706,7 @@ def create_app(
         account_email, account_emails, window_days, error = _validate_latency_params(
             args=request.args, require_account=False, default_account=default_account
         )
-        error_message = error or ("Account selection required" if not account_email else "")
+        error_message = error or ("Select an account to view latency." if not account_email else "")
         analytics = _analytics()
         summary: dict[str, object] | None = None
         recent_errors: list[dict[str, object]] = []
@@ -837,25 +729,109 @@ def create_app(
                 window_days=window_days or 7,
                 limit=5,
             )
-        account_options = _build_select_options(accounts, account_email)
-        window_options = _build_window_options(window_days or 7)
-        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+
+        sample_size = int(summary.get("span_count") or 0) if summary else 0
+        metrics_cards: list[dict[str, object]] = []
+        stage_breakdown: list[dict[str, object]] = []
+        slowest_rows: list[dict[str, object]] = []
+        error_rows: list[dict[str, object]] = []
+
+        if summary:
+            metrics_cards = [
+                {"label": "Pipeline p50", "value": _format_number(summary.get("total_duration_ms_p50")), "suffix": "ms"},
+                {"label": "Pipeline p90", "value": _format_number(summary.get("total_duration_ms_p90")), "suffix": "ms"},
+                {"label": "Pipeline p95", "value": _format_number(summary.get("total_duration_ms_p95")), "suffix": "ms"},
+                {"label": "LLM p90", "value": _format_number(summary.get("llm_latency_ms_p90")), "suffix": "ms"},
+                {"label": "Error rate", "value": _format_percent(summary.get("error_rate")), "suffix": "%"},
+                {"label": "Fallback rate", "value": _format_percent(summary.get("fallback_rate")), "suffix": "%"},
+                {"label": "Quality avg", "value": _format_number(summary.get("llm_quality_avg")), "suffix": "score"},
+                {"label": "Samples", "value": _format_number(sample_size), "suffix": "spans"},
+            ]
+            total_avg = _safe_float(summary.get("total_duration_ms_avg")) or 0.0
+            stage_stats = summary.get("stage_durations") if isinstance(summary, dict) else {}
+            for stage_name in sorted(stage_stats.keys()):
+                stats = stage_stats.get(stage_name) or {}
+                avg = _safe_float(stats.get("avg")) or 0.0
+                share_percent = 0.0
+                if total_avg > 0:
+                    share_percent = max(0.0, min(100.0, (avg / total_avg) * 100.0))
+                stage_breakdown.append(
+                    {
+                        "name": stage_name,
+                        "avg": _format_number(stats.get("avg")),
+                        "p50": _format_number(stats.get("p50")),
+                        "p90": _format_number(stats.get("p90")),
+                        "p95": _format_number(stats.get("p95")),
+                        "share": f"{share_percent:.1f}",
+                    }
+                )
+
+        if slowest:
+            sorted_slowest = sorted(
+                slowest,
+                key=lambda item: (
+                    -(_safe_float(item.get("total_ms")) or 0.0),
+                    -(_safe_float(item.get("started_at")) or 0.0),
+                    str(item.get("span_id") or ""),
+                ),
+            )
+            for item in sorted_slowest:
+                slowest_rows.append(
+                    {
+                        "started": _format_ts_utc(item.get("started_at")),
+                        "total_ms": _format_number(item.get("total_ms")),
+                        "outcome": item.get("outcome") or "–",
+                        "llm": " ".join(
+                            part for part in [item.get("llm_provider"), item.get("llm_model")] if part
+                        )
+                        or "–",
+                        "snapshot": item.get("health_snapshot_id") or "–",
+                    }
+                )
+
+        if recent_errors:
+            sorted_errors = sorted(
+                recent_errors,
+                key=lambda item: (
+                    -(_safe_float(item.get("ts_start")) or 0.0),
+                    str(item.get("span_id") or ""),
+                ),
+            )
+            for item in sorted_errors:
+                error_rows.append(
+                    {
+                        "ts": _format_ts_utc(item.get("ts_start")),
+                        "outcome": item.get("outcome") or "–",
+                        "error_code": item.get("error_code") or "–",
+                        "llm": " ".join(
+                            part for part in [item.get("llm_provider"), item.get("llm_model")] if part
+                        )
+                        or "–",
+                        "total_ms": _format_number(item.get("total_duration_ms")),
+                    }
+                )
+
+        scope_hint = None
+        if account_email:
+            scope_hint = f"{account_email} • last {window_days or 7} days"
+
         return _render_template(
             app,
             "latency.html",
             title=app.config["APP_TITLE"],
-            error_block=error_block,
-            account_options=account_options,
+            page_title="Latency",
+            error=error_message,
+            scope_hint=scope_hint,
+            account_options=accounts,
+            account_email=account_email,
             account_emails_value=",".join(account_emails),
-            window_options=window_options,
-            metrics_block=_metrics_block(summary),
-            errors_block=_errors_block(recent_errors),
-            slow_block=_slow_block(slowest),
-            static_url=_static_url(),
-            latency_url=url_for("latency"),
-            health_url=url_for("health"),
-            attention_url=url_for("attention"),
-            events_url=url_for("events"),
+            window_options=[7, 30, 90],
+            window_days=window_days or 7,
+            metrics_cards=metrics_cards,
+            stage_breakdown=stage_breakdown,
+            slowest_spans=slowest_rows,
+            recent_errors=error_rows,
+            sample_size=sample_size,
         )
 
     @app.route("/attention", methods=["GET"])
