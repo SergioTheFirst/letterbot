@@ -78,7 +78,7 @@ def test_compression_rate_counts_suppression_modes(tmp_path) -> None:
     analytics = KnowledgeAnalytics(db_path)
     now = datetime.now(timezone.utc)
 
-    for offset, mode in enumerate(["BATCH_TODAY", "DEFER_TO_MORNING", "IMMEDIATE"]):
+    for offset, mode in enumerate(["SILENT_LOG", "SILENT_LOG", "IMMEDIATE"]):
         _emit_event(
             emitter,
             event_type=EventType.DELIVERY_POLICY_APPLIED,
@@ -161,7 +161,7 @@ def test_behavior_metrics_digest_aggregates_account_scope(tmp_path) -> None:
     analytics = KnowledgeAnalytics(db_path)
     now = datetime.now(timezone.utc)
 
-    for offset, mode in enumerate(["BATCH_TODAY", "IMMEDIATE"]):
+    for offset, mode in enumerate(["SILENT_LOG", "IMMEDIATE"]):
         _emit_event(
             emitter,
             event_type=EventType.DELIVERY_POLICY_APPLIED,
@@ -169,7 +169,7 @@ def test_behavior_metrics_digest_aggregates_account_scope(tmp_path) -> None:
             account_email="acc@example.com",
             payload={"mode": mode},
         )
-    for offset, mode in enumerate(["DEFER_TO_MORNING", "IMMEDIATE"]):
+    for offset, mode in enumerate(["SILENT_LOG", "IMMEDIATE"]):
         _emit_event(
             emitter,
             event_type=EventType.DELIVERY_POLICY_APPLIED,

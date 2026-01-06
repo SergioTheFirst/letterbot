@@ -2930,7 +2930,7 @@ class KnowledgeAnalytics:
             since_ts=since_ts,
         )
         if delivery_rows:
-            suppressed_modes = {"BATCH_TODAY", "DEFER_TO_MORNING", "SILENT_LOG"}
+            suppressed_modes = {"SILENT_LOG"}
             suppressed_count = 0
             for row in delivery_rows:
                 payload = self._event_payload(row)

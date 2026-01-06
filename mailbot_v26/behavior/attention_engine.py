@@ -9,8 +9,6 @@ from mailbot_v26.config.delivery_policy import DeliveryPolicyConfig
 
 class DeliveryMode(str, Enum):
     IMMEDIATE = "IMMEDIATE"
-    BATCH_TODAY = "BATCH_TODAY"
-    DEFER_TO_MORNING = "DEFER_TO_MORNING"
     SILENT_LOG = "SILENT_LOG"
 
 
@@ -99,7 +97,6 @@ def decide_delivery(
     reason_codes: list[str] = []
     thresholds_used = {
         "immediate_value_threshold": policy.immediate_value_threshold,
-        "batch_value_threshold": policy.batch_value_threshold,
         "critical_risk_threshold": policy.critical_risk_threshold,
         "max_immediate_per_hour": policy.max_immediate_per_hour,
     }
@@ -111,7 +108,7 @@ def decide_delivery(
     if attention_gate_deferred:
         reason_codes.append("attention_gate")
         return DeliveryDecision(
-            mode=DeliveryMode.BATCH_TODAY,
+            mode=DeliveryMode.SILENT_LOG,
             reason_codes=reason_codes,
             thresholds_used=thresholds_used,
             attention_debt=attention_debt,
@@ -131,7 +128,7 @@ def decide_delivery(
     ):
         reason_codes.append("attention_debt")
         return DeliveryDecision(
-            mode=DeliveryMode.BATCH_TODAY,
+            mode=DeliveryMode.SILENT_LOG,
             reason_codes=reason_codes,
             thresholds_used=thresholds_used,
             attention_debt=attention_debt,
@@ -141,15 +138,6 @@ def decide_delivery(
         reason_codes.append("high_value")
         return DeliveryDecision(
             mode=DeliveryMode.IMMEDIATE,
-            reason_codes=reason_codes,
-            thresholds_used=thresholds_used,
-            attention_debt=attention_debt,
-        )
-
-    if scores.value >= policy.batch_value_threshold:
-        reason_codes.append("default_batch")
-        return DeliveryDecision(
-            mode=DeliveryMode.BATCH_TODAY,
             reason_codes=reason_codes,
             thresholds_used=thresholds_used,
             attention_debt=attention_debt,
