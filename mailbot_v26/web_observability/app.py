@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import html
+import json
 import logging
 import os
 import sqlite3
@@ -579,6 +580,56 @@ def create_app(
             }
         )
 
+    @app.route("/api/v1/relationships/graph", methods=["GET"])
+    def api_relationships_graph():
+        account_email, account_emails, window_days, error = _validate_latency_params(
+            args=request.args, require_account=True, window_default=30
+        )
+        if error:
+            resp = jsonify({"error": error})
+            resp.status_code = 400
+            return resp
+        limit, limit_error = _parse_limit(request.args.get("limit"), default=50, max_limit=200)
+        if limit_error:
+            resp = jsonify({"error": limit_error})
+            resp.status_code = 400
+            return resp
+        analytics = _analytics()
+        graph = analytics.relationship_graph(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=window_days or 30,
+            limit=limit or 50,
+        )
+        return jsonify(graph)
+
+    @app.route("/api/v1/relationships/contact", methods=["GET"])
+    def api_relationship_contact():
+        account_email, account_emails, window_days, error = _validate_latency_params(
+            args=request.args, require_account=True, window_default=30
+        )
+        if error:
+            resp = jsonify({"error": error})
+            resp.status_code = 400
+            return resp
+        contact_id = request.args.get("contact_id", "")
+        if not contact_id:
+            resp = jsonify({"error": "contact_id is required"})
+            resp.status_code = 400
+            return resp
+        analytics = _analytics()
+        detail = analytics.relationship_contact_detail(
+            account_email=account_email,
+            account_emails=account_emails,
+            contact_id=contact_id,
+            window_days=window_days or 30,
+        )
+        if not detail:
+            resp = jsonify({"error": "contact not found"})
+            resp.status_code = 404
+            return resp
+        return jsonify(detail)
+
     @app.route("/latency", methods=["GET"])
     def latency():
         accounts = _available_accounts(app.config["DB_PATH"])
@@ -716,6 +767,93 @@ def create_app(
             window_options=window_options,
             limit_value=limit_value,
             events_block=_events_table(items),
+        )
+
+    @app.route("/relationships", methods=["GET"])
+    def relationships():
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_email, account_emails, window_days, error = _validate_latency_params(
+            args=request.args,
+            require_account=False,
+            default_account=default_account,
+            window_default=30,
+        )
+        limit, limit_error = _parse_limit(request.args.get("limit"), default=50, max_limit=200)
+        error_message = error or limit_error or ("No account data available" if not account_email else "")
+        analytics = _analytics()
+        graph: dict[str, object] | None = None
+        if not error_message and account_email:
+            graph = analytics.relationship_graph(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=window_days or 30,
+                limit=limit or 50,
+            )
+        account_options = _build_select_options(accounts, account_email)
+        window_options = _build_window_options(window_days or 30)
+        limit_value = str(limit or 50)
+        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+        graph_json = json.dumps(graph or {}, ensure_ascii=False)
+        return _render_template(
+            app,
+            "relationships.html",
+            title=app.config["APP_TITLE"],
+            static_url=_static_url(),
+            latency_url=url_for("latency"),
+            health_url=url_for("health"),
+            events_url=url_for("events"),
+            relationships_url=url_for("relationships"),
+            error_block=error_block,
+            account_options=account_options,
+            account_emails_value=",".join(account_emails),
+            window_options=window_options,
+            limit_value=limit_value,
+            graph_json=graph_json,
+        )
+
+    @app.route("/relationships/contact", methods=["GET"])
+    def relationships_contact():
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_email, account_emails, window_days, error = _validate_latency_params(
+            args=request.args,
+            require_account=False,
+            default_account=default_account,
+            window_default=30,
+        )
+        contact_id = request.args.get("contact_id", "")
+        error_message = error or ("contact_id is required" if not contact_id else "")
+        analytics = _analytics()
+        detail: dict[str, object] | None = None
+        if not error_message and account_email:
+            detail = analytics.relationship_contact_detail(
+                account_email=account_email,
+                account_emails=account_emails,
+                contact_id=contact_id,
+                window_days=window_days or 30,
+            )
+            if not detail:
+                error_message = "Contact not found"
+        account_options = _build_select_options(accounts, account_email)
+        window_options = _build_window_options(window_days or 30)
+        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+        detail_json = json.dumps(detail or {}, ensure_ascii=False)
+        return _render_template(
+            app,
+            "relationships_contact.html",
+            title=app.config["APP_TITLE"],
+            static_url=_static_url(),
+            latency_url=url_for("latency"),
+            health_url=url_for("health"),
+            events_url=url_for("events"),
+            relationships_url=url_for("relationships"),
+            error_block=error_block,
+            account_options=account_options,
+            account_emails_value=",".join(account_emails),
+            window_options=window_options,
+            contact_id=html.escape(contact_id),
+            detail_json=detail_json,
         )
 
     return app

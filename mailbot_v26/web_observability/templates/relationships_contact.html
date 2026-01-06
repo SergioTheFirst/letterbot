@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ static_url }}">
+</head>
+<body>
+  <header class="navbar">
+    <div class="brand">{{ title }}</div>
+    <nav>
+      <a href="{{ latency_url }}">Latency</a>
+      <a href="{{ health_url }}">Health</a>
+      <a href="{{ events_url }}">Events</a>
+      <a href="{{ relationships_url }}" class="active">Relationships</a>
+    </nav>
+  </header>
+  <main class="container">
+    {{ error_block|safe }}
+    <section class="filters">
+      <form method="get" action="{{ relationships_url }}/contact" class="filter-form">
+        <div class="form-group">
+          <label for="account_email">Account</label>
+          <select id="account_email" name="account_email">{{ account_options|safe }}</select>
+        </div>
+        <div class="form-group">
+          <label for="account_emails">Scope (comma-separated)</label>
+          <input id="account_emails" name="account_emails" type="text" value="{{ account_emails_value }}" placeholder="optional, comma separated">
+        </div>
+        <div class="form-group">
+          <label for="window_days">Window</label>
+          <select id="window_days" name="window_days">{{ window_options|safe }}</select>
+        </div>
+        <div class="form-group">
+          <label for="contact_id">Contact id</label>
+          <input id="contact_id" name="contact_id" type="text" value="{{ contact_id }}" required>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Открыть</button>
+        </div>
+      </form>
+    </section>
+
+    <section>
+      <h2>Контакт</h2>
+      <div id="contact-card" class="card"></div>
+    </section>
+
+    <section>
+      <h3>Серии</h3>
+      <div class="card">
+        <h4>Доверие</h4>
+        <ul id="trust-series" class="simple-list"></ul>
+        <h4>Объём</h4>
+        <ul id="volume-series" class="simple-list"></ul>
+      </div>
+    </section>
+
+    <section>
+      <h3>Хайлайты</h3>
+      <ul id="highlights" class="simple-list"></ul>
+    </section>
+  </main>
+  <script>
+    const detail = {{ detail_json | safe }};
+    if (detail && detail.contact) {
+      const card = document.getElementById('contact-card');
+      const c = detail.contact;
+      card.innerHTML = `
+        <div class="metric-grid">
+          <div><div class="label">ID</div><div class="value">${c.id || ''}</div></div>
+          <div><div class="label">Метка</div><div class="value">${(c.label || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div></div>
+          <div><div class="label">Домен</div><div class="value">${(c.domain || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div></div>
+          <div><div class="label">Всего писем</div><div class="value">${c.emails_total || 0}</div></div>
+          <div><div class="label">Тредов</div><div class="value">${c.threads_total || 0}</div></div>
+          <div><div class="label">Trust</div><div class="value">${c.trust_score !== undefined ? c.trust_score : '–'}</div></div>
+          <div><div class="label">Δ trust</div><div class="value">${c.trust_delta !== undefined ? c.trust_delta : '–'}</div></div>
+          <div><div class="label">Последний контакт</div><div class="value">${c.last_seen_utc || '–'}</div></div>
+        </div>`;
+      const trustList = document.getElementById('trust-series');
+      (detail.series.trust || []).forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = `${item.date}: ${item.value}`;
+        trustList.appendChild(li);
+      });
+      const volumeList = document.getElementById('volume-series');
+      (detail.series.volume || []).forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = `${item.date}: входящие ${item.inbound}, исходящие ${item.outbound}`;
+        volumeList.appendChild(li);
+      });
+      const highlights = document.getElementById('highlights');
+      (detail.highlights || []).forEach(h => {
+        const li = document.createElement('li');
+        li.textContent = h.text || '';
+        highlights.appendChild(li);
+      });
+      if (!detail.highlights || detail.highlights.length === 0) {
+        const li = document.createElement('li');
+        li.textContent = 'Нет сигналов за выбранный период';
+        highlights.appendChild(li);
+      }
+    }
+  </script>
+</body>
+</html>

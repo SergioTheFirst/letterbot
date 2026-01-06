@@ -115,6 +115,27 @@ class KnowledgeAnalytics:
         placeholders = ", ".join(["?"] * len(account_ids))
         return f" AND account_id IN ({placeholders})", list(account_ids)
 
+    @staticmethod
+    def _contact_key(raw: str) -> str:
+        cleaned = (raw or "").strip()
+        if cleaned.lower().startswith("contact:"):
+            return cleaned[len("contact:") :]
+        return cleaned
+
+    @staticmethod
+    def _contact_label(entity_id: str, payload: Mapping[str, object] | None = None) -> tuple[str, str]:
+        domain_hint = ""
+        if payload:
+            raw_domain = payload.get("sender_domain") or payload.get("domain")
+            if isinstance(raw_domain, str) and raw_domain.strip():
+                domain_hint = raw_domain.strip().lower()
+        if "@" in entity_id:
+            domain = entity_id.split("@", 1)[1].lower()
+            return domain, domain
+        if domain_hint:
+            return domain_hint, domain_hint
+        return entity_id, ""
+
     def _event_rows(
         self,
         *,
@@ -483,6 +504,242 @@ class KnowledgeAnalytics:
                 }
             )
         return items
+
+    def relationship_graph(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+        limit: int,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        since_ts = self._window_start_ts(window_days)
+        resolved_limit = min(200, max(1, int(limit))) if limit else 50
+        max_ts = since_ts
+        nodes: list[dict[str, object]] = [
+            {
+                "id": "user:me",
+                "label": "Вы",
+                "domain": "",
+                "emails_total": 0,
+                "threads_total": 0,
+                "last_seen_utc": None,
+            }
+        ]
+        if not account_ids:
+            return {
+                "scope": {"account_emails": account_ids, "window_days": window_days},
+                "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "nodes": nodes,
+                "edges": [],
+            }
+
+        query = """
+        SELECT event_type, ts_utc, account_id, entity_id, email_id, payload, payload_json
+        FROM events_v1
+        WHERE ts_utc >= ? AND entity_id IS NOT NULL
+        """
+        clause, clause_params = self._account_scope_clause(account_ids)
+        query += clause
+        query += "\n        ORDER BY ts_utc ASC, event_type ASC, email_id ASC, entity_id ASC"
+        params: list[object] = [since_ts, *clause_params]
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            rows = []
+
+        aggregates: dict[str, dict[str, object]] = {}
+        trust_events: dict[str, list[tuple[float, float]]] = {}
+        for row in rows:
+            entity_id_raw = str(row.get("entity_id") or "").strip()
+            if not entity_id_raw:
+                continue
+            entity_id = entity_id_raw
+            payload = self._event_payload(row)
+            ts_utc = float(row.get("ts_utc") or 0.0)
+            event_type = str(row.get("event_type") or "")
+            entry = aggregates.setdefault(
+                entity_id,
+                {
+                    "emails_total": 0,
+                    "threads": set(),
+                    "last_seen": 0.0,
+                    "trust_score": None,
+                    "risk_flags": set(),
+                },
+            )
+            if row.get("email_id") is not None:
+                entry["emails_total"] = int(entry["emails_total"]) + 1
+                entry["threads"].add(row.get("email_id"))
+            entry["last_seen"] = max(float(entry["last_seen"]), ts_utc)
+            max_ts = max(max_ts, ts_utc)
+            if event_type == "trust_score_updated":
+                score_raw = payload.get("trust_score")
+                try:
+                    score = float(score_raw)
+                except (TypeError, ValueError):
+                    score = None
+                if score is not None:
+                    trust_events.setdefault(entity_id, []).append((ts_utc, score))
+                    entry["trust_score"] = score
+            if event_type in {"silence_signal_detected", "deadlock_detected"}:
+                entry["risk_flags"].add(event_type)
+
+        for events in trust_events.values():
+            events.sort(key=lambda item: item[0])
+
+        result_nodes: list[dict[str, object]] = []
+        for entity_id, entry in aggregates.items():
+            trust_delta = None
+            events = trust_events.get(entity_id, [])
+            if len(events) >= 2:
+                first = events[0][1]
+                last = events[-1][1]
+                trust_delta = last - first
+            label, domain = self._contact_label(entity_id)
+            result_nodes.append(
+                {
+                    "id": f"contact:{entity_id}",
+                    "label": label,
+                    "domain": domain,
+                    "emails_total": int(entry["emails_total"]),
+                    "threads_total": len(entry["threads"]),
+                    **({"trust_score": entry["trust_score"]} if entry["trust_score"] is not None else {}),
+                    **({"trust_delta": trust_delta} if trust_delta is not None else {}),
+                    "avg_tta_seconds": None,
+                    "risk_flags": sorted(entry["risk_flags"]),
+                    "last_seen_utc": datetime.fromtimestamp(entry["last_seen"], tz=timezone.utc).isoformat()
+                    if entry["last_seen"]
+                    else None,
+                }
+            )
+
+        def _node_sort_key(node: Mapping[str, object]) -> tuple[float, int, str]:
+            trust_score = node.get("trust_score")
+            trust_key = -float(trust_score) if trust_score is not None else math.inf
+            return (
+                trust_key,
+                -int(node.get("emails_total") or 0),
+                str(node.get("id") or ""),
+            )
+
+        result_nodes.sort(key=_node_sort_key)
+        result_nodes = result_nodes[:resolved_limit]
+        edges = [
+            {
+                "source": "user:me",
+                "target": node["id"],
+                "weight": int(node.get("emails_total") or 0),
+                "kind": "email_volume",
+            }
+            for node in result_nodes
+        ]
+        edges.sort(key=lambda edge: (-int(edge.get("weight") or 0), str(edge.get("target") or "")))
+        generated = datetime.fromtimestamp(max_ts, tz=timezone.utc).isoformat()
+        return {
+            "scope": {"account_emails": account_ids, "window_days": window_days},
+            "generated_at_utc": generated,
+            "nodes": nodes + result_nodes,
+            "edges": edges,
+        }
+
+    def relationship_contact_detail(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        contact_id: str,
+        window_days: int,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return {}
+        entity_id = self._contact_key(contact_id)
+        if not entity_id:
+            return {}
+        since_ts = self._window_start_ts(window_days)
+        query = """
+        SELECT event_type, ts_utc, account_id, entity_id, email_id, payload, payload_json
+        FROM events_v1
+        WHERE ts_utc >= ? AND entity_id = ?
+        """
+        clause, clause_params = self._account_scope_clause(account_ids)
+        query += clause
+        query += "\n        ORDER BY ts_utc ASC, event_type ASC, email_id ASC"
+        params: list[object] = [since_ts, entity_id, *clause_params]
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            rows = []
+
+        trust_series: list[dict[str, object]] = []
+        volume_by_date: dict[str, dict[str, int]] = {}
+        risk_flags: set[str] = set()
+        emails_total = 0
+        threads: set[object] = set()
+        last_seen = 0.0
+        trust_score = None
+
+        for row in rows:
+            ts_utc = float(row.get("ts_utc") or 0.0)
+            event_type = str(row.get("event_type") or "")
+            payload = self._event_payload(row)
+            date_key = datetime.fromtimestamp(ts_utc, tz=timezone.utc).date().isoformat()
+            volume_entry = volume_by_date.setdefault(date_key, {"inbound": 0, "outbound": 0})
+            if event_type == "email_received":
+                volume_entry["inbound"] += 1
+            elif event_type in {"telegram_delivered", "priority_decision_recorded", "priority_correction_recorded"}:
+                volume_entry["outbound"] += 1
+            if row.get("email_id") is not None:
+                emails_total += 1
+                threads.add(row.get("email_id"))
+            last_seen = max(last_seen, ts_utc)
+            if event_type == "trust_score_updated":
+                score_raw = payload.get("trust_score")
+                try:
+                    score = float(score_raw)
+                except (TypeError, ValueError):
+                    score = None
+                if score is not None:
+                    trust_score = score
+                    trust_series.append({"date": date_key, "value": score})
+            if event_type in {"silence_signal_detected", "deadlock_detected"}:
+                risk_flags.add(event_type)
+
+        trust_series.sort(key=lambda item: item["date"])
+        volume_series = [
+            {"date": day, "inbound": counts["inbound"], "outbound": counts["outbound"]}
+            for day, counts in sorted(volume_by_date.items(), key=lambda item: item[0])
+        ]
+
+        trust_delta = None
+        if len(trust_series) >= 2:
+            trust_delta = trust_series[-1]["value"] - trust_series[0]["value"]
+        label, domain = self._contact_label(entity_id)
+        contact = {
+            "id": f"contact:{entity_id}",
+            "label": label,
+            "domain": domain,
+            "emails_total": emails_total,
+            "threads_total": len(threads),
+            **({"trust_score": trust_score} if trust_score is not None else {}),
+            **({"trust_delta": trust_delta} if trust_delta is not None else {}),
+            "avg_tta_seconds": None,
+            "risk_flags": sorted(risk_flags),
+            "last_seen_utc": datetime.fromtimestamp(last_seen, tz=timezone.utc).isoformat() if last_seen else None,
+        }
+        highlights: list[dict[str, str]] = []
+        for flag in sorted(risk_flags):
+            if flag == "silence_signal_detected":
+                highlights.append({"kind": "pattern", "text": "Обнаружен сигнал тишины за период"})
+            elif flag == "deadlock_detected":
+                highlights.append({"kind": "pattern", "text": "Возможный дедлок общения"})
+        return {
+            "contact": contact,
+            "series": {"trust": trust_series, "volume": volume_series},
+            "highlights": highlights,
+        }
 
     def bootstrap_corrections_count(
         self,
