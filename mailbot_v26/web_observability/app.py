@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Mapping, Optional
@@ -44,6 +45,14 @@ logger = logging.getLogger(__name__)
 ALLOWED_WINDOWS = {7, 30, 90}
 
 
+@dataclass(frozen=True)
+class DashboardVars:
+    account_emails: list[str]
+    window_days: int
+    limit: int
+    pii: bool
+
+
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
@@ -55,10 +64,92 @@ def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
 
 
 def _render_template(app: Flask, template_name: str, **context: object) -> str:
+    context.setdefault("request", request)
+    context.setdefault("session", session)
     if USING_FLASK_STUB:
         template_path = Path(app.template_folder or "") / template_name
-        return render_template(str(template_path), **context)
+        try:
+            from jinja2 import Environment, FileSystemLoader
+
+            env = Environment(
+                loader=FileSystemLoader(app.template_folder or ""), autoescape=False
+            )
+            env.globals["url_for"] = url_for
+            template = env.get_template(template_name)
+            return template.render(**context)
+        except ModuleNotFoundError:
+            return _render_stub_html(template_name, context, template_path)
     return render_template(template_name, **context)
+
+
+def _render_stub_html(
+    template_name: str, context: Mapping[str, object], template_path: Path
+) -> str:
+    dashboard_vars = context.get("dashboard_vars") if isinstance(context, Mapping) else None
+    window_val = getattr(dashboard_vars, "window_days", 7) if dashboard_vars else 7
+    limit_val = getattr(dashboard_vars, "limit", 25) if dashboard_vars else 25
+    account_scope = ""
+    if dashboard_vars and getattr(dashboard_vars, "account_emails", None):
+        account_scope = ",".join(getattr(dashboard_vars, "account_emails"))
+    account_email = html.escape(str(context.get("account_email") or ""))
+
+    def _options(values: list[int], selected: int) -> str:
+        opts: list[str] = []
+        for value in values:
+            sel = " selected" if value == selected else ""
+            opts.append(f'<option value="{value}"{sel}>{value}</option>')
+        if selected not in values:
+            opts.append(f'<option value="{selected}" selected>{selected}</option>')
+        return "".join(opts)
+
+    account_hidden = (
+        f'<input type="hidden" name="account_email" value="{account_email}">' if account_email else ""
+    )
+    header = (
+        "<div class=\"dashboard-vars\">"
+        f'<input id="account_emails" name="account_emails" value="{html.escape(account_scope)}">'
+        f'<select name="window_days">{_options([7, 30, 90], int(window_val))}</select>'
+        f'<select name="limit">{_options([10, 25, 50], int(limit_val))}</select>'
+        f"{account_hidden}"
+        '<button id="copy-share-link">Copy share link</button>'
+        "</div>"
+    )
+
+    if template_name == "bridge.html":
+        activity_rows = context.get("activity_rows") if isinstance(context, Mapping) else []
+        digest_today = context.get("digest_today") if isinstance(context, Mapping) else []
+        digest_week = context.get("digest_week") if isinstance(context, Mapping) else []
+        activity_body = "".join(
+            """
+            <tr>
+              <td>{delivered}</td><td>{e2e}</td><td>{from_label}</td><td>{to_label}</td>
+              <td>{preview}</td><td>{status}</td><td>{mode}</td>
+            </tr>
+            """.format(
+                delivered=html.escape(row.get("delivered", "")),
+                e2e=html.escape(str(row.get("e2e") or "")),
+                from_label=html.escape(str(row.get("from_label") or "")),
+                to_label=html.escape(str(row.get("to_label") or "")),
+                preview=html.escape(str(row.get("telegram_preview") or "")),
+                status=html.escape(str(row.get("status") or "")),
+                mode=html.escape(str(row.get("mode") or "")),
+            )
+            for row in (activity_rows or [])
+        )
+        digest_today_block = "".join(
+            f"<li>{html.escape(str(item.get('title') or ''))} {html.escape(str(item.get('time') or ''))}</li>"
+            for item in (digest_today or [])
+        ) or "<div class=\"hint\">Adjust filters to view today's highlights.</div>"
+        digest_week_block = "".join(
+            f"<li>{html.escape(str(item.get('title') or ''))} {html.escape(str(item.get('time') or ''))}</li>"
+            for item in (digest_week or [])
+        ) or "<div class=\"hint\">Expand window to see weekly digest.</div>"
+        return (
+            f"<html><body>{header}<h2>Digest Today</h2>{digest_today_block}<h2>Digest Week</h2>{digest_week_block}"
+            f"<h2>Recent Mail Activity</h2><table>{activity_body}</table></body></html>"
+        )
+
+    return render_template(str(template_path), **context)
 
 
 def _static_url() -> str:
@@ -183,6 +274,51 @@ def _events_table(items: list[dict[str, object]]) -> str:
     )
 
 
+def _build_activity_table_rows(activity_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not activity_rows:
+        return []
+    table_rows: list[dict[str, object]] = []
+    for row in activity_rows:
+        delivered_ts = row.get("delivered_ts_utc") or row.get("received_ts_utc")
+        e2e_value = row.get("e2e_seconds")
+        status_text = str(row.get("status") or "")
+        status_class = "muted"
+        if status_text.lower() == "delivered":
+            status_class = "success"
+        elif status_text.lower() == "failed":
+            status_class = "danger"
+        table_rows.append(
+            {
+                "delivered": _format_ts_utc(delivered_ts) if delivered_ts else "",
+                "e2e": _format_number(e2e_value) if e2e_value is not None else "",
+                "from_label": row.get("from_label") or "",
+                "to_label": row.get("to_label") or "",
+                "telegram_preview": row.get("telegram_preview") or "",
+                "status": status_text or "",
+                "status_class": status_class,
+                "mode": row.get("delivery_mode") or "",
+            }
+        )
+    return table_rows
+
+
+def _summarize_digest_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not rows:
+        return []
+    digest_items: list[dict[str, object]] = []
+    for row in rows:
+        delivered_ts = row.get("delivered_ts_utc") or row.get("received_ts_utc")
+        digest_items.append(
+            {
+                "title": row.get("telegram_preview") or "",
+                "from_label": row.get("from_label") or "",
+                "status": row.get("status") or "",
+                "time": _format_ts_utc(delivered_ts) if delivered_ts else "",
+            }
+        )
+    return digest_items
+
+
 def _health_current_block(current: dict[str, object] | None) -> str:
     if not current:
         return ""
@@ -277,23 +413,36 @@ def _load_credentials(config_dir: Path) -> tuple[str, str, float]:
 def _parse_account_emails(raw: str | None) -> list[str]:
     if not raw:
         return []
-    emails = [item.strip() for item in raw.split(",") if item.strip()]
-    return sorted(dict.fromkeys(emails))
+    seen: set[str] = set()
+    emails: list[str] = []
+    for item in raw.split(","):
+        trimmed = item.strip()
+        if not trimmed:
+            continue
+        if trimmed in seen:
+            continue
+        seen.add(trimmed)
+        emails.append(trimmed)
+    return emails
 
 
 def _parse_window_days(
-    raw: Optional[str], default: int = 7
+    raw: Optional[str], default: int = 7, allowed: set[int] | None = None
 ) -> tuple[Optional[int], Optional[str]]:
     if raw is None or raw == "":
-        if default not in ALLOWED_WINDOWS:
-            return None, "window_days must be one of 7, 30, 90"
+        if allowed is not None and default not in allowed:
+            return None, f"window_days must be one of {', '.join(map(str, sorted(allowed)))}"
+        if default < 1 or default > 365:
+            return None, "window_days must be between 1 and 365"
         return default, None
     try:
         value = int(raw)
     except (TypeError, ValueError):
         return None, "window_days must be an integer"
-    if value not in ALLOWED_WINDOWS:
-        return None, "window_days must be one of 7, 30, 90"
+    if allowed is not None and value not in allowed:
+        return None, f"window_days must be one of {', '.join(map(str, sorted(allowed)))}"
+    if value < 1 or value > 365:
+        return None, "window_days must be between 1 and 365"
     return value, None
 
 
@@ -316,16 +465,98 @@ def _parse_limit(
     return value, None
 
 
+def resolve_dashboard_vars(request, session, allow_pii: bool | None = None) -> DashboardVars:
+    try:
+        session_vars = session.get("dashboard_vars") or {}
+    except Exception:
+        session_vars = {}
+
+    def _session_value(key: str) -> object:
+        if isinstance(session_vars, Mapping):
+            return session_vars.get(key)
+        return None
+
+    def _parse_accounts(raw: object) -> list[str]:
+        return _parse_account_emails(str(raw)) if raw not in (None, "") else []
+
+    query_accounts_raw = request.args.get("account_emails")
+    accounts = _parse_accounts(query_accounts_raw)
+    if not accounts:
+        accounts = _parse_accounts(_session_value("account_emails"))
+
+    def _int_in_range(raw_value: object, minimum: int, maximum: int, default: int) -> int:
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        return max(minimum, min(maximum, value))
+
+    window_raw = request.args.get("window_days")
+    window_days = None
+    if window_raw is not None:
+        window_days = _int_in_range(window_raw, 1, 365, 7)
+    elif _session_value("window_days") is not None:
+        window_days = _int_in_range(_session_value("window_days"), 1, 365, 7)
+    else:
+        window_days = 7
+
+    limit_raw = request.args.get("limit")
+    limit_value = None
+    if limit_raw is not None:
+        limit_value = _int_in_range(limit_raw, 1, 200, 25)
+    elif _session_value("limit") is not None:
+        limit_value = _int_in_range(_session_value("limit"), 1, 200, 25)
+    else:
+        limit_value = 25
+
+    if allow_pii is None:
+        allow_pii_flag = str(os.getenv("WEB_OBSERVABILITY_ALLOW_PII", "0")).lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    else:
+        allow_pii_flag = bool(allow_pii)
+
+    pii_raw = request.args.get("pii") if allow_pii_flag else None
+    pii_value = False
+    if allow_pii_flag and pii_raw is not None:
+        pii_value = str(pii_raw).lower() in {"1", "true", "yes", "on"}
+    elif allow_pii_flag and _session_value("pii") is not None:
+        pii_value = bool(_session_value("pii"))
+
+    resolved = DashboardVars(
+        account_emails=accounts,
+        window_days=window_days,
+        limit=limit_value,
+        pii=pii_value if allow_pii_flag else False,
+    )
+    try:
+        session["dashboard_vars"] = {
+            "account_emails": resolved.account_emails,
+            "window_days": resolved.window_days,
+            "limit": resolved.limit,
+            "pii": resolved.pii,
+        }
+    except Exception:
+        logger.debug("Dashboard vars session persist skipped", exc_info=True)
+    return resolved
+
+
 def _validate_latency_params(
     *,
     args,
     require_account: bool = True,
     default_account: str | None = None,
     window_default: int = 7,
+    allowed_windows: set[int] | None = ALLOWED_WINDOWS,
 ) -> tuple[Optional[str], list[str], Optional[int], Optional[str]]:
     account_email = (args.get("account_email") or "").strip()
     account_emails = _parse_account_emails(args.get("account_emails"))
-    window_days, error = _parse_window_days(args.get("window_days"), window_default)
+    window_days, error = _parse_window_days(
+        args.get("window_days"), window_default, allowed_windows
+    )
     if error:
         return None, [], None, error
     if account_emails and account_email and account_email not in account_emails:
@@ -493,7 +724,104 @@ def create_app(
 
     @app.route("/")
     def index():
-        return redirect(url_for("latency"))
+        dashboard_vars = _dashboard_vars()
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_email = (request.args.get("account_email") or "").strip()
+        if not account_email and dashboard_vars.account_emails:
+            account_email = dashboard_vars.account_emails[0]
+        if not account_email:
+            account_email = default_account or ""
+        account_emails = dashboard_vars.account_emails or ([] if not account_email else [account_email])
+        window_days = dashboard_vars.window_days or 7
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
+        )
+
+        analytics = _analytics()
+        summary: dict[str, object] | None = None
+        activity_rows: list[dict[str, object]] = []
+        digest_today: list[dict[str, object]] = []
+        digest_week: list[dict[str, object]] = []
+        if account_email:
+            summary = analytics.processing_spans_metrics_digest(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=window_days,
+            )
+            activity_rows = analytics.recent_mail_activity(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=window_days,
+                limit=dashboard_vars.limit or 25,
+                reveal_pii=reveal_pii,
+            )
+            digest_today = analytics.recent_mail_activity(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=1,
+                limit=5,
+                reveal_pii=reveal_pii,
+            )
+            digest_week = analytics.recent_mail_activity(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=7,
+                limit=5,
+                reveal_pii=reveal_pii,
+            )
+
+        golden_signals: list[dict[str, object]] = []
+        if summary:
+            span_count = int(summary.get("span_count") or 0)
+            outcome_counts = summary.get("outcome_counts") if isinstance(summary, Mapping) else {}
+            success_count = 0
+            failed_count = 0
+            if isinstance(outcome_counts, Mapping):
+                success_count = int(outcome_counts.get("ok") or 0) + int(
+                    outcome_counts.get("delivered") or 0
+                )
+                failed_count = int(outcome_counts.get("error") or 0) + int(
+                    outcome_counts.get("failed") or 0
+                )
+            golden_signals = [
+                {"label": "p50", "value": _format_number(summary.get("total_duration_ms_p50")), "suffix": "ms"},
+                {"label": "p90", "value": _format_number(summary.get("total_duration_ms_p90")), "suffix": "ms"},
+                {"label": "p95", "value": _format_number(summary.get("total_duration_ms_p95")), "suffix": "ms"},
+                {"label": "Error rate", "value": _format_percent(summary.get("error_rate")), "suffix": "%"},
+                {"label": "Delivered", "value": _format_number(success_count or span_count), "suffix": ""},
+                {"label": "Failed", "value": _format_number(failed_count), "suffix": ""},
+            ]
+
+        scope_hint = None
+        if account_email:
+            scope_hint = f"{account_email} • last {window_days} days"
+
+        archive_available = False
+        if hasattr(app, "view_functions"):
+            archive_available = "archive" in getattr(app, "view_functions")
+        elif hasattr(app, "_endpoint_map"):
+            archive_available = "archive" in getattr(app, "_endpoint_map", {})
+
+        return _render_template(
+            app,
+            "bridge.html",
+            title=app.config["APP_TITLE"],
+            page_title="BRIDGE",
+            scope_hint=scope_hint,
+            dashboard_vars=dashboard_vars,
+            account_options=accounts,
+            account_email=account_email,
+            account_emails_value=",".join(account_emails),
+            window_days=window_days,
+            golden_signals=golden_signals,
+            activity_rows=_build_activity_table_rows(activity_rows),
+            digest_today=_summarize_digest_rows(digest_today),
+            digest_week=_summarize_digest_rows(digest_week),
+            pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
+            pii_enabled=reveal_pii,
+            archive_available=archive_available,
+        )
 
     def _analytics() -> KnowledgeAnalytics:
         factory = app.config.get("ANALYTICS_FACTORY")
@@ -501,12 +829,12 @@ def create_app(
             return factory()
         return KnowledgeAnalytics(app.config["DB_PATH"], read_only=True)
 
-    def _pii_enabled() -> bool:
-        allowed = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII"))
-        if not allowed:
-            return False
-        flag = str(request.args.get("pii", "")).lower()
-        return flag in {"1", "true", "yes", "on"}
+    def _dashboard_vars() -> DashboardVars:
+        return resolve_dashboard_vars(
+            request,
+            session,
+            allow_pii=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
+        )
 
     @app.route("/api/v1/observability/latency_summary", methods=["GET"])
     def api_latency_summary():
@@ -718,10 +1046,23 @@ def create_app(
 
     @app.route("/latency", methods=["GET"])
     def latency():
+        dashboard_vars = _dashboard_vars()
         accounts = _available_accounts(app.config["DB_PATH"])
         default_account = accounts[0] if accounts else None
+        account_email_arg = (request.args.get("account_email") or "").strip()
+        resolved_account = account_email_arg or (dashboard_vars.account_emails[0] if dashboard_vars.account_emails else "")
+        if not resolved_account and default_account:
+            resolved_account = default_account
         account_email, account_emails, window_days, error = _validate_latency_params(
-            args=request.args, require_account=False, default_account=default_account
+            args={
+                **{k: v for k, v in request.args.items()},
+                "account_email": resolved_account,
+                "account_emails": ",".join(dashboard_vars.account_emails),
+                "window_days": str(dashboard_vars.window_days),
+            },
+            require_account=False,
+            default_account=default_account,
+            allowed_windows=None,
         )
         error_message = error or ("Select an account to view latency." if not account_email else "")
         analytics = _analytics()
@@ -729,7 +1070,9 @@ def create_app(
         recent_errors: list[dict[str, object]] = []
         slowest: list[dict[str, object]] = []
         activity_rows: list[dict[str, object]] = []
-        reveal_pii = _pii_enabled()
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
+        )
         if not error_message and account_email:
             summary = analytics.processing_spans_metrics_digest(
                 account_email=account_email,
@@ -752,7 +1095,7 @@ def create_app(
                 account_email=account_email,
                 account_emails=account_emails,
                 window_days=window_days or 7,
-                limit=40,
+                limit=dashboard_vars.limit or 25,
                 reveal_pii=reveal_pii,
             )
 
@@ -761,7 +1104,7 @@ def create_app(
         stage_breakdown: list[dict[str, object]] = []
         slowest_rows: list[dict[str, object]] = []
         error_rows: list[dict[str, object]] = []
-        activity_table_rows: list[dict[str, object]] = []
+        activity_table_rows: list[dict[str, object]] = _build_activity_table_rows(activity_rows)
 
         if summary:
             metrics_cards = [
@@ -838,29 +1181,6 @@ def create_app(
                     }
                 )
 
-        if activity_rows:
-            for row in activity_rows:
-                delivered_ts = row.get("delivered_ts_utc") or row.get("received_ts_utc")
-                e2e_value = row.get("e2e_seconds")
-                status_text = str(row.get("status") or "")
-                status_class = "muted"
-                if status_text.lower() == "delivered":
-                    status_class = "success"
-                elif status_text.lower() == "failed":
-                    status_class = "danger"
-                activity_table_rows.append(
-                    {
-                        "delivered": _format_ts_utc(delivered_ts) if delivered_ts else "",
-                        "e2e": _format_number(e2e_value) if e2e_value is not None else "",
-                        "from_label": row.get("from_label") or "",
-                        "to_label": row.get("to_label") or "",
-                        "telegram_preview": row.get("telegram_preview") or "",
-                        "status": status_text or "",
-                        "status_class": status_class,
-                        "mode": row.get("delivery_mode") or "",
-                    }
-                )
-
         scope_hint = None
         if account_email:
             scope_hint = f"{account_email} • last {window_days or 7} days"
@@ -872,6 +1192,7 @@ def create_app(
             page_title="Latency",
             error=error_message,
             scope_hint=scope_hint,
+            dashboard_vars=dashboard_vars,
             account_options=accounts,
             account_email=account_email,
             account_emails_value=",".join(account_emails),
