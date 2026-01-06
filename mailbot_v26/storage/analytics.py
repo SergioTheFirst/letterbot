@@ -5,6 +5,7 @@ import logging
 import math
 import re
 import sqlite3
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -384,6 +385,91 @@ class KnowledgeAnalytics:
             return {}
         return {key: sanitized[key] for key in sorted(sanitized.keys())}
 
+    @staticmethod
+    def _safe_payload_value(value: object, *, max_length: int = 120) -> object:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value[:max_length]
+        return str(value)[:max_length]
+
+    def _sanitize_learning_payload(self, event_type: str, payload: Mapping[str, object]) -> dict[str, object]:
+        allowed_by_type: dict[str, set[str]] = {
+            EventType.PRIORITY_CORRECTION_RECORDED.value: {
+                "old_priority",
+                "new_priority",
+                "engine",
+                "source",
+                "system_mode",
+            },
+            EventType.SURPRISE_DETECTED.value: {
+                "old_priority",
+                "new_priority",
+                "delta",
+                "engine",
+                "source",
+            },
+            EventType.DELIVERY_POLICY_APPLIED.value: {
+                "mode",
+                "reason_codes",
+                "thresholds_used",
+                "attention_debt",
+                "priority",
+                "confidence_percent",
+                "extraction_success",
+                "attachment_count",
+            },
+            EventType.ATTENTION_DEBT_UPDATED.value: {
+                "attention_debt",
+                "bucket",
+                "immediate_last_hour",
+                "max_per_hour",
+            },
+            EventType.CALIBRATION_PROPOSALS_GENERATED.value: {
+                "week_key",
+                "proposals_count",
+                "top_labels",
+            },
+        }
+        allowed_keys = allowed_by_type.get(event_type)
+        if not allowed_keys or not isinstance(payload, Mapping):
+            return {}
+
+        sanitized: dict[str, object] = {}
+
+        def _clean_container(value: object) -> object:
+            if isinstance(value, list):
+                cleaned_list: list[object] = []
+                for item in value:
+                    if isinstance(item, (str, int, float, bool)) or item is None:
+                        cleaned_list.append(self._safe_payload_value(item))
+                return cleaned_list
+            if isinstance(value, dict):
+                cleaned_dict: dict[str, object] = {}
+                for k, v in value.items():
+                    if not isinstance(k, str):
+                        continue
+                    cleaned_dict[k] = self._safe_payload_value(v)
+                return {key: cleaned_dict[key] for key in sorted(cleaned_dict.keys())}
+            return self._safe_payload_value(value)
+
+        forbidden_tokens = ["subject", "body", "raw", "sender", "from_email", "email"]
+        for key in allowed_keys:
+            lowered = key.lower()
+            if any(token in lowered for token in forbidden_tokens):
+                continue
+            if key not in payload:
+                continue
+            sanitized[key] = _clean_container(payload.get(key))
+
+        if not sanitized:
+            return {}
+        return {key: sanitized[key] for key in sorted(sanitized.keys())}
+
     def _event_summary(self, event_type: str, details: dict[str, object]) -> str:
         priority_marker = self._priority_emoji(details.get("priority")) if details else None
         prefix = f"{event_type}{f' {priority_marker}' if priority_marker else ''}"
@@ -504,6 +590,257 @@ class KnowledgeAnalytics:
                 }
             )
         return items
+
+    def _event_rows_scoped_multi(
+        self,
+        *,
+        account_ids: Sequence[str],
+        event_types: Sequence[str],
+        since_ts: float,
+        limit: int | None = None,
+        order_desc: bool = True,
+    ) -> list[dict[str, object]]:
+        if not account_ids or not event_types:
+            return []
+        placeholders = ", ".join(["?"] * len(event_types))
+        query = """
+        SELECT id, event_type, ts_utc, account_id, entity_id, email_id, payload, payload_json
+        FROM events_v1
+        WHERE event_type IN ({event_types}) AND ts_utc >= ?
+        """.replace("{event_types}", placeholders)
+        params: list[object] = list(event_types)
+        params.append(since_ts)
+        clause, clause_params = self._account_scope_clause(account_ids)
+        query += clause
+        params.extend(clause_params)
+        if order_desc:
+            query += "\n        ORDER BY ts_utc DESC, id ASC"
+        else:
+            query += "\n        ORDER BY ts_utc ASC, id ASC"
+        if limit is not None:
+            query += "\n        LIMIT ?"
+            params.append(limit)
+        try:
+            return self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return []
+
+    def behavioral_metrics_summary(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+        now_ts: float,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return {}
+        window_seconds = max(1, int(window_days)) * 24 * 60 * 60
+        since_ts = float(now_ts) - window_seconds
+
+        summary: dict[str, object] = {
+            "window_days": window_days,
+            "account_emails": account_ids,
+        }
+
+        corrections = self._event_count_scoped(
+            account_ids=account_ids,
+            event_type=EventType.PRIORITY_CORRECTION_RECORDED.value,
+            since_ts=since_ts,
+        )
+        surprises = self._event_count_scoped(
+            account_ids=account_ids,
+            event_type=EventType.SURPRISE_DETECTED.value,
+            since_ts=since_ts,
+        )
+        summary["corrections"] = corrections
+        summary["surprises"] = surprises
+        summary["surprise_rate"] = (
+            0.0 if corrections <= 0 else float(surprises) / float(corrections)
+        )
+
+        received_rows = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.EMAIL_RECEIVED.value,
+            since_ts=since_ts,
+        )
+        received_by_email: dict[int, float] = {}
+        for row in received_rows:
+            email_id = row.get("email_id")
+            if email_id is None:
+                continue
+            try:
+                key = int(email_id)
+            except (TypeError, ValueError):
+                continue
+            ts_val = row.get("ts_utc")
+            try:
+                ts_float = float(ts_val)
+            except (TypeError, ValueError):
+                continue
+            if key not in received_by_email or ts_float < received_by_email[key]:
+                received_by_email[key] = ts_float
+        corrections_rows = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.PRIORITY_CORRECTION_RECORDED.value,
+            since_ts=since_ts,
+        )
+        tta_values: list[float] = []
+        for row in corrections_rows:
+            email_id = row.get("email_id")
+            if email_id is None:
+                continue
+            try:
+                key = int(email_id)
+            except (TypeError, ValueError):
+                continue
+            received_ts = received_by_email.get(key)
+            if received_ts is None:
+                continue
+            try:
+                correction_ts = float(row.get("ts_utc") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            delta = correction_ts - received_ts
+            if delta >= 0:
+                tta_values.append(delta)
+        summary["tta_seconds_p50"] = self._percentile(tta_values, 50) if tta_values else None
+        summary["tta_seconds_p90"] = self._percentile(tta_values, 90) if tta_values else None
+
+        delivery_rows = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.DELIVERY_POLICY_APPLIED.value,
+            since_ts=since_ts,
+        )
+        total_delivery = len(delivery_rows)
+        non_immediate = 0
+        reason_counter: Counter[str] = Counter()
+        for row in delivery_rows:
+            payload = self._event_payload(row)
+            mode = str(payload.get("mode") or "").lower()
+            if mode and mode != "immediate":
+                non_immediate += 1
+            reason_codes = payload.get("reason_codes")
+            if isinstance(reason_codes, list):
+                for reason in reason_codes:
+                    reason_str = str(reason or "").strip()
+                    if reason_str:
+                        reason_counter[reason_str] += 1
+        summary["compression_rate"] = (
+            0.0 if total_delivery <= 0 else float(non_immediate) / float(total_delivery)
+        )
+        summary["deferral_reasons"] = [
+            {"reason_code": key, "count": reason_counter[key]}
+            for key in sorted(
+                reason_counter.keys(),
+                key=lambda item: (-reason_counter[item], item),
+            )
+        ]
+
+        attention_rows = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.ATTENTION_DEBT_UPDATED.value,
+            since_ts=since_ts,
+        )
+        buckets: defaultdict[str, int] = defaultdict(int)
+        for row in attention_rows:
+            payload = self._event_payload(row)
+            bucket = str(payload.get("bucket") or "").strip().lower() or "unknown"
+            buckets[bucket] += 1
+        summary["attention_debt_distribution"] = {
+            key: buckets.get(key, 0)
+            for key in ["low", "medium", "high", "unknown"]
+            if buckets.get(key, 0) or key in {"low", "medium", "high"}
+        }
+
+        summary["signal_counts"] = {
+            "deadlock_detected": self._event_count_scoped(
+                account_ids=account_ids,
+                event_type=EventType.DEADLOCK_DETECTED.value,
+                since_ts=since_ts,
+            ),
+            "silence_signal_detected": self._event_count_scoped(
+                account_ids=account_ids,
+                event_type=EventType.SILENCE_SIGNAL_DETECTED.value,
+                since_ts=since_ts,
+            ),
+        }
+
+        generated_at = datetime.fromtimestamp(float(now_ts), tz=timezone.utc).isoformat()
+        summary["generated_at_utc"] = (
+            generated_at if not generated_at.endswith("+00:00") else generated_at.replace("+00:00", "Z")
+        )
+        return summary
+
+    def learning_timeline(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+        limit: int,
+        now_ts: float,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return {}
+        resolved_limit = min(200, max(1, int(limit)))
+        window_seconds = max(1, int(window_days)) * 24 * 60 * 60
+        since_ts = float(now_ts) - window_seconds
+        event_types = [
+            EventType.PRIORITY_CORRECTION_RECORDED.value,
+            EventType.SURPRISE_DETECTED.value,
+            EventType.DELIVERY_POLICY_APPLIED.value,
+            EventType.ATTENTION_DEBT_UPDATED.value,
+            EventType.CALIBRATION_PROPOSALS_GENERATED.value,
+        ]
+        rows = self._event_rows_scoped_multi(
+            account_ids=account_ids,
+            event_types=event_types,
+            since_ts=since_ts,
+            limit=resolved_limit,
+            order_desc=True,
+        )
+        items: list[dict[str, object]] = []
+        for row in rows:
+            event_type = str(row.get("event_type") or "")
+            payload = self._event_payload(row)
+            sanitized_payload = self._sanitize_learning_payload(event_type, payload)
+            entity_raw = self._contact_key(str(row.get("entity_id") or ""))
+            entity_label, entity_domain = self._contact_label(entity_raw, payload)
+            ts_val = row.get("ts_utc")
+            try:
+                ts_float = float(ts_val)
+            except (TypeError, ValueError):
+                ts_float = 0.0
+            iso_ts = datetime.fromtimestamp(ts_float, tz=timezone.utc).isoformat() if ts_float else None
+            if iso_ts and iso_ts.endswith("+00:00"):
+                iso_ts = iso_ts.replace("+00:00", "Z")
+            items.append(
+                {
+                    "event_id": row.get("id"),
+                    "event_type": event_type,
+                    "ts_utc": ts_val,
+                    "ts_iso": iso_ts,
+                    "email_id": row.get("email_id") if row.get("email_id") is not None else None,
+                    "entity": {
+                        "label": entity_label,
+                        "domain": entity_domain,
+                    },
+                    "payload": sanitized_payload,
+                }
+            )
+        generated_at = datetime.fromtimestamp(float(now_ts), tz=timezone.utc).isoformat()
+        if generated_at.endswith("+00:00"):
+            generated_at = generated_at.replace("+00:00", "Z")
+        return {
+            "window_days": window_days,
+            "account_emails": account_ids,
+            "limit": resolved_limit,
+            "generated_at_utc": generated_at,
+            "items": items,
+        }
 
     def relationship_graph(
         self,

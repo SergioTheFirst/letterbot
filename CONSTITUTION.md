@@ -119,6 +119,7 @@ IV. Архитектура и надёжность
 - Web = read-only Intelligence Hub; events timeline renders sanitized summaries only; never show raw email text/subjects/senders in web.
 - Relationship graph и прочие веб-аналитики всегда только чтение, поверх обезличенных снапшотов и агрегатов; никаких сырых тел/HTML/вложений.
 - Интеллект-страницы (health/events/relationships/attention) отображают только агрегированные метрики без PII и не модифицируют БД.
+- Learning Observatory (web + API) — только чтение, детерминировано, строится из events_v1, с PII-санитайзером; shadow-классификация не меняет delivery defaults.
 
 V. Privacy и данные
 

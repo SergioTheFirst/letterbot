@@ -129,3 +129,4 @@ Working set (files / tables / tests):
 2026-01-12: web events timeline (read-only, scoped, PII-guarded).
 2026-01-13: relationship graph API+UI (read-only, scoped, deterministic, PII-guarded).
 2026-01-13: web attention economics API+UI (read-only, scoped, deterministic, PII-guarded).
+2026-01-12: learning observatory (events_v1-derived, read-only web+API) added.
