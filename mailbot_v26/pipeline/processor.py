@@ -271,7 +271,6 @@ def _build_delivery_context(
     return DeliveryContext(
         now_local=now_local,
         immediate_sent_last_hour=immediate_sent_last_hour,
-        max_immediate_per_hour=policy_config.max_immediate_per_hour,
     )
 
 
@@ -4295,252 +4294,224 @@ def process_message(
                 },
             )
     
-        if behavior_enabled and delivery_decision.mode == DeliveryMode.SILENT_LOG:
-            logger.info(
-                "telegram_delivery_suppressed",
+        send_start = time.perf_counter()
+        telegram_delivered = False
+        delivery_ts = time.time()
+        consecutive_tg_failures = 0
+        delivery_result: DeliveryResult | None = None
+        wait_budget_seconds = MAX_TELEGRAM_WAIT_SECONDS
+        delivery_mode_for_span = "final_first_send"
+        elapsed_to_first_send_seconds = 0.0
+        edit_applied = False
+        minimal_payload = _build_minimal_telegram_payload(
+            priority=priority,
+            from_email=from_email,
+            subject=subject,
+            attachments=attachments,
+            metadata=dict(payload.metadata),
+        )
+        edit_errors: list[str] = []
+
+        def _on_edit_failure(reason: str) -> None:
+            edit_errors.append(reason)
+            event_emitter.emit(
+                type="telegram_edit_failed",
+                timestamp=received_at,
                 email_id=message_id,
-                reason=attention_reason,
-                mode=delivery_decision.mode.value,
+                payload={"reason": reason, "chat_id": telegram_chat_id},
             )
-        else:
-            send_start = time.perf_counter()
-            telegram_delivered = False
-            delivery_ts = time.time()
-            consecutive_tg_failures = 0
-            delivery_result: DeliveryResult | None = None
-            wait_budget_seconds = MAX_TELEGRAM_WAIT_SECONDS
-            delivery_mode_for_span = "final_first_send"
-            elapsed_to_first_send_seconds = 0.0
-            edit_applied = False
-            minimal_payload = _build_minimal_telegram_payload(
-                priority=priority,
-                from_email=from_email,
-                subject=subject,
-                attachments=attachments,
-                metadata=dict(payload.metadata),
-            )
-            edit_errors: list[str] = []
 
-            def _on_edit_failure(reason: str) -> None:
-                edit_errors.append(reason)
-                event_emitter.emit(
-                    type="telegram_edit_failed",
-                    timestamp=received_at,
+        def _edit_payload(message_id: int, final_payload: TelegramPayload) -> bool:
+            bot_token = str(
+                payload.metadata.get("bot_token")
+                or minimal_payload.metadata.get("bot_token")
+                or ""
+            )
+            chat_id = str(
+                payload.metadata.get("chat_id")
+                or minimal_payload.metadata.get("chat_id")
+                or ""
+            )
+            return edit_telegram_message(
+                bot_token=bot_token,
+                chat_id=chat_id,
+                message_id=message_id,
+                html_text=final_payload.html_text,
+            )
+
+        def _send_payload(message_payload: TelegramPayload) -> DeliveryResult:
+            return _coerce_delivery_result(
+                enqueue_tg(email_id=message_id, payload=message_payload),
+                email_id=message_id,
+            )
+
+        sla_outcome = _apply_delivery_sla(
+            processing_started_at=processing_started_at,
+            wait_budget_seconds=wait_budget_seconds,
+            minimal_payload=minimal_payload,
+            final_payload=payload,
+            send_func=_send_payload,
+            edit_func=_edit_payload,
+            on_edit_failure=_on_edit_failure,
+        )
+        delivery_result = sla_outcome.result
+        delivery_mode_for_span = sla_outcome.delivery_mode
+        elapsed_to_first_send_seconds = sla_outcome.elapsed_to_first_send_seconds
+        edit_applied = sla_outcome.edit_applied
+        try:
+            if delivery_result is None:
+                raise RuntimeError("telegram_delivery_result_missing")
+            if not delivery_result.delivered:
+                if delivery_result.retryable:
+                    raise RuntimeError(delivery_result.error or "Telegram delivery failed")
+                logger.error(
+                    "telegram_delivery_non_retryable",
                     email_id=message_id,
-                    payload={"reason": reason, "chat_id": telegram_chat_id},
+                    chat_id=telegram_chat_id,
+                    error=delivery_result.error or "unknown error",
                 )
-
-            def _edit_payload(message_id: int, final_payload: TelegramPayload) -> bool:
-                bot_token = str(
-                    payload.metadata.get("bot_token")
-                    or minimal_payload.metadata.get("bot_token")
-                    or ""
-                )
-                chat_id = str(
-                    payload.metadata.get("chat_id")
-                    or minimal_payload.metadata.get("chat_id")
-                    or ""
-                )
-                return edit_telegram_message(
-                    bot_token=bot_token,
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    html_text=final_payload.html_text,
-                )
-
-            def _send_payload(message_payload: TelegramPayload) -> DeliveryResult:
-                return _coerce_delivery_result(
-                    enqueue_tg(email_id=message_id, payload=message_payload),
-                    email_id=message_id,
-                )
-
-            sla_outcome = _apply_delivery_sla(
-                processing_started_at=processing_started_at,
-                wait_budget_seconds=wait_budget_seconds,
-                minimal_payload=minimal_payload,
-                final_payload=payload,
-                send_func=_send_payload,
-                edit_func=_edit_payload,
-                on_edit_failure=_on_edit_failure,
-            )
-            delivery_result = sla_outcome.result
-            delivery_mode_for_span = sla_outcome.delivery_mode
-            elapsed_to_first_send_seconds = sla_outcome.elapsed_to_first_send_seconds
-            edit_applied = sla_outcome.edit_applied
-            try:
-                if delivery_result is None:
-                    raise RuntimeError("telegram_delivery_result_missing")
-                if not delivery_result.delivered:
-                    if delivery_result.retryable:
-                        raise RuntimeError(
-                            delivery_result.error or "Telegram delivery failed"
-                        )
-                    logger.error(
-                        "telegram_delivery_non_retryable",
-                        email_id=message_id,
-                        chat_id=telegram_chat_id,
-                        error=delivery_result.error or "unknown error",
-                    )
-                    change = system_health.update_component(
-                        "Telegram",
-                        False,
-                        reason=delivery_result.error or "Telegram send failed",
-                    )
-                    _notify_system_mode_change(
-                        change=change,
-                        chat_id=telegram_chat_id,
-                        account_email=account_email,
-                    )
-                    fallback_metadata = dict(payload.metadata)
-                    fallback_metadata.setdefault("chat_id", telegram_chat_id)
-                    fallback_metadata.setdefault("account_email", account_email)
-                    fallback_payload = TelegramPayload(
-                        html_text="Telegram delivery failed. Check email client.",
-                        priority="🔴",
-                        metadata=fallback_metadata,
-                    )
-                    enqueue_tg(email_id=message_id, payload=fallback_payload)
-                    event_emitter.emit(
-                        type="telegram_delivery_failed",
-                        timestamp=received_at,
-                        email_id=message_id,
-                        payload={"error": delivery_result.error or "non-retryable failure"},
-                    )
-                    _emit_contract_event(
-                        EventType.TELEGRAM_FAILED,
-                        ts_utc=delivery_ts,
-                        account_id=account_email,
-                        entity_id=entity_resolution.entity_id if entity_resolution else None,
-                        email_id=message_id,
-                        payload={
-                            "error": delivery_result.error or "non-retryable failure",
-                            "delivered": False,
-                            "occurred_at_utc": delivery_ts,
-                            "mode": delivery_result.mode,
-                            "retry_count": delivery_result.retry_count,
-                        },
-                    )
-                    consecutive_tg_failures = notification_alert_store.record_failure(
-                        datetime.fromtimestamp(delivery_ts, tz=timezone.utc)
-                    )
-                else:
-                    telegram_delivered = True
-                    change = system_health.update_component("Telegram", True)
-                    _notify_system_mode_change(
-                        change=change,
-                        chat_id=telegram_chat_id,
-                        account_email=account_email,
-                    )
-                    if render_mode != TelegramRenderMode.FULL or payload_invalid:
-                        logger.warning(
-                            "telegram_fallback_sent",
-                            email_id=message_id,
-                            chat_id=telegram_chat_id,
-                            success=True,
-                        )
-                    logger.info(
-                        "telegram_sent",
-                        email_id=message_id,
-                        chat_id=telegram_chat_id,
-                        success=True,
-                    )
-            except Exception as exc:
                 change = system_health.update_component(
                     "Telegram",
                     False,
-                    reason=str(exc) or "Telegram send failed",
+                    reason=delivery_result.error or "Telegram send failed",
                 )
                 _notify_system_mode_change(
                     change=change,
                     chat_id=telegram_chat_id,
                     account_email=account_email,
                 )
-                event_emitter.emit(
-                    type="telegram_delivery_failed",
-                    timestamp=received_at,
+                fallback_metadata = dict(payload.metadata)
+                fallback_metadata.setdefault("chat_id", telegram_chat_id)
+                fallback_metadata.setdefault("account_email", account_email)
+                fallback_payload = TelegramPayload(
+                    html_text="Telegram delivery failed. Check email client.",
+                    priority="🔴",
+                    metadata=fallback_metadata,
+                )
+                fallback_delivery = _coerce_delivery_result(
+                    enqueue_tg(email_id=message_id, payload=fallback_payload),
                     email_id=message_id,
-                    payload={"error": str(exc)},
                 )
-                _emit_contract_event(
-                    EventType.TELEGRAM_FAILED,
-                    ts_utc=delivery_ts,
-                    account_id=account_email,
-                    entity_id=entity_resolution.entity_id if entity_resolution else None,
+                if fallback_delivery.delivered:
+                    telegram_delivered = True
+                    delivery_ts = time.time()
+            else:
+                telegram_delivered = True
+                change = system_health.update_component("Telegram", True)
+                _notify_system_mode_change(
+                    change=change,
+                    chat_id=telegram_chat_id,
+                    account_email=account_email,
+                )
+                if render_mode != TelegramRenderMode.FULL or payload_invalid:
+                    logger.warning(
+                        "telegram_fallback_sent",
+                        email_id=message_id,
+                        chat_id=telegram_chat_id,
+                        success=True,
+                    )
+                logger.info(
+                    "telegram_sent",
                     email_id=message_id,
-                    payload={
-                        "error": str(exc),
-                        "delivered": False,
-                        "occurred_at_utc": delivery_ts,
-                        "mode": "html",
-                        "retry_count": 0,
-                    },
+                    chat_id=telegram_chat_id,
+                    success=True,
                 )
-                consecutive_tg_failures = notification_alert_store.record_failure(
-                    datetime.fromtimestamp(delivery_ts, tz=timezone.utc)
-                )
-                logger.error(
-                    "processing_error",
-                    stage="telegram",
-                    email_id=message_id,
-                    error=str(exc),
-                )
-                raise
-            if telegram_delivered:
-                notification_alert_store.reset_failures()
-                event_emitter.emit(
-                    type="telegram_delivery_succeeded",
-                    timestamp=received_at,
-                    email_id=message_id,
-                    payload={
-                        "render_mode": render_mode.name,
-                        "delivery_mode": delivery_mode_for_span,
-                        "edit_applied": edit_applied,
-                        "message_id": delivery_result.message_id if delivery_result else None,
-                    },
-                )
-                _emit_contract_event(
-                    EventType.TELEGRAM_DELIVERED,
-                    ts_utc=delivery_ts,
-                    account_id=account_email,
-                    entity_id=entity_resolution.entity_id if entity_resolution else None,
-                    email_id=message_id,
-                    payload={
-                        "render_mode": render_mode.name,
-                        "priority": priority,
-                        "mail_type": mail_type or "",
-                        "from_email": from_email,
-                        "delivered": True,
-                        "occurred_at_utc": delivery_ts,
-                        "mode": delivery_result.mode if delivery_result else "html",
-                        "retry_count": delivery_result.retry_count if delivery_result else 0,
-                        "message_id": delivery_result.message_id if delivery_result else None,
-                        "chat_id": telegram_chat_id,
-                        "delivery_mode": delivery_mode_for_span,
-                    },
-                )
-
+        except Exception as exc:
+            change = system_health.update_component(
+                "Telegram",
+                False,
+                reason=str(exc) or "Telegram send failed",
+            )
+            _notify_system_mode_change(
+                change=change,
+                chat_id=telegram_chat_id,
+                account_email=account_email,
+            )
             event_emitter.emit(
-                type="telegram_delivery_sla",
+                type="telegram_delivery_failed",
+                timestamp=received_at,
+                email_id=message_id,
+                payload={"error": str(exc)},
+            )
+            _emit_contract_event(
+                EventType.TELEGRAM_FAILED,
+                ts_utc=delivery_ts,
+                account_id=account_email,
+                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                email_id=message_id,
+                payload={
+                    "error": str(exc),
+                    "delivered": False,
+                    "occurred_at_utc": delivery_ts,
+                    "mode": "html",
+                    "retry_count": 0,
+                },
+            )
+            consecutive_tg_failures = notification_alert_store.record_failure(
+                datetime.fromtimestamp(delivery_ts, tz=timezone.utc)
+            )
+            logger.error(
+                "processing_error",
+                stage="telegram",
+                email_id=message_id,
+                error=str(exc),
+            )
+            raise
+        if telegram_delivered:
+            notification_alert_store.reset_failures()
+            event_emitter.emit(
+                type="telegram_delivery_succeeded",
                 timestamp=received_at,
                 email_id=message_id,
                 payload={
+                    "render_mode": render_mode.name,
                     "delivery_mode": delivery_mode_for_span,
-                    "wait_budget_seconds": wait_budget_seconds,
-                    "elapsed_to_first_send_seconds": elapsed_to_first_send_seconds,
                     "edit_applied": edit_applied,
-                    "edit_errors": edit_errors,
+                    "message_id": delivery_result.message_id if delivery_result else None,
+                },
+            )
+            _emit_contract_event(
+                EventType.TELEGRAM_DELIVERED,
+                ts_utc=delivery_ts,
+                account_id=account_email,
+                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                email_id=message_id,
+                payload={
+                    "render_mode": render_mode.name,
+                    "priority": priority,
+                    "mail_type": mail_type or "",
+                    "from_email": from_email,
+                    "delivered": True,
+                    "occurred_at_utc": delivery_ts,
+                    "mode": delivery_result.mode if delivery_result else "html",
+                    "retry_count": delivery_result.retry_count if delivery_result else 0,
+                    "message_id": delivery_result.message_id if delivery_result else None,
+                    "chat_id": telegram_chat_id,
+                    "delivery_mode": delivery_mode_for_span,
                 },
             )
 
-            _maybe_alert_notification_sla(
-                account_email=account_email,
-                telegram_chat_id=telegram_chat_id,
-                sla_result=policy_decision.notification_sla,
-                consecutive_failures=consecutive_tg_failures,
-                telegram_delivered=telegram_delivered,
-            )
-            span.record_stage("send", int((time.perf_counter() - send_start) * 1000))
-    
+        event_emitter.emit(
+            type="telegram_delivery_sla",
+            timestamp=received_at,
+            email_id=message_id,
+            payload={
+                "delivery_mode": delivery_mode_for_span,
+                "wait_budget_seconds": wait_budget_seconds,
+                "elapsed_to_first_send_seconds": elapsed_to_first_send_seconds,
+                "edit_applied": edit_applied,
+                "edit_errors": edit_errors,
+            },
+        )
+
+        _maybe_alert_notification_sla(
+            account_email=account_email,
+            telegram_chat_id=telegram_chat_id,
+            sla_result=policy_decision.notification_sla,
+            consecutive_failures=consecutive_tg_failures,
+            telegram_delivered=telegram_delivered,
+        )
+        span.record_stage("send", int((time.perf_counter() - send_start) * 1000))
         if feature_flags.ENABLE_PREVIEW_ACTIONS and not enable_premium_clarity:
             if not policy_decision.allow_preview:
                 preview_skip_reason = (

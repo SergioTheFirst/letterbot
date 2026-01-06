@@ -1,41 +1,20 @@
-# Delivery Policy (v1.5)
+# Delivery Policy (v1.6)
 
-## Источник времени
-- Локальное время машины: now().astimezone().
-- Workday/weekend определяется по локальной дате.
+## Основы
+- Одно письмо → одно уведомление в Telegram (Tier-1).
+- Доставка всегда немедленная; никаких тихих часов, выходных исключений, батчей или отложенных режимов.
+- При превышении SLA ожидания отправляется минимальный Tier-1 и далее возможны только правки того же сообщения (edit-in-place).
+- Никаких повторных пушей: последующее обогащение только через edit-in-place.
 
-## Quiet window (DND)
-- Конфиг: [delivery_policy].night_hours или quiet_hours.
-- Формат: start-end (например, 21-7).
-- В quiet window некритичные уведомления не отправляются.
-
-## Матрица решений (упрощённая)
-
-| Time-of-day | Workday/Weekend | DND | Attention debt | Решение по умолчанию |
-|---|---|---|---|---|
-| Day | Workday | off | low | IMMEDIATE/BATCH по value |
-| Day | Weekend | off | low | BATCH_TODAY |
-| Night | any | on | low | DEFER_TO_MORNING |
-| Any | any | any | high | BATCH_TODAY |
-| Any | any | any | critical risk | IMMEDIATE |
+## Решение о доставке
+- Единственный режим доставки: `IMMEDIATE`.
+- Reason codes сохраняются только для аналитики (например, `critical_risk`, `high_value`, `low_signal`, `attention_gate`).
+- Поведение детерминированно: одни и те же входы → одно и то же решение.
 
 ## Пороговые значения
-- immediate_value_threshold
-- batch_value_threshold
-- critical_risk_threshold
-- max_immediate_per_hour
-
-## Reason codes
-- quiet_hours
-- critical_risk
-- high_value
-- weekend_batch
-- attention_debt
-- low_signal
-- default_batch
-- defer_to_morning
+- `immediate_value_threshold`
+- `critical_risk_threshold`
 
 ## Telegram UX (per-email)
-- Одно письмо → одно Telegram сообщение.
-- Progressive disclosure только через spoiler внутри того же сообщения (без кнопок).
-- Эмодзи ограничены закрытым списком (🔴 🟡 🔵 ⚡ 💬 ⏸️ 📎).
+- Одно сообщение содержит весь Tier-1; детали/обогащение — только через редактирование того же сообщения.
+- Прогрессивное раскрытие соблюдает Constitution: никаких дополнительных пушей или отложенных уведомлений.

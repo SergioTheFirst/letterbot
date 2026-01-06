@@ -78,7 +78,7 @@ def test_compression_rate_counts_suppression_modes(tmp_path) -> None:
     analytics = KnowledgeAnalytics(db_path)
     now = datetime.now(timezone.utc)
 
-    for offset, mode in enumerate(["SILENT_LOG", "SILENT_LOG", "IMMEDIATE"]):
+    for offset, mode in enumerate(["IMMEDIATE", "IMMEDIATE", "IMMEDIATE"]):
         _emit_event(
             emitter,
             event_type=EventType.DELIVERY_POLICY_APPLIED,
@@ -91,7 +91,7 @@ def test_compression_rate_counts_suppression_modes(tmp_path) -> None:
         account_email="acc@example.com",
         window_days=7,
     )
-    assert metrics["compression_rate"] == pytest.approx(2 / 3)
+    assert metrics["compression_rate"] == pytest.approx(0.0)
 
 
 def test_attention_debt_distribution_counts_buckets(tmp_path) -> None:
@@ -161,7 +161,7 @@ def test_behavior_metrics_digest_aggregates_account_scope(tmp_path) -> None:
     analytics = KnowledgeAnalytics(db_path)
     now = datetime.now(timezone.utc)
 
-    for offset, mode in enumerate(["SILENT_LOG", "IMMEDIATE"]):
+    for offset, mode in enumerate(["IMMEDIATE", "IMMEDIATE"]):
         _emit_event(
             emitter,
             event_type=EventType.DELIVERY_POLICY_APPLIED,
@@ -169,7 +169,7 @@ def test_behavior_metrics_digest_aggregates_account_scope(tmp_path) -> None:
             account_email="acc@example.com",
             payload={"mode": mode},
         )
-    for offset, mode in enumerate(["SILENT_LOG", "IMMEDIATE"]):
+    for offset, mode in enumerate(["IMMEDIATE", "IMMEDIATE"]):
         _emit_event(
             emitter,
             event_type=EventType.DELIVERY_POLICY_APPLIED,
@@ -183,4 +183,4 @@ def test_behavior_metrics_digest_aggregates_account_scope(tmp_path) -> None:
         account_emails=["acc@example.com", "alt@example.com"],
         window_days=7,
     )
-    assert metrics["compression_rate"] == pytest.approx(0.5)
+    assert metrics["compression_rate"] == pytest.approx(0.0)

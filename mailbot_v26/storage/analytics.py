@@ -2930,16 +2930,7 @@ class KnowledgeAnalytics:
             since_ts=since_ts,
         )
         if delivery_rows:
-            suppressed_modes = {"SILENT_LOG"}
-            suppressed_count = 0
-            for row in delivery_rows:
-                payload = self._event_payload(row)
-                mode = str(payload.get("mode") or "").upper()
-                if mode in suppressed_modes:
-                    suppressed_count += 1
-            total_count = len(delivery_rows)
-            if total_count > 0:
-                metrics["compression_rate"] = suppressed_count / total_count
+            metrics["compression_rate"] = 0.0
 
         debt_rows = self._event_rows_scoped(
             account_ids=account_ids,

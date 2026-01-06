@@ -9,7 +9,6 @@ from mailbot_v26.config.delivery_policy import DeliveryPolicyConfig
 
 class DeliveryMode(str, Enum):
     IMMEDIATE = "IMMEDIATE"
-    SILENT_LOG = "SILENT_LOG"
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +23,6 @@ class DeliveryDecision:
 class DeliveryContext:
     now_local: datetime
     immediate_sent_last_hour: int
-    max_immediate_per_hour: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,13 +42,8 @@ _PRIORITY_VALUE = {
 _SEVERITY_RISK = {"LOW": 10, "MEDIUM": 30, "HIGH": 60}
 
 
-def compute_attention_debt(
-    *, immediate_sent_last_hour: int, max_immediate_per_hour: int
-) -> int:
-    if max_immediate_per_hour <= 0:
-        return 0
-    ratio = immediate_sent_last_hour / max_immediate_per_hour
-    return min(100, max(0, int(ratio * 100)))
+def compute_attention_debt(*, immediate_sent_last_hour: int) -> int:
+    return 0
 
 
 def score_email(
@@ -98,37 +91,17 @@ def decide_delivery(
     thresholds_used = {
         "immediate_value_threshold": policy.immediate_value_threshold,
         "critical_risk_threshold": policy.critical_risk_threshold,
-        "max_immediate_per_hour": policy.max_immediate_per_hour,
     }
     attention_debt = compute_attention_debt(
         immediate_sent_last_hour=context.immediate_sent_last_hour,
-        max_immediate_per_hour=context.max_immediate_per_hour,
     )
-
     if attention_gate_deferred:
         reason_codes.append("attention_gate")
-        return DeliveryDecision(
-            mode=DeliveryMode.SILENT_LOG,
-            reason_codes=reason_codes,
-            thresholds_used=thresholds_used,
-            attention_debt=attention_debt,
-        )
 
     if scores.risk >= policy.critical_risk_threshold:
         reason_codes.append("critical_risk")
         return DeliveryDecision(
             mode=DeliveryMode.IMMEDIATE,
-            reason_codes=reason_codes,
-            thresholds_used=thresholds_used,
-            attention_debt=attention_debt,
-        )
-
-    if context.max_immediate_per_hour > 0 and (
-        context.immediate_sent_last_hour >= context.max_immediate_per_hour
-    ):
-        reason_codes.append("attention_debt")
-        return DeliveryDecision(
-            mode=DeliveryMode.SILENT_LOG,
             reason_codes=reason_codes,
             thresholds_used=thresholds_used,
             attention_debt=attention_debt,
@@ -145,7 +118,7 @@ def decide_delivery(
 
     reason_codes.append("low_signal")
     return DeliveryDecision(
-        mode=DeliveryMode.SILENT_LOG,
+        mode=DeliveryMode.IMMEDIATE,
         reason_codes=reason_codes,
         thresholds_used=thresholds_used,
         attention_debt=attention_debt,
