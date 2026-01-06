@@ -28,11 +28,19 @@ class WeeklyAccuracyProgress:
 
 
 class KnowledgeAnalytics:
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, *, read_only: bool = False) -> None:
         self.path = Path(path)
+        self._query_only = bool(read_only)
 
     def _connect_readonly(self) -> sqlite3.Connection:
-        return sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        if self._query_only:
+            try:
+                conn.execute("PRAGMA query_only = ON")
+            except sqlite3.Error:
+                conn.close()
+                raise
+        return conn
 
     def _execute_select(self, query: str, params: Iterable[object] | None = None) -> list[dict[str, object]]:
         with self._connect_readonly() as conn:

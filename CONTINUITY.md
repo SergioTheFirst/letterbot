@@ -132,3 +132,5 @@ Working set (files / tables / tests):
 2026-01-12: learning observatory (events_v1-derived, read-only web+API) added.
 2026-01-13: delivery policy limited to IMMEDIATE; batching/deferral removed.
 2026-01-14: immediate delivery enforced; time-window/batch configs removed.
+
+- 2026-01-14: web observability console now localhost-only read-only with silent empty states.
