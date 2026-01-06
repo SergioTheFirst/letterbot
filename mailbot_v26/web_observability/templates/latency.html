@@ -22,6 +22,9 @@
           {% for option in window_options %}
           <option value="{{ option }}" {% if option == window_days %}selected{% endif %}>Last {{ option }} days</option>
           {% endfor %}
+          {% if window_days not in window_options %}
+          <option value="{{ window_days }}" selected>Last {{ window_days }} days</option>
+          {% endif %}
         </select>
       </div>
       <div class="filter-group" style="justify-content: flex-end;">
