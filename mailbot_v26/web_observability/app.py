@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import html
+import ipaddress
 import json
 import logging
 import os
@@ -41,6 +42,16 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics
 logger = logging.getLogger(__name__)
 
 ALLOWED_WINDOWS = {7, 30, 90}
+
+
+def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        conn.execute("PRAGMA query_only = ON")
+    except sqlite3.Error:
+        conn.close()
+        raise
+    return conn
 
 
 def _render_template(app: Flask, template_name: str, **context: object) -> str:
@@ -83,7 +94,7 @@ def _format_number(value: object) -> str:
 
 def _metrics_block(summary: dict[str, object] | None) -> str:
     if not summary:
-        return '<p class="muted">No data available.</p>'
+        return ""
     cards = []
     cards.append(
         """
@@ -158,7 +169,7 @@ def _metrics_block(summary: dict[str, object] | None) -> str:
 
 def _errors_block(recent_errors: list[dict[str, object]]) -> str:
     if not recent_errors:
-        return '<p class="muted">No recent errors.</p>'
+        return ""
     rows = []
     for item in recent_errors:
         rows.append(
@@ -181,7 +192,7 @@ def _errors_block(recent_errors: list[dict[str, object]]) -> str:
 
 def _slow_block(slowest: list[dict[str, object]]) -> str:
     if not slowest:
-        return '<p class="muted">No slow spans found.</p>'
+        return ""
     rows = []
     for item in slowest:
         rows.append(
@@ -236,7 +247,7 @@ def _short_id(value: object, length: int = 8) -> str:
 
 def _events_table(items: list[dict[str, object]]) -> str:
     if not items:
-        return '<div class="empty-state">No events in this window.</div>'
+        return ""
     rows = []
 
     def _detail_badges(details: Mapping[str, object] | None) -> str:
@@ -282,7 +293,7 @@ def _events_table(items: list[dict[str, object]]) -> str:
 
 def _health_current_block(current: dict[str, object] | None) -> str:
     if not current:
-        return '<div class="empty-state">No health snapshots in this window.</div>'
+        return ""
     system_mode = html.escape(str(current.get("system_mode") or ""))
     gates_state = current.get("gates_state") if isinstance(current, dict) else {}
     metrics_brief = current.get("metrics_brief") if isinstance(current, dict) else {}
@@ -314,7 +325,7 @@ def _health_current_block(current: dict[str, object] | None) -> str:
 
 def _health_timeline_block(timeline: list[dict[str, object]]) -> str:
     if not timeline:
-        return '<div class="empty-state">No health timeline entries in this window.</div>'
+        return ""
     rows = []
     for item in timeline:
         rows.append(
@@ -507,7 +518,7 @@ def _validate_learning_params(
 def _available_accounts(db_path: Path) -> list[str]:
     query = "SELECT DISTINCT account_id FROM processing_spans ORDER BY account_id ASC"
     try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        with _open_readonly_connection(db_path) as conn:
             rows = conn.execute(query).fetchall()
     except sqlite3.OperationalError:
         rows = []
@@ -516,7 +527,7 @@ def _available_accounts(db_path: Path) -> list[str]:
         return accounts
     fallback_query = "SELECT DISTINCT account_id FROM events_v1 ORDER BY account_id ASC"
     try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        with _open_readonly_connection(db_path) as conn:
             rows = conn.execute(fallback_query).fetchall()
     except sqlite3.OperationalError:
         return []
@@ -545,6 +556,9 @@ def create_app(
     app.config["APP_TITLE"] = title
     app.config["ATTENTION_COST_PER_HOUR"] = max(0.0, float(attention_cost_per_hour))
     app.secret_key = secret_key
+    app.config["ANALYTICS_FACTORY"] = lambda: KnowledgeAnalytics(
+        app.config["DB_PATH"], read_only=True
+    )
 
     @app.before_request
     def _require_login():
@@ -580,7 +594,10 @@ def create_app(
         return redirect(url_for("latency"))
 
     def _analytics() -> KnowledgeAnalytics:
-        return KnowledgeAnalytics(app.config["DB_PATH"])
+        factory = app.config.get("ANALYTICS_FACTORY")
+        if callable(factory):
+            return factory()
+        return KnowledgeAnalytics(app.config["DB_PATH"], read_only=True)
 
     @app.route("/api/v1/observability/latency_summary", methods=["GET"])
     def api_latency_summary():
@@ -718,7 +735,7 @@ def create_app(
             window_days=window_days or 30,
         )
         if not detail:
-            resp = jsonify({"error": "contact not found"})
+            resp = jsonify({"error": "contact unavailable"})
             resp.status_code = 404
             return resp
         return jsonify(detail)
@@ -797,7 +814,7 @@ def create_app(
         account_email, account_emails, window_days, error = _validate_latency_params(
             args=request.args, require_account=False, default_account=default_account
         )
-        error_message = error or ("No account data available" if not account_email else "")
+        error_message = error or ("Account selection required" if not account_email else "")
         analytics = _analytics()
         summary: dict[str, object] | None = None
         recent_errors: list[dict[str, object]] = []
@@ -853,7 +870,7 @@ def create_app(
             include_anomalies,
             error,
         ) = _validate_attention_params(args=request.args, default_account=default_account)
-        error_message = error or ("No account data available" if not account_email else "")
+        error_message = error or ("Account selection required" if not account_email else "")
         analytics = _analytics()
         summary: dict[str, object] | None = None
         if not error_message and account_email:
@@ -910,7 +927,7 @@ def create_app(
         account_email, account_emails, window_days, limit, error = _validate_learning_params(
             args=request.args, default_account=default_account
         )
-        error_message = error or ("No account data available" if not account_email else "")
+        error_message = error or ("Account selection required" if not account_email else "")
         analytics = _analytics()
         summary: dict[str, object] | None = None
         timeline: dict[str, object] | None = None
@@ -1014,7 +1031,9 @@ def create_app(
             window_default=30,
         )
         limit, limit_error = _parse_limit(request.args.get("limit"), default=200, max_limit=500)
-        error_message = error or limit_error or ("No account data available" if not account_email else "")
+        error_message = error or limit_error or (
+            "Account selection required" if not account_email else ""
+        )
         analytics = _analytics()
         items: list[dict[str, object]] = []
         if not error_message and account_email:
@@ -1059,7 +1078,9 @@ def create_app(
             window_default=30,
         )
         limit, limit_error = _parse_limit(request.args.get("limit"), default=50, max_limit=200)
-        error_message = error or limit_error or ("No account data available" if not account_email else "")
+        error_message = error or limit_error or (
+            "Account selection required" if not account_email else ""
+        )
         analytics = _analytics()
         graph: dict[str, object] | None = None
         if not error_message and account_email:
@@ -1114,7 +1135,7 @@ def create_app(
                 window_days=window_days or 30,
             )
             if not detail:
-                error_message = "Contact not found"
+                error_message = "Contact unavailable"
         account_options = _build_select_options(accounts, account_email)
         window_options = _build_window_options(window_days or 30)
         error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
@@ -1148,6 +1169,15 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8080, help="Port to listen on")
     args = parser.parse_args()
 
+    bind_address = args.bind or "127.0.0.1"
+    try:
+        parsed_bind = ipaddress.ip_address(bind_address)
+        if not parsed_bind.is_loopback:
+            raise RuntimeError("Bind address must be loopback (127.0.0.1 or ::1)")
+    except ValueError:
+        if bind_address.lower() != "localhost":
+            raise RuntimeError("Bind address must be loopback (127.0.0.1 or ::1)")
+
     config_dir = args.config if args.config else CONFIG_DIR
     password, secret_key, attention_cost = _load_credentials(config_dir)
 
@@ -1163,7 +1193,7 @@ def main() -> None:
         secret_key=secret_key,
         attention_cost_per_hour=attention_cost,
     )
-    app.run(host=args.bind, port=args.port)
+    app.run(host=str(bind_address), port=args.port)
 
 
 if __name__ == "__main__":
