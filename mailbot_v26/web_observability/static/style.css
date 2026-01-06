@@ -185,3 +185,31 @@ button:hover {
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
+
+.graph-node {
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.graph-label {
+  font-size: 12px;
+  fill: #1e293b;
+}
+
+.simple-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.simple-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.simple-list li:last-child {
+  border-bottom: none;
+}
+
+.card h4 {
+  margin-top: 0;
+}
