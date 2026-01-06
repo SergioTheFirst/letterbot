@@ -118,6 +118,7 @@ IV. Архитектура и надёжность
 - Веб-консоль наблюдаемости только для чтения; отображает обезличенные снапшоты состояния (gates/metrics/system_mode) без payload_json.
 - Web = read-only Intelligence Hub; events timeline renders sanitized summaries only; never show raw email text/subjects/senders in web.
 - Relationship graph и прочие веб-аналитики всегда только чтение, поверх обезличенных снапшотов и агрегатов; никаких сырых тел/HTML/вложений.
+- Интеллект-страницы (health/events/relationships/attention) отображают только агрегированные метрики без PII и не модифицируют БД.
 
 V. Privacy и данные
 

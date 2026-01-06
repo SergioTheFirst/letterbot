@@ -341,7 +341,7 @@ def _health_timeline_block(timeline: list[dict[str, object]]) -> str:
     )
 
 
-def _load_credentials(config_dir: Path) -> tuple[str, str]:
+def _load_credentials(config_dir: Path) -> tuple[str, str, float]:
     parser = configparser.ConfigParser()
     config_path = config_dir / "config.ini"
     if config_path.exists():
@@ -361,7 +361,14 @@ def _load_credentials(config_dir: Path) -> tuple[str, str]:
         raise RuntimeError(
             "WEB_SECRET_KEY environment variable or [general] web_secret_key is required"
         )
-    return password, secret_key
+    try:
+        attention_cost = float(
+            parser.get("general", "attention_cost_per_hour", fallback="0")
+        )
+    except (TypeError, ValueError, configparser.Error):
+        attention_cost = 0.0
+    attention_cost = max(0.0, attention_cost)
+    return password, secret_key, attention_cost
 
 
 def _parse_account_emails(raw: str | None) -> list[str]:
@@ -387,15 +394,20 @@ def _parse_window_days(
     return value, None
 
 
-def _parse_limit(raw: Optional[str], default: int = 200, max_limit: int = 500) -> tuple[int | None, Optional[str]]:
+def _parse_limit(
+    raw: Optional[str],
+    default: int = 200,
+    max_limit: int = 500,
+    min_value: int = 1,
+) -> tuple[int | None, Optional[str]]:
     if raw is None or raw == "":
         return default, None
     try:
         value = int(raw)
     except (TypeError, ValueError):
         return None, "limit must be an integer"
-    if value <= 0:
-        return None, "limit must be positive"
+    if value < min_value:
+        return None, f"limit must be >= {min_value}"
     if value > max_limit:
         return max_limit, None
     return value, None
@@ -426,11 +438,60 @@ def _validate_latency_params(
     return account_email, account_emails, window_days, None
 
 
+def _parse_include_anomalies(raw: Optional[str]) -> tuple[bool | None, Optional[str]]:
+    if raw is None or raw == "":
+        return False, None
+    raw_clean = str(raw).strip()
+    if raw_clean == "1":
+        return True, None
+    if raw_clean == "0":
+        return False, None
+    return None, "include_anomalies must be 0 or 1"
+
+
+def _validate_attention_params(
+    *,
+    args,
+    default_account: str | None = None,
+) -> tuple[Optional[str], list[str], Optional[int], Optional[int], bool | None, Optional[str]]:
+    account_email = (args.get("account_email") or "").strip()
+    account_emails = _parse_account_emails(args.get("account_emails"))
+    window_days, window_error = _parse_window_days(args.get("window_days"), 30)
+    if window_error:
+        return None, [], None, None, None, window_error
+    limit, limit_error = _parse_limit(args.get("limit"), default=50, max_limit=200, min_value=5)
+    if limit_error:
+        return None, [], None, None, None, limit_error
+    include_anomalies, anomalies_error = _parse_include_anomalies(args.get("include_anomalies"))
+    if anomalies_error:
+        return None, [], None, None, None, anomalies_error
+    if account_emails and account_email and account_email not in account_emails:
+        return None, [], None, None, None, "account_email must match one of account_emails"
+    if not account_email and account_emails:
+        account_email = account_emails[0]
+    if not account_email and default_account:
+        account_email = default_account
+    if not account_emails and account_email:
+        account_emails = [account_email]
+    if not account_email:
+        return None, [], None, None, None, "account_email is required"
+    return account_email, account_emails, window_days, limit, bool(include_anomalies), None
+
+
 def _available_accounts(db_path: Path) -> list[str]:
     query = "SELECT DISTINCT account_id FROM processing_spans ORDER BY account_id ASC"
     try:
         with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
             rows = conn.execute(query).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    accounts = [str(row[0]) for row in rows if row and row[0]]
+    if accounts:
+        return accounts
+    fallback_query = "SELECT DISTINCT account_id FROM events_v1 ORDER BY account_id ASC"
+    try:
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            rows = conn.execute(fallback_query).fetchall()
     except sqlite3.OperationalError:
         return []
     return [str(row[0]) for row in rows if row and row[0]]
@@ -441,7 +502,12 @@ def _ensure_authenticated() -> bool:
 
 
 def create_app(
-    *, db_path: Path, password: str, secret_key: str, title: str = "Observability Console"
+    *,
+    db_path: Path,
+    password: str,
+    secret_key: str,
+    title: str = "Observability Console",
+    attention_cost_per_hour: float = 0.0,
 ) -> Flask:
     app = Flask(
         __name__,
@@ -451,6 +517,7 @@ def create_app(
     app.config["DB_PATH"] = Path(db_path)
     app.config["WEB_PASSWORD"] = password
     app.config["APP_TITLE"] = title
+    app.config["ATTENTION_COST_PER_HOUR"] = max(0.0, float(attention_cost_per_hour))
     app.secret_key = secret_key
 
     @app.before_request
@@ -630,6 +697,32 @@ def create_app(
             return resp
         return jsonify(detail)
 
+    @app.route("/api/v1/intelligence/attention_economics", methods=["GET"])
+    def api_attention_economics():
+        (
+            account_email,
+            account_emails,
+            window_days,
+            limit,
+            include_anomalies,
+            error,
+        ) = _validate_attention_params(args=request.args)
+        if error:
+            resp = jsonify({"error": error})
+            resp.status_code = 400
+            return resp
+        analytics = _analytics()
+        resolved_window = window_days or 30
+        resolved_limit = limit or 50
+        summary = analytics.attention_economics_summary(
+            account_emails=account_emails,
+            window_days=resolved_window,
+            limit=resolved_limit,
+            include_anomalies=bool(include_anomalies),
+            attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
+        )
+        return jsonify(summary)
+
     @app.route("/latency", methods=["GET"])
     def latency():
         accounts = _available_accounts(app.config["DB_PATH"])
@@ -677,7 +770,70 @@ def create_app(
             static_url=_static_url(),
             latency_url=url_for("latency"),
             health_url=url_for("health"),
+            attention_url=url_for("attention"),
             events_url=url_for("events"),
+        )
+
+    @app.route("/attention", methods=["GET"])
+    def attention():
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        (
+            account_email,
+            account_emails,
+            window_days,
+            limit,
+            include_anomalies,
+            error,
+        ) = _validate_attention_params(args=request.args, default_account=default_account)
+        error_message = error or ("No account data available" if not account_email else "")
+        analytics = _analytics()
+        summary: dict[str, object] | None = None
+        if not error_message and account_email:
+            summary = analytics.attention_economics_summary(
+                account_emails=account_emails,
+                window_days=window_days or 30,
+                limit=limit or 50,
+                include_anomalies=bool(include_anomalies),
+                attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
+            )
+        fallback_generated = datetime.fromtimestamp(0, tz=timezone.utc).isoformat()
+        if fallback_generated.endswith("+00:00"):
+            fallback_generated = fallback_generated.replace("+00:00", "Z")
+        resolved_summary = summary or {
+            "window_days": window_days or 30,
+            "account_emails": account_emails,
+            "limit": limit or 50,
+            "totals": {
+                "estimated_read_minutes": 0.0,
+                "message_count": 0,
+                "attachment_count": 0,
+                "deferred_count": 0,
+            },
+            "entities": [],
+            "generated_at_utc": fallback_generated,
+        }
+        account_options = _build_select_options(accounts, account_email)
+        window_options = _build_window_options(window_days or 30)
+        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+        return _render_template(
+            app,
+            "attention.html",
+            title=app.config["APP_TITLE"],
+            static_url=_static_url(),
+            latency_url=url_for("latency"),
+            health_url=url_for("health"),
+            attention_url=url_for("attention"),
+            events_url=url_for("events"),
+            relationships_url=url_for("relationships"),
+            error_block=error_block,
+            account_options=account_options,
+            account_emails_value=",".join(account_emails),
+            window_options=window_options,
+            limit_value=str(limit or 50),
+            include_anomalies_checked="checked" if include_anomalies else "",
+            summary=resolved_summary,
+            attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
         )
 
     @app.route("/health", methods=["GET"])
@@ -717,7 +873,9 @@ def create_app(
             static_url=_static_url(),
             latency_url=url_for("latency"),
             health_url=url_for("health"),
+            attention_url=url_for("attention"),
             events_url=url_for("events"),
+            relationships_url=url_for("relationships"),
             error_block=error_block,
             account_options=account_options,
             account_emails_value=",".join(account_emails),
@@ -760,7 +918,9 @@ def create_app(
             static_url=_static_url(),
             latency_url=url_for("latency"),
             health_url=url_for("health"),
+            attention_url=url_for("attention"),
             events_url=url_for("events"),
+            relationships_url=url_for("relationships"),
             error_block=error_block,
             account_options=account_options,
             account_emails_value=",".join(account_emails),
@@ -802,6 +962,7 @@ def create_app(
             static_url=_static_url(),
             latency_url=url_for("latency"),
             health_url=url_for("health"),
+            attention_url=url_for("attention"),
             events_url=url_for("events"),
             relationships_url=url_for("relationships"),
             error_block=error_block,
@@ -846,6 +1007,7 @@ def create_app(
             static_url=_static_url(),
             latency_url=url_for("latency"),
             health_url=url_for("health"),
+            attention_url=url_for("attention"),
             events_url=url_for("events"),
             relationships_url=url_for("relationships"),
             error_block=error_block,
@@ -868,7 +1030,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config_dir = args.config if args.config else CONFIG_DIR
-    password, secret_key = _load_credentials(config_dir)
+    password, secret_key, attention_cost = _load_credentials(config_dir)
 
     if args.db:
         db_path = args.db
@@ -876,7 +1038,12 @@ def main() -> None:
         storage = load_storage_config(config_dir)
         db_path = storage.db_path
 
-    app = create_app(db_path=db_path, password=password, secret_key=secret_key)
+    app = create_app(
+        db_path=db_path,
+        password=password,
+        secret_key=secret_key,
+        attention_cost_per_hour=attention_cost,
+    )
     app.run(host=args.bind, port=args.port)
 
 

@@ -2403,6 +2403,159 @@ class KnowledgeAnalytics:
         )
         return results
 
+    def attention_economics_summary(
+        self,
+        *,
+        account_emails: Sequence[str],
+        window_days: int,
+        limit: int,
+        include_anomalies: bool,
+        attention_cost_per_hour: float = 0.0,
+    ) -> dict[str, object]:
+        from mailbot_v26.insights.attention_economics import compute_attention_economics
+
+        scope = self._normalize_account_scope(
+            account_emails[0] if account_emails else "", account_emails
+        )
+        primary_account = scope[0] if scope else ""
+        raw_entities = self.attention_entity_metrics(
+            account_email=primary_account,
+            account_emails=scope,
+            days=window_days,
+        )
+        totals = {
+            "estimated_read_minutes": float(
+                sum(float(item.get("estimated_read_minutes") or 0.0) for item in raw_entities)
+            ),
+            "message_count": int(sum(int(item.get("message_count") or 0) for item in raw_entities)),
+            "attachment_count": int(
+                sum(int(item.get("attachment_count") or 0) for item in raw_entities)
+            ),
+            "deferred_count": int(sum(int(item.get("deferred_count") or 0) for item in raw_entities)),
+        }
+        if attention_cost_per_hour > 0:
+            totals["estimated_cost"] = round(
+                (totals["estimated_read_minutes"] / 60.0) * attention_cost_per_hour, 2
+            )
+
+        result = None
+        if scope:
+            result = compute_attention_economics(
+                analytics=self,
+                account_email=primary_account,
+                account_emails=scope,
+                window_days=window_days,
+                include_anomalies=include_anomalies,
+            )
+
+        def _entity_entry(
+            *,
+            entity_id: str,
+            label: str,
+            message_count: int,
+            attachment_count: int,
+            estimated_read_minutes: float,
+            deferred_count: int,
+            trust_delta: float | None,
+            health_delta: float | None,
+            anomalies: Sequence[str] = (),
+        ) -> dict[str, object]:
+            entry: dict[str, object] = {
+                "entity_id": entity_id,
+                "entity_label": label,
+                "message_count": message_count,
+                "attachment_count": attachment_count,
+                "estimated_read_minutes": estimated_read_minutes,
+                "deferred_count": deferred_count,
+            }
+            if trust_delta is not None:
+                entry["trust_delta"] = trust_delta
+            if health_delta is not None:
+                entry["health_delta"] = health_delta
+            if anomalies:
+                entry["anomalies"] = list(anomalies)
+            if attention_cost_per_hour > 0:
+                entry["estimated_cost"] = round(
+                    (estimated_read_minutes / 60.0) * attention_cost_per_hour, 2
+                )
+            return entry
+
+        entities: list[dict[str, object]] = []
+        if result is not None:
+            for entity in result.entities[:limit]:
+                entities.append(
+                    _entity_entry(
+                        entity_id=entity.entity_id,
+                        label=entity.label,
+                        message_count=entity.message_count,
+                        attachment_count=entity.attachment_count,
+                        estimated_read_minutes=entity.estimated_read_minutes,
+                        deferred_count=entity.deferred_count,
+                        trust_delta=entity.trust_delta,
+                        health_delta=entity.health_delta,
+                        anomalies=entity.anomalies,
+                    )
+                )
+        else:
+            for item in raw_entities:
+                entity_id = str(item.get("entity_id") or "").strip()
+                if not entity_id:
+                    continue
+                label = self.entity_label(entity_id=entity_id) or entity_id
+                entities.append(
+                    _entity_entry(
+                        entity_id=entity_id,
+                        label=label,
+                        message_count=int(item.get("message_count") or 0),
+                        attachment_count=int(item.get("attachment_count") or 0),
+                        estimated_read_minutes=float(item.get("estimated_read_minutes") or 0.0),
+                        deferred_count=int(item.get("deferred_count") or 0),
+                        trust_delta=None,
+                        health_delta=None,
+                        anomalies=(),
+                    )
+                )
+            entities.sort(
+                key=lambda item: (
+                    -float(item.get("estimated_read_minutes") or 0.0),
+                    str(item.get("entity_label") or item.get("entity_id") or "").lower(),
+                )
+            )
+            entities = entities[:limit]
+
+        generated_ts = None
+        if scope:
+            query = """
+            SELECT MAX(ts_utc) AS max_ts
+            FROM events_v1
+            WHERE event_type = 'email_received'
+              AND ts_utc >= ?
+            """
+            params: list[object] = [self._window_start_ts(window_days)]
+            clause, clause_params = self._account_scope_clause(scope)
+            query += clause
+            params.extend(clause_params)
+            try:
+                rows = self._execute_select(query, params)
+            except sqlite3.OperationalError:
+                rows = []
+            if rows and rows[0].get("max_ts") is not None:
+                generated_ts = float(rows[0]["max_ts"])
+        if generated_ts is None:
+            generated_ts = 0.0
+
+        generated_at = datetime.fromtimestamp(generated_ts, tz=timezone.utc).isoformat()
+        if generated_at.endswith("+00:00"):
+            generated_at = generated_at.replace("+00:00", "Z")
+        return {
+            "window_days": window_days,
+            "account_emails": scope,
+            "limit": limit,
+            "totals": totals,
+            "entities": entities,
+            "generated_at_utc": generated_at,
+        }
+
     def behavior_metrics_digest(
         self,
         *,
