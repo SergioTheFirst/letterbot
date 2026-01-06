@@ -115,7 +115,6 @@ def test_oversize_email_warns_in_telegram(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(
         path=":memory:",
         save_email=lambda **kwargs: None,
-        mark_deferred_for_digest=lambda **kwargs: True,
         fetch_pending_commitments_by_sender=lambda **kwargs: [],
         update_commitment_statuses=lambda **kwargs: True,
         save_commitments=lambda **kwargs: True,

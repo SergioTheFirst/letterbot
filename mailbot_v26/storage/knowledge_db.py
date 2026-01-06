@@ -371,29 +371,6 @@ class KnowledgeDB:
             logger.error("KnowledgeDB save failed: %s", exc)
             return None
 
-    def mark_deferred_for_digest(
-        self,
-        *,
-        email_row_id: int,
-        deferred: bool = True,
-    ) -> bool:
-        try:
-            def _action(conn: sqlite3.Connection) -> bool:
-                conn.execute(
-                    """
-                    UPDATE emails
-                    SET deferred_for_digest = ?
-                    WHERE id = ?
-                    """,
-                    (1 if deferred else 0, email_row_id),
-                )
-                return True
-
-            return bool(self.write_transaction(_action))
-        except Exception as exc:
-            logger.error("KnowledgeDB deferred update failed: %s", exc)
-            return False
-
     def save_commitments(
         self,
         *,

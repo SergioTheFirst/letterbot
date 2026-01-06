@@ -7,7 +7,7 @@ from pathlib import Path
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 
-def test_deferred_for_digest_persisted(tmp_path: Path) -> None:
+def test_deferred_for_digest_defaults_false(tmp_path: Path) -> None:
     db_path = tmp_path / "database.sqlite"
     db = KnowledgeDB(db_path)
 
@@ -24,7 +24,6 @@ def test_deferred_for_digest_persisted(tmp_path: Path) -> None:
     )
 
     assert email_row_id is not None
-    assert db.mark_deferred_for_digest(email_row_id=email_row_id, deferred=True)
 
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
@@ -33,4 +32,4 @@ def test_deferred_for_digest_persisted(tmp_path: Path) -> None:
         ).fetchone()
 
     assert row is not None
-    assert row[0] == 1
+    assert row[0] == 0

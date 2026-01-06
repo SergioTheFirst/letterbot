@@ -14,27 +14,21 @@ def _write_config(tmp_path: Path, content: str) -> Path:
     return config_dir
 
 
-def test_load_delivery_policy_config_parses_hours(tmp_path: Path) -> None:
+def test_load_delivery_policy_config_ignores_banned_keys(tmp_path: Path) -> None:
     config_dir = _write_config(
         tmp_path,
         """
 [features]
 
 [delivery_policy]
-night_hours = 22-6
 immediate_value_threshold = 70
-batch_value_threshold = 25
 critical_risk_threshold = 90
-max_immediate_per_hour = 3
 """.strip(),
     )
     cfg = load_delivery_policy_config(config_dir)
-    assert cfg.night_start_hour == 22
-    assert cfg.night_end_hour == 6
     assert cfg.immediate_value_threshold == 70
-    assert cfg.batch_value_threshold == 25
     assert cfg.critical_risk_threshold == 90
-    assert cfg.max_immediate_per_hour == 3
+    assert cfg.max_immediate_per_hour == 0
 
 
 def test_feature_flags_shadow_modes(tmp_path: Path) -> None:

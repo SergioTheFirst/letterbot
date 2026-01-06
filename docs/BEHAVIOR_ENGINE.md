@@ -1,54 +1,14 @@
-# Behavior Engine / Attention Decision Engine
+# Behavior Engine
 
-## Цель
-Детерминированно решать режим доставки без LLM и фиксировать решение в events_v1.
+## Delivery decisions
+- Единственный режим доставки: IMMEDIATE.
+- Решения детерминированы и логируются в `DELIVERY_POLICY_APPLIED`.
+- Reason codes используются только для аналитики и не меняют факт немедленной отправки.
 
-## Оси ситуаций
-- Время: workday/weekend, quiet window.
-- Срочность: critical risk, commitments, deadlines.
-- Ценность: приоритет, тип письма, сигнал качества.
-- Нагрузка: attention debt, лимит мгновенных уведомлений.
+## Signals (analytics-only)
+- `critical_risk`, `high_value`, `low_signal`, `attention_gate` фиксируются как причины.
+- Attention debt метрики допускаются только как сигнал; доставка не подавляется.
 
-## 12 паттернов (минимальный набор)
-1. Critical-night: ночное время + критический риск → IMMEDIATE.
-2. Critical-day: дневное время + критический риск → IMMEDIATE.
-3. Commitments-night: commitments/deadline ночью → IMMEDIATE.
-4. Commitments-day: commitments/deadline днём → IMMEDIATE.
-5. High-value-day: высокая ценность днём → IMMEDIATE.
-6. High-value-night: высокая ценность ночью → DEFER_TO_MORNING.
-7. Medium-value-day: средняя ценность днём → BATCH_TODAY.
-8. Medium-value-night: средняя ценность ночью → DEFER_TO_MORNING.
-9. Low-value-day: низкая ценность днём → BATCH_TODAY.
-10. Low-value-night: низкая ценность ночью → SILENT_LOG.
-11. Debt-capped: внимание превышено → BATCH_TODAY.
-12. Signal-weak: не хватает фактов → SILENT_LOG.
-13. Weekend-high-value: weekend + high value (non-critical) → BATCH_TODAY.
-
-## Инварианты
-- Fast First соблюдается для критичных писем.
-- Не увеличивать частоту уведомлений (только снижать/батчить/деферить).
-- Никаких предположений без фактов; если данных нет — нейтральные значения.
-- Нет LLM в принятии решений.
-
-## Shadow detectors (blocked: data prerequisites)
-- Deadlock detector requires a stable thread key in stored data/events:
-  - thread_id / conversation_id, or reliable in_reply_to / references mapping.
-- Silence detector requires explicit "waiting for response" signal and baseline response time.
-  - Example fields: mail_type=waiting_for_them + baseline response buckets.
-
-## Scoring (v1.5)
-- Value: маппинг приоритета (🔴/🟠/🟡/🔵) + penalties/boosts.
-- Risk: commitments + deadlines + severity.
-- Debt: число IMMEDIATE за окно vs лимит.
-
-## Режимы доставки
-- IMMEDIATE: отправка сейчас.
-- BATCH_TODAY: включить в ближайший дайджест.
-- DEFER_TO_MORNING: отложить до утра (quiet hours).
-- SILENT_LOG: только событие в events_v1.
-
-## Упаковка (packaging directives)
-- Facts всегда показываются.
-- Uncertainty блок — только если низкая уверенность.
-- Consequences — только с evidence из истории/events.
-- Если данных нет — блоки не показывать.
+## Tier-1 UX
+- Один email → одно сообщение в Telegram без батчей или отложенных окон.
+- Обогащение возможно только через edit-in-place в рамках SLA.

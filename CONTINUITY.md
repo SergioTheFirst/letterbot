@@ -23,7 +23,7 @@ Done:
 - Integrated deferral into TG delivery and daily digest with deferred items section.
 - Added ADRs + behavioral docs; updated STRATEGY.
 - Added unit tests for policy config, attention engine, digest deferred items, surprise event.
-- Added weekend batching rule for non-critical high-value emails (reason_code=weekend_batch).
+- Added weekend delivery rule for non-critical high-value emails (legacy deferral now removed).
 - Added defensive fallback for behavior decision logic failures to preserve legacy delivery flow.
 - Added premium processor feature flag with queue routing and fallback.
 - Added thread key primitives, header plumbing, persistence columns, and tests.
@@ -121,7 +121,7 @@ Working set (files / tables / tests):
 2026-01-05: observability analytics + export for processing spans (scoped by account_emails), PII-guarded.
 2026-01-05: observability retention + size caps + stricter PII scrubbing for spans/health snapshots.
 2026-01-11: local read-only web observability console added.
-2026-01-12: removed quiet/focus/weekend delivery deferrals; DeliveryContext simplified; telegram sender returns message_id with edit helper.
+2026-01-12: removed focus/weekend delivery deferrals; DeliveryContext simplified; telegram sender returns message_id with edit helper.
 2026-01-05: delivery SLA budget with minimal Tier-1 then edit-in-place.
 2026-01-05: web health dashboard/API read-only with scoped account filters.
 
@@ -130,4 +130,5 @@ Working set (files / tables / tests):
 2026-01-13: relationship graph API+UI (read-only, scoped, deterministic, PII-guarded).
 2026-01-13: web attention economics API+UI (read-only, scoped, deterministic, PII-guarded).
 2026-01-12: learning observatory (events_v1-derived, read-only web+API) added.
-2026-01-13: delivery policy limited to IMMEDIATE or SILENT_LOG; batching/deferral removed.
+2026-01-13: delivery policy limited to IMMEDIATE; batching/deferral removed.
+2026-01-14: immediate delivery enforced; time-window/batch configs removed.

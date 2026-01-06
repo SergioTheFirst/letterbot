@@ -17,7 +17,6 @@ def test_focus_hours_batches_high_value_non_critical() -> None:
     context = DeliveryContext(
         now_local=datetime.now(timezone.utc),
         immediate_sent_last_hour=0,
-        max_immediate_per_hour=policy.max_immediate_per_hour,
     )
     decision = decide_delivery(scores=scores, context=context, policy=policy)
     assert decision.mode == DeliveryMode.IMMEDIATE
@@ -30,7 +29,6 @@ def test_focus_hours_does_not_override_critical() -> None:
     context = DeliveryContext(
         now_local=datetime.now(timezone.utc),
         immediate_sent_last_hour=0,
-        max_immediate_per_hour=policy.max_immediate_per_hour,
     )
     decision = decide_delivery(scores=scores, context=context, policy=policy)
     assert decision.mode == DeliveryMode.IMMEDIATE

@@ -23,13 +23,13 @@ def test_low_value_defaults_to_silent_log() -> None:
     context = DeliveryContext(
         now_local=datetime.now(timezone.utc),
         immediate_sent_last_hour=0,
-        max_immediate_per_hour=policy.max_immediate_per_hour,
     )
     decision = decide_delivery(scores=scores, context=context, policy=policy)
-    assert decision.mode == DeliveryMode.SILENT_LOG
+    assert decision.mode == DeliveryMode.IMMEDIATE
+    assert "low_signal" in decision.reason_codes
 
 
-def test_critical_risk_overrides_quiet_hours() -> None:
+def test_critical_risk_always_immediate() -> None:
     policy = DeliveryPolicyConfig(critical_risk_threshold=80)
     scores = score_email(
         priority="🔵",
@@ -41,7 +41,6 @@ def test_critical_risk_overrides_quiet_hours() -> None:
     context = DeliveryContext(
         now_local=datetime.now(timezone.utc),
         immediate_sent_last_hour=0,
-        max_immediate_per_hour=policy.max_immediate_per_hour,
     )
     decision = decide_delivery(scores=scores, context=context, policy=policy)
     assert decision.mode == DeliveryMode.IMMEDIATE
@@ -59,30 +58,10 @@ def test_weekend_high_value_batches_non_critical() -> None:
     context = DeliveryContext(
         now_local=datetime.now(timezone.utc),
         immediate_sent_last_hour=0,
-        max_immediate_per_hour=policy.max_immediate_per_hour,
     )
     decision = decide_delivery(scores=scores, context=context, policy=policy)
     assert decision.mode == DeliveryMode.IMMEDIATE
     assert "high_value" in decision.reason_codes
-
-
-def test_rate_cap_forces_silent_log_with_reason() -> None:
-    policy = DeliveryPolicyConfig(max_immediate_per_hour=2)
-    scores = score_email(
-        priority="🔴",
-        commitments_count=1,
-        deadlines_count=0,
-        insight_severity=None,
-        relationship_health_delta=None,
-    )
-    context = DeliveryContext(
-        now_local=datetime.now(timezone.utc),
-        immediate_sent_last_hour=2,
-        max_immediate_per_hour=policy.max_immediate_per_hour,
-    )
-    decision = decide_delivery(scores=scores, context=context, policy=policy)
-    assert decision.mode == DeliveryMode.SILENT_LOG
-    assert "attention_debt" in decision.reason_codes
 
 
 def test_attention_gate_forces_silent_log() -> None:
@@ -97,7 +76,6 @@ def test_attention_gate_forces_silent_log() -> None:
     context = DeliveryContext(
         now_local=datetime.now(timezone.utc),
         immediate_sent_last_hour=0,
-        max_immediate_per_hour=policy.max_immediate_per_hour,
     )
     decision = decide_delivery(
         scores=scores,
@@ -105,5 +83,9 @@ def test_attention_gate_forces_silent_log() -> None:
         policy=policy,
         attention_gate_deferred=True,
     )
-    assert decision.mode == DeliveryMode.SILENT_LOG
+    assert decision.mode == DeliveryMode.IMMEDIATE
     assert "attention_gate" in decision.reason_codes
+
+
+def test_only_immediate_delivery_mode() -> None:
+    assert list(DeliveryMode) == [DeliveryMode.IMMEDIATE]
