@@ -30,62 +30,108 @@
     </form>
   </div>
 
-  <div class="stack">
-    <div class="section-title">
-      <h2>Pipeline latency</h2>
-      {% if sample_size %}<span class="hint">Sample size: {{ sample_size }}</span>{% endif %}
-    </div>
-    {% if metrics_cards %}
-    <div class="metric-grid">
-      {% for metric in metrics_cards %}
-      <div class="metric-card">
-        <div class="label">{{ metric.label }}</div>
-        <div class="value">{{ metric.value }}{% if metric.suffix %}<small> {{ metric.suffix }}</small>{% endif %}</div>
+  <div class="cockpit-grid">
+    <div class="card">
+      <div class="section-title">
+        <h2>Pipeline latency</h2>
+        <div class="hint">{% if sample_size %}Sample size: {{ sample_size }}{% else %}Adjust filters to view latency.{% endif %}</div>
       </div>
-      {% endfor %}
+      {% if metrics_cards %}
+      <div class="metric-grid compact-metrics">
+        {% for metric in metrics_cards %}
+        <div class="metric-card">
+          <div class="label">{{ metric.label }}</div>
+          <div class="value">{{ metric.value }}{% if metric.suffix %}<small> {{ metric.suffix }}</small>{% endif %}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if stage_breakdown %}
+      <div class="section-title" style="margin-top: 8px;">
+        <h2>Stage breakdown</h2>
+        <span class="hint">Share of average pipeline time</span>
+      </div>
+      <div class="table-scroll">
+        <table class="table compact">
+          <thead>
+            <tr>
+              <th>Stage</th>
+              <th>Avg (ms)</th>
+              <th>p50</th>
+              <th>p90</th>
+              <th>p95</th>
+              <th width="140">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for stage in stage_breakdown %}
+            <tr>
+              <td>{{ stage.name }}</td>
+              <td>{{ stage.avg }}</td>
+              <td>{{ stage.p50 }}</td>
+              <td>{{ stage.p90 }}</td>
+              <td>{{ stage.p95 }}</td>
+              <td>
+                <div class="bar-track">
+                  <div class="bar-fill" style="width: {{ stage.share }}%"></div>
+                </div>
+                <small>{{ stage.share }}%</small>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
     </div>
-    {% else %}
-    <div class="hint">Adjust filters to view latency.</div>
+
+    {% if activity_rows %}
+    <div class="card activity-card">
+      <div class="section-title">
+        <h2>Recent Mail Activity</h2>
+        <div class="hint">
+          {% if pii_enabled %}Expert PII override enabled{% elif pii_allowed %}PII masked by default; add ?pii=1 to reveal{% else %}PII masked{% endif %}
+        </div>
+      </div>
+      <div class="table-scroll activity-table-wrapper">
+        <table class="table compact activity-table">
+          <thead>
+            <tr>
+              <th>Delivered (UTC)</th>
+              <th class="numeric">E2E (s)</th>
+              <th>From</th>
+              <th>To</th>
+              <th>Telegram preview</th>
+              <th>Status</th>
+              <th>Mode</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in activity_rows %}
+            <tr>
+              <td class="mono">{{ row.delivered }}</td>
+              <td class="numeric">{{ row.e2e }}</td>
+              <td class="truncate">{{ row.from_label }}</td>
+              <td class="truncate">{{ row.to_label }}</td>
+              <td class="truncate preview">{{ row.telegram_preview }}</td>
+              <td><span class="badge {{ row.status_class }}">{{ row.status }}</span></td>
+              <td>{% if row.mode %}<span class="badge muted">{{ row.mode }}</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% elif account_email %}
+    <div class="card activity-card">
+      <div class="section-title">
+        <h2>Recent Mail Activity</h2>
+        <div class="hint">Expand time window to surface more mail activity.</div>
+      </div>
+    </div>
     {% endif %}
   </div>
-
-  {% if stage_breakdown %}
-  <div class="card" style="margin-top: 14px;">
-    <div class="section-title">
-      <h2>Stage breakdown</h2>
-      <span class="hint">Share of average pipeline time</span>
-    </div>
-    <table class="table">
-      <thead>
-        <tr>
-          <th>Stage</th>
-          <th>Avg (ms)</th>
-          <th>p50</th>
-          <th>p90</th>
-          <th>p95</th>
-          <th width="160">Share</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for stage in stage_breakdown %}
-        <tr>
-          <td>{{ stage.name }}</td>
-          <td>{{ stage.avg }}</td>
-          <td>{{ stage.p50 }}</td>
-          <td>{{ stage.p90 }}</td>
-          <td>{{ stage.p95 }}</td>
-          <td>
-            <div class="bar-track">
-              <div class="bar-fill" style="width: {{ stage.share }}%"></div>
-            </div>
-            <small>{{ stage.share }}%</small>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
 
   {% if slowest_spans %}
   <div class="card" style="margin-top: 14px;">

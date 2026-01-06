@@ -437,6 +437,7 @@ def create_app(
     secret_key: str,
     title: str = "Observability Console",
     attention_cost_per_hour: float = 0.0,
+    allow_pii: bool | None = None,
 ) -> Flask:
     app = Flask(
         __name__,
@@ -447,6 +448,15 @@ def create_app(
     app.config["WEB_PASSWORD"] = password
     app.config["APP_TITLE"] = title
     app.config["ATTENTION_COST_PER_HOUR"] = max(0.0, float(attention_cost_per_hour))
+    resolved_allow_pii = allow_pii
+    if resolved_allow_pii is None:
+        resolved_allow_pii = str(os.getenv("WEB_OBSERVABILITY_ALLOW_PII", "0")).lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    app.config["WEB_OBSERVABILITY_ALLOW_PII"] = bool(resolved_allow_pii)
     app.secret_key = secret_key
     app.config["ANALYTICS_FACTORY"] = lambda: KnowledgeAnalytics(
         app.config["DB_PATH"], read_only=True
@@ -490,6 +500,13 @@ def create_app(
         if callable(factory):
             return factory()
         return KnowledgeAnalytics(app.config["DB_PATH"], read_only=True)
+
+    def _pii_enabled() -> bool:
+        allowed = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII"))
+        if not allowed:
+            return False
+        flag = str(request.args.get("pii", "")).lower()
+        return flag in {"1", "true", "yes", "on"}
 
     @app.route("/api/v1/observability/latency_summary", methods=["GET"])
     def api_latency_summary():
@@ -711,6 +728,8 @@ def create_app(
         summary: dict[str, object] | None = None
         recent_errors: list[dict[str, object]] = []
         slowest: list[dict[str, object]] = []
+        activity_rows: list[dict[str, object]] = []
+        reveal_pii = _pii_enabled()
         if not error_message and account_email:
             summary = analytics.processing_spans_metrics_digest(
                 account_email=account_email,
@@ -729,12 +748,20 @@ def create_app(
                 window_days=window_days or 7,
                 limit=5,
             )
+            activity_rows = analytics.recent_mail_activity(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=window_days or 7,
+                limit=40,
+                reveal_pii=reveal_pii,
+            )
 
         sample_size = int(summary.get("span_count") or 0) if summary else 0
         metrics_cards: list[dict[str, object]] = []
         stage_breakdown: list[dict[str, object]] = []
         slowest_rows: list[dict[str, object]] = []
         error_rows: list[dict[str, object]] = []
+        activity_table_rows: list[dict[str, object]] = []
 
         if summary:
             metrics_cards = [
@@ -811,6 +838,29 @@ def create_app(
                     }
                 )
 
+        if activity_rows:
+            for row in activity_rows:
+                delivered_ts = row.get("delivered_ts_utc") or row.get("received_ts_utc")
+                e2e_value = row.get("e2e_seconds")
+                status_text = str(row.get("status") or "")
+                status_class = "muted"
+                if status_text.lower() == "delivered":
+                    status_class = "success"
+                elif status_text.lower() == "failed":
+                    status_class = "danger"
+                activity_table_rows.append(
+                    {
+                        "delivered": _format_ts_utc(delivered_ts) if delivered_ts else "",
+                        "e2e": _format_number(e2e_value) if e2e_value is not None else "",
+                        "from_label": row.get("from_label") or "",
+                        "to_label": row.get("to_label") or "",
+                        "telegram_preview": row.get("telegram_preview") or "",
+                        "status": status_text or "",
+                        "status_class": status_class,
+                        "mode": row.get("delivery_mode") or "",
+                    }
+                )
+
         scope_hint = None
         if account_email:
             scope_hint = f"{account_email} • last {window_days or 7} days"
@@ -832,6 +882,9 @@ def create_app(
             slowest_spans=slowest_rows,
             recent_errors=error_rows,
             sample_size=sample_size,
+            activity_rows=activity_table_rows,
+            pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
+            pii_enabled=reveal_pii,
         )
 
     @app.route("/attention", methods=["GET"])

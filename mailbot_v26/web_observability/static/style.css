@@ -129,7 +129,7 @@ input:focus-visible {
 }
 
 .page {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 24px;
 }
@@ -250,8 +250,13 @@ button:hover {
 }
 
 .metric-card .value {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
+}
+
+.compact-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
 }
 
 .divider-title {
@@ -294,6 +299,23 @@ button:hover {
 
 .table tr:last-child td {
   border-bottom: none;
+}
+
+.table.compact th,
+.table.compact td {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow: auto;
+}
+
+.table.compact th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .badge {
@@ -379,5 +401,69 @@ button:hover {
 }
 
 small {
+  color: var(--muted);
+}
+
+.cockpit-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 14px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+@media (max-width: 1180px) {
+  .cockpit-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.activity-card {
+  min-height: 320px;
+}
+
+.activity-table-wrapper {
+  max-height: 520px;
+}
+
+.activity-table tbody tr:hover {
+  background: var(--surface-muted);
+}
+
+.mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  white-space: nowrap;
+}
+
+.numeric {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.truncate {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-table .preview {
+  max-width: 320px;
+}
+
+.badge.success {
+  background: rgba(20, 184, 166, 0.12);
+  border-color: rgba(20, 184, 166, 0.4);
+  color: var(--success);
+}
+
+.badge.danger {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: var(--danger);
+}
+
+.badge.muted {
+  background: var(--surface-muted);
   color: var(--muted);
 }

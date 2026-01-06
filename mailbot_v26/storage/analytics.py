@@ -104,6 +104,32 @@ class KnowledgeAnalytics:
         return []
 
     @staticmethod
+    def _mask_email_address(value: object) -> str:
+        if not value:
+            return ""
+        text = str(value).strip()
+        if not text or "@" not in text:
+            return ""
+        local, _, domain = text.partition("@")
+        if not domain:
+            return ""
+        first = local[0] if local else ""
+        return f"{first}…@{domain}"
+
+    @staticmethod
+    def _strip_emails(text: str) -> str:
+        if not text:
+            return ""
+        return re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "", text)
+
+    @staticmethod
+    def _clamp_preview_text(text: str, *, limit: int = 140) -> str:
+        cleaned = " ".join((text or "").replace("\n", " ").split())
+        if len(cleaned) <= limit:
+            return cleaned
+        return cleaned[: max(0, limit - 1)] + "…"
+
+    @staticmethod
     def _parse_json_dict(raw: object) -> dict[str, object]:
         if raw is None:
             return {}
@@ -123,6 +149,15 @@ class KnowledgeAnalytics:
             return " AND account_id = ?", [account_ids[0]]
         placeholders = ", ".join(["?"] * len(account_ids))
         return f" AND account_id IN ({placeholders})", list(account_ids)
+
+    @staticmethod
+    def _account_email_clause(account_ids: Sequence[str]) -> tuple[str, list[object]]:
+        if not account_ids:
+            return "", []
+        if len(account_ids) == 1:
+            return " AND account_email = ?", [account_ids[0]]
+        placeholders = ", ".join(["?"] * len(account_ids))
+        return f" AND account_email IN ({placeholders})", list(account_ids)
 
     @staticmethod
     def _contact_key(raw: str) -> str:
@@ -567,6 +602,192 @@ class KnowledgeAnalytics:
             return self._execute_select(query, params)
         except sqlite3.OperationalError:
             return []
+
+    def recent_mail_activity(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        window_days: int = 7,
+        limit: int = 30,
+        reveal_pii: bool = False,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return []
+        resolved_limit = max(0, int(limit))
+        if resolved_limit <= 0:
+            return []
+        since_ts = self._window_start_ts(window_days)
+        since_iso = datetime.fromtimestamp(since_ts, tz=timezone.utc).isoformat()
+        clause, clause_params = self._account_email_clause(account_ids)
+        query = """
+        SELECT id, account_email, from_email, action_line, body_summary, received_at
+        FROM emails
+        WHERE received_at >= ?
+        """
+        params: list[object] = [since_iso, *clause_params]
+        query += clause
+        query += " ORDER BY received_at DESC, id DESC LIMIT ?"
+        params.append(resolved_limit * 2)
+        try:
+            email_rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return []
+
+        delivered_events = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.TELEGRAM_DELIVERED.value,
+            since_ts=since_ts,
+        )
+        failed_events = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.TELEGRAM_FAILED.value,
+            since_ts=since_ts,
+        )
+        policy_events = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.DELIVERY_POLICY_APPLIED.value,
+            since_ts=since_ts,
+        )
+
+        entries: dict[int, dict[str, object]] = {}
+        for row in email_rows:
+            try:
+                email_id = int(row.get("id"))
+            except (TypeError, ValueError):
+                continue
+            received_raw = str(row.get("received_at") or "")
+            received_dt = parse_sqlite_datetime(received_raw)
+            received_ts = received_dt.timestamp() if received_dt else None
+            entries[email_id] = {
+                "email_id": email_id,
+                "account_email": row.get("account_email") or "",
+                "from_email": row.get("from_email") or "",
+                "action_line": row.get("action_line") or "",
+                "body_summary": row.get("body_summary") or "",
+                "received_ts_utc": received_ts,
+                "status": "In-flight",
+            }
+
+        def _event_ts(row: Mapping[str, object]) -> float | None:
+            payload = self._event_payload(row)
+            if isinstance(payload, Mapping):
+                candidate = payload.get("occurred_at_utc")
+                try:
+                    return float(candidate)
+                except (TypeError, ValueError):
+                    pass
+            try:
+                return float(row.get("ts_utc"))
+            except (TypeError, ValueError):
+                return None
+
+        for event in policy_events:
+            try:
+                email_id = int(event.get("email_id"))
+            except (TypeError, ValueError):
+                continue
+            if email_id not in entries:
+                continue
+            payload = self._event_payload(event)
+            mode_value = ""
+            if isinstance(payload, Mapping):
+                raw_mode = payload.get("mode") or payload.get("delivery_mode")
+                if raw_mode:
+                    mode_value = str(raw_mode)
+            ts_value = _event_ts(event) or 0.0
+            existing_ts = entries[email_id].get("delivery_mode_ts")
+            if existing_ts is None or ts_value >= float(existing_ts):
+                entries[email_id]["delivery_mode_ts"] = ts_value
+                entries[email_id]["delivery_mode"] = mode_value
+
+        for event in delivered_events:
+            try:
+                email_id = int(event.get("email_id"))
+            except (TypeError, ValueError):
+                continue
+            if email_id not in entries:
+                continue
+            ts_value = _event_ts(event)
+            if ts_value is None:
+                continue
+            existing_ts = entries[email_id].get("delivered_ts_utc")
+            if existing_ts is None or ts_value > float(existing_ts):
+                entries[email_id]["delivered_ts_utc"] = ts_value
+                entries[email_id]["status"] = "Delivered"
+
+        for event in failed_events:
+            try:
+                email_id = int(event.get("email_id"))
+            except (TypeError, ValueError):
+                continue
+            if email_id not in entries:
+                continue
+            if entries[email_id].get("delivered_ts_utc") is not None:
+                continue
+            ts_value = _event_ts(event)
+            if ts_value is None:
+                continue
+            existing_ts = entries[email_id].get("failed_ts_utc")
+            if existing_ts is None or ts_value > float(existing_ts):
+                entries[email_id]["failed_ts_utc"] = ts_value
+                entries[email_id]["status"] = "Failed"
+
+        results: list[dict[str, object]] = []
+        for entry in entries.values():
+            received_ts = entry.get("received_ts_utc")
+            delivered_ts = entry.get("delivered_ts_utc")
+            e2e_seconds = None
+            if delivered_ts is not None and received_ts is not None:
+                try:
+                    e2e_seconds = max(0.0, float(delivered_ts) - float(received_ts))
+                except (TypeError, ValueError):
+                    e2e_seconds = None
+            mask_pii = not reveal_pii
+            from_label = (
+                self._mask_email_address(entry.get("from_email"))
+                if mask_pii
+                else str(entry.get("from_email") or "")
+            )
+            to_label = (
+                self._mask_email_address(entry.get("account_email"))
+                if mask_pii
+                else str(entry.get("account_email") or "")
+            )
+            preview_parts = [
+                str(entry.get("action_line") or ""),
+                str(entry.get("body_summary") or ""),
+            ]
+            combined_preview = " — ".join(part for part in preview_parts if part)
+            if mask_pii:
+                combined_preview = self._strip_emails(combined_preview)
+            preview = self._clamp_preview_text(combined_preview, limit=160)
+
+            results.append(
+                {
+                    "email_id": entry.get("email_id"),
+                    "received_ts_utc": received_ts,
+                    "delivered_ts_utc": delivered_ts,
+                    "status": entry.get("status") or "In-flight",
+                    "from_label": from_label,
+                    "to_label": to_label,
+                    "telegram_preview": preview,
+                    "e2e_seconds": e2e_seconds,
+                    "delivery_mode": entry.get("delivery_mode") or "",
+                }
+            )
+
+        sorted_rows = sorted(
+            results,
+            key=lambda item: (
+                item.get("delivered_ts_utc") is None,
+                -(float(item.get("delivered_ts_utc") or 0.0)),
+                -(float(item.get("received_ts_utc") or 0.0)),
+                -(float(item.get("email_id") or 0.0)),
+            ),
+        )
+        return sorted_rows[:resolved_limit]
 
     def events_timeline(
         self,
