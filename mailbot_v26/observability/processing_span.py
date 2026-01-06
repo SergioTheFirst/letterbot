@@ -455,11 +455,21 @@ def _extract_metrics_brief(payload: Mapping[str, Any]) -> str:
 
 
 def _extract_system_mode(payload: Mapping[str, Any]) -> str:
-    mode = payload.get("mode") if isinstance(payload, Mapping) else None
-    if mode is None:
+    if not isinstance(payload, Mapping):
+        return ""
+    mode_value = None
+    for key in ("system_mode", "mode"):
+        if key in payload:
+            mode_value = payload.get(key)
+            break
+    if mode_value is None:
+        system_section = payload.get("system")
+        if isinstance(system_section, Mapping):
+            mode_value = system_section.get("mode")
+    if not isinstance(mode_value, str):
         return ""
     try:
-        return str(mode)
+        return str(mode_value)
     except Exception:
         return ""
 

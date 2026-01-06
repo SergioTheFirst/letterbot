@@ -324,9 +324,13 @@ def _parse_account_emails(raw: str | None) -> list[str]:
     return sorted(dict.fromkeys(emails))
 
 
-def _parse_window_days(raw: Optional[str]) -> tuple[Optional[int], Optional[str]]:
+def _parse_window_days(
+    raw: Optional[str], default: int = 7
+) -> tuple[Optional[int], Optional[str]]:
     if raw is None or raw == "":
-        return 7, None
+        if default not in ALLOWED_WINDOWS:
+            return None, "window_days must be one of 7, 30, 90"
+        return default, None
     try:
         value = int(raw)
     except (TypeError, ValueError):
@@ -341,10 +345,11 @@ def _validate_latency_params(
     args,
     require_account: bool = True,
     default_account: str | None = None,
+    window_default: int = 7,
 ) -> tuple[Optional[str], list[str], Optional[int], Optional[str]]:
     account_email = (args.get("account_email") or "").strip()
     account_emails = _parse_account_emails(args.get("account_emails"))
-    window_days, error = _parse_window_days(args.get("window_days"))
+    window_days, error = _parse_window_days(args.get("window_days"), window_default)
     if error:
         return None, [], None, error
     if account_emails and account_email and account_email not in account_emails:
@@ -461,12 +466,12 @@ def create_app(
     @app.route("/api/v1/observability/health_timeline", methods=["GET"])
     def api_health_timeline():
         account_email, account_emails, window_days, error = _validate_latency_params(
-            args=request.args, require_account=True
+            args=request.args, require_account=True, window_default=30
         )
         if error:
             return jsonify({"error": error}), 400
         analytics = _analytics()
-        resolved_window = window_days or 7
+        resolved_window = window_days or 30
         current = analytics.processing_spans_health_current(
             account_email=account_email,
             account_emails=account_emails,
@@ -541,7 +546,10 @@ def create_app(
         accounts = _available_accounts(app.config["DB_PATH"])
         default_account = accounts[0] if accounts else None
         account_email, account_emails, window_days, error = _validate_latency_params(
-            args=request.args, require_account=False, default_account=default_account
+            args=request.args,
+            require_account=False,
+            default_account=default_account,
+            window_default=30,
         )
         error_block = (
             f'<div class="alert">{html.escape(error)}</div>' if error else ""
@@ -550,7 +558,7 @@ def create_app(
         current: dict[str, object] | None = None
         timeline: list[dict[str, object]] = []
         if not error and account_email:
-            resolved_window = window_days or 7
+            resolved_window = window_days or 30
             current = analytics.processing_spans_health_current(
                 account_email=account_email,
                 account_emails=account_emails,
@@ -562,7 +570,7 @@ def create_app(
                 window_days=resolved_window,
             )
         account_options = _build_select_options(accounts, account_email)
-        window_options = _build_window_options(window_days or 7)
+        window_options = _build_window_options(window_days or 30)
         return _render_template(
             app,
             "health.html",

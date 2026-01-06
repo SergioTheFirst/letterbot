@@ -157,3 +157,43 @@ def test_processing_span_basic_fields(tmp_path: Path) -> None:
     assert isinstance(durations, dict)
     assert durations.get("llm") == 12
     assert row["llm_quality_score"] == 0.85
+
+
+def test_system_mode_persisted(tmp_path: Path) -> None:
+    db_path = tmp_path / "db.sqlite"
+    recorder = ProcessingSpanRecorder(db_path)
+    payload = {
+        "system_mode": "FULL",
+        "metrics": {"days_7": {"shadow_accuracy": 0.9}},
+        "gates": {"passed": True, "failed": []},
+    }
+
+    _build_span(recorder, account="acc", email_id=6, payload=payload)
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT system_mode FROM system_health_snapshots LIMIT 1"
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "FULL"
+
+
+def test_system_mode_fallback_mode_key(tmp_path: Path) -> None:
+    db_path = tmp_path / "db.sqlite"
+    recorder = ProcessingSpanRecorder(db_path)
+    payload = {
+        "mode": "DEGRADED",
+        "metrics": {"days_7": {"shadow_accuracy": 0.5}},
+        "gates": {"passed": False, "failed": ["llm"]},
+    }
+
+    _build_span(recorder, account="acc", email_id=7, payload=payload)
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT system_mode FROM system_health_snapshots LIMIT 1"
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "DEGRADED"
