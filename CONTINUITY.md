@@ -134,3 +134,4 @@ Working set (files / tables / tests):
 2026-01-14: immediate delivery enforced; time-window/batch configs removed.
 
 - 2026-01-14: web observability console now localhost-only read-only with silent empty states.
+2026-01-06: premium base template + CSS tokens; login/latency pages now use base; noisy empty-state copy removed.

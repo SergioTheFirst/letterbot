@@ -3,26 +3,42 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title }}</title>
+  <title>{% block title %}{{ title or "MailBot Web — Observability" }}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <header class="navbar">
-    <div class="brand">{{ title }}</div>
-    <nav>
-      <a href="{{ url_for('latency') }}" class="{% if request.path == '/latency' or request.path == '/' %}active{% endif %}">Latency</a>
-      <a href="{{ url_for('health') }}" class="{% if request.path == '/health' %}active{% endif %}">Health</a>
-      <a href="{{ url_for('attention') }}" class="{% if request.path == '/attention' %}active{% endif %}">Attention</a>
-      <a href="{{ url_for('learning') }}" class="{% if request.path == '/learning' %}active{% endif %}">Learning</a>
-      <a href="{{ url_for('events') }}" class="{% if request.path == '/events' %}active{% endif %}">Events</a>
-      <a href="{{ url_for('relationships') }}" class="{% if request.path.startswith('/relationships') %}active{% endif %}">Relationships</a>
-    </nav>
-  </header>
-  <main class="container">
-    {% if error %}
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-stack">
+        <div class="brand">MailBot Web — Observability</div>
+        {% if scope_hint %}<div class="subtitle">{{ scope_hint }}</div>{% endif %}
+      </div>
+      {% if not hide_nav %}
+      <nav class="nav">
+        <a href="{{ url_for('latency') }}" class="nav-link {% if request.path == '/latency' or request.path == '/' %}active{% endif %}">Latency</a>
+        <a href="{{ url_for('health') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">Health</a>
+        <a href="{{ url_for('attention') }}" class="nav-link {% if request.path == '/attention' %}active{% endif %}">Attention</a>
+        <a href="{{ url_for('learning') }}" class="nav-link {% if request.path == '/learning' %}active{% endif %}">Learning</a>
+        <a href="{{ url_for('events') }}" class="nav-link {% if request.path == '/events' %}active{% endif %}">Events</a>
+        <a href="{{ url_for('relationships') }}" class="nav-link {% if request.path.startswith('/relationships') %}active{% endif %}">Relationships</a>
+      </nav>
+      {% endif %}
+    </header>
+
+    <main class="page">
+      {% if page_title or page_actions %}
+      <div class="page-header">
+        {% if page_title %}<h1>{{ page_title }}</h1>{% endif %}
+        {% if page_actions %}<div class="page-actions">{% block page_actions %}{{ page_actions }}{% endblock %}</div>{% endif %}
+      </div>
+      {% endif %}
+
+      {% if error %}
       <div class="alert">{{ error }}</div>
-    {% endif %}
-    {% block content %}{% endblock %}
-  </main>
+      {% endif %}
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 </body>
 </html>
