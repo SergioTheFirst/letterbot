@@ -116,6 +116,7 @@ IV. Архитектура и надёжность
 - Разделение worker/web: обработка писем и Telegram-поток не должны блокировать друг друга.
 - Телеметрия и логи — без утечек PII за пределы контролируемых хранилищ.
 - Веб-консоль наблюдаемости только для чтения; отображает обезличенные снапшоты состояния (gates/metrics/system_mode) без payload_json.
+- Web = read-only Intelligence Hub; events timeline renders sanitized summaries only; never show raw email text/subjects/senders in web.
 
 V. Privacy и данные
 

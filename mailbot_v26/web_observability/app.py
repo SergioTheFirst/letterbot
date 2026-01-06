@@ -233,6 +233,52 @@ def _short_id(value: object, length: int = 8) -> str:
     return text[:length]
 
 
+def _events_table(items: list[dict[str, object]]) -> str:
+    if not items:
+        return '<div class="empty-state">No events in this window.</div>'
+    rows = []
+
+    def _detail_badges(details: Mapping[str, object] | None) -> str:
+        if not details:
+            return ""
+        badges: list[str] = []
+        for key in sorted(details.keys()):
+            if len(badges) >= 3:
+                break
+            value = details.get(key)
+            badges.append(
+                f"<span class=\"badge\">{html.escape(str(key))}: {html.escape(str(value))}</span>"
+            )
+        return " ".join(badges)
+
+    for item in items:
+        details_badges = _detail_badges(item.get("details") if isinstance(item, Mapping) else {})
+        rows.append(
+            """
+            <tr>
+              <td>{}</td>
+              <td><span class="badge">{}</span></td>
+              <td>{}</td>
+              <td>{}</td>
+              <td>{}</td>
+              <td>{}</td>
+            </tr>
+            """.format(
+                html.escape(_format_ts_utc(item.get("ts_utc"))),
+                html.escape(str(item.get("event_type") or "")),
+                html.escape(_short_id(item.get("email_id"), 12)),
+                html.escape(_short_id(item.get("entity_id"), 12)),
+                html.escape(str(item.get("summary") or "")),
+                details_badges,
+            )
+        )
+    return (
+        "<table class=\"data-table\">"
+        "<thead><tr><th>Timestamp (UTC)</th><th>Type</th><th>Email ID</th><th>Entity ID</th><th>Summary</th><th>Details</th></tr></thead>"
+        + f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
 def _health_current_block(current: dict[str, object] | None) -> str:
     if not current:
         return '<div class="empty-state">No health snapshots in this window.</div>'
@@ -337,6 +383,20 @@ def _parse_window_days(
         return None, "window_days must be an integer"
     if value not in ALLOWED_WINDOWS:
         return None, "window_days must be one of 7, 30, 90"
+    return value, None
+
+
+def _parse_limit(raw: Optional[str], default: int = 200, max_limit: int = 500) -> tuple[int | None, Optional[str]]:
+    if raw is None or raw == "":
+        return default, None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None, "limit must be an integer"
+    if value <= 0:
+        return None, "limit must be positive"
+    if value > max_limit:
+        return max_limit, None
     return value, None
 
 
@@ -492,6 +552,33 @@ def create_app(
             }
         )
 
+    @app.route("/api/v1/events/timeline", methods=["GET"])
+    def api_events_timeline():
+        account_email, account_emails, window_days, error = _validate_latency_params(
+            args=request.args, require_account=True, window_default=30
+        )
+        if error:
+            return jsonify({"error": error}), 400
+        limit, limit_error = _parse_limit(request.args.get("limit"), default=200, max_limit=500)
+        if limit_error:
+            return jsonify({"error": limit_error}), 400
+        resolved_window = window_days or 30
+        analytics = _analytics()
+        items = analytics.events_timeline(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=resolved_window,
+            limit=limit or 0,
+        )
+        return jsonify(
+            {
+                "window_days": resolved_window,
+                "account_email": account_email,
+                "account_emails": account_emails,
+                "items": items,
+            }
+        )
+
     @app.route("/latency", methods=["GET"])
     def latency():
         accounts = _available_accounts(app.config["DB_PATH"])
@@ -539,6 +626,7 @@ def create_app(
             static_url=_static_url(),
             latency_url=url_for("latency"),
             health_url=url_for("health"),
+            events_url=url_for("events"),
         )
 
     @app.route("/health", methods=["GET"])
@@ -578,12 +666,56 @@ def create_app(
             static_url=_static_url(),
             latency_url=url_for("latency"),
             health_url=url_for("health"),
+            events_url=url_for("events"),
             error_block=error_block,
             account_options=account_options,
             account_emails_value=",".join(account_emails),
             window_options=window_options,
             current_block=_health_current_block(current),
             timeline_block=_health_timeline_block(timeline),
+        )
+
+    @app.route("/events", methods=["GET"])
+    def events():
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_email, account_emails, window_days, error = _validate_latency_params(
+            args=request.args,
+            require_account=False,
+            default_account=default_account,
+            window_default=30,
+        )
+        limit, limit_error = _parse_limit(request.args.get("limit"), default=200, max_limit=500)
+        error_message = error or limit_error or ("No account data available" if not account_email else "")
+        analytics = _analytics()
+        items: list[dict[str, object]] = []
+        if not error_message and account_email:
+            resolved_window = window_days or 30
+            resolved_limit = limit or 200
+            items = analytics.events_timeline(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=resolved_window,
+                limit=resolved_limit,
+            )
+        account_options = _build_select_options(accounts, account_email)
+        window_options = _build_window_options(window_days or 30)
+        limit_value = str(limit or 200)
+        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+        return _render_template(
+            app,
+            "events.html",
+            title=app.config["APP_TITLE"],
+            static_url=_static_url(),
+            latency_url=url_for("latency"),
+            health_url=url_for("health"),
+            events_url=url_for("events"),
+            error_block=error_block,
+            account_options=account_options,
+            account_emails_value=",".join(account_emails),
+            window_options=window_options,
+            limit_value=limit_value,
+            events_block=_events_table(items),
         )
 
     return app
