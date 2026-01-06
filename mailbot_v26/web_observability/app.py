@@ -478,6 +478,32 @@ def _validate_attention_params(
     return account_email, account_emails, window_days, limit, bool(include_anomalies), None
 
 
+def _validate_learning_params(
+    *,
+    args,
+    default_account: str | None = None,
+) -> tuple[Optional[str], list[str], Optional[int], Optional[int], Optional[str]]:
+    account_email = (args.get("account_email") or "").strip()
+    account_emails = _parse_account_emails(args.get("account_emails"))
+    window_days, window_error = _parse_window_days(args.get("window"), 30)
+    if window_error:
+        return None, [], None, None, window_error
+    limit, limit_error = _parse_limit(args.get("limit"), default=50, max_limit=200, min_value=1)
+    if limit_error:
+        return None, [], None, None, limit_error
+    if account_emails and account_email and account_email not in account_emails:
+        return None, [], None, None, "account_email must match one of account_emails"
+    if not account_email and account_emails:
+        account_email = account_emails[0]
+    if not account_email and default_account:
+        account_email = default_account
+    if not account_emails and account_email:
+        account_emails = [account_email]
+    if not account_email:
+        return None, [], None, None, "account_email is required"
+    return account_email, account_emails, window_days, limit, None
+
+
 def _available_accounts(db_path: Path) -> list[str]:
     query = "SELECT DISTINCT account_id FROM processing_spans ORDER BY account_id ASC"
     try:
@@ -723,6 +749,47 @@ def create_app(
         )
         return jsonify(summary)
 
+    @app.route("/api/v1/intelligence/learning_summary", methods=["GET"])
+    def api_learning_summary():
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_email, account_emails, window_days, limit, error = _validate_learning_params(
+            args=request.args, default_account=default_account
+        )
+        if error:
+            resp = jsonify({"error": error})
+            resp.status_code = 400
+            return resp
+        analytics = _analytics()
+        summary = analytics.behavioral_metrics_summary(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=window_days or 30,
+            now_ts=datetime.now(timezone.utc).timestamp(),
+        )
+        return jsonify(summary)
+
+    @app.route("/api/v1/intelligence/learning_timeline", methods=["GET"])
+    def api_learning_timeline():
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_email, account_emails, window_days, limit, error = _validate_learning_params(
+            args=request.args, default_account=default_account
+        )
+        if error:
+            resp = jsonify({"error": error})
+            resp.status_code = 400
+            return resp
+        analytics = _analytics()
+        timeline = analytics.learning_timeline(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=window_days or 30,
+            limit=limit or 50,
+            now_ts=datetime.now(timezone.utc).timestamp(),
+        )
+        return jsonify(timeline)
+
     @app.route("/latency", methods=["GET"])
     def latency():
         accounts = _available_accounts(app.config["DB_PATH"])
@@ -795,8 +862,8 @@ def create_app(
                 window_days=window_days or 30,
                 limit=limit or 50,
                 include_anomalies=bool(include_anomalies),
-                attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
-            )
+            attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
+        )
         fallback_generated = datetime.fromtimestamp(0, tz=timezone.utc).isoformat()
         if fallback_generated.endswith("+00:00"):
             fallback_generated = fallback_generated.replace("+00:00", "Z")
@@ -834,6 +901,58 @@ def create_app(
             include_anomalies_checked="checked" if include_anomalies else "",
             summary=resolved_summary,
             attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
+        )
+
+    @app.route("/learning", methods=["GET"])
+    def learning():
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_email, account_emails, window_days, limit, error = _validate_learning_params(
+            args=request.args, default_account=default_account
+        )
+        error_message = error or ("No account data available" if not account_email else "")
+        analytics = _analytics()
+        summary: dict[str, object] | None = None
+        timeline: dict[str, object] | None = None
+        if not error_message and account_email:
+            now_ts = datetime.now(timezone.utc).timestamp()
+            resolved_window = window_days or 30
+            resolved_limit = limit or 50
+            summary = analytics.behavioral_metrics_summary(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=resolved_window,
+                now_ts=now_ts,
+            )
+            timeline = analytics.learning_timeline(
+                account_email=account_email,
+                account_emails=account_emails,
+                window_days=resolved_window,
+                limit=resolved_limit,
+                now_ts=now_ts,
+            )
+        account_options = _build_select_options(accounts, account_email)
+        window_options = _build_window_options(window_days or 30)
+        limit_value = str(limit or 50)
+        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+        return _render_template(
+            app,
+            "learning.html",
+            title=app.config["APP_TITLE"],
+            static_url=_static_url(),
+            latency_url=url_for("latency"),
+            health_url=url_for("health"),
+            attention_url=url_for("attention"),
+            events_url=url_for("events"),
+            relationships_url=url_for("relationships"),
+            learning_url=url_for("learning"),
+            error_block=error_block,
+            account_options=account_options,
+            account_emails_value=",".join(account_emails),
+            window_options=window_options,
+            limit_value=limit_value,
+            summary=summary or {},
+            timeline=timeline or {"items": []},
         )
 
     @app.route("/health", methods=["GET"])
