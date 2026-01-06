@@ -124,3 +124,5 @@ Working set (files / tables / tests):
 2026-01-12: removed quiet/focus/weekend delivery deferrals; DeliveryContext simplified; telegram sender returns message_id with edit helper.
 2026-01-05: delivery SLA budget with minimal Tier-1 then edit-in-place.
 2026-01-05: web health dashboard/API read-only with scoped account filters.
+
+2026-01-06: web health default window=30 + system_mode persistence fix + web health tests.
