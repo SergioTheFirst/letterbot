@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -50,6 +51,8 @@ ARCHIVE_PAGE_SIZE = 50
 ARCHIVE_STATUSES = {"any", "ok", "warn", "fail"}
 EVENTS_GROUP_PAGE_SIZE = 20
 EVENT_FILTERS = {"all", "processing", "delivery", "health", "learning"}
+WEB_EMAIL_REDACTED_PREVIEW = "Summary hidden"
+WEB_EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
 @dataclass(frozen=True)
@@ -520,9 +523,9 @@ def _build_activity_table_rows(activity_rows: list[dict[str, object]]) -> list[d
             {
                 "delivered": _format_ts_utc(delivered_ts) if delivered_ts else "",
                 "e2e": _format_number(e2e_value) if e2e_value is not None else "",
-                "from_label": row.get("from_label") or "",
-                "to_label": row.get("to_label") or "",
-                "telegram_preview": row.get("telegram_preview") or "",
+                "from_label": _sanitize_sender_label(row.get("from_label")),
+                "to_label": _sanitize_account_label(row.get("to_label")),
+                "telegram_preview": _sanitize_email_preview(row.get("telegram_preview")),
                 "status": status_text or "",
                 "status_class": status_class,
                 "mode": row.get("delivery_mode") or "",
@@ -539,13 +542,71 @@ def _summarize_digest_rows(rows: list[dict[str, object]]) -> list[dict[str, obje
         delivered_ts = row.get("delivered_ts_utc") or row.get("received_ts_utc")
         digest_items.append(
             {
-                "title": row.get("telegram_preview") or "",
-                "from_label": row.get("from_label") or "",
+                "title": _sanitize_email_preview(row.get("telegram_preview")),
+                "from_label": _sanitize_sender_label(row.get("from_label")),
                 "status": row.get("status") or "",
                 "time": _format_ts_utc(delivered_ts) if delivered_ts else "",
             }
         )
     return digest_items
+
+
+def _mask_email_address(value: object) -> str:
+    if not value:
+        return ""
+    text = str(value).strip()
+    if "@" not in text:
+        return ""
+    local, _, domain = text.partition("@")
+    if not domain:
+        return ""
+    first = local[0] if local else ""
+    return f"{first}…@{domain}"
+
+
+def _sanitize_email_label(value: object, *, fallback: str) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    match = WEB_EMAIL_PATTERN.search(text)
+    if not match:
+        return fallback
+    return _mask_email_address(match.group(0))
+
+
+def _sanitize_sender_label(value: object) -> str:
+    return _sanitize_email_label(value, fallback="Sender hidden") if value else ""
+
+
+def _sanitize_account_label(value: object) -> str:
+    return _sanitize_email_label(value, fallback="Account hidden") if value else ""
+
+
+def _sanitize_email_preview(value: object) -> str:
+    if not value:
+        return ""
+    return WEB_EMAIL_REDACTED_PREVIEW
+
+
+def _sanitize_archive_row(row: Mapping[str, object]) -> dict[str, object]:
+    return {
+        **row,
+        "from_label": _sanitize_sender_label(row.get("from_label")),
+        "account_label": _sanitize_account_label(row.get("account_label")),
+        "preview": _sanitize_email_preview(row.get("preview")),
+    }
+
+
+def _sanitize_event_headline(headline: Mapping[str, object] | None) -> dict[str, object]:
+    if not headline:
+        return {}
+    sanitized = dict(headline)
+    sanitized["from_masked"] = _sanitize_sender_label(headline.get("from_masked"))
+    sanitized["to_masked"] = _sanitize_account_label(headline.get("to_masked"))
+    sanitized["preview_masked"] = _sanitize_email_preview(headline.get("preview_masked"))
+    return sanitized
 
 
 def _health_current_block(current: dict[str, object] | None) -> str:
@@ -1599,8 +1660,9 @@ def create_app(
 
         formatted_rows = []
         for row in rows:
+            sanitized_row = _sanitize_archive_row(row if isinstance(row, Mapping) else {})
             e2e_ms = None
-            e2e_seconds = row.get("e2e_seconds")
+            e2e_seconds = sanitized_row.get("e2e_seconds")
             if e2e_seconds is not None:
                 try:
                     e2e_ms = float(e2e_seconds) * 1000.0
@@ -1608,16 +1670,16 @@ def create_app(
                     e2e_ms = None
             formatted_rows.append(
                 {
-                    "email_id": row.get("email_id"),
-                    "received": _format_ts_utc(row.get("received_ts_utc")),
-                    "from_label": row.get("from_label") or "",
-                    "account_label": row.get("account_label") or "",
-                    "preview": row.get("preview") or "",
-                    "status": row.get("status") or "",
+                    "email_id": sanitized_row.get("email_id"),
+                    "received": _format_ts_utc(sanitized_row.get("received_ts_utc")),
+                    "from_label": sanitized_row.get("from_label") or "",
+                    "account_label": sanitized_row.get("account_label") or "",
+                    "preview": sanitized_row.get("preview") or "",
+                    "status": sanitized_row.get("status") or "",
                     "e2e_ms": _format_duration_ms(e2e_ms),
-                    "delivery_mode": row.get("delivery_mode") or "",
-                    "failure_reason": row.get("failure_reason") or "",
-                    "stage_hint": row.get("stage_hint") or "",
+                    "delivery_mode": sanitized_row.get("delivery_mode") or "",
+                    "failure_reason": sanitized_row.get("failure_reason") or "",
+                    "stage_hint": sanitized_row.get("stage_hint") or "",
                 }
             )
 
@@ -1679,6 +1741,7 @@ def create_app(
                 404,
             )
 
+        detail = _sanitize_archive_row(detail)
         timeline_raw = analytics.email_processing_timeline(email_id=email_id)
         timeline_rows = []
         for row in timeline_raw:
@@ -2684,6 +2747,8 @@ def create_app(
             group_kind = group.get("group_kind")
             group_id = group.get("group_id")
             forensics_url = None
+            if group_kind == "email":
+                headline = _sanitize_event_headline(headline)
             if group_kind == "email" and group_id is not None:
                 params = {
                     "account_emails": ",".join(account_emails),

@@ -34,6 +34,7 @@ Done:
 - 2026-01-16: health cockpit status page with basic/engineer modes, partial refresh, read-only indexes, and login selector/tests.
 - 2026-01-08: web archive + email forensics views added with deterministic ordering, new indexes, screenshot helper hardening, and tests.
 - IMAP UID bootstrap cursor behavior verified with criteria-aware tests.
+- 2026-01-17: web observability masks sender labels and preview content in UI.
 Now:
 - None.
 Next:
@@ -53,9 +54,13 @@ Working set (files / tables / tests):
 - mailbot_v26/storage/analytics.py
 - mailbot_v26/web_observability/app.py
 - mailbot_v26/web_observability/templates/archive.html
+- mailbot_v26/web_observability/templates/bridge.html
+- mailbot_v26/web_observability/templates/cockpit.html
 - mailbot_v26/web_observability/templates/email_detail.html
+- mailbot_v26/web_observability/templates/latency.html
 - mailbot_v26/tools/capture_web_screenshot.py
 - mailbot_v26/tests/test_web_archive_forensics.py
+- mailbot_v26/tests/test_web_cockpit_home.py
 - mailbot_v26/pipeline/daily_digest.py
 - mailbot_v26/pipeline/digest_scheduler.py
 - mailbot_v26/feedback.py
