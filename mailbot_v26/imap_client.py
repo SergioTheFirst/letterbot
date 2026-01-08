@@ -71,10 +71,9 @@ class ResilientIMAP:
 
         if last_uid <= 0:
             return [["SINCE", since_date]]
-        return [["OR", ["UID", f"{last_uid + 1}:*"], ["SINCE", since_date]]]
+        return [["UID", f"{last_uid + 1}:*"]]
 
     def fetch_new_messages(self) -> List[tuple[int, bytes]]:
-        criteria = self._build_search()
         if IMAPClient is None:
             self.state.set_imap_status(self.account.login, "error", "imapclient missing")
             self.logger.error("IMAP client dependency is not available; skipping fetch")
@@ -89,11 +88,25 @@ class ResilientIMAP:
             )
             client.login(self.account.login, self.account.password)
             client.select_folder("INBOX")
-            uids: Iterable[int] = client.search(criteria[0])
             last_uid = self.state.get_last_uid(self.account.login)
-            uid_list = list(uids)
-            latest_seen_uid = max(uid_list) if uid_list else last_uid
-            new_uids = [uid for uid in uid_list if uid > last_uid]
+            last_check = self.state.get_last_check_time(self.account.login)
+            baseline = last_check or self.start_time
+            if baseline < self.start_time:
+                baseline = self.start_time
+            since_date = baseline.strftime("%d-%b-%Y")
+
+            is_bootstrap = last_uid <= 0
+            if is_bootstrap:
+                all_uids = list(client.search(["UID", "1:*"]))
+                max_uid = max(all_uids) if all_uids else 0
+                uid_list = list(client.search(["SINCE", since_date]))
+                latest_seen_uid = max_uid if max_uid > last_uid else last_uid
+                new_uids = uid_list
+            else:
+                uids: Iterable[int] = client.search(["UID", f"{last_uid + 1}:*"])
+                uid_list = list(uids)
+                latest_seen_uid = max(uid_list) if uid_list else last_uid
+                new_uids = uid_list
             messages: List[tuple[int, bytes]] = []
             for uid in sorted(new_uids):
                 data = client.fetch([uid], ["RFC822.SIZE", "INTERNALDATE"])
@@ -101,8 +114,11 @@ class ResilientIMAP:
                 internaldate = envelope.get(b"INTERNALDATE")
                 if isinstance(internaldate, datetime) and internaldate.tzinfo is not None:
                     internaldate = internaldate.replace(tzinfo=None)
-                if isinstance(internaldate, datetime) and internaldate < self.start_time:
-                    latest_seen_uid = max(latest_seen_uid, uid)
+                if (
+                    is_bootstrap
+                    and isinstance(internaldate, datetime)
+                    and internaldate < self.start_time
+                ):
                     continue
 
                 message_size = envelope.get(b"RFC822.SIZE")
@@ -131,7 +147,6 @@ class ResilientIMAP:
                     envelope = data.get(uid, {})
                     raw = envelope[b"RFC822"]
                 messages.append((uid, raw))
-                latest_seen_uid = max(latest_seen_uid, uid)
 
             if latest_seen_uid > last_uid:
                 self.state.update_last_uid(self.account.login, latest_seen_uid)
