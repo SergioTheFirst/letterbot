@@ -8,8 +8,15 @@ def test_schema_indexes_include_cockpit_support(tmp_path: Path) -> None:
     db_path = tmp_path / "schema.sqlite"
     KnowledgeDB(db_path)
     with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index' AND name = ?",
-            ("idx_emails_account_received_at",),
-        ).fetchone()
-    assert row is not None
+        for index_name in (
+            "idx_emails_account_received_at",
+            "idx_emails_received_at_id",
+            "idx_emails_account_received_at_id",
+            "idx_events_v1_email_event_ts",
+            "idx_processing_spans_email_ts",
+        ):
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name = ?",
+                (index_name,),
+            ).fetchone()
+            assert row is not None
