@@ -55,6 +55,15 @@ EVENTS_GROUP_PAGE_SIZE = 20
 EVENT_FILTERS = {"all", "processing", "delivery", "health", "learning"}
 WEB_EMAIL_REDACTED_PREVIEW = "Summary hidden"
 WEB_EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+LANE_KEYS = ("all", "critical", "commitments", "deferred", "failures", "learning")
+LANE_LABELS = {
+    "all": "все",
+    "critical": "критично",
+    "commitments": "обязательства",
+    "deferred": "отложено",
+    "failures": "сбои",
+    "learning": "обучение",
+}
 
 
 @dataclass(frozen=True)
@@ -140,6 +149,8 @@ def _render_stub_html(
     if dashboard_vars and getattr(dashboard_vars, "account_emails", None):
         account_scope = ",".join(getattr(dashboard_vars, "account_emails"))
     account_email = html.escape(str(context.get("account_email") or ""))
+    lane_value = html.escape(str(context.get("lane") or "")) if "lane" in context else ""
+    share_url = html.escape(str(context.get("share_url") or "")) if "share_url" in context else ""
 
     def _options(values: list[int], selected: int) -> str:
         opts: list[str] = []
@@ -153,13 +164,15 @@ def _render_stub_html(
     account_hidden = (
         f'<input type="hidden" name="account_email" value="{account_email}">' if account_email else ""
     )
+    lane_hidden = f'<input type="hidden" name="lane" value="{lane_value}">' if lane_value else ""
     header = (
         "<div class=\"dashboard-vars\">"
         f'<input id="account_emails" name="account_emails" value="{html.escape(account_scope)}">'
         f'<select name="window_days">{_options([7, 30, 90], int(window_val))}</select>'
         f'<select name="limit">{_options([10, 25, 50], int(limit_val))}</select>'
         f"{account_hidden}"
-        '<button id="copy-share-link">Copy share link</button>'
+        f"{lane_hidden}"
+        f'<button id="copy-share-link" data-share-url="{share_url}">Copy share link</button>'
         "</div>"
     )
 
@@ -168,6 +181,21 @@ def _render_stub_html(
         digest_today = context.get("digest_today") if isinstance(context, Mapping) else []
         digest_week = context.get("digest_week") if isinstance(context, Mapping) else []
         engineer_mode = bool(context.get("engineer_mode")) if isinstance(context, Mapping) else False
+        lane_pills = context.get("lane_pills") if isinstance(context, Mapping) else []
+        lane_html = ""
+        if isinstance(lane_pills, list) and lane_pills:
+            lane_html = "<div class=\"lane-pills\">" + "".join(
+                (
+                    "<a class=\"lane-pill {active}\" href=\"{url}\">"
+                    "{label} {count}</a>"
+                ).format(
+                    active="active" if pill.get("active") else "",
+                    url=html.escape(str(pill.get("url") or "")),
+                    label=html.escape(str(pill.get("label") or "")),
+                    count=html.escape(str(pill.get("count") or "")),
+                )
+                for pill in lane_pills
+            ) + "</div>"
         activity_body = "".join(
             """
             <tr>
@@ -200,7 +228,7 @@ def _render_stub_html(
         )
         return (
             f"<html><body>{header}<h2>Today Digest</h2>{digest_today_block}<h2>Week Digest</h2>{digest_week_block}"
-            f"<h2>Recent Activity</h2>{engineer_block}<table>{activity_body}</table></body></html>"
+            f"<h2>Recent Activity</h2>{lane_html}{engineer_block}<table>{activity_body}</table></body></html>"
         )
 
     if template_name in {"health.html", "partials/health_overview.html"}:
@@ -417,6 +445,36 @@ def _parse_event_filter(raw: Optional[str]) -> tuple[str, Optional[str]]:
     if cleaned in EVENT_FILTERS:
         return cleaned, None
     return "all", f"type must be one of {', '.join(sorted(EVENT_FILTERS))}"
+
+
+def _parse_lane(raw: Optional[str]) -> str:
+    cleaned = str(raw or "all").strip().lower()
+    if cleaned in LANE_KEYS:
+        return cleaned
+    return "all"
+
+
+def _build_lane_pills(
+    *,
+    selected_lane: str,
+    counts: Mapping[str, int],
+    base_params: Mapping[str, str],
+    endpoint: str,
+) -> list[dict[str, object]]:
+    pills: list[dict[str, object]] = []
+    for lane_key in LANE_KEYS:
+        params = dict(base_params)
+        params["lane"] = lane_key
+        pills.append(
+            {
+                "key": lane_key,
+                "label": LANE_LABELS.get(lane_key, lane_key),
+                "count": int(counts.get(lane_key, 0) or 0),
+                "url": url_for(endpoint, **params),
+                "active": lane_key == selected_lane,
+            }
+        )
+    return pills
 
 
 def _parse_page(raw: Optional[str], *, default: int = 1) -> int:
@@ -1561,6 +1619,7 @@ def create_app(
             account_emails.append(account_email)
         account_emails = sorted({email for email in account_emails if email})
         window_days = dashboard_vars.window_days or 7
+        lane = _parse_lane(request.args.get("lane"))
         reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
             dashboard_vars.pii
         )
@@ -1592,9 +1651,52 @@ def create_app(
             summary.get("status_strip") if isinstance(summary, Mapping) else None,
             now_ts=time.time(),
         )
-        activity_rows = _build_activity_table_rows(
-            summary.get("recent_activity") if isinstance(summary, Mapping) else []
+        activity_cache_key = (
+            "lane_activity",
+            str(app.config["DB_PATH"]),
+            tuple(account_emails),
+            window_days,
+            lane,
+            dashboard_vars.limit,
+            bool(reveal_pii),
         )
+        cached_activity = _COCKPIT_CACHE.get(activity_cache_key)
+        if cached_activity is None:
+            if account_emails and hasattr(analytics, "lane_activity_rows"):
+                cached_activity = analytics.lane_activity_rows(
+                    account_email=account_emails[0],
+                    account_emails=account_emails,
+                    window_days=window_days,
+                    limit=dashboard_vars.limit,
+                    lane=lane,
+                    reveal_pii=reveal_pii,
+                )
+            else:
+                cached_activity = (
+                    summary.get("recent_activity") if isinstance(summary, Mapping) else []
+                )
+            _COCKPIT_CACHE.set(activity_cache_key, cached_activity)
+        activity_rows = _build_activity_table_rows(
+            cached_activity if isinstance(cached_activity, list) else []
+        )
+        lane_counts: dict[str, int] = {key: 0 for key in LANE_KEYS}
+        if account_emails and hasattr(analytics, "lane_counts"):
+            lane_cache_key = (
+                "lane_counts",
+                str(app.config["DB_PATH"]),
+                tuple(account_emails),
+                window_days,
+            )
+            cached_counts = _COCKPIT_CACHE.get(lane_cache_key)
+            if isinstance(cached_counts, Mapping):
+                lane_counts = {key: int(cached_counts.get(key) or 0) for key in LANE_KEYS}
+            else:
+                lane_counts = analytics.lane_counts(
+                    account_email=account_emails[0],
+                    account_emails=account_emails,
+                    window_days=window_days,
+                )
+                _COCKPIT_CACHE.set(lane_cache_key, lane_counts)
         digest_today = summary.get("today_digest") if isinstance(summary, Mapping) else {}
         digest_week = summary.get("week_digest") if isinstance(summary, Mapping) else {}
         today_items = _summarize_digest_rows(digest_today.get("items", []))
@@ -1654,8 +1756,32 @@ def create_app(
                 params["window_days"] = str(window_days)
             if reveal_pii and "pii" not in params:
                 params["pii"] = "1"
+            if "lane" not in params:
+                params["lane"] = lane
             params["mode"] = target
             return url_for("index", **params)
+
+        lane_params: dict[str, str] = {}
+        if account_emails:
+            lane_params["account_emails"] = ",".join(account_emails)
+        if window_days:
+            lane_params["window_days"] = str(window_days)
+        if dashboard_vars.limit:
+            lane_params["limit"] = str(dashboard_vars.limit)
+        if reveal_pii:
+            lane_params["pii"] = "1"
+        if mode:
+            lane_params["mode"] = mode
+
+        share_params = dict(lane_params)
+        share_params["lane"] = lane
+        share_url = url_for("index", **share_params)
+        lane_pills = _build_lane_pills(
+            selected_lane=lane,
+            counts=lane_counts,
+            base_params=lane_params,
+            endpoint="index",
+        )
 
         return _render_template(
             app,
@@ -1670,6 +1796,8 @@ def create_app(
             status_strip=status_strip,
             golden_signals=golden_signals,
             activity_rows=activity_rows,
+            lane=lane,
+            lane_pills=lane_pills,
             digest_today=today_items,
             digest_today_counts=digest_today.get("counts", []),
             digest_week=week_items,
@@ -1687,6 +1815,7 @@ def create_app(
             commitments_url=commitments_url,
             hide_limit=True,
             status_refresh_ms=STATUS_STRIP_REFRESH_MS,
+            share_url=share_url,
         )
 
     @app.route("/cockpit")
@@ -1703,6 +1832,7 @@ def create_app(
         window_days, window_error = _parse_window_days(
             window_raw, default=7, allowed=ALLOWED_ARCHIVE_WINDOWS
         )
+        lane = _parse_lane(request.args.get("lane"))
         status, status_error = _parse_archive_status(request.args.get("status"))
         try:
             page = int(request.args.get("page") or 1)
@@ -1720,17 +1850,64 @@ def create_app(
         error_message = window_error or status_error
         rows: list[dict[str, object]] = []
         total_count = 0
+        lane_counts: dict[str, int] = {key: 0 for key in LANE_KEYS}
         if account_emails and window_days:
             analytics = _analytics()
-            payload = analytics.email_archive_page(
-                account_email=account_emails[0],
-                account_emails=account_emails,
-                window_days=window_days,
-                page=page,
-                page_size=ARCHIVE_PAGE_SIZE,
-                status=status,
-                reveal_pii=reveal_pii,
+            if hasattr(analytics, "lane_counts"):
+                lane_cache_key = (
+                    "lane_counts",
+                    str(app.config["DB_PATH"]),
+                    tuple(account_emails),
+                    window_days,
+                )
+                cached_counts = _COCKPIT_CACHE.get(lane_cache_key)
+                if isinstance(cached_counts, Mapping):
+                    lane_counts = {key: int(cached_counts.get(key) or 0) for key in LANE_KEYS}
+                else:
+                    lane_counts = analytics.lane_counts(
+                        account_email=account_emails[0],
+                        account_emails=account_emails,
+                        window_days=window_days,
+                    )
+                    _COCKPIT_CACHE.set(lane_cache_key, lane_counts)
+            archive_cache_key = (
+                "archive_lane",
+                str(app.config["DB_PATH"]),
+                tuple(account_emails),
+                window_days,
+                status,
+                lane,
+                page,
+                bool(reveal_pii),
+                int(time.time()) // 15,
             )
+            cached_payload = _COCKPIT_CACHE.get(archive_cache_key)
+            if isinstance(cached_payload, Mapping):
+                payload = dict(cached_payload)
+            else:
+                if hasattr(analytics, "lane_archive_rows"):
+                    payload = analytics.lane_archive_rows(
+                        account_email=account_emails[0],
+                        account_emails=account_emails,
+                        window_days=window_days,
+                        page=page,
+                        page_size=ARCHIVE_PAGE_SIZE,
+                        status=status,
+                        lane=lane,
+                        reveal_pii=reveal_pii,
+                    )
+                else:
+                    payload = analytics.email_archive_page(
+                        account_email=account_emails[0],
+                        account_emails=account_emails,
+                        window_days=window_days,
+                        page=page,
+                        page_size=ARCHIVE_PAGE_SIZE,
+                        status=status,
+                        reveal_pii=reveal_pii,
+                    )
+                _COCKPIT_CACHE.set(archive_cache_key, payload)
+            payload = payload if isinstance(payload, Mapping) else {}
             rows = payload.get("rows") if isinstance(payload, Mapping) else []
             if not isinstance(rows, list):
                 rows = []
@@ -1748,6 +1925,8 @@ def create_app(
                 params["account_emails"] = ",".join(account_emails)
             if window_days:
                 params["window_days"] = str(window_days)
+            if lane:
+                params["lane"] = lane
             if status and status != "any":
                 params["status"] = status
             if reveal_pii:
@@ -1807,6 +1986,13 @@ def create_app(
             title=app.config["APP_TITLE"],
             page_title="Email Archive",
             dashboard_vars=dashboard_vars,
+            lane=lane,
+            lane_pills=_build_lane_pills(
+                selected_lane=lane,
+                counts=lane_counts,
+                base_params=base_params,
+                endpoint="archive",
+            ),
             account_emails=account_emails,
             window_days=window_days or 7,
             status=status,
@@ -1827,6 +2013,7 @@ def create_app(
             engineer_mode=include_engineer,
             error=error_message,
             hide_limit=True,
+            share_url=url_for("archive", **detail_params),
         )
 
     @app.route("/commitments")
@@ -3038,6 +3225,7 @@ def create_app(
             default=30,
             allowed=ALLOWED_WINDOWS,
         )
+        lane = _parse_lane(request.args.get("lane"))
         event_filter, filter_error = _parse_event_filter(request.args.get("type"))
         page = _parse_page(request.args.get("page"), default=1)
         reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
@@ -3059,12 +3247,14 @@ def create_app(
 
         analytics = _analytics()
         narrative: dict[str, object] = {"groups": [], "total_groups": 0, "page": page}
+        lane_counts: dict[str, int] = {key: 0 for key in LANE_KEYS}
         if not error_message and window_days:
             cache_key = (
-                "events_narrative",
+                "events_narrative_lane",
                 str(app.config["DB_PATH"]),
                 tuple(account_emails),
                 window_days,
+                lane,
                 event_filter,
                 page,
                 bool(reveal_pii),
@@ -3074,16 +3264,45 @@ def create_app(
             if isinstance(cached, Mapping):
                 narrative = dict(cached)
             else:
-                narrative = analytics.events_narrative_v1(
-                    account_email=account_emails[0],
-                    account_emails=account_emails,
-                    window_days=window_days,
-                    event_filter=event_filter,
-                    page=page,
-                    page_size=EVENTS_GROUP_PAGE_SIZE,
-                    reveal_pii=reveal_pii,
-                )
+                if hasattr(analytics, "lane_event_groups"):
+                    narrative = analytics.lane_event_groups(
+                        account_email=account_emails[0],
+                        account_emails=account_emails,
+                        window_days=window_days,
+                        lane=lane,
+                        event_filter=event_filter,
+                        page=page,
+                        page_size=EVENTS_GROUP_PAGE_SIZE,
+                        reveal_pii=reveal_pii,
+                    )
+                else:
+                    narrative = analytics.events_narrative_v1(
+                        account_email=account_emails[0],
+                        account_emails=account_emails,
+                        window_days=window_days,
+                        event_filter=event_filter,
+                        page=page,
+                        page_size=EVENTS_GROUP_PAGE_SIZE,
+                        reveal_pii=reveal_pii,
+                    )
                 _EVENTS_NARRATIVE_CACHE.set(cache_key, narrative)
+            if hasattr(analytics, "lane_counts"):
+                lane_cache_key = (
+                    "lane_counts",
+                    str(app.config["DB_PATH"]),
+                    tuple(account_emails),
+                    window_days,
+                )
+                cached_counts = _COCKPIT_CACHE.get(lane_cache_key)
+                if isinstance(cached_counts, Mapping):
+                    lane_counts = {key: int(cached_counts.get(key) or 0) for key in LANE_KEYS}
+                else:
+                    lane_counts = analytics.lane_counts(
+                        account_email=account_emails[0],
+                        account_emails=account_emails,
+                        window_days=window_days,
+                    )
+                    _COCKPIT_CACHE.set(lane_cache_key, lane_counts)
 
         groups: list[dict[str, object]] = []
         for group in narrative.get("groups", []):
@@ -3144,6 +3363,8 @@ def create_app(
                 params["account_emails"] = ",".join(account_emails)
             if window_days:
                 params["window_days"] = str(window_days)
+            if lane:
+                params["lane"] = lane
             if event_filter and event_filter != "all":
                 params["type"] = event_filter
             if reveal_pii:
@@ -3173,6 +3394,13 @@ def create_app(
             pii_enabled=reveal_pii,
             error=error_message,
             hide_limit=True,
+            lane=lane,
+            lane_pills=_build_lane_pills(
+                selected_lane=lane,
+                counts=lane_counts,
+                base_params=base_params,
+                endpoint="events",
+            ),
             groups=groups,
             event_filter=event_filter,
             page=page,
@@ -3180,6 +3408,7 @@ def create_app(
             total_groups=total_groups,
             prev_url=prev_url,
             next_url=next_url,
+            share_url=url_for("events", **base_params, page=page),
         )
 
     @app.route("/email", methods=["GET"])

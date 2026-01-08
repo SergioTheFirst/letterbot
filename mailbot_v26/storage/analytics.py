@@ -64,6 +64,35 @@ class KnowledgeAnalytics:
         EventType.COMMITMENT_STATUS_CHANGED.value,
         EventType.COMMITMENT_EXPIRED.value,
     }
+    _LANE_KEYS = (
+        "all",
+        "critical",
+        "commitments",
+        "deferred",
+        "failures",
+        "learning",
+    )
+    _LANE_EVENT_TYPES = {
+        "critical": {
+            EventType.PRIORITY_DECISION_RECORDED.value,
+            EventType.TELEGRAM_FAILED.value,
+            EventType.DELIVERY_POLICY_APPLIED.value,
+            EventType.ANOMALY_DETECTED.value,
+            EventType.DEADLOCK_DETECTED.value,
+        },
+        "commitments": set(_COMMITMENT_EVENT_TYPES),
+        "deferred": {
+            EventType.ATTENTION_DEFERRED_FOR_DIGEST.value,
+            EventType.DELIVERY_POLICY_APPLIED.value,
+        },
+        "failures": {
+            EventType.TELEGRAM_FAILED.value,
+            EventType.DEADLOCK_DETECTED.value,
+            EventType.SILENCE_SIGNAL_DETECTED.value,
+            EventType.ANOMALY_DETECTED.value,
+        },
+        "learning": set(_NARRATIVE_LEARNING_TYPES),
+    }
 
     def __init__(self, path: Path | str, *, read_only: bool = False) -> None:
         self.path = Path(path)
@@ -105,6 +134,100 @@ class KnowledgeAnalytics:
     def _window_start_ts(self, days: int) -> float:
         anchor = datetime.now(timezone.utc).timestamp()
         return anchor - (days * 24 * 60 * 60)
+
+    def _normalize_lane(self, lane: str | None) -> str:
+        candidate = str(lane or "all").strip().lower()
+        if candidate not in self._LANE_KEYS:
+            return "all"
+        return candidate
+
+    def _lane_event_filter_types(self, lane: str | None) -> list[str]:
+        normalized = self._normalize_lane(lane)
+        if normalized == "all":
+            return []
+        types = self._LANE_EVENT_TYPES.get(normalized, set())
+        return sorted(types)
+
+    def _lane_email_clause(self, lane: str | None, *, since_ts: float) -> tuple[str, list[object]]:
+        normalized = self._normalize_lane(lane)
+        if normalized == "all":
+            return "", []
+        conditions: list[str] = []
+        params: list[object] = []
+        if normalized == "critical":
+            conditions.append("e.priority = ?")
+            params.append("🔴")
+            conditions.append(
+                "EXISTS (SELECT 1 FROM events_v1 ev "
+                "WHERE ev.email_id = e.id AND ev.event_type = ? AND ev.ts_utc >= ?)"
+            )
+            params.extend([EventType.TELEGRAM_FAILED.value, since_ts])
+            conditions.append(
+                "EXISTS (SELECT 1 FROM events_v1 ev "
+                "WHERE ev.email_id = e.id AND ev.event_type = ? AND ev.ts_utc >= ? "
+                "AND ev.payload_json IS NOT NULL AND UPPER(ev.payload_json) LIKE ?)"
+            )
+            params.extend([EventType.DELIVERY_POLICY_APPLIED.value, since_ts, "%IMMEDIATE%"])
+        elif normalized == "commitments":
+            conditions.append(
+                "EXISTS (SELECT 1 FROM commitments c "
+                "WHERE c.email_row_id = e.id AND c.status IN (?, ?))"
+            )
+            params.extend(["pending", "expired"])
+            commitment_types = sorted(self._COMMITMENT_EVENT_TYPES)
+            placeholders = ", ".join(["?"] * len(commitment_types))
+            conditions.append(
+                "EXISTS (SELECT 1 FROM events_v1 ev "
+                f"WHERE ev.email_id = e.id AND ev.event_type IN ({placeholders}) AND ev.ts_utc >= ?)"
+            )
+            params.extend(commitment_types)
+            params.append(since_ts)
+        elif normalized == "deferred":
+            conditions.append("e.deferred_for_digest = 1")
+            conditions.append(
+                "EXISTS (SELECT 1 FROM events_v1 ev "
+                "WHERE ev.email_id = e.id AND ev.event_type = ? AND ev.ts_utc >= ?)"
+            )
+            params.extend([EventType.ATTENTION_DEFERRED_FOR_DIGEST.value, since_ts])
+            conditions.append(
+                "EXISTS (SELECT 1 FROM events_v1 ev "
+                "WHERE ev.email_id = e.id AND ev.event_type = ? AND ev.ts_utc >= ? "
+                "AND ev.payload_json IS NOT NULL AND ("
+                "UPPER(ev.payload_json) LIKE ? OR UPPER(ev.payload_json) LIKE ? OR UPPER(ev.payload_json) LIKE ?))"
+            )
+            params.extend(
+                [
+                    EventType.DELIVERY_POLICY_APPLIED.value,
+                    since_ts,
+                    "%BATCH%",
+                    "%DEFER%",
+                    "%SILENT%",
+                ]
+            )
+        elif normalized == "failures":
+            conditions.append(
+                "EXISTS (SELECT 1 FROM events_v1 ev "
+                "WHERE ev.email_id = e.id AND ev.event_type = ? AND ev.ts_utc >= ?)"
+            )
+            params.extend([EventType.TELEGRAM_FAILED.value, since_ts])
+            conditions.append(
+                "EXISTS (SELECT 1 FROM processing_spans ps "
+                "WHERE ps.email_id = e.id AND ps.ts_start_utc >= ? AND ps.outcome != ?)"
+            )
+            params.extend([since_ts, "ok"])
+        elif normalized == "learning":
+            learning_types = sorted(self._NARRATIVE_LEARNING_TYPES)
+            placeholders = ", ".join(["?"] * len(learning_types))
+            conditions.append(
+                "EXISTS (SELECT 1 FROM events_v1 ev "
+                f"WHERE ev.email_id = e.id AND ev.event_type IN ({placeholders}) AND ev.ts_utc >= ?)"
+            )
+            params.extend(learning_types)
+            params.append(since_ts)
+
+        if not conditions:
+            return "", []
+        return " AND (" + " OR ".join(conditions) + ")", params
 
     @staticmethod
     def _percentile(values: list[float], percentile: float) -> float | None:
@@ -610,13 +733,13 @@ class KnowledgeAnalytics:
                 break
         return "; ".join(pairs)
 
-    def events_narrative_v1(
+    def _events_narrative_groups(
         self,
         *,
         account_email: str,
         account_emails: Iterable[str] | None,
         window_days: int,
-        event_filter: str,
+        filter_types: Sequence[str],
         page: int,
         page_size: int,
         reveal_pii: bool,
@@ -632,7 +755,6 @@ class KnowledgeAnalytics:
         resolved_page = max(1, int(page))
         resolved_page_size = max(1, int(page_size))
         since_ts = self._window_start_ts(window_days)
-        filter_types = self._narrative_filter_types(event_filter)
 
         clause, clause_params = self._account_scope_clause(account_ids)
         filter_clause = ""
@@ -937,6 +1059,65 @@ class KnowledgeAnalytics:
             "page_size": resolved_page_size,
         }
 
+    def events_narrative_v1(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+        event_filter: str,
+        page: int,
+        page_size: int,
+        reveal_pii: bool,
+    ) -> dict[str, object]:
+        filter_types = self._narrative_filter_types(event_filter)
+        return self._events_narrative_groups(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=window_days,
+            filter_types=filter_types,
+            page=page,
+            page_size=page_size,
+            reveal_pii=reveal_pii,
+        )
+
+    def lane_event_groups(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+        lane: str | None,
+        event_filter: str,
+        page: int,
+        page_size: int,
+        reveal_pii: bool,
+    ) -> dict[str, object]:
+        lane_types = set(self._lane_event_filter_types(lane))
+        filter_types = set(self._narrative_filter_types(event_filter))
+        if lane_types and filter_types:
+            combined = sorted(lane_types.intersection(filter_types))
+        elif lane_types:
+            combined = sorted(lane_types)
+        else:
+            combined = sorted(filter_types)
+        if lane_types and filter_types and not combined:
+            return {
+                "groups": [],
+                "total_groups": 0,
+                "page": page,
+                "page_size": page_size,
+            }
+        return self._events_narrative_groups(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=window_days,
+            filter_types=combined,
+            page=page,
+            page_size=page_size,
+            reveal_pii=reveal_pii,
+        )
+
     def bootstrap_start_ts(
         self,
         *,
@@ -1041,6 +1222,228 @@ class KnowledgeAnalytics:
         """
         params: list[object] = [since_iso, *clause_params]
         query += clause
+        query += " ORDER BY received_at DESC, id DESC LIMIT ?"
+        params.append(resolved_limit * 2)
+        try:
+            email_rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return []
+
+        delivered_events = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.TELEGRAM_DELIVERED.value,
+            since_ts=since_ts,
+        )
+        failed_events = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.TELEGRAM_FAILED.value,
+            since_ts=since_ts,
+        )
+        policy_events = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.DELIVERY_POLICY_APPLIED.value,
+            since_ts=since_ts,
+        )
+
+        entries: dict[int, dict[str, object]] = {}
+        for row in email_rows:
+            try:
+                email_id = int(row.get("id"))
+            except (TypeError, ValueError):
+                continue
+            received_raw = str(row.get("received_at") or "")
+            received_dt = parse_sqlite_datetime(received_raw)
+            received_ts = received_dt.timestamp() if received_dt else None
+            entries[email_id] = {
+                "email_id": email_id,
+                "account_email": row.get("account_email") or "",
+                "from_email": row.get("from_email") or "",
+                "action_line": row.get("action_line") or "",
+                "body_summary": row.get("body_summary") or "",
+                "received_ts_utc": received_ts,
+                "status": "In-flight",
+            }
+
+        def _event_ts(row: Mapping[str, object]) -> float | None:
+            payload = self._event_payload(row)
+            if isinstance(payload, Mapping):
+                candidate = payload.get("occurred_at_utc")
+                try:
+                    return float(candidate)
+                except (TypeError, ValueError):
+                    pass
+            try:
+                return float(row.get("ts_utc"))
+            except (TypeError, ValueError):
+                return None
+
+        for event in policy_events:
+            try:
+                email_id = int(event.get("email_id"))
+            except (TypeError, ValueError):
+                continue
+            if email_id not in entries:
+                continue
+            payload = self._event_payload(event)
+            mode_value = ""
+            if isinstance(payload, Mapping):
+                raw_mode = payload.get("mode") or payload.get("delivery_mode")
+                if raw_mode:
+                    mode_value = str(raw_mode)
+            ts_value = _event_ts(event) or 0.0
+            existing_ts = entries[email_id].get("delivery_mode_ts")
+            if existing_ts is None or ts_value >= float(existing_ts):
+                entries[email_id]["delivery_mode_ts"] = ts_value
+                entries[email_id]["delivery_mode"] = mode_value
+
+        for event in delivered_events:
+            try:
+                email_id = int(event.get("email_id"))
+            except (TypeError, ValueError):
+                continue
+            if email_id not in entries:
+                continue
+            ts_value = _event_ts(event)
+            if ts_value is None:
+                continue
+            existing_ts = entries[email_id].get("delivered_ts_utc")
+            if existing_ts is None or ts_value > float(existing_ts):
+                entries[email_id]["delivered_ts_utc"] = ts_value
+                entries[email_id]["status"] = "Delivered"
+
+        for event in failed_events:
+            try:
+                email_id = int(event.get("email_id"))
+            except (TypeError, ValueError):
+                continue
+            if email_id not in entries:
+                continue
+            if entries[email_id].get("delivered_ts_utc") is not None:
+                continue
+            ts_value = _event_ts(event)
+            if ts_value is None:
+                continue
+            existing_ts = entries[email_id].get("failed_ts_utc")
+            if existing_ts is None or ts_value > float(existing_ts):
+                entries[email_id]["failed_ts_utc"] = ts_value
+                entries[email_id]["status"] = "Failed"
+
+        results: list[dict[str, object]] = []
+        for entry in entries.values():
+            received_ts = entry.get("received_ts_utc")
+            delivered_ts = entry.get("delivered_ts_utc")
+            e2e_seconds = None
+            if delivered_ts is not None and received_ts is not None:
+                try:
+                    e2e_seconds = max(0.0, float(delivered_ts) - float(received_ts))
+                except (TypeError, ValueError):
+                    e2e_seconds = None
+            mask_pii = not reveal_pii
+            from_label = (
+                self._mask_email_address(entry.get("from_email"))
+                if mask_pii
+                else str(entry.get("from_email") or "")
+            )
+            to_label = (
+                self._mask_email_address(entry.get("account_email"))
+                if mask_pii
+                else str(entry.get("account_email") or "")
+            )
+            preview_parts = [
+                str(entry.get("action_line") or ""),
+                str(entry.get("body_summary") or ""),
+            ]
+            combined_preview = " — ".join(part for part in preview_parts if part)
+            if mask_pii:
+                combined_preview = self._strip_emails(combined_preview)
+            preview = self._clamp_preview_text(combined_preview, limit=160)
+
+            results.append(
+                {
+                    "email_id": entry.get("email_id"),
+                    "received_ts_utc": received_ts,
+                    "delivered_ts_utc": delivered_ts,
+                    "status": entry.get("status") or "In-flight",
+                    "from_label": from_label,
+                    "to_label": to_label,
+                    "telegram_preview": preview,
+                    "e2e_seconds": e2e_seconds,
+                    "delivery_mode": entry.get("delivery_mode") or "",
+                }
+            )
+
+        sorted_rows = sorted(
+            results,
+            key=lambda item: (
+                item.get("delivered_ts_utc") is None,
+                -(float(item.get("delivered_ts_utc") or 0.0)),
+                -(float(item.get("received_ts_utc") or 0.0)),
+                -(float(item.get("email_id") or 0.0)),
+            ),
+        )
+        return sorted_rows[:resolved_limit]
+
+    def lane_counts(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+    ) -> dict[str, int]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        counts: dict[str, int] = {key: 0 for key in self._LANE_KEYS}
+        if not account_ids:
+            return counts
+        since_ts = self._window_start_ts(window_days)
+        since_iso = datetime.fromtimestamp(since_ts, tz=timezone.utc).isoformat()
+        clause, clause_params = self._account_email_clause(account_ids)
+        base_query = """
+        SELECT COUNT(1) AS total_count
+        FROM emails e
+        WHERE e.received_at >= ?
+        """
+        for lane in self._LANE_KEYS:
+            lane_clause, lane_params = self._lane_email_clause(lane, since_ts=since_ts)
+            query = base_query + clause + lane_clause
+            params: list[object] = [since_iso, *clause_params, *lane_params]
+            try:
+                rows = self._execute_select(query, params)
+            except sqlite3.OperationalError:
+                rows = []
+            total = int(rows[0].get("total_count") or 0) if rows else 0
+            counts[lane] = total
+        return counts
+
+    def lane_activity_rows(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        window_days: int = 7,
+        limit: int = 30,
+        lane: str | None = None,
+        reveal_pii: bool = False,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return []
+        resolved_limit = max(0, int(limit))
+        if resolved_limit <= 0:
+            return []
+        since_ts = self._window_start_ts(window_days)
+        since_iso = datetime.fromtimestamp(
+            since_ts, tz=timezone.utc
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        clause, clause_params = self._account_email_clause(account_ids)
+        lane_clause, lane_params = self._lane_email_clause(lane, since_ts=since_ts)
+        query = """
+        SELECT id, account_email, from_email, action_line, body_summary, received_at
+        FROM emails e
+        WHERE received_at >= ?
+        """
+        params: list[object] = [since_iso, *clause_params, *lane_params]
+        query += clause
+        query += lane_clause
         query += " ORDER BY received_at DESC, id DESC LIMIT ?"
         params.append(resolved_limit * 2)
         try:
@@ -1412,6 +1815,182 @@ class KnowledgeAnalytics:
                     "account_label": account_label,
                     "preview": preview,
                     "status": status_label,
+                    "e2e_seconds": e2e_seconds,
+                    "delivery_mode": delivery_mode,
+                    "failure_reason": failure_reason,
+                    "stage_hint": stage_hint,
+                }
+            )
+
+        return {"rows": results, "total_count": total_count}
+
+    def lane_archive_rows(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        window_days: int = 7,
+        page: int = 1,
+        page_size: int = 50,
+        status: str = "any",
+        lane: str | None = None,
+        reveal_pii: bool = False,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return {"rows": [], "total_count": 0}
+        resolved_page = max(1, int(page))
+        resolved_page_size = max(1, int(page_size))
+        since_ts = self._window_start_ts(window_days)
+        since_iso = datetime.fromtimestamp(since_ts, tz=timezone.utc).isoformat()
+        status_norm = str(status or "any").strip().lower()
+        if status_norm not in {"any", "ok", "warn", "fail"}:
+            status_norm = "any"
+
+        clause, clause_params = self._account_email_clause(account_ids)
+        lane_clause, lane_params = self._lane_email_clause(lane, since_ts=since_ts)
+        status_clause = "1=1"
+        if status_norm == "ok":
+            status_clause = "delivered_ts IS NOT NULL"
+        elif status_norm == "fail":
+            status_clause = "failed_ts IS NOT NULL AND delivered_ts IS NULL"
+        elif status_norm == "warn":
+            status_clause = "delivered_ts IS NULL AND failed_ts IS NULL"
+
+        base_query = """
+        WITH scoped AS (
+            SELECT e.id, e.account_email, e.from_email, e.action_line, e.body_summary, e.received_at,
+                (
+                    SELECT MAX(ts_utc) FROM events_v1
+                    WHERE email_id = e.id AND event_type = ? AND ts_utc >= ?
+                ) AS delivered_ts,
+                (
+                    SELECT MAX(ts_utc) FROM events_v1
+                    WHERE email_id = e.id AND event_type = ? AND ts_utc >= ?
+                ) AS failed_ts,
+                (
+                    SELECT payload_json FROM events_v1
+                    WHERE email_id = e.id AND event_type = ? AND ts_utc >= ?
+                    ORDER BY ts_utc DESC, event_type ASC, email_id DESC
+                    LIMIT 1
+                ) AS failed_payload,
+                (
+                    SELECT payload_json FROM events_v1
+                    WHERE email_id = e.id AND event_type = ? AND ts_utc >= ?
+                    ORDER BY ts_utc DESC, event_type ASC, email_id DESC
+                    LIMIT 1
+                ) AS policy_payload,
+                (
+                    SELECT payload_json FROM events_v1
+                    WHERE email_id = e.id AND event_type = ? AND ts_utc >= ?
+                    ORDER BY ts_utc DESC, event_type ASC, email_id DESC
+                    LIMIT 1
+                ) AS delivered_payload,
+                (
+                    SELECT stage_durations_json FROM processing_spans
+                    WHERE email_id = e.id AND ts_start_utc >= ?
+                    ORDER BY ts_start_utc DESC, span_id ASC
+                    LIMIT 1
+                ) AS stage_durations_json
+            FROM emails e
+            WHERE e.received_at >= ?
+        """
+        params: list[object] = [
+            EventType.TELEGRAM_DELIVERED.value,
+            since_ts,
+            EventType.TELEGRAM_FAILED.value,
+            since_ts,
+            EventType.TELEGRAM_FAILED.value,
+            since_ts,
+            EventType.DELIVERY_POLICY_APPLIED.value,
+            since_ts,
+            EventType.TELEGRAM_DELIVERED.value,
+            since_ts,
+            since_ts,
+            since_iso,
+            *clause_params,
+            *lane_params,
+        ]
+        base_query += clause
+        base_query += lane_clause
+        base_query += "\n        )\n"
+        count_query = f"{base_query}SELECT COUNT(1) AS total_count FROM scoped WHERE {status_clause}"
+        try:
+            count_rows = self._execute_select(count_query, params)
+            total_count = int(count_rows[0].get("total_count") or 0) if count_rows else 0
+        except sqlite3.OperationalError:
+            total_count = 0
+
+        page_offset = (resolved_page - 1) * resolved_page_size
+        page_query = (
+            f"{base_query}SELECT * FROM scoped WHERE {status_clause} "
+            "ORDER BY received_at DESC, id DESC LIMIT ? OFFSET ?"
+        )
+        page_params = [*params, resolved_page_size, page_offset]
+        try:
+            rows = self._execute_select(page_query, page_params)
+        except sqlite3.OperationalError:
+            rows = []
+
+        results: list[dict[str, object]] = []
+        for row in rows:
+            received_dt = parse_sqlite_datetime(str(row.get("received_at") or ""))
+            received_ts = received_dt.timestamp() if received_dt else None
+            delivered_ts = self._safe_float(row.get("delivered_ts"))
+            failed_ts = self._safe_float(row.get("failed_ts"))
+            status_label = "In-flight"
+            if delivered_ts is not None:
+                status_label = "Delivered"
+            elif failed_ts is not None:
+                status_label = "Failed"
+            e2e_seconds = None
+            if delivered_ts is not None and received_ts is not None:
+                e2e_seconds = max(0.0, float(delivered_ts) - float(received_ts))
+            from_email = row.get("from_email") or ""
+            account_email = row.get("account_email") or ""
+            from_label = (
+                self._mask_email_address(from_email)
+                if not reveal_pii
+                else str(from_email)
+            )
+            account_label = (
+                self._mask_email_address(account_email)
+                if not reveal_pii
+                else str(account_email)
+            )
+            preview = self._build_email_preview(
+                row.get("action_line"),
+                row.get("body_summary"),
+                reveal_pii=reveal_pii,
+            )
+            policy_payload = self._parse_json_dict(row.get("policy_payload"))
+            delivered_payload = self._parse_json_dict(row.get("delivered_payload"))
+            delivery_mode = ""
+            if policy_payload:
+                raw_mode = policy_payload.get("mode") or policy_payload.get("delivery_mode")
+                if raw_mode:
+                    delivery_mode = str(raw_mode)
+            if not delivery_mode and delivered_payload:
+                raw_mode = delivered_payload.get("delivery_mode")
+                if raw_mode:
+                    delivery_mode = str(raw_mode)
+            failed_payload = self._parse_json_dict(row.get("failed_payload"))
+            failure_reason = self._sanitize_failure_reason(
+                failed_payload.get("error") if failed_payload else "",
+                reveal_pii=reveal_pii,
+            )
+            stage_hint = self._stage_breakdown_hint(row.get("stage_durations_json"))
+
+            results.append(
+                {
+                    "email_id": row.get("id"),
+                    "received_ts_utc": received_ts,
+                    "delivered_ts_utc": delivered_ts,
+                    "failed_ts_utc": failed_ts,
+                    "status": status_label,
+                    "from_label": from_label,
+                    "account_label": account_label,
+                    "preview": preview,
                     "e2e_seconds": e2e_seconds,
                     "delivery_mode": delivery_mode,
                     "failure_reason": failure_reason,

@@ -360,11 +360,21 @@ def render_template(template_path: str, **context: Any) -> str:
 def url_for(endpoint: str, **values: Any) -> str:
     app = _app_ctx.get(None)
     if app is None:
-        return f"/{endpoint if endpoint != 'index' else ''}" if endpoint else "/"
-    path = app._endpoint_map.get(endpoint)
-    if path:
+        path = f"/{endpoint if endpoint != 'index' else ''}" if endpoint else "/"
+    else:
+        path = app._endpoint_map.get(endpoint) or f"/{endpoint if endpoint else ''}"
+    if not values:
         return path
-    return f"/{endpoint if endpoint else ''}"
+    parts: list[tuple[str, str]] = []
+    for key in sorted(values.keys()):
+        value = values[key]
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                parts.append((key, str(item)))
+        else:
+            parts.append((key, str(value)))
+    query = urlencode(parts)
+    return f"{path}?{query}" if query else path
 
 
 def _guess_mime(file_path: str) -> str:
