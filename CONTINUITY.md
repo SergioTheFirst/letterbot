@@ -33,6 +33,7 @@ Done:
 - 2026-01-15: web cockpit home with owner/engineer modes, status strip, and read-only analytics tests.
 - 2026-01-16: health cockpit status page with basic/engineer modes, partial refresh, read-only indexes, and login selector/tests.
 - 2026-01-08: web archive + email forensics views added with deterministic ordering, new indexes, screenshot helper hardening, and tests.
+- IMAP UID bootstrap cursor behavior verified with criteria-aware tests.
 Now:
 - None.
 Next:
