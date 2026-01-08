@@ -42,9 +42,14 @@ def test_web_pages_avoid_empty_state_phrases(tmp_path: Path) -> None:
             "/events",
             "/health",
             "/relationships",
+            "/archive",
+            "/email/1",
         ]:
             response = client.get(path)
-            assert response.status_code == 200
+            if path.startswith("/email/"):
+                assert response.status_code in {200, 404}
+            else:
+                assert response.status_code == 200
             body = response.get_data(as_text=True).lower()
             for phrase in forbidden_phrases:
                 assert phrase not in body

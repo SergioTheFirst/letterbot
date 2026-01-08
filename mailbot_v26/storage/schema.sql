@@ -210,6 +210,9 @@ CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts
 CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts
     ON events_v1(account_id, ts_utc);
 
+CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts_id
+    ON events_v1(account_id, ts_utc DESC, id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_events_v1_entity_ts
     ON events_v1(entity_id, ts_utc);
 

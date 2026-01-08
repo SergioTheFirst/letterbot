@@ -48,6 +48,8 @@ ALLOWED_WINDOWS = {7, 30, 90}
 ALLOWED_ARCHIVE_WINDOWS = {1, 7, 30, 90}
 ARCHIVE_PAGE_SIZE = 50
 ARCHIVE_STATUSES = {"any", "ok", "warn", "fail"}
+EVENTS_GROUP_PAGE_SIZE = 20
+EVENT_FILTERS = {"all", "processing", "delivery", "health", "learning"}
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,7 @@ _COCKPIT_CACHE = _TTLCache(10.0)
 _HEALTH_SUMMARY_CACHE = _TTLCache(15.0)
 _HEALTH_COMPONENT_CACHE = _TTLCache(30.0)
 _HEALTH_INCIDENT_CACHE = _TTLCache(30.0)
+_EVENTS_NARRATIVE_CACHE = _TTLCache(20.0)
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -309,8 +312,24 @@ def _render_stub_html(
                     outcome=html.escape(str(row.get("outcome") or "")),
                     extra_cols=extra_cols,
                 )
-            )
+        )
         return f"<html><body>{header}<table>{''.join(rows)}</table></body></html>"
+
+    if template_name == "events.html":
+        groups = context.get("groups") if isinstance(context, Mapping) else []
+        blocks = []
+        for group in groups or []:
+            if not isinstance(group, Mapping):
+                continue
+            group_kind = group.get("group_kind")
+            headline = group.get("headline") if isinstance(group.get("headline"), Mapping) else {}
+            if group_kind == "email":
+                label = f"Email {group.get('group_id')}"
+            else:
+                label = str(headline.get("label") or group.get("group_id") or "")
+            blocks.append(f"<div class=\"event-group\">{html.escape(label)}</div>")
+        body = "".join(blocks) if blocks else "<div class=\"hint\">Adjust window_days or account scope.</div>"
+        return f"<html><body>{header}{body}</body></html>"
 
     return render_template(str(template_path), **context)
 
@@ -334,6 +353,23 @@ def _build_window_options(selected: int | None) -> str:
         is_selected = " selected" if value == selected else ""
         options.append(f"<option value=\"{value}\"{is_selected}>Last {value} days</option>")
     return "".join(options)
+
+
+def _parse_event_filter(raw: Optional[str]) -> tuple[str, Optional[str]]:
+    if raw is None or raw == "":
+        return "all", None
+    cleaned = str(raw).strip().lower()
+    if cleaned in EVENT_FILTERS:
+        return cleaned, None
+    return "all", f"type must be one of {', '.join(sorted(EVENT_FILTERS))}"
+
+
+def _parse_page(raw: Optional[str], *, default: int = 1) -> int:
+    try:
+        value = int(raw or default)
+    except (TypeError, ValueError):
+        return default
+    return max(1, value)
 
 
 def _build_archive_window_options(selected: int | None) -> str:
@@ -911,6 +947,17 @@ def _status_class_for_mode(mode: str) -> str:
     if "EMERGENCY" in normalized:
         return "danger"
     if "DEGRADED" in normalized:
+        return "warn"
+    return "muted"
+
+
+def _status_class_for_label(label: str) -> str:
+    normalized = str(label or "").strip().lower()
+    if normalized in {"ok", "delivered", "success", "full", "ready"}:
+        return "success"
+    if normalized in {"failed", "fail", "error", "down", "emergency"}:
+        return "danger"
+    if normalized in {"warn", "warning", "degraded", "in-flight", "pending"}:
         return "warn"
     return "muted"
 
@@ -2577,50 +2624,170 @@ def create_app(
 
     @app.route("/events", methods=["GET"])
     def events():
-        accounts = _available_accounts(app.config["DB_PATH"])
-        default_account = accounts[0] if accounts else None
-        account_email, account_emails, window_days, error = _validate_latency_params(
-            args=request.args,
-            require_account=False,
-            default_account=default_account,
-            window_default=30,
+        dashboard_vars = _dashboard_vars()
+        account_emails = _resolve_account_scope(dashboard_vars)
+        window_days, window_error = _parse_window_days(
+            request.args.get("window_days"),
+            default=30,
+            allowed=ALLOWED_WINDOWS,
         )
-        limit, limit_error = _parse_limit(request.args.get("limit"), default=200, max_limit=500)
-        error_message = error or limit_error or (
-            "Account selection required" if not account_email else ""
+        event_filter, filter_error = _parse_event_filter(request.args.get("type"))
+        page = _parse_page(request.args.get("page"), default=1)
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
         )
+        error_message = window_error or filter_error
+        if not account_emails:
+            error_message = error_message or "Account scope required to view events."
+
+        adjusted_dashboard = DashboardVars(
+            account_emails=account_emails,
+            window_days=window_days or 30,
+            limit=dashboard_vars.limit,
+            pii=dashboard_vars.pii,
+        )
+        scope_hint = None
+        if account_emails:
+            scope_hint = f"{account_emails[0]} • last {window_days or 30} days"
+
         analytics = _analytics()
-        items: list[dict[str, object]] = []
-        if not error_message and account_email:
-            resolved_window = window_days or 30
-            resolved_limit = limit or 200
-            items = analytics.events_timeline(
-                account_email=account_email,
-                account_emails=account_emails,
-                window_days=resolved_window,
-                limit=resolved_limit,
+        narrative: dict[str, object] = {"groups": [], "total_groups": 0, "page": page}
+        if not error_message and window_days:
+            cache_key = (
+                "events_narrative",
+                str(app.config["DB_PATH"]),
+                tuple(account_emails),
+                window_days,
+                event_filter,
+                page,
+                bool(reveal_pii),
+                int(time.time()) // 15,
             )
-        account_options = _build_select_options(accounts, account_email)
-        window_options = _build_window_options(window_days or 30)
-        limit_value = str(limit or 200)
-        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+            cached = _EVENTS_NARRATIVE_CACHE.get(cache_key)
+            if isinstance(cached, Mapping):
+                narrative = dict(cached)
+            else:
+                narrative = analytics.events_narrative_v1(
+                    account_email=account_emails[0],
+                    account_emails=account_emails,
+                    window_days=window_days,
+                    event_filter=event_filter,
+                    page=page,
+                    page_size=EVENTS_GROUP_PAGE_SIZE,
+                    reveal_pii=reveal_pii,
+                )
+                _EVENTS_NARRATIVE_CACHE.set(cache_key, narrative)
+
+        groups: list[dict[str, object]] = []
+        for group in narrative.get("groups", []):
+            headline = group.get("headline") if isinstance(group, Mapping) else {}
+            group_kind = group.get("group_kind")
+            group_id = group.get("group_id")
+            forensics_url = None
+            if group_kind == "email" and group_id is not None:
+                params = {
+                    "account_emails": ",".join(account_emails),
+                    "window_days": str(window_days or 30),
+                }
+                if reveal_pii:
+                    params["pii"] = "1"
+                params["id"] = str(int(group_id))
+                forensics_url = url_for("email_detail_redirect", **params)
+            status_label = ""
+            if isinstance(headline, Mapping):
+                if group_kind == "email":
+                    status_label = str(headline.get("delivery_status") or "")
+                else:
+                    status_label = str(headline.get("status_label") or "")
+
+            groups.append(
+                {
+                    "group_kind": group_kind,
+                    "group_id": group_id,
+                    "ts_first": _format_ts_utc(group.get("ts_first")),
+                    "ts_last": _format_ts_utc(group.get("ts_last")),
+                    "event_count": group.get("event_count") or 0,
+                    "headline": headline or {},
+                    "timeline": [
+                        {
+                            "ts": _format_ts_utc(item.get("ts_utc")),
+                            "event_type": item.get("event_type") or "",
+                            "stage": item.get("stage") or "",
+                            "outcome": item.get("outcome") or "",
+                            "notes_safe": item.get("notes_safe") or "",
+                        }
+                        for item in (group.get("timeline") or [])
+                    ],
+                    "forensics_url": forensics_url,
+                    "status_label": status_label,
+                    "status_class": _status_class_for_label(status_label),
+                }
+            )
+
+        total_groups = int(narrative.get("total_groups") or 0)
+        total_pages = max(1, int(math.ceil(total_groups / EVENTS_GROUP_PAGE_SIZE))) if total_groups else 1
+        if page > total_pages:
+            page = total_pages
+
+        def _base_params() -> dict[str, str]:
+            params: dict[str, str] = {}
+            if account_emails:
+                params["account_emails"] = ",".join(account_emails)
+            if window_days:
+                params["window_days"] = str(window_days)
+            if event_filter and event_filter != "all":
+                params["type"] = event_filter
+            if reveal_pii:
+                params["pii"] = "1"
+            return params
+
+        base_params = _base_params()
+        prev_url = None
+        if page > 1:
+            prev_params = dict(base_params)
+            prev_params["page"] = str(page - 1)
+            prev_url = url_for("events", **prev_params)
+        next_url = None
+        if page < total_pages:
+            next_params = dict(base_params)
+            next_params["page"] = str(page + 1)
+            next_url = url_for("events", **next_params)
+
         return _render_template(
             app,
             "events.html",
             title=app.config["APP_TITLE"],
-            static_url=_static_url(),
-            latency_url=url_for("latency"),
-            health_url=url_for("health"),
-            attention_url=url_for("attention"),
-            events_url=url_for("events"),
-            relationships_url=url_for("relationships"),
-            error_block=error_block,
-            account_options=account_options,
-            account_emails_value=",".join(account_emails),
-            window_options=window_options,
-            limit_value=limit_value,
-            events_block=_events_table(items),
+            page_title="Events Narrative",
+            dashboard_vars=adjusted_dashboard,
+            scope_hint=scope_hint,
+            pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
+            pii_enabled=reveal_pii,
+            error=error_message,
+            hide_limit=True,
+            groups=groups,
+            event_filter=event_filter,
+            page=page,
+            total_pages=total_pages,
+            total_groups=total_groups,
+            prev_url=prev_url,
+            next_url=next_url,
         )
+
+    @app.route("/email", methods=["GET"])
+    def email_detail_redirect():
+        email_id_raw = request.args.get("id")
+        try:
+            email_id = int(email_id_raw or 0)
+        except (TypeError, ValueError):
+            email_id = 0
+        if email_id <= 0:
+            return redirect(url_for("archive"))
+        params: dict[str, str] = {}
+        for key in ("account_emails", "window_days", "status", "page", "mode", "pii"):
+            value = request.args.get(key)
+            if value:
+                params[key] = value
+        return redirect(url_for("email_details", email_id=email_id, **params))
 
     @app.route("/relationships", methods=["GET"])
     def relationships():

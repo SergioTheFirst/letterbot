@@ -39,7 +39,7 @@ def test_banned_phrases_not_present(tmp_path: Path) -> None:
                 VALUES (1, 'acct@example.com', 'sender@example.com', '2026-01-01T00:00:00+00:00')
                 """
             )
-        for path in ["/", "/latency", "/health", "/archive", "/email/1"]:
+        for path in ["/", "/latency", "/health", "/archive", "/email/1", "/events"]:
             response = client.get(path)
             assert response.status_code == 200
             _assert_no_banned_phrases(response.get_data(as_text=True))

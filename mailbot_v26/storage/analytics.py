@@ -28,6 +28,38 @@ class WeeklyAccuracyProgress:
 
 
 class KnowledgeAnalytics:
+    _NARRATIVE_LEARNING_TYPES = {
+        EventType.PRIORITY_CORRECTION_RECORDED.value,
+        EventType.SURPRISE_DETECTED.value,
+        EventType.ATTENTION_DEBT_UPDATED.value,
+        EventType.CALIBRATION_PROPOSALS_GENERATED.value,
+    }
+    _NARRATIVE_HEALTH_TYPES = {
+        EventType.DEADLOCK_DETECTED.value,
+        EventType.SILENCE_SIGNAL_DETECTED.value,
+        EventType.RELATIONSHIP_HEALTH_UPDATED.value,
+        EventType.TRUST_SCORE_UPDATED.value,
+        EventType.ANOMALY_DETECTED.value,
+    }
+    _NARRATIVE_SYSTEM_TYPES = {
+        EventType.DAILY_DIGEST_SENT.value,
+        EventType.WEEKLY_DIGEST_SENT.value,
+    }
+    _NARRATIVE_PROCESSING_TYPES = {
+        EventType.EMAIL_RECEIVED.value,
+        EventType.ATTACHMENT_EXTRACTED.value,
+        EventType.PRIORITY_DECISION_RECORDED.value,
+        EventType.TG_RENDER_RECORDED.value,
+    }
+    _NARRATIVE_DELIVERY_TYPES = {
+        EventType.TELEGRAM_DELIVERED.value,
+        EventType.TELEGRAM_FAILED.value,
+        EventType.DELIVERY_POLICY_APPLIED.value,
+        EventType.ATTENTION_DEFERRED_FOR_DIGEST.value,
+        EventType.DAILY_DIGEST_SENT.value,
+        EventType.WEEKLY_DIGEST_SENT.value,
+    }
+
     def __init__(self, path: Path | str, *, read_only: bool = False) -> None:
         self.path = Path(path)
         self._query_only = bool(read_only)
@@ -537,6 +569,368 @@ class KnowledgeAnalytics:
             value = details.get(key)
             pairs.append(f"{key}={value}")
         return f"{prefix}: " + "; ".join(pairs)
+
+    def _narrative_group_kind(self, event_type: str) -> str:
+        if event_type in self._NARRATIVE_LEARNING_TYPES:
+            return "learning"
+        if event_type in self._NARRATIVE_HEALTH_TYPES:
+            return "health"
+        if event_type in self._NARRATIVE_SYSTEM_TYPES:
+            return "system"
+        return "other"
+
+    def _narrative_filter_types(self, category: str) -> list[str]:
+        cleaned = str(category or "all").strip().lower()
+        if cleaned == "processing":
+            return sorted(self._NARRATIVE_PROCESSING_TYPES)
+        if cleaned == "delivery":
+            return sorted(self._NARRATIVE_DELIVERY_TYPES)
+        if cleaned == "health":
+            return sorted(self._NARRATIVE_HEALTH_TYPES)
+        if cleaned == "learning":
+            return sorted(self._NARRATIVE_LEARNING_TYPES)
+        return []
+
+    def _narrative_event_notes(self, details: dict[str, object]) -> str:
+        if not details:
+            return ""
+        skip_keys = {"stage", "outcome"}
+        pairs = []
+        for key in sorted(details.keys()):
+            if key in skip_keys:
+                continue
+            value = details.get(key)
+            pairs.append(f"{key}={value}")
+            if len(pairs) >= 3:
+                break
+        return "; ".join(pairs)
+
+    def events_narrative_v1(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+        event_filter: str,
+        page: int,
+        page_size: int,
+        reveal_pii: bool,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return {
+                "groups": [],
+                "total_groups": 0,
+                "page": page,
+                "page_size": page_size,
+            }
+        resolved_page = max(1, int(page))
+        resolved_page_size = max(1, int(page_size))
+        since_ts = self._window_start_ts(window_days)
+        filter_types = self._narrative_filter_types(event_filter)
+
+        clause, clause_params = self._account_scope_clause(account_ids)
+        filter_clause = ""
+        filter_params: list[object] = []
+        if filter_types:
+            placeholders = ", ".join(["?"] * len(filter_types))
+            filter_clause = f" AND event_type IN ({placeholders})"
+            filter_params = list(filter_types)
+
+        group_kind_case = """
+            CASE
+                WHEN event_type IN ({learning}) THEN 'learning'
+                WHEN event_type IN ({health}) THEN 'health'
+                WHEN event_type IN ({system}) THEN 'system'
+                ELSE 'other'
+            END
+        """.format(
+            learning=", ".join(["?"] * len(self._NARRATIVE_LEARNING_TYPES)),
+            health=", ".join(["?"] * len(self._NARRATIVE_HEALTH_TYPES)),
+            system=", ".join(["?"] * len(self._NARRATIVE_SYSTEM_TYPES)),
+        )
+        group_kind_params: list[object] = [
+            *sorted(self._NARRATIVE_LEARNING_TYPES),
+            *sorted(self._NARRATIVE_HEALTH_TYPES),
+            *sorted(self._NARRATIVE_SYSTEM_TYPES),
+        ]
+
+        grouped_query = f"""
+        WITH scoped AS (
+            SELECT id, event_type, ts_utc, email_id
+            FROM events_v1
+            WHERE ts_utc >= ?{filter_clause}
+            {clause}
+        )
+        SELECT
+            CASE WHEN email_id IS NOT NULL THEN 'email' ELSE {group_kind_case} END AS group_kind,
+            CASE WHEN email_id IS NOT NULL THEN email_id ELSE event_type END AS group_id,
+            MIN(ts_utc) AS ts_first,
+            MAX(ts_utc) AS ts_last,
+            COUNT(*) AS event_count
+        FROM scoped
+        GROUP BY group_kind, group_id
+        ORDER BY ts_last DESC, group_kind ASC, group_id DESC
+        LIMIT ? OFFSET ?
+        """
+        group_params: list[object] = [
+            since_ts,
+            *filter_params,
+            *clause_params,
+            *group_kind_params,
+            resolved_page_size,
+            (resolved_page - 1) * resolved_page_size,
+        ]
+
+        total_query = f"""
+        WITH scoped AS (
+            SELECT event_type, ts_utc, email_id
+            FROM events_v1
+            WHERE ts_utc >= ?{filter_clause}
+            {clause}
+        )
+        SELECT COUNT(*) AS total
+        FROM (
+            SELECT 1
+            FROM scoped
+            GROUP BY
+                CASE WHEN email_id IS NOT NULL THEN 'email' ELSE {group_kind_case} END,
+                CASE WHEN email_id IS NOT NULL THEN email_id ELSE event_type END
+        )
+        """
+        total_params: list[object] = [
+            since_ts,
+            *filter_params,
+            *clause_params,
+            *group_kind_params,
+        ]
+
+        with self._connect_readonly() as conn:
+            conn.row_factory = sqlite3.Row
+            try:
+                group_rows = conn.execute(grouped_query, tuple(group_params)).fetchall()
+                total_row = conn.execute(total_query, tuple(total_params)).fetchone()
+            except sqlite3.OperationalError:
+                return {
+                    "groups": [],
+                    "total_groups": 0,
+                    "page": resolved_page,
+                    "page_size": resolved_page_size,
+                }
+
+        total_groups = int(total_row["total"]) if total_row and total_row["total"] is not None else 0
+        group_records = [dict(row) for row in group_rows]
+
+        email_ids: list[int] = []
+        for row in group_records:
+            if row.get("group_kind") == "email":
+                try:
+                    email_ids.append(int(row.get("group_id")))
+                except (TypeError, ValueError):
+                    continue
+
+        email_map: dict[int, dict[str, object]] = {}
+        if email_ids:
+            placeholders = ", ".join(["?"] * len(email_ids))
+            email_query = f"""
+            SELECT id, account_email, from_email, action_line, body_summary
+            FROM emails
+            WHERE id IN ({placeholders})
+            """
+            with self._connect_readonly() as conn:
+                conn.row_factory = sqlite3.Row
+                try:
+                    for row in conn.execute(email_query, tuple(email_ids)):
+                        email_map[int(row["id"])] = dict(row)
+                except sqlite3.OperationalError:
+                    email_map = {}
+
+        delivery_map: dict[int, dict[str, float | None]] = {}
+        if email_ids:
+            placeholders = ", ".join(["?"] * len(email_ids))
+            delivery_query = f"""
+            SELECT
+                email_id,
+                MIN(CASE WHEN event_type = ? THEN ts_utc END) AS received_ts,
+                MAX(CASE WHEN event_type = ? THEN ts_utc END) AS delivered_ts,
+                MAX(CASE WHEN event_type = ? THEN ts_utc END) AS failed_ts
+            FROM events_v1
+            WHERE ts_utc >= ? AND email_id IN ({placeholders})
+            {clause}
+            GROUP BY email_id
+            """
+            delivery_params: list[object] = [
+                EventType.EMAIL_RECEIVED.value,
+                EventType.TELEGRAM_DELIVERED.value,
+                EventType.TELEGRAM_FAILED.value,
+                since_ts,
+                *email_ids,
+                *clause_params,
+            ]
+            with self._connect_readonly() as conn:
+                conn.row_factory = sqlite3.Row
+                try:
+                    rows = conn.execute(delivery_query, tuple(delivery_params)).fetchall()
+                except sqlite3.OperationalError:
+                    rows = []
+            for row in rows:
+                row_dict = dict(row)
+                try:
+                    email_id = int(row_dict.get("email_id"))
+                except (TypeError, ValueError):
+                    continue
+                delivery_map[email_id] = {
+                    "received_ts": row_dict.get("received_ts"),
+                    "delivered_ts": row_dict.get("delivered_ts"),
+                    "failed_ts": row_dict.get("failed_ts"),
+                }
+
+        def _timeline_rows(
+            group_kind: str, group_id: object, *, limit: int = 25
+        ) -> list[dict[str, object]]:
+            params: list[object] = []
+            if group_kind == "email":
+                group_clause = "email_id = ?"
+                try:
+                    params.append(int(group_id))
+                except (TypeError, ValueError):
+                    return []
+            else:
+                group_clause = "event_type = ? AND email_id IS NULL"
+                params.append(str(group_id))
+            params.append(since_ts)
+            params.extend(clause_params)
+            timeline_query = f"""
+            SELECT id, event_type, ts_utc, payload, payload_json
+            FROM events_v1
+            WHERE {group_clause} AND ts_utc >= ?
+            {clause}
+            ORDER BY ts_utc DESC, id DESC
+            LIMIT ?
+            """
+            params.append(limit)
+            with self._connect_readonly() as conn:
+                conn.row_factory = sqlite3.Row
+                try:
+                    rows = conn.execute(timeline_query, tuple(params)).fetchall()
+                except sqlite3.OperationalError:
+                    return []
+            items = []
+            for row in rows:
+                row_dict = dict(row)
+                payload = self._event_payload(row_dict)
+                details = self._sanitize_event_payload(payload)
+                items.append(
+                    {
+                        "event_id": row_dict.get("id"),
+                        "ts_utc": row_dict.get("ts_utc"),
+                        "event_type": row_dict.get("event_type"),
+                        "stage": details.get("stage") if isinstance(details, Mapping) else None,
+                        "outcome": details.get("outcome") if isinstance(details, Mapping) else None,
+                        "details": details,
+                    }
+                )
+            items.sort(key=lambda item: (float(item.get("ts_utc") or 0.0), int(item.get("event_id") or 0)))
+            return items
+
+        groups: list[dict[str, object]] = []
+        for row in group_records:
+            group_kind = str(row.get("group_kind") or "")
+            group_id = row.get("group_id")
+            timeline = _timeline_rows(group_kind, group_id, limit=25)
+            headline: dict[str, object] = {}
+            if group_kind == "email":
+                try:
+                    email_id = int(group_id)
+                except (TypeError, ValueError):
+                    email_id = None
+                email_row = email_map.get(email_id or -1, {})
+                from_value = email_row.get("from_email") or ""
+                to_value = email_row.get("account_email") or ""
+                preview = self._build_email_preview(
+                    email_row.get("action_line"),
+                    email_row.get("body_summary"),
+                    reveal_pii=reveal_pii,
+                    limit=160,
+                )
+                from_label = (
+                    self._mask_email_address(from_value) if not reveal_pii else str(from_value)
+                )
+                to_label = (
+                    self._mask_email_address(to_value) if not reveal_pii else str(to_value)
+                )
+                delivery = delivery_map.get(email_id or -1, {})
+                delivered_ts = delivery.get("delivered_ts")
+                failed_ts = delivery.get("failed_ts")
+                received_ts = delivery.get("received_ts")
+                status = "In-flight"
+                if delivered_ts is not None:
+                    status = "Delivered"
+                elif failed_ts is not None:
+                    status = "Failed"
+                e2e_latency = None
+                if delivered_ts is not None and received_ts is not None:
+                    try:
+                        e2e_latency = max(0.0, float(delivered_ts) - float(received_ts))
+                    except (TypeError, ValueError):
+                        e2e_latency = None
+                headline = {
+                    "from_masked": from_label,
+                    "to_masked": to_label,
+                    "preview_masked": preview,
+                    "delivery_status": status,
+                    "e2e_latency_s": e2e_latency,
+                }
+            else:
+                label = str(group_id or "")
+                label = label.replace("_", " ")
+                status_label = ""
+                if timeline:
+                    details = timeline[-1].get("details") if isinstance(timeline[-1], dict) else {}
+                    if isinstance(details, Mapping):
+                        for key in ("outcome", "decision", "system_mode", "delivery_mode"):
+                            if details.get(key):
+                                status_label = str(details.get(key))
+                                break
+                headline = {
+                    "label": label,
+                    "status_label": status_label,
+                }
+
+            timeline_view = []
+            for entry in timeline:
+                details = entry.get("details") if isinstance(entry, Mapping) else {}
+                notes = ""
+                if isinstance(details, Mapping):
+                    notes = self._narrative_event_notes(dict(details))
+                timeline_view.append(
+                    {
+                        "ts_utc": entry.get("ts_utc"),
+                        "event_type": entry.get("event_type"),
+                        "stage": entry.get("stage") or "",
+                        "outcome": entry.get("outcome") or "",
+                        "notes_safe": notes,
+                    }
+                )
+
+            groups.append(
+                {
+                    "group_kind": group_kind,
+                    "group_id": group_id,
+                    "ts_first": row.get("ts_first"),
+                    "ts_last": row.get("ts_last"),
+                    "event_count": int(row.get("event_count") or 0),
+                    "headline": headline,
+                    "timeline": timeline_view,
+                }
+            )
+
+        return {
+            "groups": groups,
+            "total_groups": total_groups,
+            "page": resolved_page,
+            "page_size": resolved_page_size,
+        }
 
     def bootstrap_start_ts(
         self,
