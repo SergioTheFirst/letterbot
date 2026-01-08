@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import io
 import logging
-import zipfile
-from xml.etree import ElementTree as ET
 
 logger = logging.getLogger(__name__)
-XL_MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+MAX_ROWS = 200
+MAX_COLS = 30
+MAX_CHARS = 50_000
+
+
+def _normalize_text(value: str) -> str:
+    normalized = (value or "").encode("utf-8", "ignore").decode("utf-8", "ignore")
+    return normalized.strip()
 
 
 def _safe_text(value: str | None) -> str:
@@ -15,143 +20,135 @@ def _safe_text(value: str | None) -> str:
     return " ".join(value.split())
 
 
-def _normalize_text(value: str) -> str:
-    normalized = (value or "").encode("utf-8", "ignore").decode("utf-8", "ignore")
-    return normalized.strip()
+def _stringify_cell(value: object | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return _safe_text(value)
+    return _safe_text(str(value))
 
 
-def _load_pandas():
+def _append_line(
+    lines: list[str],
+    line: str,
+    *,
+    max_chars: int = MAX_CHARS,
+) -> bool:
+    if not line:
+        return True
+    current = sum(len(item) for item in lines)
+    if lines:
+        current += len(lines) - 1
+    remaining = max_chars - current
+    if remaining <= 0:
+        return False
+    if len(line) > remaining:
+        lines.append(line[:remaining])
+        return False
+    lines.append(line)
+    return True
+
+
+def _collect_rows_from_openpyxl(file_bytes: bytes) -> list[str]:
     try:
-        import pandas as pd
-        return pd
-    except Exception:
-        return None
-
-
-def _extract_shared_strings(zf: zipfile.ZipFile) -> list[str]:
-    """Извлечь общие строки из XLSX"""
-    try:
-        data = zf.read("xl/sharedStrings.xml")
-    except Exception:
+        from openpyxl import load_workbook
+    except Exception as exc:
+        logger.debug("openpyxl import failed: %s", exc)
         return []
 
     try:
-        root = ET.fromstring(data)
-    except ET.ParseError:
+        workbook = load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    except Exception as exc:
+        logger.debug("openpyxl load failed: %s", exc)
         return []
 
-    values: list[str] = []
-    for node in root.findall(f".//{XL_MAIN_NS}t"):
-        text = _safe_text(node.text or "")
-        if text:
-            values.append(text)
-    return values
-
-
-def _extract_cells(zf: zipfile.ZipFile, shared_strings: list[str]) -> list[str]:
-    """Извлечь ячейки из всех листов"""
-    rows: list[str] = []
-    
-    for name in sorted(zf.namelist()):
-        if not name.startswith("xl/worksheets/sheet"):
-            continue
-
+    lines: list[str] = []
+    row_count = 0
+    for sheet in workbook.worksheets:
+        if row_count >= MAX_ROWS:
+            break
         try:
-            sheet_xml = zf.read(name)
-            root = ET.fromstring(sheet_xml)
-        except Exception as e:
-            logger.debug("Failed to parse %s: %s", name, e)
+            for row in sheet.iter_rows(max_col=MAX_COLS, values_only=True):
+                if row_count >= MAX_ROWS:
+                    break
+                values = [_stringify_cell(cell) for cell in row[:MAX_COLS]]
+                while values and not values[-1]:
+                    values.pop()
+                if not any(values):
+                    continue
+                line = "\t".join(values)
+                if not _append_line(lines, line):
+                    workbook.close()
+                    return lines
+                row_count += 1
+        except Exception as exc:
+            logger.debug("openpyxl sheet parse failed: %s", exc)
             continue
-
-        for row in root.findall(f".//{XL_MAIN_NS}row"):
-            values: list[str] = []
-            
-            for cell in row.findall(f"{XL_MAIN_NS}c"):
-                cell_type = cell.attrib.get("t")
-                value_node = cell.find(f"{XL_MAIN_NS}v")
-                
-                # Общая строка
-                if cell_type == "s" and value_node is not None:
-                    try:
-                        idx = int(value_node.text or "0")
-                        cell_value = shared_strings[idx] if idx < len(shared_strings) else ""
-                    except (ValueError, IndexError):
-                        cell_value = ""
-                
-                # Прямое значение
-                elif value_node is not None and value_node.text:
-                    cell_value = _safe_text(value_node.text)
-                
-                # Inline строка
-                else:
-                    inline = cell.find(f"{XL_MAIN_NS}is/{XL_MAIN_NS}t")
-                    cell_value = _safe_text(inline.text if inline is not None else "")
-
-                if cell_value:
-                    values.append(cell_value)
-
-            if values:
-                rows.append(" | ".join(values))
-
-    return rows
+    workbook.close()
+    return lines
 
 
-def _extract_via_zip(file_bytes: bytes) -> list[str]:
-    """Основной метод - чистый ZIP"""
+def _collect_rows_from_xlrd(file_bytes: bytes) -> list[str]:
     try:
-        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
-            shared_strings = _extract_shared_strings(zf)
-            rows = _extract_cells(zf, shared_strings)
-    except Exception as e:
-        logger.debug("ZIP extraction failed: %s", e)
+        import xlrd
+    except Exception as exc:
+        logger.debug("xlrd import failed: %s", exc)
         return []
 
-    return rows
+    try:
+        workbook = xlrd.open_workbook(file_contents=file_bytes)
+    except Exception as exc:
+        logger.debug("xlrd load failed: %s", exc)
+        return []
 
-
-def _limit_rows(rows: list[str], max_rows: int = 20) -> list[str]:
-    """Ограничить количество строк, но взять больше для информативности"""
-    preview = [row for row in rows if row and row.strip()]
-    return preview[:max_rows]
+    lines: list[str] = []
+    row_count = 0
+    for sheet in workbook.sheets():
+        if row_count >= MAX_ROWS:
+            break
+        for rowx in range(min(sheet.nrows, MAX_ROWS - row_count)):
+            if row_count >= MAX_ROWS:
+                break
+            values = []
+            max_col = min(sheet.ncols, MAX_COLS)
+            for colx in range(max_col):
+                values.append(_stringify_cell(sheet.cell_value(rowx, colx)))
+            while values and not values[-1]:
+                values.pop()
+            if not any(values):
+                continue
+            line = "\t".join(values)
+            if not _append_line(lines, line):
+                return lines
+            row_count += 1
+    return lines
 
 
 def extract_excel(file_bytes: bytes, filename: str) -> str:
     """
     Извлечение из XLS/XLSX.
-    Приоритет: ZIP -> pandas
+    Приоритет: openpyxl -> xlrd (если доступен)
     """
     name = (filename or "").lower()
 
     if not name.endswith((".xls", ".xlsx")):
         return ""
 
-    # ПОПЫТКА 1: Чистый ZIP (для XLSX)
+    # ПОПЫТКА 1: openpyxl (XLSX)
     if name.endswith(".xlsx"):
-        zip_rows = _extract_via_zip(file_bytes)
-        limited_rows = _limit_rows(zip_rows, max_rows=20)
-        
-        if limited_rows:
-            text = _normalize_text("\n".join(limited_rows))
-            logger.debug("Extracted %d chars from %s (ZIP method)", len(text), filename)
+        rows = _collect_rows_from_openpyxl(file_bytes)
+        if rows:
+            text = _normalize_text("\n".join(rows))
+            logger.debug("Extracted %d chars from %s (openpyxl)", len(text), filename)
             return text
 
-    # ПОПЫТКА 2: pandas (для XLS и как фоллбэк для XLSX)
-    pandas = _load_pandas()
-    if pandas:
-        try:
-            # Для XLS используем xlrd engine
-            engine = "xlrd" if name.endswith(".xls") else "openpyxl"
-            df = pandas.read_excel(io.BytesIO(file_bytes), engine=engine)
-            df = df.dropna(how="all")
-            preview = df.head(20)
-            
-            if not preview.empty:
-                text = _normalize_text(preview.to_string(index=False, header=True))
-                logger.debug("Extracted %d chars from %s (pandas)", len(text), filename)
-                return text
-                
-        except Exception as e:
-            logger.debug("pandas extraction failed: %s", e)
+    # ПОПЫТКА 2: xlrd (XLS, опционально)
+    if name.endswith(".xls"):
+        rows = _collect_rows_from_xlrd(file_bytes)
+        if rows:
+            text = _normalize_text("\n".join(rows))
+            logger.debug("Extracted %d chars from %s (xlrd)", len(text), filename)
+            return text
 
     logger.warning("Failed to extract text from %s", filename)
     return ""

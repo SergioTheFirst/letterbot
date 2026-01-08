@@ -39,15 +39,12 @@ class DoctorReport:
     telegram_error: str | None
 
 
-DEPENDENCY_IMPORTS = [
+REQUIRED_IMPORTS = [
     "imapclient",
     "requests",
     "yaml",
-    "numpy",
-    "pandas",
     "openpyxl",
     "docx",
-    "xlrd",
     "pdfminer",
     "pyttsx3",
     "telegram",
@@ -57,6 +54,14 @@ DEPENDENCY_IMPORTS = [
     "flask",
     "ldap",
 ]
+
+OPTIONAL_IMPORTS = [
+    "numpy",
+    "pandas",
+    "xlrd",
+]
+
+DEPENDENCY_IMPORTS = REQUIRED_IMPORTS + OPTIONAL_IMPORTS
 
 REQUIRED_TABLES = {
     "emails",
@@ -157,15 +162,30 @@ def _check_venv() -> DoctorEntry:
 
 
 def _check_dependencies() -> DoctorEntry:
-    missing: list[str] = []
-    for module in DEPENDENCY_IMPORTS:
+    missing_required: list[str] = []
+    missing_optional: list[str] = []
+    for module in REQUIRED_IMPORTS:
         try:
             importlib.import_module(module)
         except Exception:
-            missing.append(module)
-    if missing:
+            missing_required.append(module)
+    for module in OPTIONAL_IMPORTS:
+        try:
+            importlib.import_module(module)
+        except Exception:
+            missing_optional.append(module)
+    if missing_required:
+        details = f"отсутствуют: {', '.join(sorted(missing_required))}"
+        if missing_optional:
+            details = (
+                f"{details}; опционально отсутствуют: {', '.join(sorted(missing_optional))}"
+            )
+        return DoctorEntry("Dependencies", "FAIL", details)
+    if missing_optional:
         return DoctorEntry(
-            "Dependencies", "FAIL", f"отсутствуют: {', '.join(sorted(missing))}"
+            "Dependencies",
+            "WARN",
+            f"опционально отсутствуют: {', '.join(sorted(missing_optional))}",
         )
     return DoctorEntry("Dependencies", "OK", "импорты успешны")
 
