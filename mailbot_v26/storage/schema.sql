@@ -207,6 +207,9 @@ CREATE TABLE IF NOT EXISTS events_v1 (
 CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts
     ON events_v1(event_type, ts_utc);
 
+CREATE INDEX IF NOT EXISTS idx_events_v1_event_account_ts
+    ON events_v1(event_type, account_id, ts_utc);
+
 CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts
     ON events_v1(account_id, ts_utc);
 

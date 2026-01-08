@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -281,6 +282,22 @@ class KnowledgeAnalytics:
         first = local[0] if local else ""
         return f"{first}…@{domain}"
 
+    def _mask_contact_label(self, *, entity_id: str, label: str) -> str:
+        candidate = (label or entity_id or "").strip()
+        entity_value = (entity_id or "").strip()
+        if "@" in entity_value:
+            masked = self._mask_email_address(entity_value)
+            if masked:
+                return masked
+        if "@" in candidate:
+            masked = self._mask_email_address(candidate)
+            if masked:
+                return masked
+        if not candidate:
+            return "contact-unknown"
+        digest = hashlib.sha1(candidate.encode("utf-8")).hexdigest()[:6]
+        return f"contact-{digest}"
+
     @staticmethod
     def _strip_emails(text: str) -> str:
         if not text:
@@ -312,6 +329,24 @@ class KnowledgeAnalytics:
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    def _estimate_attention_minutes(self, payload: dict[str, object]) -> float:
+        word_count = self._safe_float(payload.get("word_count"))
+        if word_count is not None and word_count > 0:
+            words = max(40.0, word_count)
+        else:
+            char_count = self._safe_float(payload.get("body_chars"))
+            if char_count is None or char_count <= 0:
+                char_count = self._safe_float(payload.get("extracted_chars"))
+            if char_count is None or char_count <= 0:
+                char_count = self._safe_float(payload.get("size_bytes"))
+            if char_count is not None and char_count > 0:
+                words = max(40.0, char_count / 5.0)
+            else:
+                # Fallback: 0.5 minutes per email when length is unavailable.
+                return 0.5
+        minutes = words / 200.0
+        return max(0.25, min(12.0, float(minutes)))
 
     @staticmethod
     def _account_scope_clause(account_ids: Sequence[str]) -> tuple[str, list[object]]:
@@ -4776,11 +4811,7 @@ class KnowledgeAnalytics:
             if not sender:
                 continue
             entity_id = sender.lower()
-            text_content = str(payload.get("body_summary") or payload.get("subject") or "").strip()
-            word_count = len(re.findall(r"\b\w+\b", text_content)) if text_content else 0
-            attachment_count = int(payload.get("attachments_count") or 0)
-            read_minutes = 1.0 if word_count <= 0 else max(1.0, word_count / 200.0)
-            read_minutes += attachment_count * 1.5
+            read_minutes = self._estimate_attention_minutes(payload)
             entry = aggregates.setdefault(
                 entity_id,
                 {
@@ -4791,7 +4822,6 @@ class KnowledgeAnalytics:
                 },
             )
             entry["message_count"] += 1.0
-            entry["attachment_count"] += float(attachment_count)
             entry["estimated_read_minutes"] += float(read_minutes)
             if row.get("email_id") is not None and str(row.get("email_id")) in deferred_ids:
                 entry["deferred_count"] += 1.0
@@ -4815,17 +4845,108 @@ class KnowledgeAnalytics:
         )
         return results
 
+    def attention_lane_breakdown(
+        self,
+        *,
+        account_emails: Sequence[str],
+        window_days: int,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope(
+            account_emails[0] if account_emails else "", account_emails
+        )
+        if not account_ids:
+            return []
+        since_ts = self._window_start_ts(window_days)
+        since_iso = datetime.fromtimestamp(
+            since_ts, tz=timezone.utc
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        clause, clause_params = self._account_email_clause(account_ids)
+        base_query = """
+        SELECT e.id
+        FROM emails e
+        WHERE e.received_at >= ?
+        """
+
+        minutes_by_email: dict[int, float] = {}
+        event_rows = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type="email_received",
+            since_ts=since_ts,
+        )
+        for row in event_rows:
+            email_id = row.get("email_id")
+            if email_id is None:
+                continue
+            try:
+                email_id_int = int(email_id)
+            except (TypeError, ValueError):
+                continue
+            minutes_by_email[email_id_int] = self._estimate_attention_minutes(
+                self._event_payload(row)
+            )
+
+        lane_order = [
+            "critical",
+            "commitments",
+            "deferred",
+            "failures",
+            "learning",
+            "all",
+        ]
+        results: list[dict[str, object]] = []
+        for lane in lane_order:
+            lane_clause, lane_params = self._lane_email_clause(lane, since_ts=since_ts)
+            query = base_query + clause + lane_clause
+            params: list[object] = [since_iso, *clause_params, *lane_params]
+            try:
+                rows = self._execute_select(query, params)
+            except sqlite3.OperationalError:
+                rows = []
+            email_ids = [
+                int(row.get("id") or 0)
+                for row in rows
+                if int(row.get("id") or 0) > 0
+            ]
+            count = len(email_ids)
+            minutes = 0.0
+            for email_id in email_ids:
+                minutes += minutes_by_email.get(email_id, 0.5)
+            results.append(
+                {
+                    "lane": lane,
+                    "count": count,
+                    "estimated_read_minutes": round(minutes, 2),
+                }
+            )
+
+        total_minutes = next(
+            (row["estimated_read_minutes"] for row in results if row["lane"] == "all"),
+            0.0,
+        )
+        if total_minutes <= 0:
+            total_minutes = 0.0
+        for row in results:
+            share = 0.0
+            if total_minutes > 0:
+                share = max(
+                    0.0,
+                    min(100.0, (float(row.get("estimated_read_minutes") or 0.0) / total_minutes) * 100),
+                )
+            row["share_percent"] = round(share, 1)
+        return results
+
     def attention_economics_summary(
         self,
         *,
         account_emails: Sequence[str],
         window_days: int,
         limit: int,
-        include_anomalies: bool,
+        sort: str,
         attention_cost_per_hour: float = 0.0,
     ) -> dict[str, object]:
-        from mailbot_v26.insights.attention_economics import compute_attention_economics
-
+        sort = str(sort or "time").strip().lower()
+        if sort not in {"time", "cost", "count"}:
+            sort = "time"
         scope = self._normalize_account_scope(
             account_emails[0] if account_emails else "", account_emails
         )
@@ -4850,16 +4971,6 @@ class KnowledgeAnalytics:
                 (totals["estimated_read_minutes"] / 60.0) * attention_cost_per_hour, 2
             )
 
-        result = None
-        if scope:
-            result = compute_attention_economics(
-                analytics=self,
-                account_email=primary_account,
-                account_emails=scope,
-                window_days=window_days,
-                include_anomalies=include_anomalies,
-            )
-
         def _entity_entry(
             *,
             entity_id: str,
@@ -4868,24 +4979,20 @@ class KnowledgeAnalytics:
             attachment_count: int,
             estimated_read_minutes: float,
             deferred_count: int,
-            trust_delta: float | None,
-            health_delta: float | None,
-            anomalies: Sequence[str] = (),
         ) -> dict[str, object]:
+            masked_label = self._mask_contact_label(entity_id=entity_id, label=label)
+            signals = "–"
+            if message_count > 0 and deferred_count > 0:
+                signals = f"отложено {round((deferred_count / message_count) * 100)}%"
             entry: dict[str, object] = {
                 "entity_id": entity_id,
-                "entity_label": label,
+                "entity_label": masked_label,
                 "message_count": message_count,
                 "attachment_count": attachment_count,
                 "estimated_read_minutes": estimated_read_minutes,
                 "deferred_count": deferred_count,
+                "signals": signals,
             }
-            if trust_delta is not None:
-                entry["trust_delta"] = trust_delta
-            if health_delta is not None:
-                entry["health_delta"] = health_delta
-            if anomalies:
-                entry["anomalies"] = list(anomalies)
             if attention_cost_per_hour > 0:
                 entry["estimated_cost"] = round(
                     (estimated_read_minutes / 60.0) * attention_cost_per_hour, 2
@@ -4893,47 +5000,53 @@ class KnowledgeAnalytics:
             return entry
 
         entities: list[dict[str, object]] = []
-        if result is not None:
-            for entity in result.entities[:limit]:
-                entities.append(
-                    _entity_entry(
-                        entity_id=entity.entity_id,
-                        label=entity.label,
-                        message_count=entity.message_count,
-                        attachment_count=entity.attachment_count,
-                        estimated_read_minutes=entity.estimated_read_minutes,
-                        deferred_count=entity.deferred_count,
-                        trust_delta=entity.trust_delta,
-                        health_delta=entity.health_delta,
-                        anomalies=entity.anomalies,
-                    )
-                )
-        else:
-            for item in raw_entities:
-                entity_id = str(item.get("entity_id") or "").strip()
-                if not entity_id:
-                    continue
-                label = self.entity_label(entity_id=entity_id) or entity_id
-                entities.append(
-                    _entity_entry(
-                        entity_id=entity_id,
-                        label=label,
-                        message_count=int(item.get("message_count") or 0),
-                        attachment_count=int(item.get("attachment_count") or 0),
-                        estimated_read_minutes=float(item.get("estimated_read_minutes") or 0.0),
-                        deferred_count=int(item.get("deferred_count") or 0),
-                        trust_delta=None,
-                        health_delta=None,
-                        anomalies=(),
-                    )
-                )
-            entities.sort(
-                key=lambda item: (
-                    -float(item.get("estimated_read_minutes") or 0.0),
-                    str(item.get("entity_label") or item.get("entity_id") or "").lower(),
+        for item in raw_entities:
+            entity_id = str(item.get("entity_id") or "").strip()
+            if not entity_id:
+                continue
+            label = self.entity_label(entity_id=entity_id) or entity_id
+            entities.append(
+                _entity_entry(
+                    entity_id=entity_id,
+                    label=label,
+                    message_count=int(item.get("message_count") or 0),
+                    attachment_count=int(item.get("attachment_count") or 0),
+                    estimated_read_minutes=float(item.get("estimated_read_minutes") or 0.0),
+                    deferred_count=int(item.get("deferred_count") or 0),
                 )
             )
-            entities = entities[:limit]
+
+        def _sort_key(item: dict[str, object]) -> tuple[float, str]:
+            entity_key = str(item.get("entity_id") or "").lower()
+            if sort == "count":
+                return (-float(item.get("message_count") or 0.0), entity_key)
+            if sort == "cost":
+                cost_value = item.get("estimated_cost")
+                if cost_value is None:
+                    cost_value = float(item.get("estimated_read_minutes") or 0.0)
+                return (-float(cost_value or 0.0), entity_key)
+            return (-float(item.get("estimated_read_minutes") or 0.0), entity_key)
+
+        entities.sort(key=_sort_key)
+        entities = entities[:limit]
+
+        lane_breakdown = self.attention_lane_breakdown(
+            account_emails=scope,
+            window_days=window_days,
+        )
+
+        top_contact_label = ""
+        if raw_entities:
+            top_entry = sorted(
+                raw_entities,
+                key=lambda item: (
+                    -float(item.get("estimated_read_minutes") or 0.0),
+                    str(item.get("entity_id") or "").lower(),
+                ),
+            )[0]
+            entity_id = str(top_entry.get("entity_id") or "")
+            label = self.entity_label(entity_id=entity_id) or entity_id
+            top_contact_label = self._mask_contact_label(entity_id=entity_id, label=label)
 
         generated_ts = None
         if scope:
@@ -4963,8 +5076,11 @@ class KnowledgeAnalytics:
             "window_days": window_days,
             "account_emails": scope,
             "limit": limit,
+            "sort": sort,
             "totals": totals,
             "entities": entities,
+            "lane_breakdown": lane_breakdown,
+            "top_contact_label": top_contact_label,
             "generated_at_utc": generated_at,
         }
 

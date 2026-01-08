@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import configparser
 import html
+import io
 import ipaddress
 import json
 import logging
@@ -19,6 +21,7 @@ from typing import Iterable, Mapping, Optional
 try:
     from flask import (
         Flask,
+        Response,
         jsonify,
         redirect,
         render_template,
@@ -30,6 +33,7 @@ try:
 except ModuleNotFoundError:
     from mailbot_v26.web_observability.flask_stub import (
         Flask,
+        Response,
         jsonify,
         redirect,
         render_template,
@@ -64,6 +68,7 @@ LANE_LABELS = {
     "failures": "сбои",
     "learning": "обучение",
 }
+ALLOWED_ATTENTION_SORTS = {"time", "cost", "count"}
 
 
 @dataclass(frozen=True)
@@ -107,6 +112,8 @@ _HEALTH_INCIDENT_CACHE = _TTLCache(30.0)
 _EVENTS_NARRATIVE_CACHE = _TTLCache(20.0)
 _COMMITMENTS_CACHE = _TTLCache(20.0)
 _COMMITMENTS_COUNT_CACHE = _TTLCache(15.0)
+_ATTENTION_TOTALS_CACHE = _TTLCache(20.0)
+_ATTENTION_TABLE_CACHE = _TTLCache(20.0)
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -413,6 +420,30 @@ def _render_stub_html(
             blocks.append(f"<div class=\"event-group\">{html.escape(label)}</div>")
         body = "".join(blocks) if blocks else "<div class=\"hint\">Adjust window_days or account scope.</div>"
         return f"<html><body>{header}{body}</body></html>"
+
+    if template_name == "attention.html":
+        summary = context.get("summary") if isinstance(context, Mapping) else {}
+        entities = summary.get("entities") if isinstance(summary, Mapping) else []
+        rows = "".join(
+            """
+            <tr>
+              <td>{label}</td><td>{count}</td><td>{minutes}</td><td>{cost}</td><td>{signals}</td>
+            </tr>
+            """.format(
+                label=html.escape(str(row.get("entity_label") or "")),
+                count=html.escape(str(row.get("message_count") or 0)),
+                minutes=html.escape(str(row.get("estimated_read_minutes") or 0.0)),
+                cost=html.escape(str(row.get("estimated_cost") or "")),
+                signals=html.escape(str(row.get("signals") or "")),
+            )
+            for row in (entities or [])
+            if isinstance(row, Mapping)
+        )
+        table = (
+            "<table class=\"table compact fixed attention-table\">"
+            f"<tbody>{rows}</tbody></table>"
+        )
+        return f"<html><body>{header}{table}</body></html>"
 
     return render_template(str(template_path), **context)
 
@@ -1437,44 +1468,39 @@ def _validate_latency_params(
     return account_email, account_emails, window_days, None
 
 
-def _parse_include_anomalies(raw: Optional[str]) -> tuple[bool | None, Optional[str]]:
+def _parse_attention_sort(raw: Optional[str]) -> tuple[str, Optional[str]]:
     if raw is None or raw == "":
-        return False, None
-    raw_clean = str(raw).strip()
-    if raw_clean == "1":
-        return True, None
-    if raw_clean == "0":
-        return False, None
-    return None, "include_anomalies must be 0 or 1"
+        return "time", None
+    cleaned = str(raw).strip().lower()
+    if cleaned in ALLOWED_ATTENTION_SORTS:
+        return cleaned, None
+    return "time", "sort must be one of: time, cost, count"
 
 
 def _validate_attention_params(
     *,
     args,
     default_account: str | None = None,
-) -> tuple[Optional[str], list[str], Optional[int], Optional[int], bool | None, Optional[str]]:
+) -> tuple[list[str], int, str, Optional[str]]:
     account_email = (args.get("account_email") or "").strip()
     account_emails = _parse_account_emails(args.get("account_emails"))
-    window_days, window_error = _parse_window_days(args.get("window_days"), 30)
+    window_days, window_error = _parse_window_days(
+        args.get("window_days"), 30, allowed=ALLOWED_WINDOWS
+    )
     if window_error:
-        return None, [], None, None, None, window_error
-    limit, limit_error = _parse_limit(args.get("limit"), default=50, max_limit=200, min_value=5)
-    if limit_error:
-        return None, [], None, None, None, limit_error
-    include_anomalies, anomalies_error = _parse_include_anomalies(args.get("include_anomalies"))
-    if anomalies_error:
-        return None, [], None, None, None, anomalies_error
+        return [], 0, "time", window_error
+    sort_mode, sort_error = _parse_attention_sort(args.get("sort"))
+    if sort_error:
+        return [], 0, "time", sort_error
     if account_emails and account_email and account_email not in account_emails:
-        return None, [], None, None, None, "account_email must match one of account_emails"
-    if not account_email and account_emails:
-        account_email = account_emails[0]
-    if not account_email and default_account:
-        account_email = default_account
+        return [], 0, "time", "account_email must match one of account_emails"
     if not account_emails and account_email:
         account_emails = [account_email]
-    if not account_email:
-        return None, [], None, None, None, "account_email is required"
-    return account_email, account_emails, window_days, limit, bool(include_anomalies), None
+    if not account_emails and default_account:
+        account_emails = [default_account]
+    if not account_emails:
+        return [], 0, "time", "account_emails is required"
+    return account_emails, window_days or 30, sort_mode, None
 
 
 def _validate_learning_params(
@@ -2415,6 +2441,62 @@ def create_app(
             resolved = [default_account]
         return sorted({email for email in resolved if email})
 
+    def _attention_payload(
+        *,
+        account_emails: list[str],
+        window_days: int,
+        sort_mode: str,
+    ) -> dict[str, object]:
+        totals_cache_key = (
+            "attention_totals",
+            str(app.config["DB_PATH"]),
+            tuple(account_emails),
+            window_days,
+        )
+        table_cache_key = (
+            "attention_table",
+            str(app.config["DB_PATH"]),
+            tuple(account_emails),
+            window_days,
+            sort_mode,
+        )
+        cached_totals = _ATTENTION_TOTALS_CACHE.get(totals_cache_key)
+        cached_entities = _ATTENTION_TABLE_CACHE.get(table_cache_key)
+        if isinstance(cached_totals, Mapping) and isinstance(cached_entities, list):
+            return {
+                **cached_totals,
+                "entities": cached_entities,
+                "sort": sort_mode,
+                "limit": 50,
+            }
+        analytics = _analytics()
+        summary = analytics.attention_economics_summary(
+            account_emails=account_emails,
+            window_days=window_days,
+            limit=50,
+            sort=sort_mode,
+            attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
+        )
+        totals_payload = {
+            "window_days": summary.get("window_days"),
+            "account_emails": summary.get("account_emails"),
+            "limit": summary.get("limit"),
+            "totals": summary.get("totals", {}),
+            "lane_breakdown": summary.get("lane_breakdown", []),
+            "top_contact_label": summary.get("top_contact_label", ""),
+            "generated_at_utc": summary.get("generated_at_utc", ""),
+        }
+        _ATTENTION_TOTALS_CACHE.set(totals_cache_key, totals_payload)
+        entities = summary.get("entities", [])
+        if isinstance(entities, list):
+            _ATTENTION_TABLE_CACHE.set(table_cache_key, entities)
+        return {
+            **totals_payload,
+            "entities": entities if isinstance(entities, list) else [],
+            "sort": sort_mode,
+            "limit": summary.get("limit", 50),
+        }
+
     def _health_summary_payload(
         *,
         account_emails: list[str],
@@ -2696,27 +2778,17 @@ def create_app(
 
     @app.route("/api/v1/intelligence/attention_economics", methods=["GET"])
     def api_attention_economics():
-        (
-            account_email,
-            account_emails,
-            window_days,
-            limit,
-            include_anomalies,
-            error,
-        ) = _validate_attention_params(args=request.args)
+        account_emails, window_days, sort_mode, error = _validate_attention_params(
+            args=request.args
+        )
         if error:
             resp = jsonify({"error": error})
             resp.status_code = 400
             return resp
-        analytics = _analytics()
-        resolved_window = window_days or 30
-        resolved_limit = limit or 50
-        summary = analytics.attention_economics_summary(
+        summary = _attention_payload(
             account_emails=account_emails,
-            window_days=resolved_window,
-            limit=resolved_limit,
-            include_anomalies=bool(include_anomalies),
-            attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
+            window_days=window_days or 30,
+            sort_mode=sort_mode,
         )
         return jsonify(summary)
 
@@ -2929,63 +3001,111 @@ def create_app(
     def attention():
         accounts = _available_accounts(app.config["DB_PATH"])
         default_account = accounts[0] if accounts else None
-        (
-            account_email,
-            account_emails,
-            window_days,
-            limit,
-            include_anomalies,
-            error,
-        ) = _validate_attention_params(args=request.args, default_account=default_account)
-        error_message = error or ("Account selection required" if not account_email else "")
-        analytics = _analytics()
-        summary: dict[str, object] | None = None
-        if not error_message and account_email:
-            summary = analytics.attention_economics_summary(
+        account_emails, window_days, sort_mode, error = _validate_attention_params(
+            args=request.args, default_account=default_account
+        )
+        error_message = error or ""
+        if error_message:
+            summary = {
+                "window_days": window_days or 30,
+                "account_emails": account_emails,
+                "limit": 50,
+                "sort": sort_mode,
+                "totals": {
+                    "estimated_read_minutes": 0.0,
+                    "message_count": 0,
+                    "estimated_cost": 0.0,
+                },
+                "entities": [],
+                "lane_breakdown": [],
+                "top_contact_label": "",
+                "generated_at_utc": "",
+            }
+        else:
+            summary = _attention_payload(
                 account_emails=account_emails,
                 window_days=window_days or 30,
-                limit=limit or 50,
-                include_anomalies=bool(include_anomalies),
-            attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
+                sort_mode=sort_mode,
+            )
+        generated_at = summary.get("generated_at_utc") or ""
+        scope_hint = ""
+        if account_emails:
+            if len(account_emails) == 1:
+                scope_hint = f"{account_emails[0]} • last {window_days or 30} days"
+            else:
+                scope_hint = f"{len(account_emails)} accounts • last {window_days or 30} days"
+        total_minutes = float(
+            summary.get("totals", {}).get("estimated_read_minutes") or 0.0
         )
-        fallback_generated = datetime.fromtimestamp(0, tz=timezone.utc).isoformat()
-        if fallback_generated.endswith("+00:00"):
-            fallback_generated = fallback_generated.replace("+00:00", "Z")
-        resolved_summary = summary or {
-            "window_days": window_days or 30,
-            "account_emails": account_emails,
-            "limit": limit or 50,
-            "totals": {
-                "estimated_read_minutes": 0.0,
-                "message_count": 0,
-                "attachment_count": 0,
-                "deferred_count": 0,
-            },
-            "entities": [],
-            "generated_at_utc": fallback_generated,
+        total_hours = round(total_minutes / 60.0, 2)
+        attention_cost = float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0))
+        csv_params: dict[str, str] = {
+            "account_emails": ",".join(account_emails),
+            "window_days": str(window_days or 30),
+            "sort": sort_mode,
         }
-        account_options = _build_select_options(accounts, account_email)
-        window_options = _build_window_options(window_days or 30)
-        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+        attention_csv_url = url_for("attention_csv", **csv_params)
+        sort_options = [
+            {"value": "time", "label": "time", "selected": sort_mode == "time"},
+            {"value": "cost", "label": "cost", "selected": sort_mode == "cost"},
+            {"value": "count", "label": "count", "selected": sort_mode == "count"},
+        ]
+        dashboard_vars = _dashboard_vars()
         return _render_template(
             app,
             "attention.html",
             title=app.config["APP_TITLE"],
-            static_url=_static_url(),
-            latency_url=url_for("latency"),
-            health_url=url_for("health"),
+            page_title="Attention economics",
+            scope_hint=scope_hint,
+            dashboard_vars=dashboard_vars,
+            hide_limit=True,
+            error=error_message or None,
             attention_url=url_for("attention"),
-            events_url=url_for("events"),
-            relationships_url=url_for("relationships"),
-            error_block=error_block,
-            account_options=account_options,
+            attention_csv_url=attention_csv_url,
             account_emails_value=",".join(account_emails),
-            window_options=window_options,
-            limit_value=str(limit or 50),
-            include_anomalies_checked="checked" if include_anomalies else "",
-            summary=resolved_summary,
-            attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
+            window_days=window_days or 30,
+            sort_options=sort_options,
+            summary=summary,
+            generated_at=generated_at,
+            total_hours=total_hours,
+            attention_cost_per_hour=attention_cost,
+            lane_labels=LANE_LABELS,
         )
+
+    @app.route("/attention.csv", methods=["GET"])
+    def attention_csv():
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_emails, window_days, sort_mode, error = _validate_attention_params(
+            args=request.args, default_account=default_account
+        )
+        if error:
+            resp = jsonify({"error": error})
+            resp.status_code = 400
+            return resp
+        summary = _attention_payload(
+            account_emails=account_emails,
+            window_days=window_days or 30,
+            sort_mode=sort_mode,
+        )
+        rows = summary.get("entities", [])
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Contact", "Emails", "Attention minutes", "Estimated cost", "Signals"])
+        for row in rows if isinstance(rows, list) else []:
+            writer.writerow(
+                [
+                    str(row.get("entity_label") or ""),
+                    int(row.get("message_count") or 0),
+                    f"{float(row.get('estimated_read_minutes') or 0.0):.2f}",
+                    str(row.get("estimated_cost") or ""),
+                    str(row.get("signals") or ""),
+                ]
+            )
+        csv_text = output.getvalue()
+        response = Response(csv_text.encode("utf-8"), mimetype="text/csv; charset=utf-8")
+        response.headers = {"Content-Disposition": "attachment; filename=attention.csv"}
+        return response
 
     @app.route("/learning", methods=["GET"])
     def learning():
