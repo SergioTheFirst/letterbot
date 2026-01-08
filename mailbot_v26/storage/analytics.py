@@ -34,6 +34,11 @@ class KnowledgeAnalytics:
 
     def _connect_readonly(self) -> sqlite3.Connection:
         conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        try:
+            conn.execute("PRAGMA busy_timeout = 750")
+        except sqlite3.Error:
+            conn.close()
+            raise
         if self._query_only:
             try:
                 conn.execute("PRAGMA query_only = ON")
@@ -788,6 +793,218 @@ class KnowledgeAnalytics:
             ),
         )
         return sorted_rows[:resolved_limit]
+
+    def _priority_digest_counts(
+        self,
+        *,
+        account_ids: Sequence[str],
+        since_ts: float,
+    ) -> list[dict[str, object]]:
+        if not account_ids:
+            return []
+        since_iso = datetime.fromtimestamp(since_ts, tz=timezone.utc).isoformat()
+        clause, clause_params = self._account_email_clause(account_ids)
+        query = """
+        SELECT priority, COUNT(*) AS count
+        FROM emails
+        WHERE received_at >= ?
+        """
+        params: list[object] = [since_iso, *clause_params]
+        query += clause
+        query += " GROUP BY priority ORDER BY count DESC, priority ASC"
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return []
+        results: list[dict[str, object]] = []
+        for row in rows:
+            label = str(row.get("priority") or "Unclassified").strip() or "Unclassified"
+            results.append({"label": label.title(), "count": int(row.get("count") or 0)})
+        return results
+
+    def _latency_distribution(
+        self,
+        *,
+        account_ids: Sequence[str],
+        window_days: int,
+    ) -> list[dict[str, object]]:
+        if not account_ids:
+            return []
+        since_ts = self._window_start_ts(window_days)
+        rows = self._processing_span_rows_scoped(account_ids=account_ids, since_ts=since_ts)
+        bins = [
+            (0.0, 1.0, "0-1s"),
+            (1.0, 2.0, "1-2s"),
+            (2.0, 5.0, "2-5s"),
+            (5.0, 10.0, "5-10s"),
+            (10.0, 30.0, "10-30s"),
+            (30.0, 60.0, "30-60s"),
+        ]
+        counts: list[int] = [0 for _ in bins]
+        overflow = 0
+        for row in rows:
+            total_ms = row.get("total_duration_ms")
+            if total_ms is None:
+                try:
+                    total_ms = (float(row.get("ts_end_utc")) - float(row.get("ts_start_utc"))) * 1000.0
+                except (TypeError, ValueError):
+                    total_ms = None
+            if total_ms is None:
+                continue
+            seconds = max(0.0, float(total_ms) / 1000.0)
+            placed = False
+            for idx, (start, end, _) in enumerate(bins):
+                if start <= seconds < end:
+                    counts[idx] += 1
+                    placed = True
+                    break
+            if not placed:
+                overflow += 1
+        results = [
+            {"label": label, "count": counts[idx]}
+            for idx, (_, _, label) in enumerate(bins)
+            if counts[idx] > 0
+        ]
+        if overflow:
+            results.append({"label": "60s+", "count": overflow})
+        return results
+
+    def cockpit_summary(
+        self,
+        *,
+        account_emails: Iterable[str] | None,
+        window_days: int,
+        allow_pii: bool,
+        include_engineer: bool = False,
+        activity_limit: int = 15,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope("", account_emails)
+        db_size_bytes = None
+        try:
+            db_size_bytes = self.path.stat().st_size
+        except OSError:
+            db_size_bytes = None
+
+        status_strip: dict[str, object] = {
+            "system_mode": "unknown",
+            "gates_state": {},
+            "metrics_brief": {},
+            "updated_ts_utc": None,
+            "db_size_bytes": db_size_bytes,
+        }
+
+        if account_ids:
+            current = self.processing_spans_health_current(
+                account_email=account_ids[0],
+                account_emails=account_ids,
+                window_days=window_days,
+            )
+            if current:
+                status_strip = {
+                    "system_mode": current.get("system_mode") or "unknown",
+                    "gates_state": current.get("gates_state") or {},
+                    "metrics_brief": current.get("metrics_brief") or {},
+                    "updated_ts_utc": current.get("ts_end_utc"),
+                    "db_size_bytes": db_size_bytes,
+                }
+
+        if not account_ids:
+            return {
+                "status_strip": status_strip,
+                "today_digest": {"counts": [], "items": []},
+                "week_digest": {"counts": [], "items": []},
+                "recent_activity": [],
+                "golden_signals": {},
+                "engineer": {},
+            }
+
+        primary_account = account_ids[0]
+        summary = self.processing_spans_metrics_digest(
+            account_email=primary_account,
+            account_emails=account_ids,
+            window_days=window_days,
+        )
+        recent_activity = self.recent_mail_activity(
+            account_email=primary_account,
+            account_emails=account_ids,
+            window_days=window_days,
+            limit=min(50, max(1, int(activity_limit))),
+            reveal_pii=allow_pii,
+        )
+        today_items = self.recent_mail_activity(
+            account_email=primary_account,
+            account_emails=account_ids,
+            window_days=1,
+            limit=3,
+            reveal_pii=allow_pii,
+        )
+        week_items = self.recent_mail_activity(
+            account_email=primary_account,
+            account_emails=account_ids,
+            window_days=7,
+            limit=3,
+            reveal_pii=allow_pii,
+        )
+        today_counts = self._priority_digest_counts(
+            account_ids=account_ids, since_ts=self._window_start_ts(1)
+        )
+        week_counts = self._priority_digest_counts(
+            account_ids=account_ids, since_ts=self._window_start_ts(7)
+        )
+
+        golden_signals = {
+            "latency_p50_ms": summary.get("total_duration_ms_p50"),
+            "latency_p95_ms": summary.get("total_duration_ms_p95"),
+            "error_rate": summary.get("error_rate"),
+            "fallback_rate": summary.get("fallback_rate"),
+            "span_count": summary.get("span_count"),
+            "db_size_bytes": db_size_bytes,
+        }
+        metrics_brief = status_strip.get("metrics_brief") if isinstance(status_strip, Mapping) else {}
+        metrics_window: Mapping[str, object] | None = None
+        if isinstance(metrics_brief, Mapping) and metrics_brief:
+            for key in sorted(metrics_brief.keys(), key=lambda item: str(item)):
+                window_values = metrics_brief.get(key)
+                if isinstance(window_values, Mapping):
+                    metrics_window = window_values
+                    break
+        if metrics_window:
+            success_rate = metrics_window.get("telegram_delivery_success_rate")
+            try:
+                if success_rate is not None:
+                    tg_failure_rate = max(0.0, 1.0 - float(success_rate))
+                    golden_signals["tg_failure_rate"] = tg_failure_rate
+            except (TypeError, ValueError):
+                pass
+
+        engineer: dict[str, object] = {}
+        if include_engineer:
+            engineer = {
+                "slow_spans": self.processing_spans_slowest(
+                    account_email=primary_account,
+                    account_emails=account_ids,
+                    window_days=window_days,
+                    limit=20,
+                ),
+                "recent_errors": self.processing_spans_recent_errors(
+                    account_email=primary_account,
+                    account_emails=account_ids,
+                    window_days=window_days,
+                    limit=20,
+                ),
+                "latency_distribution": self._latency_distribution(
+                    account_ids=account_ids, window_days=window_days
+                ),
+            }
+
+        return {
+            "status_strip": status_strip,
+            "today_digest": {"counts": today_counts, "items": today_items},
+            "week_digest": {"counts": week_counts, "items": week_items},
+            "recent_activity": recent_activity,
+            "golden_signals": golden_signals,
+            "engineer": engineer,
+        }
 
     def events_timeline(
         self,

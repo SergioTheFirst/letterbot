@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,9 +54,36 @@ class DashboardVars:
     pii: bool
 
 
+class _TTLCache:
+    def __init__(self, ttl_seconds: float) -> None:
+        self._ttl_seconds = max(0.0, ttl_seconds)
+        self._items: dict[tuple[object, ...], tuple[float, object]] = {}
+
+    def get(self, key: tuple[object, ...]) -> object | None:
+        if not self._ttl_seconds:
+            return None
+        item = self._items.get(key)
+        if not item:
+            return None
+        stored_at, value = item
+        if time.monotonic() - stored_at > self._ttl_seconds:
+            self._items.pop(key, None)
+            return None
+        return value
+
+    def set(self, key: tuple[object, ...], value: object) -> None:
+        if not self._ttl_seconds:
+            return
+        self._items[key] = (time.monotonic(), value)
+
+
+_COCKPIT_CACHE = _TTLCache(10.0)
+
+
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
+        conn.execute("PRAGMA busy_timeout = 750")
         conn.execute("PRAGMA query_only = ON")
     except sqlite3.Error:
         conn.close()
@@ -115,10 +143,11 @@ def _render_stub_html(
         "</div>"
     )
 
-    if template_name == "bridge.html":
+    if template_name in {"bridge.html", "cockpit.html"}:
         activity_rows = context.get("activity_rows") if isinstance(context, Mapping) else []
         digest_today = context.get("digest_today") if isinstance(context, Mapping) else []
         digest_week = context.get("digest_week") if isinstance(context, Mapping) else []
+        engineer_mode = bool(context.get("engineer_mode")) if isinstance(context, Mapping) else False
         activity_body = "".join(
             """
             <tr>
@@ -144,9 +173,10 @@ def _render_stub_html(
             f"<li>{html.escape(str(item.get('title') or ''))} {html.escape(str(item.get('time') or ''))}</li>"
             for item in (digest_week or [])
         ) or "<div class=\"hint\">Expand window to see weekly digest.</div>"
+        engineer_block = "<details><summary>Engineer</summary></details>" if engineer_mode else ""
         return (
-            f"<html><body>{header}<h2>Digest Today</h2>{digest_today_block}<h2>Digest Week</h2>{digest_week_block}"
-            f"<h2>Recent Mail Activity</h2><table>{activity_body}</table></body></html>"
+            f"<html><body>{header}<h2>Today Digest</h2>{digest_today_block}<h2>Week Digest</h2>{digest_week_block}"
+            f"<h2>Recent Activity</h2>{engineer_block}<table>{activity_body}</table></body></html>"
         )
 
     return render_template(str(template_path), **context)
@@ -195,6 +225,20 @@ def _format_percent(value: object) -> str:
     if numeric is None:
         return "–"
     return _format_number(numeric * 100)
+
+
+def _format_bytes(value: object) -> str:
+    try:
+        size = float(value)
+    except (TypeError, ValueError):
+        return "–"
+    if size < 0:
+        return "–"
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size < 1024.0:
+            return f"{size:.1f}{unit}" if unit != "B" else f"{int(size)}{unit}"
+        size /= 1024.0
+    return f"{size:.1f}TB"
 
 def _format_ts_utc(value: object) -> str:
     try:
@@ -544,6 +588,218 @@ def resolve_dashboard_vars(request, session, allow_pii: bool | None = None) -> D
     return resolved
 
 
+def _resolve_cockpit_mode(request, session) -> str:
+    try:
+        session_vars = session.get("cockpit_mode")
+    except Exception:
+        session_vars = None
+    raw_mode = request.args.get("mode")
+    if raw_mode is None and session_vars:
+        raw_mode = str(session_vars)
+    mode = str(raw_mode or "owner").strip().lower()
+    if mode not in {"owner", "engineer"}:
+        mode = "owner"
+    try:
+        session["cockpit_mode"] = mode
+    except Exception:
+        logger.debug("Cockpit mode session persist skipped", exc_info=True)
+    return mode
+
+
+def _status_from_value(value: object) -> tuple[str, str]:
+    if value is None or value == "":
+        return "unknown", "muted"
+    if isinstance(value, bool):
+        return ("ok", "success") if value else ("down", "danger")
+    text = str(value).strip()
+    if not text:
+        return "unknown", "muted"
+    lowered = text.lower()
+    if lowered in {"ok", "open", "healthy", "ready", "true", "1", "up", "pass", "green"}:
+        return "ok", "success"
+    if lowered in {"warn", "warning", "degraded", "yellow"}:
+        return "warn", "warn"
+    if lowered in {"down", "fail", "failed", "error", "closed", "red", "false", "0"}:
+        return "down", "danger"
+    return text, "muted"
+
+
+def _status_from_mapping(values: Mapping[str, object], *, keys: Iterable[str]) -> object | None:
+    for key in keys:
+        if key in values:
+            return values.get(key)
+    for candidate_key in sorted(values.keys(), key=lambda item: str(item).lower()):
+        candidate_value = values.get(candidate_key)
+        lowered = str(candidate_key).lower()
+        for key in keys:
+            if key in lowered:
+                return candidate_value
+    return None
+
+
+def _status_strip_view(
+    status_strip: Mapping[str, object] | None, *, now_ts: float
+) -> dict[str, object]:
+    status_strip = status_strip or {}
+    system_mode = str(status_strip.get("system_mode") or "unknown")
+    gates_state = status_strip.get("gates_state") if isinstance(status_strip, Mapping) else {}
+    metrics_brief = status_strip.get("metrics_brief") if isinstance(status_strip, Mapping) else {}
+    gates_state = gates_state if isinstance(gates_state, Mapping) else {}
+    metrics_brief = metrics_brief if isinstance(metrics_brief, Mapping) else {}
+    metrics_window = {}
+    if metrics_brief:
+        for window_key in sorted(metrics_brief.keys(), key=lambda item: str(item)):
+            window_values = metrics_brief.get(window_key)
+            if isinstance(window_values, Mapping):
+                metrics_window = window_values
+                break
+
+    imap_value = _status_from_mapping(gates_state, keys=["imap", "mail", "inbox"])
+    llm_failure_rate = None
+    if isinstance(metrics_window, Mapping):
+        llm_failure_rate = metrics_window.get("llm_failure_rate")
+    tg_success_rate = None
+    if isinstance(metrics_window, Mapping):
+        tg_success_rate = metrics_window.get("telegram_delivery_success_rate")
+
+    llm_status = "unknown"
+    llm_class = "muted"
+    llm_rate = _safe_float(llm_failure_rate)
+    if llm_rate is not None:
+        if llm_rate < 0.05:
+            llm_status, llm_class = "ok", "success"
+        elif llm_rate < 0.12:
+            llm_status, llm_class = "warn", "warn"
+        else:
+            llm_status, llm_class = "down", "danger"
+
+    tg_status = "unknown"
+    tg_class = "muted"
+    tg_rate = _safe_float(tg_success_rate)
+    if tg_rate is not None:
+        if tg_rate >= 0.98:
+            tg_status, tg_class = "ok", "success"
+        elif tg_rate >= 0.9:
+            tg_status, tg_class = "warn", "warn"
+        else:
+            tg_status, tg_class = "down", "danger"
+
+    db_size_bytes = status_strip.get("db_size_bytes")
+    db_status = "unknown"
+    db_class = "muted"
+    if db_size_bytes is not None:
+        db_status, db_class = "ok", "success"
+
+    imap_status_text, imap_class = _status_from_value(imap_value)
+
+    updated_ts = _safe_float(status_strip.get("updated_ts_utc"))
+    updated_ago = "–"
+    if updated_ts is not None:
+        age = max(0, int(now_ts - updated_ts))
+        updated_ago = f"{age}s ago"
+
+    return {
+        "system_mode": system_mode,
+        "imap": {"text": imap_status_text, "class": imap_class},
+        "llm": {"text": llm_status, "class": llm_class},
+        "telegram": {"text": tg_status, "class": tg_class},
+        "db": {"text": db_status, "class": db_class},
+        "db_size": _format_bytes(db_size_bytes),
+        "updated_ago": updated_ago,
+    }
+
+
+def _golden_signals_view(golden_signals: Mapping[str, object] | None) -> dict[str, str]:
+    if not golden_signals:
+        return {}
+    latency_p50 = _format_number(golden_signals.get("latency_p50_ms"))
+    latency_p95 = _format_number(golden_signals.get("latency_p95_ms"))
+    error_rate = _format_percent(golden_signals.get("error_rate"))
+    fallback_rate = _format_percent(golden_signals.get("fallback_rate"))
+    tg_failure_rate = _format_percent(golden_signals.get("tg_failure_rate"))
+    traffic_volume = _format_number(golden_signals.get("span_count"))
+    db_size = _format_bytes(golden_signals.get("db_size_bytes"))
+    saturation_parts = [part for part in [db_size, f"{traffic_volume} spans"] if part != "–"]
+    saturation = " • ".join(saturation_parts) if saturation_parts else "–"
+    return {
+        "latency_p50": f"{latency_p50} ms" if latency_p50 != "–" else "–",
+        "latency_p95": f"{latency_p95} ms" if latency_p95 != "–" else "–",
+        "error_rate": f"{error_rate}%" if error_rate != "–" else "–",
+        "fallback_rate": f"{fallback_rate}%" if fallback_rate != "–" else "–",
+        "tg_failure_rate": f"{tg_failure_rate}%" if tg_failure_rate != "–" else "–",
+        "traffic_volume": traffic_volume if traffic_volume != "–" else "–",
+        "saturation": saturation,
+    }
+
+
+def _engineer_slowest_view(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not rows:
+        return []
+    sorted_rows = sorted(
+        rows,
+        key=lambda item: (
+            -(_safe_float(item.get("total_ms")) or 0.0),
+            -(_safe_float(item.get("started_at") or item.get("ts_start_utc")) or 0.0),
+            str(item.get("span_id") or ""),
+        ),
+    )
+    results: list[dict[str, object]] = []
+    for item in sorted_rows:
+        results.append(
+            {
+                "started": _format_ts_utc(item.get("started_at") or item.get("ts_start_utc")),
+                "total_ms": _format_number(item.get("total_ms") or item.get("total_duration_ms")),
+                "outcome": item.get("outcome") or "–",
+                "llm": " ".join(
+                    part for part in [item.get("llm_provider"), item.get("llm_model")] if part
+                )
+                or "–",
+                "snapshot": item.get("health_snapshot_id") or item.get("snapshot_id") or "–",
+            }
+        )
+    return results
+
+
+def _engineer_errors_view(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not rows:
+        return []
+    sorted_rows = sorted(
+        rows,
+        key=lambda item: (
+            -(_safe_float(item.get("ts_start") or item.get("ts_start_utc")) or 0.0),
+            str(item.get("span_id") or ""),
+        ),
+    )
+    results: list[dict[str, object]] = []
+    for item in sorted_rows:
+        results.append(
+            {
+                "ts": _format_ts_utc(item.get("ts_start") or item.get("ts_start_utc")),
+                "outcome": item.get("outcome") or "–",
+                "error_code": item.get("error_code") or "–",
+                "llm": " ".join(
+                    part for part in [item.get("llm_provider"), item.get("llm_model")] if part
+                )
+                or "–",
+                "total_ms": _format_number(item.get("total_duration_ms")),
+            }
+        )
+    return results
+
+
+def _latency_distribution_view(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not rows:
+        return []
+    max_count = max(int(row.get("count") or 0) for row in rows) or 1
+    results: list[dict[str, object]] = []
+    for row in rows:
+        count = int(row.get("count") or 0)
+        bar_len = max(1, round((count / max_count) * 20)) if count else 0
+        bar = "#" * bar_len
+        results.append({"label": row.get("label") or "", "count": count, "bar": bar})
+    return results
+
+
 def _validate_latency_params(
     *,
     args,
@@ -711,7 +967,7 @@ def create_app(
                 session["authenticated"] = True
                 session.permanent = False
                 next_path = request.args.get("next")
-                return redirect(next_path or url_for("latency"))
+                return redirect(next_path or url_for("index"))
             error = "Incorrect password. Please try again."
         return _render_template(
             app,
@@ -727,100 +983,166 @@ def create_app(
         dashboard_vars = _dashboard_vars()
         accounts = _available_accounts(app.config["DB_PATH"])
         default_account = accounts[0] if accounts else None
+
         account_email = (request.args.get("account_email") or "").strip()
         if not account_email and dashboard_vars.account_emails:
             account_email = dashboard_vars.account_emails[0]
         if not account_email:
             account_email = default_account or ""
         account_emails = dashboard_vars.account_emails or ([] if not account_email else [account_email])
+        if account_email and account_email not in account_emails:
+            account_emails.append(account_email)
+        account_emails = sorted({email for email in account_emails if email})
         window_days = dashboard_vars.window_days or 7
         reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
             dashboard_vars.pii
         )
+        mode = _resolve_cockpit_mode(request, session)
+        include_engineer = mode == "engineer"
 
         analytics = _analytics()
-        summary: dict[str, object] | None = None
-        activity_rows: list[dict[str, object]] = []
-        digest_today: list[dict[str, object]] = []
-        digest_week: list[dict[str, object]] = []
-        if account_email:
-            summary = analytics.processing_spans_metrics_digest(
-                account_email=account_email,
+        cache_key = (
+            "cockpit",
+            tuple(account_emails),
+            window_days,
+            bool(reveal_pii),
+            bool(include_engineer),
+        )
+        summary = _COCKPIT_CACHE.get(cache_key)
+        if summary is None:
+            summary = analytics.cockpit_summary(
                 account_emails=account_emails,
                 window_days=window_days,
+                allow_pii=reveal_pii,
+                include_engineer=include_engineer,
+                activity_limit=15,
             )
-            activity_rows = analytics.recent_mail_activity(
-                account_email=account_email,
-                account_emails=account_emails,
-                window_days=window_days,
-                limit=dashboard_vars.limit or 25,
-                reveal_pii=reveal_pii,
-            )
-            digest_today = analytics.recent_mail_activity(
-                account_email=account_email,
-                account_emails=account_emails,
-                window_days=1,
-                limit=5,
-                reveal_pii=reveal_pii,
-            )
-            digest_week = analytics.recent_mail_activity(
-                account_email=account_email,
-                account_emails=account_emails,
-                window_days=7,
-                limit=5,
-                reveal_pii=reveal_pii,
-            )
+            _COCKPIT_CACHE.set(cache_key, summary)
 
-        golden_signals: list[dict[str, object]] = []
-        if summary:
-            span_count = int(summary.get("span_count") or 0)
-            outcome_counts = summary.get("outcome_counts") if isinstance(summary, Mapping) else {}
-            success_count = 0
-            failed_count = 0
-            if isinstance(outcome_counts, Mapping):
-                success_count = int(outcome_counts.get("ok") or 0) + int(
-                    outcome_counts.get("delivered") or 0
-                )
-                failed_count = int(outcome_counts.get("error") or 0) + int(
-                    outcome_counts.get("failed") or 0
-                )
-            golden_signals = [
-                {"label": "p50", "value": _format_number(summary.get("total_duration_ms_p50")), "suffix": "ms"},
-                {"label": "p90", "value": _format_number(summary.get("total_duration_ms_p90")), "suffix": "ms"},
-                {"label": "p95", "value": _format_number(summary.get("total_duration_ms_p95")), "suffix": "ms"},
-                {"label": "Error rate", "value": _format_percent(summary.get("error_rate")), "suffix": "%"},
-                {"label": "Delivered", "value": _format_number(success_count or span_count), "suffix": ""},
-                {"label": "Failed", "value": _format_number(failed_count), "suffix": ""},
-            ]
+        summary = summary if isinstance(summary, Mapping) else {}
+        status_strip = _status_strip_view(
+            summary.get("status_strip") if isinstance(summary, Mapping) else None,
+            now_ts=time.time(),
+        )
+        activity_rows = _build_activity_table_rows(
+            summary.get("recent_activity") if isinstance(summary, Mapping) else []
+        )
+        digest_today = summary.get("today_digest") if isinstance(summary, Mapping) else {}
+        digest_week = summary.get("week_digest") if isinstance(summary, Mapping) else {}
+        today_items = _summarize_digest_rows(digest_today.get("items", []))
+        week_items = _summarize_digest_rows(digest_week.get("items", []))
+        golden_signals = _golden_signals_view(
+            summary.get("golden_signals") if isinstance(summary, Mapping) else {}
+        )
+        engineer_payload = summary.get("engineer") if isinstance(summary, Mapping) else {}
+        engineer_slowest = _engineer_slowest_view(
+            engineer_payload.get("slow_spans", []) if isinstance(engineer_payload, Mapping) else []
+        )
+        engineer_errors = _engineer_errors_view(
+            engineer_payload.get("recent_errors", []) if isinstance(engineer_payload, Mapping) else []
+        )
+        latency_distribution = _latency_distribution_view(
+            engineer_payload.get("latency_distribution", [])
+            if isinstance(engineer_payload, Mapping)
+            else []
+        )
 
         scope_hint = None
         if account_email:
             scope_hint = f"{account_email} • last {window_days} days"
 
-        archive_available = False
-        if hasattr(app, "view_functions"):
-            archive_available = "archive" in getattr(app, "view_functions")
-        elif hasattr(app, "_endpoint_map"):
-            archive_available = "archive" in getattr(app, "_endpoint_map", {})
+        def _mode_link(target: str) -> str:
+            params = {k: v for k, v in request.args.items()}
+            if "account_emails" not in params and account_emails:
+                params["account_emails"] = ",".join(account_emails)
+            if "window_days" not in params:
+                params["window_days"] = str(window_days)
+            if reveal_pii and "pii" not in params:
+                params["pii"] = "1"
+            params["mode"] = target
+            return url_for("index", **params)
 
         return _render_template(
             app,
-            "bridge.html",
+            "cockpit.html",
             title=app.config["APP_TITLE"],
-            page_title="BRIDGE",
+            page_title="Bridge Cockpit",
             scope_hint=scope_hint,
             dashboard_vars=dashboard_vars,
-            account_options=accounts,
             account_email=account_email,
             account_emails_value=",".join(account_emails),
             window_days=window_days,
+            status_strip=status_strip,
             golden_signals=golden_signals,
-            activity_rows=_build_activity_table_rows(activity_rows),
-            digest_today=_summarize_digest_rows(digest_today),
-            digest_week=_summarize_digest_rows(digest_week),
+            activity_rows=activity_rows,
+            digest_today=today_items,
+            digest_today_counts=digest_today.get("counts", []),
+            digest_week=week_items,
+            digest_week_counts=digest_week.get("counts", []),
             pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
             pii_enabled=reveal_pii,
-            archive_available=archive_available,
+            cockpit_mode=mode,
+            mode_owner_url=_mode_link("owner"),
+            mode_engineer_url=_mode_link("engineer"),
+            engineer_mode=include_engineer,
+            engineer_slowest=engineer_slowest,
+            engineer_errors=engineer_errors,
+            latency_distribution=latency_distribution,
+            hide_limit=True,
+        )
+
+    @app.route("/cockpit")
+    def cockpit_redirect():
+        return redirect(url_for("index"))
+
+    @app.route("/partial/status_strip")
+    def status_strip_partial():
+        dashboard_vars = _dashboard_vars()
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_email = (request.args.get("account_email") or "").strip()
+        if not account_email and dashboard_vars.account_emails:
+            account_email = dashboard_vars.account_emails[0]
+        if not account_email:
+            account_email = default_account or ""
+        account_emails = dashboard_vars.account_emails or ([] if not account_email else [account_email])
+        if account_email and account_email not in account_emails:
+            account_emails.append(account_email)
+        account_emails = sorted({email for email in account_emails if email})
+        window_days = dashboard_vars.window_days or 7
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
+        )
+        include_engineer = False
+
+        analytics = _analytics()
+        cache_key = (
+            "cockpit",
+            tuple(account_emails),
+            window_days,
+            bool(reveal_pii),
+            bool(include_engineer),
+        )
+        summary = _COCKPIT_CACHE.get(cache_key)
+        if summary is None:
+            summary = analytics.cockpit_summary(
+                account_emails=account_emails,
+                window_days=window_days,
+                allow_pii=reveal_pii,
+                include_engineer=include_engineer,
+                activity_limit=15,
+            )
+            _COCKPIT_CACHE.set(cache_key, summary)
+
+        summary = summary if isinstance(summary, Mapping) else {}
+        status_strip = _status_strip_view(
+            summary.get("status_strip") if isinstance(summary, Mapping) else None,
+            now_ts=time.time(),
+        )
+        return _render_template(
+            app,
+            "partials/status_strip.html",
+            status_strip=status_strip,
         )
 
     def _analytics() -> KnowledgeAnalytics:

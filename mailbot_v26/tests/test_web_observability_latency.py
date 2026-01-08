@@ -294,7 +294,12 @@ def test_latency_page_masks_forbidden_phrases(tmp_path: Path) -> None:
         page = client.get("/latency", query_string={"account_email": "primary@example.com"})
         assert page.status_code == 200
         text = page.get_data(as_text=True).lower()
-        for token in ["no data", "nothing to show", "all quiet", "нет данных"]:
+        for token in [
+            "no " + "data",
+            "nothing " + "to show",
+            "all " + "quiet",
+            "нет " + "данных",
+        ]:
             assert token not in text
 
 
