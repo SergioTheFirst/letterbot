@@ -28,6 +28,9 @@
       {% if pii_enabled %}
         <input type="hidden" name="pii" value="1">
       {% endif %}
+      {% if lane is defined %}
+        <input type="hidden" name="lane" value="{{ lane }}">
+      {% endif %}
       <div class="filter-actions">
         <button type="submit">Apply</button>
         {% if prev_url %}<a class="btn ghost" href="{{ prev_url }}">Prev</a>{% endif %}
@@ -38,6 +41,17 @@
       </div>
     </form>
   </div>
+
+  {% if lane_pills %}
+  <div class="lane-pills" aria-label="Lane filters">
+    {% for lane in lane_pills %}
+    <a class="lane-pill {% if lane.active %}active{% endif %}" href="{{ lane.url }}">
+      <span class="lane-label">{{ lane.label }}</span>
+      <span class="lane-count">{{ lane.count }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <div class="events-stack">
     {% if groups %}

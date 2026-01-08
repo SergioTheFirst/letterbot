@@ -64,11 +64,14 @@
             <input id="pii" name="pii" type="checkbox" value="1" {% if vars and vars.pii %}checked{% endif %}>
           </div>
           {% endif %}
+          {% if lane is defined %}
+          <input type="hidden" name="lane" value="{{ lane }}">
+          {% endif %}
           {% if account_email %}<input type="hidden" name="account_email" value="{{ account_email }}">{% endif %}
           {% if cockpit_mode %}<input type="hidden" name="mode" value="{{ cockpit_mode }}">{% endif %}
           <div class="var-actions">
             <button type="submit">Apply</button>
-            <button type="button" class="ghost" id="copy-share-link">Copy share link</button>
+            <button type="button" class="ghost" id="copy-share-link" data-share-url="{{ share_url|default('') }}">Copy share link</button>
           </div>
         </form>
       </div>
@@ -95,7 +98,7 @@
       const copyBtn = document.getElementById('copy-share-link');
       if (copyBtn) {
         copyBtn.addEventListener('click', function() {
-          const url = window.location.href;
+          const url = copyBtn.dataset.shareUrl || window.location.href;
           const onSuccess = () => {
             copyBtn.textContent = 'Link copied';
             setTimeout(() => { copyBtn.textContent = 'Copy share link'; }, 2000);

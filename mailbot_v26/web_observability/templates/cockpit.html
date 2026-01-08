@@ -89,6 +89,16 @@
           <h2>Recent Activity</h2>
           <div class="hint">Email content masked in web view.</div>
         </div>
+        {% if lane_pills %}
+        <div class="lane-pills" aria-label="Lane filters">
+          {% for lane in lane_pills %}
+          <a class="lane-pill {% if lane.active %}active{% endif %}" href="{{ lane.url }}">
+            <span class="lane-label">{{ lane.label }}</span>
+            <span class="lane-count">{{ lane.count }}</span>
+          </a>
+          {% endfor %}
+        </div>
+        {% endif %}
         {% if activity_rows %}
         <div class="table-scroll activity-table-wrapper cockpit-table">
           <table class="table compact activity-table fixed">
