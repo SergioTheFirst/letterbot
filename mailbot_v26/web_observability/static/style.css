@@ -442,6 +442,122 @@ button:hover {
   margin-top: 16px;
 }
 
+.events-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.event-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+
+.event-group summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.event-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.event-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.event-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.event-group-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.event-group-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.event-group-body {
+  margin-top: 12px;
+}
+
+.event-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-pill.success {
+  color: var(--success);
+  border-color: rgba(20, 184, 166, 0.5);
+  background: rgba(20, 184, 166, 0.12);
+}
+
+.status-pill.warn {
+  color: var(--warn);
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.status-pill.danger {
+  color: var(--danger);
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.status-pill.muted {
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+.timeline-table .timeline-col-time {
+  width: 180px;
+}
+
+.timeline-table .timeline-col-type {
+  width: 180px;
+}
+
+.timeline-table .timeline-col-stage {
+  width: 160px;
+}
+
+.timeline-table .timeline-col-outcome {
+  width: 140px;
+}
+
 .detail-card {
   margin-bottom: 16px;
 }

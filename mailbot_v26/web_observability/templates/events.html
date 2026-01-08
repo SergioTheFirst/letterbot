@@ -1,56 +1,118 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title }}</title>
-  <link rel="stylesheet" href="{{ static_url }}">
-</head>
-<body>
-  <header class="navbar">
-    <div class="brand">{{ title }}</div>
-    <nav>
-      <a href="{{ latency_url }}">Latency</a>
-      <a href="{{ health_url }}">Health</a>
-      <a href="{{ attention_url }}">Attention</a>
-      <a href="{{ events_url }}" class="active">Events</a>
-      <a href="{{ relationships_url }}">Relationships</a>
-    </nav>
-  </header>
-  <main class="container">
-    {{ error_block }}
-    <section class="filters">
-      <form method="get" action="{{ events_url }}" class="filter-form">
-        <div class="form-group">
-          <label for="account_email">Account</label>
-          <select id="account_email" name="account_email">{{ account_options }}</select>
-        </div>
-        <div class="form-group">
-          <label for="account_emails">Scope (comma-separated)</label>
-          <input id="account_emails" name="account_emails" type="text" value="{{ account_emails_value }}" placeholder="optional, comma separated">
-        </div>
-        <div class="form-group">
-          <label for="window_days">Window</label>
-          <select id="window_days" name="window_days">{{ window_options }}</select>
-        </div>
-        <div class="form-group">
-          <label for="limit">Limit</label>
-          <select id="limit" name="limit">
-            <option value="50"{% if limit_value == '50' %} selected{% endif %}>50</option>
-            <option value="200"{% if limit_value == '200' %} selected{% endif %}>200</option>
-            <option value="500"{% if limit_value == '500' %} selected{% endif %}>500</option>
-          </select>
-        </div>
-        <div class="form-actions">
-          <button type="submit">Apply</button>
-        </div>
-      </form>
-    </section>
+{% extends "base.html" %}
 
-    <section>
-      <h2>Events timeline</h2>
-      {{ events_block }}
-    </section>
-  </main>
-</body>
-</html>
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+  <div class="card detail-card">
+    <form method="get" action="{{ url_for('events') }}" class="filters-form">
+      <div class="filter-group">
+        <label for="type">Type</label>
+        <select id="type" name="type">
+          <option value="all" {% if event_filter == 'all' %}selected{% endif %}>All</option>
+          <option value="processing" {% if event_filter == 'processing' %}selected{% endif %}>Processing</option>
+          <option value="delivery" {% if event_filter == 'delivery' %}selected{% endif %}>Delivery</option>
+          <option value="health" {% if event_filter == 'health' %}selected{% endif %}>Health</option>
+          <option value="learning" {% if event_filter == 'learning' %}selected{% endif %}>Learning</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="page">Page</label>
+        <input id="page" name="page" type="number" min="1" value="{{ page }}">
+      </div>
+      {% if dashboard_vars and dashboard_vars.account_emails %}
+        <input type="hidden" name="account_emails" value="{{ dashboard_vars.account_emails|join(',') }}">
+      {% endif %}
+      {% if dashboard_vars and dashboard_vars.window_days %}
+        <input type="hidden" name="window_days" value="{{ dashboard_vars.window_days }}">
+      {% endif %}
+      {% if pii_enabled %}
+        <input type="hidden" name="pii" value="1">
+      {% endif %}
+      <div class="filter-actions">
+        <button type="submit">Apply</button>
+        {% if prev_url %}<a class="btn ghost" href="{{ prev_url }}">Prev</a>{% endif %}
+        {% if next_url %}<a class="btn ghost" href="{{ next_url }}">Next</a>{% endif %}
+      </div>
+      <div class="filter-meta muted">
+        Groups: {{ total_groups }} • Page {{ page }} / {{ total_pages }}
+      </div>
+    </form>
+  </div>
+
+  <div class="events-stack">
+    {% if groups %}
+      {% for group in groups %}
+        <details class="event-group">
+          <summary>
+            <div class="event-group-header">
+              <div class="event-group-title">
+                <span class="badge">{{ group.group_kind }}</span>
+                {% if group.group_kind == 'email' %}
+                  <strong>Email {{ group.group_id }}</strong>
+                {% else %}
+                  <strong>{{ group.headline.label }}</strong>
+                {% endif %}
+                {% if group.status_label %}
+                  <span class="status-pill {{ group.status_class }}">{{ group.status_label }}</span>
+                {% endif %}
+              </div>
+              <div class="event-group-meta">
+                <div>{{ group.ts_first }} → {{ group.ts_last }}</div>
+                <div>{{ group.event_count }} events</div>
+              </div>
+            </div>
+            {% if group.group_kind == 'email' %}
+              <div class="event-group-preview">
+                <span class="muted">From</span> {{ group.headline.from_masked }}
+                <span class="muted">To</span> {{ group.headline.to_masked }}
+                {% if group.headline.preview_masked %}
+                  <span class="muted">Preview</span> {{ group.headline.preview_masked }}
+                {% endif %}
+              </div>
+            {% endif %}
+          </summary>
+          <div class="event-group-body">
+            {% if group.group_kind == 'email' %}
+              <div class="event-group-actions">
+                {% if group.forensics_url %}<a class="btn ghost" href="{{ group.forensics_url }}">Open forensics</a>{% endif %}
+                {% if group.headline.e2e_latency_s is not none %}
+                  <span class="badge">E2E {{ group.headline.e2e_latency_s|round(1) }}s</span>
+                {% endif %}
+              </div>
+            {% endif %}
+            {% if group.timeline %}
+              <div class="table-scroll">
+                <table class="table compact timeline-table">
+                  <thead>
+                    <tr>
+                      <th class="timeline-col-time">Time (UTC)</th>
+                      <th class="timeline-col-type">Type</th>
+                      <th class="timeline-col-stage">Stage</th>
+                      <th class="timeline-col-outcome">Outcome</th>
+                      <th>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for event in group.timeline %}
+                      <tr>
+                        <td class="timeline-col-time">{{ event.ts }}</td>
+                        <td class="timeline-col-type">{{ event.event_type }}</td>
+                        <td class="timeline-col-stage">{{ event.stage or "–" }}</td>
+                        <td class="timeline-col-outcome">{{ event.outcome or "–" }}</td>
+                        <td>{{ event.notes_safe or "–" }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <div class="hint">Adjust window_days or account scope.</div>
+            {% endif %}
+          </div>
+        </details>
+      {% endfor %}
+    {% else %}
+      <div class="hint">Adjust window_days or account scope.</div>
+    {% endif %}
+  </div>
+{% endblock %}
