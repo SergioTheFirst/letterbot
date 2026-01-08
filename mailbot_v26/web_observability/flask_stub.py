@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 import contextvars
 import hmac
 import json
@@ -202,13 +203,60 @@ class Flask:
         signature = hmac.new((self.secret_key or "").encode(), data_part.encode(), sha256).hexdigest()
         return f"{data_part}.{signature}"
 
-    def _match_route(self, method: str, path: str) -> tuple[Callable[[Any], Any] | None, str | None]:
+    @staticmethod
+    def _compile_route(path: str) -> tuple[str, list[str], list[str]]:
+        parts = path.strip("/").split("/")
+        names: list[str] = []
+        converters: list[str] = []
+        pattern_parts: list[str] = []
+        for part in parts:
+            if part.startswith("<") and part.endswith(">"):
+                inner = part[1:-1]
+                if ":" in inner:
+                    converter, name = inner.split(":", 1)
+                else:
+                    converter, name = "string", inner
+                converters.append(converter)
+                names.append(name)
+                if converter == "int":
+                    pattern_parts.append(r"(?P<%s>\d+)" % name)
+                else:
+                    pattern_parts.append(r"(?P<%s>[^/]+)" % name)
+            else:
+                pattern_parts.append(re.escape(part))
+        pattern = "^/" + "/".join(pattern_parts) + "$"
+        return pattern, names, converters
+
+    def _match_route(
+        self, method: str, path: str
+    ) -> tuple[Callable[[Any], Any] | None, str | None, dict[str, Any]]:
+        path_only = path.split("?")[0]
         for route_path, methods, func, endpoint in self.routes:
-            if path.split("?")[0] == route_path and method in methods:
-                return func, endpoint
+            if method not in methods:
+                continue
+            if "<" not in route_path:
+                if path_only == route_path:
+                    return func, endpoint, {}
+                continue
+            pattern, names, converters = self._compile_route(route_path)
+            match = re.match(pattern, path_only)
+            if not match:
+                continue
+            kwargs: dict[str, Any] = {}
+            for name, converter in zip(names, converters):
+                value = match.group(name)
+                if converter == "int":
+                    try:
+                        value = int(value)
+                    except (TypeError, ValueError):
+                        kwargs = {}
+                        break
+                kwargs[name] = value
+            if kwargs:
+                return func, endpoint, kwargs
         if path.startswith("/static/") and self.static_folder:
-            return self._static_handler, "static"
-        return None, None
+            return self._static_handler, "static", {}
+        return None, None, {}
 
     def _parse_request(self, method: str, path: str, data: dict[str, str] | None, headers: dict[str, str]) -> Request:
         parsed = urlparse(path)
@@ -221,7 +269,7 @@ class Flask:
 
     def _handle_request(self, method: str, path: str, data: dict[str, str] | None, headers: dict[str, str] | None = None) -> Response:
         headers = headers or {}
-        func, endpoint = self._match_route(method, path)
+        func, endpoint, kwargs = self._match_route(method, path)
         req = self._parse_request(method, path, data, headers)
         req.endpoint = endpoint
         token_req = _request_ctx.set(req)
@@ -237,7 +285,7 @@ class Flask:
                     resp = result
                     break
             else:
-                resp = func()
+                resp = func(**kwargs) if kwargs else func()
             if not isinstance(resp, Response):
                 resp = Response(str(resp).encode("utf-8"))
             cookie_value = self._dump_session(sess_obj)

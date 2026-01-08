@@ -157,6 +157,12 @@ class ProcessingSpanRecorder:
                 )
                 conn.execute(
                     """
+                    CREATE INDEX IF NOT EXISTS idx_processing_spans_email_ts
+                        ON processing_spans(email_id, ts_start_utc, span_id);
+                    """
+                )
+                conn.execute(
+                    """
                     CREATE INDEX IF NOT EXISTS idx_processing_spans_ts_start
                         ON processing_spans(ts_start_utc);
                     """

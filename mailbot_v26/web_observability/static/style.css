@@ -237,6 +237,26 @@ input:focus-visible {
   margin-bottom: 18px;
 }
 
+.filters-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex: 1;
+}
+
+.filter-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.filter-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
 .filter-group {
   display: flex;
   flex-direction: column;
@@ -274,6 +294,26 @@ button {
 
 button:hover {
   filter: brightness(0.97);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+
+.btn.ghost {
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
 }
 
 .ghost {
@@ -375,6 +415,92 @@ button:hover {
   position: sticky;
   top: 0;
   z-index: 1;
+}
+
+.archive-table .table {
+  margin-top: 0;
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover {
+  background: var(--surface-muted);
+}
+
+.truncate {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pagination {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.detail-card {
+  margin-bottom: 16px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.detail-label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detail-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.detail-preview {
+  font-weight: 500;
+  white-space: pre-wrap;
+}
+
+.detail-actions {
+  margin-bottom: 14px;
+}
+
+.archive-table .col-time {
+  width: 140px;
+}
+
+.archive-table .col-from,
+.archive-table .col-account {
+  width: 160px;
+}
+
+.archive-table .col-preview {
+  width: 320px;
+}
+
+.archive-table .col-status,
+.archive-table .col-latency {
+  width: 120px;
+}
+
+.archive-table .col-mode {
+  width: 140px;
+}
+
+.archive-table .col-failure {
+  width: 220px;
+}
+
+.archive-table .col-stage {
+  width: 200px;
 }
 
 .badge {

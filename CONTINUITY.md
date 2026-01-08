@@ -32,6 +32,7 @@ Done:
 - 2026-01-02: trust bootstrapping (digest-only) behind enable_trust_bootstrap.
 - 2026-01-15: web cockpit home with owner/engineer modes, status strip, and read-only analytics tests.
 - 2026-01-16: health cockpit status page with basic/engineer modes, partial refresh, read-only indexes, and login selector/tests.
+- 2026-01-08: web archive + email forensics views added with deterministic ordering, new indexes, screenshot helper hardening, and tests.
 Now:
 - None.
 Next:
@@ -49,6 +50,11 @@ Working set (files / tables / tests):
 - mailbot_v26/config/silence_policy.py
 - mailbot_v26/config/trust_bootstrap.py
 - mailbot_v26/storage/analytics.py
+- mailbot_v26/web_observability/app.py
+- mailbot_v26/web_observability/templates/archive.html
+- mailbot_v26/web_observability/templates/email_detail.html
+- mailbot_v26/tools/capture_web_screenshot.py
+- mailbot_v26/tests/test_web_archive_forensics.py
 - mailbot_v26/pipeline/daily_digest.py
 - mailbot_v26/pipeline/digest_scheduler.py
 - mailbot_v26/feedback.py

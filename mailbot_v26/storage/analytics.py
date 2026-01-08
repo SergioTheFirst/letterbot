@@ -147,6 +147,13 @@ class KnowledgeAnalytics:
         return {}
 
     @staticmethod
+    def _safe_float(value: object) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _account_scope_clause(account_ids: Sequence[str]) -> tuple[str, list[object]]:
         if not account_ids:
             return "", []
@@ -793,6 +800,389 @@ class KnowledgeAnalytics:
             ),
         )
         return sorted_rows[:resolved_limit]
+
+    def _build_email_preview(
+        self,
+        action_line: object,
+        body_summary: object,
+        *,
+        reveal_pii: bool,
+        limit: int = 160,
+    ) -> str:
+        preview_parts = [
+            str(action_line or ""),
+            str(body_summary or ""),
+        ]
+        combined_preview = " — ".join(part for part in preview_parts if part)
+        if not reveal_pii:
+            combined_preview = self._strip_emails(combined_preview)
+        return self._clamp_preview_text(combined_preview, limit=limit)
+
+    def _stage_breakdown_hint(self, raw: object, *, limit: int = 2) -> str:
+        durations = self._parse_json_dict(raw)
+        if not durations:
+            return ""
+        parsed: list[tuple[str, float]] = []
+        for stage, value in durations.items():
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if numeric < 0:
+                continue
+            label = str(stage).replace("_", " ").strip()
+            if not label:
+                continue
+            parsed.append((label, numeric))
+        if not parsed:
+            return ""
+        parsed.sort(key=lambda item: (-item[1], item[0]))
+        entries = []
+        for label, duration in parsed[: max(0, int(limit))]:
+            entries.append(f"{label} {int(round(duration))}ms")
+        return " • ".join(entries)
+
+    def _sanitize_failure_reason(self, raw: object, *, reveal_pii: bool) -> str:
+        reason = str(raw or "").strip()
+        if not reason:
+            return ""
+        if not reveal_pii:
+            reason = self._strip_emails(reason)
+        return self._clamp_preview_text(reason, limit=160)
+
+    def email_archive_page(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        window_days: int = 7,
+        page: int = 1,
+        page_size: int = 50,
+        status: str = "any",
+        reveal_pii: bool = False,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return {"rows": [], "total_count": 0}
+        resolved_page = max(1, int(page))
+        resolved_page_size = max(1, int(page_size))
+        since_ts = self._window_start_ts(window_days)
+        since_iso = datetime.fromtimestamp(since_ts, tz=timezone.utc).isoformat()
+        status_norm = str(status or "any").strip().lower()
+        if status_norm not in {"any", "ok", "warn", "fail"}:
+            status_norm = "any"
+
+        clause, clause_params = self._account_email_clause(account_ids)
+        status_clause = "1=1"
+        if status_norm == "ok":
+            status_clause = "delivered_ts IS NOT NULL"
+        elif status_norm == "fail":
+            status_clause = "failed_ts IS NOT NULL AND delivered_ts IS NULL"
+        elif status_norm == "warn":
+            status_clause = "delivered_ts IS NULL AND failed_ts IS NULL"
+
+        base_query = """
+        WITH scoped AS (
+            SELECT e.id, e.account_email, e.from_email, e.action_line, e.body_summary, e.received_at,
+                (
+                    SELECT MAX(ts_utc) FROM events_v1
+                    WHERE email_id = e.id AND event_type = ? AND ts_utc >= ?
+                ) AS delivered_ts,
+                (
+                    SELECT MAX(ts_utc) FROM events_v1
+                    WHERE email_id = e.id AND event_type = ? AND ts_utc >= ?
+                ) AS failed_ts,
+                (
+                    SELECT payload_json FROM events_v1
+                    WHERE email_id = e.id AND event_type = ? AND ts_utc >= ?
+                    ORDER BY ts_utc DESC, event_type ASC, email_id DESC
+                    LIMIT 1
+                ) AS failed_payload,
+                (
+                    SELECT payload_json FROM events_v1
+                    WHERE email_id = e.id AND event_type = ? AND ts_utc >= ?
+                    ORDER BY ts_utc DESC, event_type ASC, email_id DESC
+                    LIMIT 1
+                ) AS policy_payload,
+                (
+                    SELECT payload_json FROM events_v1
+                    WHERE email_id = e.id AND event_type = ? AND ts_utc >= ?
+                    ORDER BY ts_utc DESC, event_type ASC, email_id DESC
+                    LIMIT 1
+                ) AS delivered_payload,
+                (
+                    SELECT stage_durations_json FROM processing_spans
+                    WHERE email_id = e.id AND ts_start_utc >= ?
+                    ORDER BY ts_start_utc DESC, span_id ASC
+                    LIMIT 1
+                ) AS stage_durations_json
+            FROM emails e
+            WHERE e.received_at >= ?
+        """
+        params: list[object] = [
+            EventType.TELEGRAM_DELIVERED.value,
+            since_ts,
+            EventType.TELEGRAM_FAILED.value,
+            since_ts,
+            EventType.TELEGRAM_FAILED.value,
+            since_ts,
+            EventType.DELIVERY_POLICY_APPLIED.value,
+            since_ts,
+            EventType.TELEGRAM_DELIVERED.value,
+            since_ts,
+            since_ts,
+            since_iso,
+            *clause_params,
+        ]
+        base_query += clause
+        base_query += "\n        )\n"
+        count_query = f"{base_query}SELECT COUNT(1) AS total_count FROM scoped WHERE {status_clause}"
+        try:
+            count_rows = self._execute_select(count_query, params)
+            total_count = int(count_rows[0].get("total_count") or 0) if count_rows else 0
+        except sqlite3.OperationalError:
+            total_count = 0
+
+        page_offset = (resolved_page - 1) * resolved_page_size
+        page_query = (
+            f"{base_query}SELECT * FROM scoped WHERE {status_clause} "
+            "ORDER BY received_at DESC, id DESC LIMIT ? OFFSET ?"
+        )
+        page_params = [*params, resolved_page_size, page_offset]
+        try:
+            rows = self._execute_select(page_query, page_params)
+        except sqlite3.OperationalError:
+            rows = []
+
+        results: list[dict[str, object]] = []
+        for row in rows:
+            received_dt = parse_sqlite_datetime(str(row.get("received_at") or ""))
+            received_ts = received_dt.timestamp() if received_dt else None
+            delivered_ts = self._safe_float(row.get("delivered_ts"))
+            failed_ts = self._safe_float(row.get("failed_ts"))
+            status_label = "In-flight"
+            if delivered_ts is not None:
+                status_label = "Delivered"
+            elif failed_ts is not None:
+                status_label = "Failed"
+            e2e_seconds = None
+            if delivered_ts is not None and received_ts is not None:
+                e2e_seconds = max(0.0, float(delivered_ts) - float(received_ts))
+            from_email = row.get("from_email") or ""
+            account_email = row.get("account_email") or ""
+            from_label = (
+                self._mask_email_address(from_email)
+                if not reveal_pii
+                else str(from_email)
+            )
+            account_label = (
+                self._mask_email_address(account_email)
+                if not reveal_pii
+                else str(account_email)
+            )
+            preview = self._build_email_preview(
+                row.get("action_line"),
+                row.get("body_summary"),
+                reveal_pii=reveal_pii,
+            )
+            policy_payload = self._parse_json_dict(row.get("policy_payload"))
+            delivered_payload = self._parse_json_dict(row.get("delivered_payload"))
+            delivery_mode = ""
+            if policy_payload:
+                raw_mode = policy_payload.get("mode") or policy_payload.get("delivery_mode")
+                if raw_mode:
+                    delivery_mode = str(raw_mode)
+            if not delivery_mode and delivered_payload:
+                raw_mode = delivered_payload.get("delivery_mode")
+                if raw_mode:
+                    delivery_mode = str(raw_mode)
+            failed_payload = self._parse_json_dict(row.get("failed_payload"))
+            failure_reason = self._sanitize_failure_reason(
+                failed_payload.get("error") if failed_payload else "",
+                reveal_pii=reveal_pii,
+            )
+            stage_hint = self._stage_breakdown_hint(row.get("stage_durations_json"))
+
+            results.append(
+                {
+                    "email_id": row.get("id"),
+                    "received_ts_utc": received_ts,
+                    "from_label": from_label,
+                    "account_label": account_label,
+                    "preview": preview,
+                    "status": status_label,
+                    "e2e_seconds": e2e_seconds,
+                    "delivery_mode": delivery_mode,
+                    "failure_reason": failure_reason,
+                    "stage_hint": stage_hint,
+                }
+            )
+
+        return {"rows": results, "total_count": total_count}
+
+    def email_forensics_detail(
+        self,
+        *,
+        email_id: int,
+        reveal_pii: bool = False,
+    ) -> dict[str, object] | None:
+        query = """
+        SELECT e.id, e.account_email, e.from_email, e.action_line, e.body_summary, e.received_at,
+            (
+                SELECT MAX(ts_utc) FROM events_v1
+                WHERE email_id = e.id AND event_type = ?
+            ) AS delivered_ts,
+            (
+                SELECT MAX(ts_utc) FROM events_v1
+                WHERE email_id = e.id AND event_type = ?
+            ) AS failed_ts,
+            (
+                SELECT payload_json FROM events_v1
+                WHERE email_id = e.id AND event_type = ?
+                ORDER BY ts_utc DESC, event_type ASC, email_id DESC
+                LIMIT 1
+            ) AS failed_payload,
+            (
+                SELECT payload_json FROM events_v1
+                WHERE email_id = e.id AND event_type = ?
+                ORDER BY ts_utc DESC, event_type ASC, email_id DESC
+                LIMIT 1
+            ) AS policy_payload,
+            (
+                SELECT payload_json FROM events_v1
+                WHERE email_id = e.id AND event_type = ?
+                ORDER BY ts_utc DESC, event_type ASC, email_id DESC
+                LIMIT 1
+            ) AS delivered_payload
+        FROM emails e
+        WHERE e.id = ?
+        LIMIT 1
+        """
+        params = [
+            EventType.TELEGRAM_DELIVERED.value,
+            EventType.TELEGRAM_FAILED.value,
+            EventType.TELEGRAM_FAILED.value,
+            EventType.DELIVERY_POLICY_APPLIED.value,
+            EventType.TELEGRAM_DELIVERED.value,
+            int(email_id),
+        ]
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            return None
+        if not rows:
+            return None
+        row = rows[0]
+        received_dt = parse_sqlite_datetime(str(row.get("received_at") or ""))
+        received_ts = received_dt.timestamp() if received_dt else None
+        delivered_ts = self._safe_float(row.get("delivered_ts"))
+        failed_ts = self._safe_float(row.get("failed_ts"))
+        status_label = "In-flight"
+        if delivered_ts is not None:
+            status_label = "Delivered"
+        elif failed_ts is not None:
+            status_label = "Failed"
+        e2e_seconds = None
+        if delivered_ts is not None and received_ts is not None:
+            e2e_seconds = max(0.0, float(delivered_ts) - float(received_ts))
+        from_email = row.get("from_email") or ""
+        account_email = row.get("account_email") or ""
+        from_label = (
+            self._mask_email_address(from_email)
+            if not reveal_pii
+            else str(from_email)
+        )
+        account_label = (
+            self._mask_email_address(account_email)
+            if not reveal_pii
+            else str(account_email)
+        )
+        preview = self._build_email_preview(
+            row.get("action_line"),
+            row.get("body_summary"),
+            reveal_pii=reveal_pii,
+        )
+        policy_payload = self._parse_json_dict(row.get("policy_payload"))
+        delivered_payload = self._parse_json_dict(row.get("delivered_payload"))
+        delivery_mode = ""
+        if policy_payload:
+            raw_mode = policy_payload.get("mode") or policy_payload.get("delivery_mode")
+            if raw_mode:
+                delivery_mode = str(raw_mode)
+        if not delivery_mode and delivered_payload:
+            raw_mode = delivered_payload.get("delivery_mode")
+            if raw_mode:
+                delivery_mode = str(raw_mode)
+        failed_payload = self._parse_json_dict(row.get("failed_payload"))
+        failure_reason = self._sanitize_failure_reason(
+            failed_payload.get("error") if failed_payload else "",
+            reveal_pii=reveal_pii,
+        )
+
+        return {
+            "email_id": row.get("id"),
+            "received_ts_utc": received_ts,
+            "from_label": from_label,
+            "account_label": account_label,
+            "preview": preview,
+            "status": status_label,
+            "delivered_ts_utc": delivered_ts,
+            "failed_ts_utc": failed_ts,
+            "e2e_seconds": e2e_seconds,
+            "delivery_mode": delivery_mode,
+            "failure_reason": failure_reason,
+        }
+
+    def email_processing_timeline(self, *, email_id: int) -> list[dict[str, object]]:
+        query = """
+        SELECT span_id, ts_start_utc, total_duration_ms, stage_durations_json, outcome, error_code
+        FROM processing_spans
+        WHERE email_id = ?
+        ORDER BY ts_start_utc ASC, span_id ASC
+        """
+        try:
+            rows = self._execute_select(query, [int(email_id)])
+        except sqlite3.OperationalError:
+            return []
+        timeline: list[dict[str, object]] = []
+        for row in rows:
+            durations = self._parse_json_dict(row.get("stage_durations_json"))
+            stage_entries: list[tuple[str, float]] = []
+            for stage, value in durations.items():
+                try:
+                    numeric = float(value)
+                except (TypeError, ValueError):
+                    continue
+                stage_name = str(stage).strip()
+                if not stage_name:
+                    continue
+                stage_entries.append((stage_name, numeric))
+            if not stage_entries:
+                try:
+                    total_ms = float(row.get("total_duration_ms"))
+                except (TypeError, ValueError):
+                    total_ms = None
+                if total_ms is not None:
+                    stage_entries = [("total", total_ms)]
+            for stage_name, duration_ms in stage_entries:
+                timeline.append(
+                    {
+                        "span_id": row.get("span_id"),
+                        "ts_start_utc": row.get("ts_start_utc"),
+                        "stage": stage_name,
+                        "duration_ms": duration_ms,
+                        "outcome": row.get("outcome"),
+                        "error_code": row.get("error_code"),
+                    }
+                )
+        timeline.sort(
+            key=lambda item: (
+                float(item.get("ts_start_utc") or 0.0),
+                str(item.get("stage") or ""),
+                str(item.get("span_id") or ""),
+            )
+        )
+        return timeline
 
     def _priority_digest_counts(
         self,

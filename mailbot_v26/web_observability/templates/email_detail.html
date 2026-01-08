@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block page_actions %}
+  <div class="mode-toggle">
+    <a class="mode-pill {% if cockpit_mode == 'basic' %}active{% endif %}" href="{{ mode_basic_url }}">Basic</a>
+    <a class="mode-pill {% if cockpit_mode == 'engineer' %}active{% endif %}" href="{{ mode_engineer_url }}">Engineer</a>
+  </div>
+{% endblock %}
+{% block content %}
+  <div class="page-actions detail-actions">
+    <a class="btn ghost" href="{{ archive_url }}">Back to Archive</a>
+    <a class="btn ghost" href="{{ cockpit_url }}">Back to Cockpit</a>
+  </div>
+
+  {% if detail %}
+  <div class="card detail-card">
+    <div class="detail-grid">
+      <div>
+        <div class="detail-label">Received (UTC)</div>
+        <div class="detail-value">{{ detail.received }}</div>
+      </div>
+      <div>
+        <div class="detail-label">Account</div>
+        <div class="detail-value">{{ detail.account }}</div>
+      </div>
+      <div>
+        <div class="detail-label">From</div>
+        <div class="detail-value">{{ detail.from_label }}</div>
+      </div>
+      <div>
+        <div class="detail-label">Delivery</div>
+        <div class="detail-value"><span class="badge {{ detail.status_class }}">{{ detail.status }}</span></div>
+      </div>
+      <div>
+        <div class="detail-label">E2E latency</div>
+        <div class="detail-value">{{ detail.e2e_ms }}</div>
+      </div>
+      {% if engineer_mode %}
+      <div>
+        <div class="detail-label">Delivery mode</div>
+        <div class="detail-value">{{ detail.delivery_mode }}</div>
+      </div>
+      <div>
+        <div class="detail-label">Failure reason</div>
+        <div class="detail-value">{{ detail.failure_reason }}</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card detail-card">
+    <div class="detail-label">Telegram preview</div>
+    <div class="detail-value detail-preview">{{ detail.preview }}</div>
+  </div>
+  {% endif %}
+
+  <div class="card detail-card">
+    <div class="section-title">Processing timeline</div>
+    {% if timeline_rows %}
+    <div class="table-scroll">
+      <table class="table compact fixed">
+        <thead>
+          <tr>
+            <th class="col-time">Timestamp (UTC)</th>
+            <th class="col-stage">Stage</th>
+            <th class="col-latency">Duration</th>
+            <th class="col-status">Outcome</th>
+            {% if engineer_mode %}
+            <th class="col-failure">Error</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in timeline_rows %}
+          <tr data-span-id="{{ row.span_id }}" data-stage="{{ row.stage }}">
+            <td class="col-time">{{ row.ts }}</td>
+            <td class="col-stage">{{ row.stage }}</td>
+            <td class="col-latency">{{ row.duration_ms }}</td>
+            <td class="col-status"><span class="badge muted">{{ row.outcome }}</span></td>
+            {% if engineer_mode %}
+            <td class="col-failure"><span class="truncate">{{ row.error_code }}</span></td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="muted">Timeline entries are not available for this email.</div>
+    {% endif %}
+  </div>
+{% endblock %}

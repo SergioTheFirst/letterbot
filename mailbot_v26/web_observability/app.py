@@ -6,6 +6,7 @@ import html
 import ipaddress
 import json
 import logging
+import math
 import os
 import sqlite3
 import time
@@ -44,6 +45,9 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics
 logger = logging.getLogger(__name__)
 
 ALLOWED_WINDOWS = {7, 30, 90}
+ALLOWED_ARCHIVE_WINDOWS = {1, 7, 30, 90}
+ARCHIVE_PAGE_SIZE = 50
+ARCHIVE_STATUSES = {"any", "ok", "warn", "fail"}
 
 
 @dataclass(frozen=True)
@@ -247,6 +251,67 @@ def _render_stub_html(
             return html_body
         return f"<html><body>{html_body}</body></html>"
 
+    if template_name == "archive.html":
+        archive_rows = context.get("archive_rows") if isinstance(context, Mapping) else []
+        engineer_mode = bool(context.get("engineer_mode")) if isinstance(context, Mapping) else False
+        rows = []
+        for row in archive_rows or []:
+            extra_cols = ""
+            if engineer_mode:
+                extra_cols = (
+                    f"<td>{html.escape(str(row.get('delivery_mode') or ''))}</td>"
+                    f"<td>{html.escape(str(row.get('failure_reason') or ''))}</td>"
+                    f"<td>{html.escape(str(row.get('stage_hint') or ''))}</td>"
+                )
+            rows.append(
+                """
+                <tr data-email-id="{email_id}">
+                  <td>{received}</td><td>{from_label}</td><td>{account_label}</td>
+                  <td>{preview}</td><td>{status}</td><td>{latency}</td>{extra_cols}
+                </tr>
+                """.format(
+                    email_id=html.escape(str(row.get("email_id") or "")),
+                    received=html.escape(str(row.get("received") or "")),
+                    from_label=html.escape(str(row.get("from_label") or "")),
+                    account_label=html.escape(str(row.get("account_label") or "")),
+                    preview=html.escape(str(row.get("preview") or "")),
+                    status=html.escape(str(row.get("status") or "")),
+                    latency=html.escape(str(row.get("e2e_ms") or "")),
+                    extra_cols=extra_cols,
+                )
+            )
+        header_row = (
+            "<tr><th>Time (UTC)</th><th>From</th><th>Account</th>"
+            "<th>Preview</th><th>TG status</th><th>E2E latency</th></tr>"
+        )
+        return (
+            f"<html><body>{header}<table>{header_row}{''.join(rows)}</table></body></html>"
+        )
+
+    if template_name == "email_detail.html":
+        timeline_rows = context.get("timeline_rows") if isinstance(context, Mapping) else []
+        engineer_mode = bool(context.get("engineer_mode")) if isinstance(context, Mapping) else False
+        rows = []
+        for row in timeline_rows or []:
+            extra_cols = ""
+            if engineer_mode:
+                extra_cols = f"<td>{html.escape(str(row.get('error_code') or ''))}</td>"
+            rows.append(
+                """
+                <tr data-stage="{stage}" data-span-id="{span_id}">
+                  <td>{ts}</td><td>{stage}</td><td>{duration}</td><td>{outcome}</td>{extra_cols}
+                </tr>
+                """.format(
+                    stage=html.escape(str(row.get("stage") or "")),
+                    span_id=html.escape(str(row.get("span_id") or "")),
+                    ts=html.escape(str(row.get("ts") or "")),
+                    duration=html.escape(str(row.get("duration_ms") or "")),
+                    outcome=html.escape(str(row.get("outcome") or "")),
+                    extra_cols=extra_cols,
+                )
+            )
+        return f"<html><body>{header}<table>{''.join(rows)}</table></body></html>"
+
     return render_template(str(template_path), **context)
 
 
@@ -271,6 +336,14 @@ def _build_window_options(selected: int | None) -> str:
     return "".join(options)
 
 
+def _build_archive_window_options(selected: int | None) -> str:
+    options = []
+    for value in [1, 7, 30, 90]:
+        is_selected = " selected" if value == selected else ""
+        options.append(f"<option value=\"{value}\"{is_selected}>{value} days</option>")
+    return "".join(options)
+
+
 def _format_number(value: object) -> str:
     try:
         number = float(value)
@@ -279,6 +352,13 @@ def _format_number(value: object) -> str:
     if number.is_integer():
         return str(int(number))
     return f"{number:.2f}"
+
+
+def _format_duration_ms(value: object) -> str:
+    numeric = _safe_float(value)
+    if numeric is None:
+        return "–"
+    return f"{_format_number(numeric)} ms"
 
 
 def _safe_float(value: object) -> float | None:
@@ -537,6 +617,15 @@ def _parse_account_emails(raw: str | None) -> list[str]:
         seen.add(trimmed)
         emails.append(trimmed)
     return emails
+
+
+def _parse_archive_status(raw: Optional[str]) -> tuple[str, Optional[str]]:
+    if raw is None or raw == "":
+        return "any", None
+    cleaned = str(raw).strip().lower()
+    if cleaned in ARCHIVE_STATUSES:
+        return cleaned, None
+    return "any", "status must be one of any, ok, warn, fail"
 
 
 def _parse_window_days(
@@ -1169,6 +1258,15 @@ def _available_accounts(db_path: Path) -> list[str]:
     accounts = [str(row[0]) for row in rows if row and row[0]]
     if accounts:
         return accounts
+    emails_query = "SELECT DISTINCT account_email FROM emails ORDER BY account_email ASC"
+    try:
+        with _open_readonly_connection(db_path) as conn:
+            rows = conn.execute(emails_query).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    accounts = [str(row[0]) for row in rows if row and row[0]]
+    if accounts:
+        return accounts
     fallback_query = "SELECT DISTINCT account_id FROM events_v1 ORDER BY account_id ASC"
     try:
         with _open_readonly_connection(db_path) as conn:
@@ -1369,6 +1467,238 @@ def create_app(
     def cockpit_redirect():
         return redirect(url_for("index"))
 
+    @app.route("/archive")
+    def archive():
+        dashboard_vars = _dashboard_vars()
+        account_emails = _resolve_account_scope(dashboard_vars)
+        window_raw = request.args.get("window_days")
+        if window_raw is None and dashboard_vars.window_days:
+            window_raw = str(dashboard_vars.window_days)
+        window_days, window_error = _parse_window_days(
+            window_raw, default=7, allowed=ALLOWED_ARCHIVE_WINDOWS
+        )
+        status, status_error = _parse_archive_status(request.args.get("status"))
+        try:
+            page = int(request.args.get("page") or 1)
+        except (TypeError, ValueError):
+            page = 1
+        if page < 1:
+            page = 1
+
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
+        )
+        mode = _resolve_cockpit_mode(request, session)
+        include_engineer = mode == "engineer"
+
+        error_message = window_error or status_error
+        rows: list[dict[str, object]] = []
+        total_count = 0
+        if account_emails and window_days:
+            analytics = _analytics()
+            payload = analytics.email_archive_page(
+                account_email=account_emails[0],
+                account_emails=account_emails,
+                window_days=window_days,
+                page=page,
+                page_size=ARCHIVE_PAGE_SIZE,
+                status=status,
+                reveal_pii=reveal_pii,
+            )
+            rows = payload.get("rows") if isinstance(payload, Mapping) else []
+            if not isinstance(rows, list):
+                rows = []
+            total_count = int(payload.get("total_count") or 0) if isinstance(payload, Mapping) else 0
+        else:
+            error_message = error_message or "Select an account to view the archive."
+
+        total_pages = max(1, int(math.ceil(total_count / ARCHIVE_PAGE_SIZE))) if total_count else 1
+        if page > total_pages:
+            page = total_pages
+
+        def _base_params() -> dict[str, str]:
+            params: dict[str, str] = {}
+            if account_emails:
+                params["account_emails"] = ",".join(account_emails)
+            if window_days:
+                params["window_days"] = str(window_days)
+            if status and status != "any":
+                params["status"] = status
+            if reveal_pii:
+                params["pii"] = "1"
+            if mode:
+                params["mode"] = mode
+            return params
+
+        base_params = _base_params()
+        detail_params = dict(base_params)
+        detail_params["page"] = str(page)
+
+        def _mode_link(target: str) -> str:
+            params = dict(base_params)
+            params["mode"] = target
+            return url_for("archive", **params)
+
+        prev_url = None
+        if page > 1:
+            prev_params = dict(base_params)
+            prev_params["page"] = str(page - 1)
+            prev_url = url_for("archive", **prev_params)
+        next_url = None
+        if page < total_pages:
+            next_params = dict(base_params)
+            next_params["page"] = str(page + 1)
+            next_url = url_for("archive", **next_params)
+
+        formatted_rows = []
+        for row in rows:
+            e2e_ms = None
+            e2e_seconds = row.get("e2e_seconds")
+            if e2e_seconds is not None:
+                try:
+                    e2e_ms = float(e2e_seconds) * 1000.0
+                except (TypeError, ValueError):
+                    e2e_ms = None
+            formatted_rows.append(
+                {
+                    "email_id": row.get("email_id"),
+                    "received": _format_ts_utc(row.get("received_ts_utc")),
+                    "from_label": row.get("from_label") or "",
+                    "account_label": row.get("account_label") or "",
+                    "preview": row.get("preview") or "",
+                    "status": row.get("status") or "",
+                    "e2e_ms": _format_duration_ms(e2e_ms),
+                    "delivery_mode": row.get("delivery_mode") or "",
+                    "failure_reason": row.get("failure_reason") or "",
+                    "stage_hint": row.get("stage_hint") or "",
+                }
+            )
+
+        return _render_template(
+            app,
+            "archive.html",
+            title=app.config["APP_TITLE"],
+            page_title="Email Archive",
+            dashboard_vars=dashboard_vars,
+            account_emails=account_emails,
+            window_days=window_days or 7,
+            status=status,
+            page=page,
+            total_pages=total_pages,
+            total_count=total_count,
+            page_size=ARCHIVE_PAGE_SIZE,
+            archive_rows=formatted_rows,
+            detail_params=detail_params,
+            prev_url=prev_url,
+            next_url=next_url,
+            window_options=_build_archive_window_options(window_days or 7),
+            pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
+            pii_enabled=reveal_pii,
+            cockpit_mode=mode,
+            mode_basic_url=_mode_link("basic"),
+            mode_engineer_url=_mode_link("engineer"),
+            engineer_mode=include_engineer,
+            error=error_message,
+            hide_limit=True,
+        )
+
+    @app.route("/email/<int:email_id>")
+    def email_details(email_id: int):
+        dashboard_vars = _dashboard_vars()
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
+        )
+        mode = _resolve_cockpit_mode(request, session)
+        include_engineer = mode == "engineer"
+        analytics = _analytics()
+        detail = analytics.email_forensics_detail(email_id=email_id, reveal_pii=reveal_pii)
+        if not detail:
+            return (
+                _render_template(
+                    app,
+                    "email_detail.html",
+                    title=app.config["APP_TITLE"],
+                    page_title="Email Details",
+                    dashboard_vars=dashboard_vars,
+                    pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
+                    pii_enabled=reveal_pii,
+                    cockpit_mode=mode,
+                    mode_basic_url=url_for("archive", mode="basic"),
+                    mode_engineer_url=url_for("archive", mode="engineer"),
+                    engineer_mode=include_engineer,
+                    error="Email record not found.",
+                    hide_limit=True,
+                ),
+                404,
+            )
+
+        timeline_raw = analytics.email_processing_timeline(email_id=email_id)
+        timeline_rows = []
+        for row in timeline_raw:
+            timeline_rows.append(
+                {
+                    "ts": _format_ts_utc(row.get("ts_start_utc")),
+                    "stage": row.get("stage") or "",
+                    "duration_ms": _format_duration_ms(row.get("duration_ms")),
+                    "outcome": row.get("outcome") or "",
+                    "error_code": row.get("error_code") or "",
+                    "span_id": row.get("span_id") or "",
+                }
+            )
+
+        status_label = detail.get("status") or ""
+        status_class = "muted"
+        if status_label.lower() == "delivered":
+            status_class = "success"
+        elif status_label.lower() == "failed":
+            status_class = "danger"
+        elif status_label.lower() == "in-flight":
+            status_class = "warn"
+
+        e2e_ms = None
+        if detail.get("e2e_seconds") is not None:
+            try:
+                e2e_ms = float(detail.get("e2e_seconds")) * 1000.0
+            except (TypeError, ValueError):
+                e2e_ms = None
+
+        archive_params = {}
+        for key in ("account_emails", "window_days", "status", "page", "mode", "pii"):
+            value = request.args.get(key)
+            if value:
+                archive_params[key] = value
+        archive_url = url_for("archive", **archive_params)
+
+        return _render_template(
+            app,
+            "email_detail.html",
+            title=app.config["APP_TITLE"],
+            page_title=f"Email {email_id}",
+            dashboard_vars=dashboard_vars,
+            pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
+            pii_enabled=reveal_pii,
+            cockpit_mode=mode,
+            mode_basic_url=url_for("email_details", email_id=email_id, mode="basic"),
+            mode_engineer_url=url_for("email_details", email_id=email_id, mode="engineer"),
+            engineer_mode=include_engineer,
+            hide_limit=True,
+            detail={
+                "email_id": email_id,
+                "received": _format_ts_utc(detail.get("received_ts_utc")),
+                "account": detail.get("account_label") or "",
+                "from_label": detail.get("from_label") or "",
+                "status": status_label,
+                "status_class": status_class,
+                "delivery_mode": detail.get("delivery_mode") or "",
+                "failure_reason": detail.get("failure_reason") or "",
+                "e2e_ms": _format_duration_ms(e2e_ms),
+                "preview": detail.get("preview") or "",
+            },
+            timeline_rows=timeline_rows,
+            archive_url=archive_url,
+            cockpit_url=url_for("index"),
+        )
+
     @app.route("/partial/status_strip")
     def status_strip_partial():
         dashboard_vars = _dashboard_vars()
@@ -1432,6 +1762,17 @@ def create_app(
             session,
             allow_pii=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
         )
+
+    def _resolve_account_scope(dashboard_vars: DashboardVars) -> list[str]:
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        raw_accounts = request.args.get("account_emails")
+        resolved = _parse_account_emails(raw_accounts) if raw_accounts else []
+        if not resolved:
+            resolved = list(dashboard_vars.account_emails)
+        if not resolved and default_account:
+            resolved = [default_account]
+        return sorted({email for email in resolved if email})
 
     def _health_summary_payload(
         *,

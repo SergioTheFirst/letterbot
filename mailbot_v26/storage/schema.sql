@@ -59,6 +59,12 @@ CREATE INDEX IF NOT EXISTS idx_emails_account
 CREATE INDEX IF NOT EXISTS idx_emails_account_received_at
     ON emails(account_email, received_at);
 
+CREATE INDEX IF NOT EXISTS idx_emails_received_at_id
+    ON emails(received_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_emails_account_received_at_id
+    ON emails(account_email, received_at DESC, id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_emails_from
     ON emails(from_email);
 
@@ -210,6 +216,9 @@ CREATE INDEX IF NOT EXISTS idx_events_v1_entity_ts
 CREATE INDEX IF NOT EXISTS idx_events_v1_email_id
     ON events_v1(email_id);
 
+CREATE INDEX IF NOT EXISTS idx_events_v1_email_event_ts
+    ON events_v1(email_id, event_type, ts_utc DESC);
+
 CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts_iso
     ON events_v1(event_type, ts);
 
@@ -285,6 +294,9 @@ CREATE INDEX IF NOT EXISTS idx_processing_spans_account_ts
 
 CREATE INDEX IF NOT EXISTS idx_processing_spans_email_id
     ON processing_spans(email_id);
+
+CREATE INDEX IF NOT EXISTS idx_processing_spans_email_ts
+    ON processing_spans(email_id, ts_start_utc, span_id);
 
 CREATE INDEX IF NOT EXISTS idx_processing_spans_ts_start
     ON processing_spans(ts_start_utc);
