@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS runtime_overrides (
 CREATE INDEX IF NOT EXISTS idx_emails_account
     ON emails(account_email);
 
+CREATE INDEX IF NOT EXISTS idx_emails_account_received_at
+    ON emails(account_email, received_at);
+
 CREATE INDEX IF NOT EXISTS idx_emails_from
     ON emails(from_email);
 

@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %}Bridge Cockpit — {{ title }}{% endblock %}
+
+{% block page_actions %}
+  <div class="mode-toggle">
+    <a class="mode-pill {% if cockpit_mode == 'owner' %}active{% endif %}" href="{{ mode_owner_url }}">Owner</a>
+    <a class="mode-pill {% if cockpit_mode == 'engineer' %}active{% endif %}" href="{{ mode_engineer_url }}">Engineer</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="status-strip" id="status-strip">
+    <div class="status-strip-content" id="status-strip-content">
+      {% include "partials/status_strip.html" %}
+    </div>
+    <div class="status-strip-offline" id="status-strip-offline">offline</div>
+  </div>
+
+  <div class="cockpit-grid">
+    <div class="cockpit-left">
+      <div class="card digest-card">
+        <div class="section-title">
+          <h2>Today Digest</h2>
+          <div class="hint">Highlights across the last 24h</div>
+        </div>
+        {% if digest_today_counts %}
+        <div class="digest-counts">
+          {% for item in digest_today_counts %}
+          <span class="badge muted">{{ item.label }} {{ item.count }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if digest_today %}
+        <div class="digest-items">
+          {% for item in digest_today %}
+          <div class="digest-item">
+            <div class="digest-body">
+              <div class="title">{{ item.title }}</div>
+              <div class="preview">{{ item.from_label }}</div>
+            </div>
+            <div class="digest-meta">
+              <div class="time">{{ item.time }}</div>
+              <div><span class="badge {% if item.status.lower() == 'delivered' %}success{% elif item.status.lower() == 'failed' %}danger{% else %}muted{% endif %}">{{ item.status }}</span></div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="hint">Expand window or scope to surface today signals.</div>
+        {% endif %}
+      </div>
+
+      <div class="card digest-card">
+        <div class="section-title">
+          <h2>Week Digest</h2>
+          <div class="hint">Condensed week-to-date stream</div>
+        </div>
+        {% if digest_week_counts %}
+        <div class="digest-counts">
+          {% for item in digest_week_counts %}
+          <span class="badge muted">{{ item.label }} {{ item.count }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if digest_week %}
+        <div class="digest-items">
+          {% for item in digest_week %}
+          <div class="digest-item">
+            <div class="digest-body">
+              <div class="title">{{ item.title }}</div>
+              <div class="preview">{{ item.from_label }}</div>
+            </div>
+            <div class="digest-meta">
+              <div class="time">{{ item.time }}</div>
+              <div><span class="badge {% if item.status.lower() == 'delivered' %}success{% elif item.status.lower() == 'failed' %}danger{% else %}muted{% endif %}">{{ item.status }}</span></div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="hint">Expand window to highlight weekly flow.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="cockpit-center">
+      <div class="card activity-card">
+        <div class="section-title">
+          <h2>Recent Activity</h2>
+          <div class="hint">{% if pii_enabled %}PII override enabled{% elif pii_allowed %}PII masked by default; toggle to reveal{% else %}PII masked{% endif %}</div>
+        </div>
+        {% if activity_rows %}
+        <div class="table-scroll activity-table-wrapper cockpit-table">
+          <table class="table compact activity-table fixed">
+            <thead>
+              <tr>
+                <th>Time (UTC)</th>
+                <th>From</th>
+                <th>To / Account</th>
+                <th>Telegram preview</th>
+                <th>Status</th>
+                <th class="numeric">E2E (s)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in activity_rows %}
+              <tr>
+                <td class="mono">{{ row.delivered }}</td>
+                <td class="truncate">{{ row.from_label }}</td>
+                <td class="truncate">{{ row.to_label }}</td>
+                <td class="truncate preview">{{ row.telegram_preview }}</td>
+                <td><span class="badge {{ row.status_class }}">{{ row.status }}</span></td>
+                <td class="numeric">{{ row.e2e }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="hint">Adjust scope or window to populate the stream.</div>
+        {% endif %}
+      </div>
+
+      {% if engineer_mode %}
+      <details class="card engineer-card">
+        <summary>Top slow spans</summary>
+        {% if engineer_slowest %}
+        <div class="table-scroll">
+          <table class="table compact fixed">
+            <thead>
+              <tr>
+                <th>Started (UTC)</th>
+                <th class="numeric">Total ms</th>
+                <th>Outcome</th>
+                <th>LLM</th>
+                <th>Snapshot</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in engineer_slowest %}
+              <tr>
+                <td class="mono">{{ row.started }}</td>
+                <td class="numeric">{{ row.total_ms }}</td>
+                <td>{{ row.outcome }}</td>
+                <td class="truncate">{{ row.llm }}</td>
+                <td class="truncate">{{ row.snapshot }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="hint">Broaden the window to sample more spans.</div>
+        {% endif %}
+      </details>
+
+      <details class="card engineer-card">
+        <summary>Recent errors</summary>
+        {% if engineer_errors %}
+        <div class="table-scroll">
+          <table class="table compact fixed">
+            <thead>
+              <tr>
+                <th>Time (UTC)</th>
+                <th>Outcome</th>
+                <th>Error</th>
+                <th>LLM</th>
+                <th class="numeric">Total ms</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in engineer_errors %}
+              <tr>
+                <td class="mono">{{ row.ts }}</td>
+                <td>{{ row.outcome }}</td>
+                <td class="truncate">{{ row.error_code }}</td>
+                <td class="truncate">{{ row.llm }}</td>
+                <td class="numeric">{{ row.total_ms }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="hint">Expand window to inspect error history.</div>
+        {% endif %}
+      </details>
+
+      <details class="card engineer-card">
+        <summary>Latency distribution</summary>
+        {% if latency_distribution %}
+        <div class="latency-dist">
+          {% for row in latency_distribution %}
+          <div class="latency-row">
+            <div class="latency-label">{{ row.label }}</div>
+            <pre class="latency-bar">{{ row.bar }}</pre>
+            <div class="latency-count">{{ row.count }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="hint">Collect more spans to populate the distribution.</div>
+        {% endif %}
+      </details>
+      {% endif %}
+    </div>
+
+    <div class="cockpit-right">
+      <div class="card golden-card">
+        <div class="section-title">
+          <h2>Golden signals</h2>
+          <div class="hint">Windowed aggregates</div>
+        </div>
+        {% if golden_signals %}
+        <div class="signal-grid">
+          <div class="signal-item">
+            <div class="label">Latency p50</div>
+            <div class="value">{{ golden_signals.latency_p50 }}</div>
+          </div>
+          <div class="signal-item">
+            <div class="label">Latency p95</div>
+            <div class="value">{{ golden_signals.latency_p95 }}</div>
+          </div>
+          <div class="signal-item">
+            <div class="label">Error rate</div>
+            <div class="value">{{ golden_signals.error_rate }}</div>
+          </div>
+          <div class="signal-item">
+            <div class="label">Fallback rate</div>
+            <div class="value">{{ golden_signals.fallback_rate }}</div>
+          </div>
+          <div class="signal-item">
+            <div class="label">TG failure</div>
+            <div class="value">{{ golden_signals.tg_failure_rate }}</div>
+          </div>
+          <div class="signal-item">
+            <div class="label">Traffic</div>
+            <div class="value">{{ golden_signals.traffic_volume }}</div>
+          </div>
+          <div class="signal-item">
+            <div class="label">Saturation</div>
+            <div class="value">{{ golden_signals.saturation }}</div>
+          </div>
+        </div>
+        {% else %}
+        <div class="hint">Adjust scope to surface system signals.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const strip = document.getElementById('status-strip-content');
+      const offline = document.getElementById('status-strip-offline');
+      if (!strip || !offline) return;
+      const refresh = () => {
+        fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' })
+          .then((resp) => {
+            if (!resp.ok) throw new Error('status');
+            return resp.text();
+          })
+          .then((html) => {
+            strip.innerHTML = html;
+            offline.classList.remove('active');
+          })
+          .catch(() => {
+            offline.classList.add('active');
+          });
+      };
+      setInterval(refresh, 10000);
+    })();
+  </script>
+{% endblock %}

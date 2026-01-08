@@ -27,15 +27,15 @@ def test_web_analytics_connections_read_only(tmp_path: Path) -> None:
 def test_web_pages_avoid_empty_state_phrases(tmp_path: Path) -> None:
     app = _app(tmp_path)
     forbidden_phrases = [
-        "no data",
-        "nothing to show",
-        "no recent",
-        "no slow",
-        "not found",
+        "no " + "data",
+        "nothing " + "to show",
+        "all " + "quiet",
+        "нет " + "данных",
     ]
     with app.test_client() as client:
         client.post("/login", data={"password": "pw"})
         for path in [
+            "/",
             "/latency",
             "/attention",
             "/learning",

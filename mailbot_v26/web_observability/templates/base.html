@@ -16,7 +16,7 @@
       {% if not hide_nav %}
       <div class="topbar-main">
         <nav class="nav">
-          <a href="{{ url_for('index') }}" class="nav-link {% if request.path == '/' %}active{% endif %}">Bridge</a>
+          <a href="{{ url_for('index') }}" class="nav-link {% if request.path in ['/', '/cockpit'] %}active{% endif %}">Cockpit</a>
           <a href="{{ url_for('latency') }}" class="nav-link {% if request.path == '/latency' %}active{% endif %}">Latency</a>
           <a href="{{ url_for('health') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">Health</a>
           <a href="{{ url_for('attention') }}" class="nav-link {% if request.path == '/attention' %}active{% endif %}">Attention</a>
@@ -42,6 +42,7 @@
               {% endif %}
             </select>
           </div>
+          {% if not hide_limit %}
           <div class="var-field">
             <label for="limit">Limit</label>
             {% set limit_val = vars.limit if vars else 25 %}
@@ -54,6 +55,7 @@
               {% endif %}
             </select>
           </div>
+          {% endif %}
           {% if pii_allowed %}
           <div class="var-field var-checkbox">
             <label for="pii">PII</label>
@@ -61,6 +63,7 @@
           </div>
           {% endif %}
           {% if account_email %}<input type="hidden" name="account_email" value="{{ account_email }}">{% endif %}
+          {% if cockpit_mode %}<input type="hidden" name="mode" value="{{ cockpit_mode }}">{% endif %}
           <div class="var-actions">
             <button type="submit">Apply</button>
             <button type="button" class="ghost" id="copy-share-link">Copy share link</button>

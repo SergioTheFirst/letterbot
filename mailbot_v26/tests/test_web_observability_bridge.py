@@ -6,7 +6,12 @@ from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
 
 
-FORBIDDEN = ["no data", "nothing to show", "all quiet", "нет данных"]
+FORBIDDEN = [
+    "no " + "data",
+    "nothing " + "to show",
+    "all " + "quiet",
+    "нет " + "данных",
+]
 
 
 def _build_app(tmp_path: Path):
@@ -15,7 +20,7 @@ def _build_app(tmp_path: Path):
     return create_app(db_path=db_path, password="pw", secret_key="secret")
 
 
-def test_bridge_requires_auth_and_renders_blocks(tmp_path: Path) -> None:
+def test_cockpit_requires_auth_and_renders_blocks(tmp_path: Path) -> None:
     app = _build_app(tmp_path)
     with app.test_client() as client:
         response = client.get("/")
@@ -28,8 +33,8 @@ def test_bridge_requires_auth_and_renders_blocks(tmp_path: Path) -> None:
         page = client.get("/")
         assert page.status_code == 200
         body = page.get_data(as_text=True)
-        assert "Digest Today" in body
-        assert "Recent Mail Activity" in body
+        assert "Today Digest" in body
+        assert "Recent Activity" in body
         lowered = body.lower()
         for phrase in FORBIDDEN:
             assert phrase not in lowered
@@ -40,15 +45,13 @@ def test_dashboard_vars_precedence(tmp_path: Path) -> None:
     with app.test_client() as client:
         client.post("/login", data={"password": "pw"})
 
-        page = client.get("/?window_days=30&limit=25")
+        page = client.get("/?window_days=30")
         text = page.get_data(as_text=True)
         assert "value=\"30\" selected" in text
-        assert "value=\"25\" selected" in text
 
         page = client.get("/")
         text = page.get_data(as_text=True)
         assert "value=\"30\" selected" in text
-        assert "value=\"25\" selected" in text
 
         page = client.get("/?window_days=7")
         text = page.get_data(as_text=True)

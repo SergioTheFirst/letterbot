@@ -30,6 +30,7 @@ Done:
 - Added deadlock detector (shadow-only), policy config, and dedupe-backed events_v1 emission tests.
 - Added silence-as-signal detector (shadow-only), config policy, digest hook, and tests.
 - 2026-01-02: trust bootstrapping (digest-only) behind enable_trust_bootstrap.
+- 2026-01-15: web cockpit home with owner/engineer modes, status strip, and read-only analytics tests.
 Now:
 - None.
 Next:

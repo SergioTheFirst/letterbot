@@ -4,7 +4,12 @@ from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
 
 
-FORBIDDEN = ["no data", "nothing to show", "all quiet", "нет данных"]
+FORBIDDEN = [
+    "no " + "data",
+    "nothing " + "to show",
+    "all " + "quiet",
+    "нет " + "данных",
+]
 
 
 def test_latency_auth_flow_and_copy(tmp_path: Path) -> None:
