@@ -3,7 +3,7 @@
 
 {% block page_actions %}
   <div class="mode-toggle">
-    <a class="mode-pill {% if cockpit_mode == 'owner' %}active{% endif %}" href="{{ mode_owner_url }}">Owner</a>
+    <a class="mode-pill {% if cockpit_mode == 'basic' %}active{% endif %}" href="{{ mode_basic_url }}">Basic</a>
     <a class="mode-pill {% if cockpit_mode == 'engineer' %}active{% endif %}" href="{{ mode_engineer_url }}">Engineer</a>
   </div>
 {% endblock %}
@@ -122,8 +122,9 @@
       </div>
 
       {% if engineer_mode %}
-      <details class="card engineer-card">
-        <summary>Top slow spans</summary>
+      <div class="engineer-blocks" data-testid="engineer-blocks">
+        <details class="card engineer-card">
+          <summary>Top slow spans</summary>
         {% if engineer_slowest %}
         <div class="table-scroll">
           <table class="table compact fixed">
@@ -152,10 +153,10 @@
         {% else %}
         <div class="hint">Broaden the window to sample more spans.</div>
         {% endif %}
-      </details>
+        </details>
 
-      <details class="card engineer-card">
-        <summary>Recent errors</summary>
+        <details class="card engineer-card">
+          <summary>Recent errors</summary>
         {% if engineer_errors %}
         <div class="table-scroll">
           <table class="table compact fixed">
@@ -184,10 +185,10 @@
         {% else %}
         <div class="hint">Expand window to inspect error history.</div>
         {% endif %}
-      </details>
+        </details>
 
-      <details class="card engineer-card">
-        <summary>Latency distribution</summary>
+        <details class="card engineer-card">
+          <summary>Latency distribution</summary>
         {% if latency_distribution %}
         <div class="latency-dist">
           {% for row in latency_distribution %}
@@ -201,7 +202,8 @@
         {% else %}
         <div class="hint">Collect more spans to populate the distribution.</div>
         {% endif %}
-      </details>
+        </details>
+      </div>
       {% endif %}
     </div>
 
@@ -268,7 +270,7 @@
             offline.classList.add('active');
           });
       };
-      setInterval(refresh, 10000);
+      setInterval(refresh, {{ status_refresh_ms }});
     })();
   </script>
 {% endblock %}

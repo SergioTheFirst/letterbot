@@ -787,6 +787,55 @@ small {
   font-weight: 700;
 }
 
+.health-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 2fr) minmax(240px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.health-header-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.health-explanation {
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.health-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.health-mode .label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.health-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.health-signal-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+@media (max-width: 1200px) {
+  .health-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .digest-counts {
   display: flex;
   flex-wrap: wrap;

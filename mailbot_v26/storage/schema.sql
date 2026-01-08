@@ -291,3 +291,6 @@ CREATE INDEX IF NOT EXISTS idx_processing_spans_ts_start
 
 CREATE INDEX IF NOT EXISTS idx_system_health_snapshots_ts
     ON system_health_snapshots(ts_utc);
+
+CREATE INDEX IF NOT EXISTS idx_system_health_snapshots_ts_snapshot
+    ON system_health_snapshots(ts_utc DESC, snapshot_id);

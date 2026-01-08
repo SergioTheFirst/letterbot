@@ -1,0 +1,37 @@
+import re
+from pathlib import Path
+
+from mailbot_v26.storage.knowledge_db import KnowledgeDB
+from mailbot_v26.web_observability.app import create_app
+
+
+BANNED_PHRASES = [
+    "No " + "data",
+    "Nothing " + "to show",
+    "All " + "quiet",
+    "нет " + "данных",
+]
+
+
+def _build_app(tmp_path: Path):
+    db_path = tmp_path / "web.sqlite"
+    KnowledgeDB(db_path)
+    return create_app(db_path=db_path, password="pw", secret_key="secret")
+
+
+def _assert_no_banned_phrases(body: str) -> None:
+    for phrase in BANNED_PHRASES:
+        assert re.search(re.escape(phrase), body, flags=re.IGNORECASE) is None
+
+
+def test_banned_phrases_not_present(tmp_path: Path) -> None:
+    app = _build_app(tmp_path)
+    with app.test_client() as client:
+        login_page = client.get("/login")
+        _assert_no_banned_phrases(login_page.get_data(as_text=True))
+
+        client.post("/login", data={"password": "pw"})
+        for path in ["/", "/latency", "/health"]:
+            response = client.get(path)
+            assert response.status_code == 200
+            _assert_no_banned_phrases(response.get_data(as_text=True))

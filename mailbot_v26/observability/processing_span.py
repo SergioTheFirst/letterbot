@@ -167,6 +167,12 @@ class ProcessingSpanRecorder:
                         ON system_health_snapshots(ts_utc);
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_system_health_snapshots_ts_snapshot
+                        ON system_health_snapshots(ts_utc DESC, snapshot_id);
+                    """
+                )
                 conn.commit()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("processing_span_init_failed", error=str(exc))

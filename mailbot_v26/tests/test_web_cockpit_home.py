@@ -71,15 +71,15 @@ def test_cockpit_mode_gating(tmp_path: Path) -> None:
     with app.test_client() as client:
         client.post("/login", data={"password": "pw"})
 
-        owner_resp = client.get("/")
-        assert owner_resp.status_code == 200
+        basic_resp = client.get("/")
+        assert basic_resp.status_code == 200
         assert analytics.calls == [False]
-        assert "<details" not in owner_resp.get_data(as_text=True)
+        assert "data-testid=\"engineer-blocks\"" not in basic_resp.get_data(as_text=True)
 
         engineer_resp = client.get("/?mode=engineer")
         assert engineer_resp.status_code == 200
         assert analytics.calls[-1] is True
-        assert "<details" in engineer_resp.get_data(as_text=True)
+        assert "data-testid=\"engineer-blocks\"" in engineer_resp.get_data(as_text=True)
 
 
 def test_cockpit_pii_default_and_override(tmp_path: Path) -> None:

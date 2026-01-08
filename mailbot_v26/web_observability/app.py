@@ -77,7 +77,13 @@ class _TTLCache:
         self._items[key] = (time.monotonic(), value)
 
 
+STATUS_STRIP_REFRESH_MS = 10_000
+HEALTH_REFRESH_MS = 30_000
+
 _COCKPIT_CACHE = _TTLCache(10.0)
+_HEALTH_SUMMARY_CACHE = _TTLCache(15.0)
+_HEALTH_COMPONENT_CACHE = _TTLCache(30.0)
+_HEALTH_INCIDENT_CACHE = _TTLCache(30.0)
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -173,11 +179,73 @@ def _render_stub_html(
             f"<li>{html.escape(str(item.get('title') or ''))} {html.escape(str(item.get('time') or ''))}</li>"
             for item in (digest_week or [])
         ) or "<div class=\"hint\">Expand window to see weekly digest.</div>"
-        engineer_block = "<details><summary>Engineer</summary></details>" if engineer_mode else ""
+        engineer_block = (
+            "<div data-testid=\"engineer-blocks\"><details><summary>Engineer</summary></details></div>"
+            if engineer_mode
+            else ""
+        )
         return (
             f"<html><body>{header}<h2>Today Digest</h2>{digest_today_block}<h2>Week Digest</h2>{digest_week_block}"
             f"<h2>Recent Activity</h2>{engineer_block}<table>{activity_body}</table></body></html>"
         )
+
+    if template_name in {"health.html", "partials/health_overview.html"}:
+        component_matrix = context.get("component_matrix") if isinstance(context, Mapping) else []
+        incidents = context.get("incidents") if isinstance(context, Mapping) else []
+        engineer_mode = bool(context.get("engineer_mode")) if isinstance(context, Mapping) else False
+        health_trend = context.get("health_trend") if isinstance(context, Mapping) else []
+        component_rows = "".join(
+            """
+            <tr data-testid="component-row">
+              <td>{component}</td><td>{status}</td><td>{last_check}</td><td>{last_issue}</td>
+            </tr>
+            """.format(
+                component=html.escape(str(row.get("component") or "")),
+                status=html.escape(str(row.get("status") or "")),
+                last_check=html.escape(str(row.get("last_check") or "")),
+                last_issue=html.escape(str(row.get("last_issue") or "")),
+            )
+            for row in (component_matrix or [])
+        )
+        incident_rows = "".join(
+            """
+            <tr data-testid="incident-row">
+              <td>{ts}</td><td>{component}</td><td>{symptom}</td><td>{outcome}</td>
+            </tr>
+            """.format(
+                ts=html.escape(str(row.get("ts") or "")),
+                component=html.escape(str(row.get("component") or "")),
+                symptom=html.escape(str(row.get("symptom") or "")),
+                outcome=html.escape(str(row.get("outcome") or "")),
+            )
+            for row in (incidents or [])
+        )
+        trend_rows = "".join(
+            """
+            <tr data-testid="health-trend-row" data-snapshot="{snapshot}">
+              <td>{ts}</td><td>{mode}</td><td>{gates}</td><td>{metrics}</td><td>{snapshot_short}</td>
+            </tr>
+            """.format(
+                ts=html.escape(str(row.get("ts") or "")),
+                mode=html.escape(str(row.get("mode") or "")),
+                gates=html.escape(str(row.get("gates") or "")),
+                metrics=html.escape(str(row.get("metrics") or "")),
+                snapshot=html.escape(str(row.get("snapshot") or "")),
+                snapshot_short=html.escape(str(row.get("snapshot_short") or "")),
+            )
+            for row in (health_trend or [])
+        )
+        engineer_block = (
+            '<div data-testid="health-engineer-block"></div>' if engineer_mode else ""
+        )
+        html_body = (
+            f"{header}<div data-testid=\"health-component-matrix\">Component matrix</div>"
+            f"<table>{component_rows}</table><table>{incident_rows}</table>"
+            f"<table>{trend_rows}</table>{engineer_block}"
+        )
+        if template_name == "partials/health_overview.html":
+            return html_body
+        return f"<html><body>{html_body}</body></html>"
 
     return render_template(str(template_path), **context)
 
@@ -239,6 +307,7 @@ def _format_bytes(value: object) -> str:
             return f"{size:.1f}{unit}" if unit != "B" else f"{int(size)}{unit}"
         size /= 1024.0
     return f"{size:.1f}TB"
+
 
 def _format_ts_utc(value: object) -> str:
     try:
@@ -596,9 +665,11 @@ def _resolve_cockpit_mode(request, session) -> str:
     raw_mode = request.args.get("mode")
     if raw_mode is None and session_vars:
         raw_mode = str(session_vars)
-    mode = str(raw_mode or "owner").strip().lower()
-    if mode not in {"owner", "engineer"}:
-        mode = "owner"
+    mode = str(raw_mode or "basic").strip().lower()
+    if mode == "owner":
+        mode = "basic"
+    if mode not in {"basic", "engineer"}:
+        mode = "basic"
     try:
         session["cockpit_mode"] = mode
     except Exception:
@@ -730,6 +801,200 @@ def _golden_signals_view(golden_signals: Mapping[str, object] | None) -> dict[st
         "traffic_volume": traffic_volume if traffic_volume != "–" else "–",
         "saturation": saturation,
     }
+
+
+def _metrics_window(metrics_brief: Mapping[str, object] | None) -> Mapping[str, object]:
+    if not metrics_brief:
+        return {}
+    if not isinstance(metrics_brief, Mapping):
+        return {}
+    for window_key in sorted(metrics_brief.keys(), key=lambda item: str(item)):
+        window_values = metrics_brief.get(window_key)
+        if isinstance(window_values, Mapping):
+            return window_values
+    return {}
+
+
+def _status_class_for_mode(mode: str) -> str:
+    normalized = mode.upper()
+    if normalized == "FULL":
+        return "success"
+    if "EMERGENCY" in normalized:
+        return "danger"
+    if "DEGRADED" in normalized:
+        return "warn"
+    return "muted"
+
+
+def _health_mode_explanation(mode: str, gates_state: Mapping[str, object] | None) -> str:
+    if not mode:
+        return "Health snapshots unavailable for this scope."
+    normalized = mode.upper()
+    if normalized == "FULL":
+        return "All core systems are operating within normal thresholds."
+    if "EMERGENCY" in normalized:
+        return "Emergency read-only mode is active; review incidents and gate failures."
+    if "DEGRADED" in normalized:
+        return "Operating in degraded mode with active safeguards."
+    if gates_state:
+        return "Health gate evaluation completed with mixed signals."
+    return "Operating status captured; monitor for changes."
+
+
+def _clamp_text(value: object, limit: int = 96) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "–"
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)] + "…"
+
+
+def _health_golden_signals_view(
+    *,
+    summary: Mapping[str, object] | None,
+    metrics_brief: Mapping[str, object] | None,
+) -> dict[str, str]:
+    summary = summary if isinstance(summary, Mapping) else {}
+    metrics_window = _metrics_window(metrics_brief)
+    tg_success = _format_percent(metrics_window.get("telegram_delivery_success_rate"))
+    fallback_rate = _format_percent(summary.get("fallback_rate"))
+    latency_p95 = _format_number(summary.get("total_duration_ms_p95"))
+    return {
+        "tg_success_rate": f"{tg_success}%" if tg_success != "–" else "–",
+        "fallback_rate": f"{fallback_rate}%" if fallback_rate != "–" else "–",
+        "latency_p95": f"{latency_p95} ms" if latency_p95 != "–" else "–",
+    }
+
+
+def _derive_incident_component(item: Mapping[str, object]) -> str:
+    error_code = str(item.get("error_code") or "").lower()
+    llm_provider = str(item.get("llm_provider") or "").lower()
+    if "telegram" in error_code or error_code.startswith("tg_") or "tg_" in error_code:
+        return "Telegram"
+    if "imap" in error_code or "mail" in error_code:
+        return "IMAP"
+    if "sqlite" in error_code or "db" in error_code:
+        return "DB"
+    if llm_provider or "llm" in error_code:
+        return "LLM"
+    return "Pipeline"
+
+
+def _health_incidents_view(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not rows:
+        return []
+    sorted_rows = sorted(
+        rows,
+        key=lambda item: (
+            -(_safe_float(item.get("ts_start") or item.get("ts_start_utc")) or 0.0),
+            str(item.get("span_id") or ""),
+        ),
+    )
+    results: list[dict[str, object]] = []
+    for item in sorted_rows:
+        component = _derive_incident_component(item)
+        symptom = _clamp_text(item.get("error_code") or "Processing error", 72)
+        outcome = _clamp_text(item.get("outcome") or "error", 40)
+        results.append(
+            {
+                "ts": _format_ts_utc(item.get("ts_start") or item.get("ts_start_utc")),
+                "component": component,
+                "symptom": symptom,
+                "outcome": outcome,
+                "span_id": item.get("span_id") or "",
+            }
+        )
+    return results
+
+
+def _health_component_matrix_view(
+    *,
+    current: Mapping[str, object] | None,
+    status_strip: Mapping[str, object] | None,
+    incidents: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if not current or not status_strip:
+        return []
+    incident_by_component: dict[str, dict[str, object]] = {}
+    for item in incidents:
+        component = str(item.get("component") or "")
+        if component and component not in incident_by_component:
+            incident_by_component[component] = item
+
+    last_check = _format_ts_utc(current.get("ts_end_utc"))
+    system_mode = str(current.get("system_mode") or "")
+    system_status = system_mode or "unknown"
+    system_class = _status_class_for_mode(system_status) if system_status else "muted"
+
+    component_order = [
+        ("IMAP", "imap"),
+        ("LLM", "llm"),
+        ("Telegram", "telegram"),
+        ("DB", "db"),
+        ("System", "system"),
+    ]
+    rows: list[dict[str, object]] = []
+    for label, key in component_order:
+        if key == "system":
+            status_text = system_status or "unknown"
+            status_class = system_class
+        else:
+            status_entry = status_strip.get(key) if isinstance(status_strip, Mapping) else None
+            status_text = (
+                str(status_entry.get("text"))
+                if isinstance(status_entry, Mapping) and status_entry.get("text") is not None
+                else "unknown"
+            )
+            status_class = (
+                str(status_entry.get("class"))
+                if isinstance(status_entry, Mapping) and status_entry.get("class") is not None
+                else "muted"
+            )
+        incident = incident_by_component.get(label)
+        if incident:
+            last_issue = f"{incident.get('symptom')} · {incident.get('outcome')}"
+        elif label == "System" and system_status.upper() == "FULL":
+            last_issue = "All checks green."
+        else:
+            last_issue = "No recent incidents."
+        rows.append(
+            {
+                "component": label,
+                "status": status_text,
+                "status_class": status_class,
+                "last_check": last_check,
+                "last_issue": _clamp_text(last_issue, 96),
+            }
+        )
+    return rows
+
+
+def _health_trend_view(timeline: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not timeline:
+        return []
+    sorted_items = sorted(
+        timeline,
+        key=lambda item: (
+            _safe_float(item.get("ts_end_utc")) or 0.0,
+            str(item.get("snapshot_id") or ""),
+        ),
+        reverse=True,
+    )
+    results: list[dict[str, object]] = []
+    for item in sorted_items:
+        snapshot_id = str(item.get("snapshot_id") or "")
+        results.append(
+            {
+                "ts": _format_ts_utc(item.get("ts_end_utc")),
+                "mode": item.get("system_mode") or "–",
+                "gates": _summarize_mapping(item.get("gates_state"), limit=2),
+                "metrics": _summarize_mapping(item.get("metrics_brief"), limit=2),
+                "snapshot": snapshot_id,
+                "snapshot_short": _short_id(snapshot_id, 10),
+            }
+        )
+    return results
 
 
 def _engineer_slowest_view(rows: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -913,6 +1178,13 @@ def _available_accounts(db_path: Path) -> list[str]:
     return [str(row[0]) for row in rows if row and row[0]]
 
 
+def _db_size_bytes(db_path: Path) -> int | None:
+    try:
+        return db_path.stat().st_size
+    except OSError:
+        return None
+
+
 def _ensure_authenticated() -> bool:
     return bool(session.get("authenticated"))
 
@@ -1003,6 +1275,7 @@ def create_app(
         analytics = _analytics()
         cache_key = (
             "cockpit",
+            str(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
             bool(reveal_pii),
@@ -1082,13 +1355,14 @@ def create_app(
             pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
             pii_enabled=reveal_pii,
             cockpit_mode=mode,
-            mode_owner_url=_mode_link("owner"),
+            mode_basic_url=_mode_link("basic"),
             mode_engineer_url=_mode_link("engineer"),
             engineer_mode=include_engineer,
             engineer_slowest=engineer_slowest,
             engineer_errors=engineer_errors,
             latency_distribution=latency_distribution,
             hide_limit=True,
+            status_refresh_ms=STATUS_STRIP_REFRESH_MS,
         )
 
     @app.route("/cockpit")
@@ -1118,6 +1392,7 @@ def create_app(
         analytics = _analytics()
         cache_key = (
             "cockpit",
+            str(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
             bool(reveal_pii),
@@ -1158,6 +1433,144 @@ def create_app(
             allow_pii=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
         )
 
+    def _health_summary_payload(
+        *,
+        account_emails: list[str],
+        window_days: int,
+        reveal_pii: bool,
+        mode: str,
+    ) -> dict[str, object]:
+        cache_key = (
+            "health_summary",
+            str(app.config["DB_PATH"]),
+            tuple(account_emails),
+            window_days,
+            mode,
+            reveal_pii,
+        )
+        cached = _HEALTH_SUMMARY_CACHE.get(cache_key)
+        if isinstance(cached, Mapping):
+            return dict(cached)
+        db_size_bytes = _db_size_bytes(app.config["DB_PATH"])
+        summary: dict[str, object] = {
+            "current": None,
+            "status_strip": _status_strip_view(
+                {
+                    "system_mode": "unknown",
+                    "gates_state": {},
+                    "metrics_brief": {},
+                    "updated_ts_utc": None,
+                    "db_size_bytes": db_size_bytes,
+                },
+                now_ts=time.time(),
+            ),
+            "metrics_digest": {},
+            "trend": [],
+            "metrics_brief": {},
+            "db_size_bytes": db_size_bytes,
+        }
+        if not account_emails:
+            _HEALTH_SUMMARY_CACHE.set(cache_key, summary)
+            return summary
+
+        primary = account_emails[0]
+        analytics = _analytics()
+        current = analytics.processing_spans_health_current(
+            account_email=primary,
+            account_emails=account_emails,
+            window_days=window_days,
+        )
+        metrics_digest = analytics.processing_spans_metrics_digest(
+            account_email=primary,
+            account_emails=account_emails,
+            window_days=window_days,
+        )
+        trend = analytics.processing_spans_health_timeline(
+            account_email=primary,
+            account_emails=account_emails,
+            window_days=window_days,
+            limit=5,
+        )
+        status_payload = {
+            "system_mode": current.get("system_mode") if current else "unknown",
+            "gates_state": current.get("gates_state") if current else {},
+            "metrics_brief": current.get("metrics_brief") if current else {},
+            "updated_ts_utc": current.get("ts_end_utc") if current else None,
+            "db_size_bytes": db_size_bytes,
+        }
+        summary = {
+            "current": current,
+            "status_strip": _status_strip_view(status_payload, now_ts=time.time()),
+            "metrics_digest": metrics_digest,
+            "trend": trend,
+            "metrics_brief": current.get("metrics_brief") if current else {},
+            "db_size_bytes": db_size_bytes,
+        }
+        _HEALTH_SUMMARY_CACHE.set(cache_key, summary)
+        return summary
+
+    def _health_incidents_payload(
+        *,
+        account_emails: list[str],
+        window_days: int,
+        reveal_pii: bool,
+        mode: str,
+    ) -> list[dict[str, object]]:
+        cache_key = (
+            "health_incidents",
+            str(app.config["DB_PATH"]),
+            tuple(account_emails),
+            window_days,
+            mode,
+            reveal_pii,
+        )
+        cached = _HEALTH_INCIDENT_CACHE.get(cache_key)
+        if isinstance(cached, list):
+            return cached
+        if not account_emails:
+            _HEALTH_INCIDENT_CACHE.set(cache_key, [])
+            return []
+        primary = account_emails[0]
+        analytics = _analytics()
+        raw_incidents = analytics.processing_spans_recent_errors(
+            account_email=primary,
+            account_emails=account_emails,
+            window_days=window_days,
+            limit=10,
+        )
+        incidents = _health_incidents_view(raw_incidents)[:5]
+        _HEALTH_INCIDENT_CACHE.set(cache_key, incidents)
+        return incidents
+
+    def _health_component_payload(
+        *,
+        current: Mapping[str, object] | None,
+        status_strip: Mapping[str, object] | None,
+        incidents: list[dict[str, object]],
+        account_emails: list[str],
+        window_days: int,
+        reveal_pii: bool,
+        mode: str,
+    ) -> list[dict[str, object]]:
+        cache_key = (
+            "health_components",
+            str(app.config["DB_PATH"]),
+            tuple(account_emails),
+            window_days,
+            mode,
+            reveal_pii,
+        )
+        cached = _HEALTH_COMPONENT_CACHE.get(cache_key)
+        if isinstance(cached, list):
+            return cached
+        components = _health_component_matrix_view(
+            current=current,
+            status_strip=status_strip,
+            incidents=incidents,
+        )
+        _HEALTH_COMPONENT_CACHE.set(cache_key, components)
+        return components
+
     @app.route("/api/v1/observability/latency_summary", methods=["GET"])
     def api_latency_summary():
         account_email, account_emails, window_days, error = _validate_latency_params(
@@ -1196,7 +1609,7 @@ def create_app(
     @app.route("/api/v1/observability/health_timeline", methods=["GET"])
     def api_health_timeline():
         account_email, account_emails, window_days, error = _validate_latency_params(
-            args=request.args, require_account=True, window_default=30
+            args=request.args, require_account=True, window_default=7
         )
         if error:
             return jsonify({"error": error}), 400
@@ -1646,50 +2059,179 @@ def create_app(
 
     @app.route("/health", methods=["GET"])
     def health():
+        dashboard_vars = _dashboard_vars()
         accounts = _available_accounts(app.config["DB_PATH"])
         default_account = accounts[0] if accounts else None
-        account_email, account_emails, window_days, error = _validate_latency_params(
-            args=request.args,
-            require_account=False,
-            default_account=default_account,
-            window_default=30,
+        account_email = (request.args.get("account_email") or "").strip()
+        if not account_email and dashboard_vars.account_emails:
+            account_email = dashboard_vars.account_emails[0]
+        if not account_email:
+            account_email = default_account or ""
+        account_emails = dashboard_vars.account_emails or ([] if not account_email else [account_email])
+        if account_email and account_email not in account_emails:
+            account_emails.append(account_email)
+        account_emails = sorted({email for email in account_emails if email})
+        window_days = dashboard_vars.window_days or 7
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
         )
-        error_block = (
-            f'<div class="alert">{html.escape(error)}</div>' if error else ""
+        mode = _resolve_cockpit_mode(request, session)
+        include_engineer = mode == "engineer"
+
+        summary = _health_summary_payload(
+            account_emails=account_emails,
+            window_days=window_days,
+            reveal_pii=reveal_pii,
+            mode=mode,
         )
-        analytics = _analytics()
-        current: dict[str, object] | None = None
-        timeline: list[dict[str, object]] = []
-        if not error and account_email:
-            resolved_window = window_days or 30
-            current = analytics.processing_spans_health_current(
-                account_email=account_email,
+        current = summary.get("current") if isinstance(summary, Mapping) else None
+        status_strip = summary.get("status_strip") if isinstance(summary, Mapping) else None
+        metrics_digest = summary.get("metrics_digest") if isinstance(summary, Mapping) else {}
+        metrics_brief = summary.get("metrics_brief") if isinstance(summary, Mapping) else {}
+        trend = summary.get("trend") if isinstance(summary, Mapping) else []
+
+        incidents = _health_incidents_payload(
+            account_emails=account_emails,
+            window_days=window_days,
+            reveal_pii=reveal_pii,
+            mode=mode,
+        )
+        components = _health_component_payload(
+            current=current if isinstance(current, Mapping) else None,
+            status_strip=status_strip if isinstance(status_strip, Mapping) else None,
+            incidents=incidents,
+            account_emails=account_emails,
+            window_days=window_days,
+            reveal_pii=reveal_pii,
+            mode=mode,
+        )
+
+        if isinstance(current, Mapping):
+            system_mode = str(current.get("system_mode") or "")
+            gates_state = current.get("gates_state") if isinstance(current.get("gates_state"), Mapping) else {}
+            last_snapshot = _format_ts_utc(current.get("ts_end_utc"))
+        else:
+            system_mode = ""
+            gates_state = {}
+            last_snapshot = "–"
+        health_header = {
+            "mode": system_mode or "unknown",
+            "mode_class": _status_class_for_mode(system_mode),
+            "last_snapshot": last_snapshot,
+            "explanation": _health_mode_explanation(system_mode, gates_state),
+        }
+
+        health_signals = _health_golden_signals_view(
+            summary=metrics_digest if isinstance(metrics_digest, Mapping) else {},
+            metrics_brief=metrics_brief if isinstance(metrics_brief, Mapping) else {},
+        )
+        trend_rows = _health_trend_view(trend if isinstance(trend, list) else [])
+
+        engineer_timeline_rows: list[dict[str, object]] = []
+        if include_engineer and account_emails:
+            analytics = _analytics()
+            engineer_timeline = analytics.processing_spans_health_timeline(
+                account_email=account_emails[0],
                 account_emails=account_emails,
-                window_days=resolved_window,
+                window_days=window_days,
+                limit=200,
             )
-            timeline = analytics.processing_spans_health_timeline(
-                account_email=account_email,
-                account_emails=account_emails,
-                window_days=resolved_window,
-            )
-        account_options = _build_select_options(accounts, account_email)
-        window_options = _build_window_options(window_days or 30)
+            engineer_timeline_rows = _health_trend_view(engineer_timeline)
+
+        scope_hint = None
+        if account_email:
+            scope_hint = f"{account_email} • last {window_days} days"
+
+        def _mode_link(target: str) -> str:
+            params = {k: v for k, v in request.args.items()}
+            if "account_emails" not in params and account_emails:
+                params["account_emails"] = ",".join(account_emails)
+            if "window_days" not in params:
+                params["window_days"] = str(window_days)
+            if reveal_pii and "pii" not in params:
+                params["pii"] = "1"
+            params["mode"] = target
+            return url_for("health", **params)
+
+        error_message = ""
+        if not account_emails:
+            error_message = "Account scope required to display health snapshots."
+
         return _render_template(
             app,
             "health.html",
             title=app.config["APP_TITLE"],
-            static_url=_static_url(),
-            latency_url=url_for("latency"),
-            health_url=url_for("health"),
-            attention_url=url_for("attention"),
-            events_url=url_for("events"),
-            relationships_url=url_for("relationships"),
-            error_block=error_block,
-            account_options=account_options,
-            account_emails_value=",".join(account_emails),
-            window_options=window_options,
-            current_block=_health_current_block(current),
-            timeline_block=_health_timeline_block(timeline),
+            page_title="Health Cockpit",
+            scope_hint=scope_hint,
+            dashboard_vars=dashboard_vars,
+            account_email=account_email,
+            pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
+            pii_enabled=reveal_pii,
+            cockpit_mode=mode,
+            mode_basic_url=_mode_link("basic"),
+            mode_engineer_url=_mode_link("engineer"),
+            engineer_mode=include_engineer,
+            status_strip=status_strip or {},
+            health_header=health_header,
+            health_signals=health_signals,
+            health_trend=trend_rows,
+            engineer_timeline=engineer_timeline_rows,
+            component_matrix=components,
+            incidents=incidents,
+            status_refresh_ms=STATUS_STRIP_REFRESH_MS,
+            health_refresh_ms=HEALTH_REFRESH_MS,
+            error=error_message,
+            hide_limit=True,
+        )
+
+    @app.route("/partial/health", methods=["GET"])
+    def health_partial():
+        dashboard_vars = _dashboard_vars()
+        accounts = _available_accounts(app.config["DB_PATH"])
+        default_account = accounts[0] if accounts else None
+        account_email = (request.args.get("account_email") or "").strip()
+        if not account_email and dashboard_vars.account_emails:
+            account_email = dashboard_vars.account_emails[0]
+        if not account_email:
+            account_email = default_account or ""
+        account_emails = dashboard_vars.account_emails or ([] if not account_email else [account_email])
+        if account_email and account_email not in account_emails:
+            account_emails.append(account_email)
+        account_emails = sorted({email for email in account_emails if email})
+        window_days = dashboard_vars.window_days or 7
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
+        )
+        mode = _resolve_cockpit_mode(request, session)
+
+        summary = _health_summary_payload(
+            account_emails=account_emails,
+            window_days=window_days,
+            reveal_pii=reveal_pii,
+            mode=mode,
+        )
+        current = summary.get("current") if isinstance(summary, Mapping) else None
+        status_strip = summary.get("status_strip") if isinstance(summary, Mapping) else None
+        incidents = _health_incidents_payload(
+            account_emails=account_emails,
+            window_days=window_days,
+            reveal_pii=reveal_pii,
+            mode=mode,
+        )
+        components = _health_component_payload(
+            current=current if isinstance(current, Mapping) else None,
+            status_strip=status_strip if isinstance(status_strip, Mapping) else None,
+            incidents=incidents,
+            account_emails=account_emails,
+            window_days=window_days,
+            reveal_pii=reveal_pii,
+            mode=mode,
+        )
+        return _render_template(
+            app,
+            "partials/health_overview.html",
+            component_matrix=components,
+            incidents=incidents,
         )
 
     @app.route("/events", methods=["GET"])

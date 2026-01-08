@@ -1,53 +1,189 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title }}</title>
-  <link rel="stylesheet" href="{{ static_url }}">
-</head>
-<body>
-  <header class="navbar">
-    <div class="brand">{{ title }}</div>
-    <nav>
-      <a href="{{ latency_url }}">Latency</a>
-      <a href="{{ health_url }}" class="active">Health</a>
-      <a href="{{ attention_url }}">Attention</a>
-      <a href="{{ events_url }}">Events</a>
-      <a href="{{ relationships_url }}">Relationships</a>
-    </nav>
-  </header>
-  <main class="container">
-    {{ error_block }}
-    <section class="filters">
-      <form method="get" action="{{ health_url }}" class="filter-form">
-        <div class="form-group">
-          <label for="account_email">Account</label>
-          <select id="account_email" name="account_email">{{ account_options }}</select>
-        </div>
-        <div class="form-group">
-          <label for="account_emails">Scope (comma-separated)</label>
-          <input id="account_emails" name="account_emails" type="text" value="{{ account_emails_value }}" placeholder="optional, comma separated">
-        </div>
-        <div class="form-group">
-          <label for="window_days">Window</label>
-          <select id="window_days" name="window_days">{{ window_options }}</select>
-        </div>
-        <div class="form-actions">
-          <button type="submit">Apply</button>
-        </div>
-      </form>
-    </section>
+{% extends "base.html" %}
+{% block title %}Health — {{ title }}{% endblock %}
 
-    <section>
-      <h2>Current status</h2>
-      {{ current_block }}
-    </section>
+{% block page_actions %}
+  <div class="mode-toggle">
+    <a class="mode-pill {% if cockpit_mode == 'basic' %}active{% endif %}" href="{{ mode_basic_url }}">Basic</a>
+    <a class="mode-pill {% if cockpit_mode == 'engineer' %}active{% endif %}" href="{{ mode_engineer_url }}">Engineer</a>
+  </div>
+{% endblock %}
 
-    <section>
-      <h2>Timeline</h2>
-      {{ timeline_block }}
-    </section>
-  </main>
-</body>
-</html>
+{% block content %}
+  <div class="status-strip" id="status-strip">
+    <div class="status-strip-content" id="status-strip-content">
+      {% include "partials/status_strip.html" %}
+    </div>
+    <div class="status-strip-offline" id="status-strip-offline">offline</div>
+  </div>
+
+  <div class="health-grid">
+    <div class="health-main stack">
+      <div class="card health-header" data-testid="health-header">
+        <div class="section-title">
+          <h2>Status header</h2>
+          <div class="hint">System snapshot overview</div>
+        </div>
+        <div class="health-header-body">
+          <div>
+            <div class="health-explanation">{{ health_header.explanation }}</div>
+            <div class="health-meta">Last snapshot: <span class="mono">{{ health_header.last_snapshot }}</span></div>
+          </div>
+          <div class="health-mode">
+            <div class="label">System mode</div>
+            <span class="badge {{ health_header.mode_class }}">{{ health_header.mode }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="health-overview" id="health-overview">
+        <div id="health-overview-content">
+          {% include "partials/health_overview.html" %}
+        </div>
+        <div class="status-strip-offline" id="health-overview-offline">health refresh paused</div>
+      </div>
+    </div>
+
+    <div class="health-side stack">
+      <div class="card">
+        <div class="section-title">
+          <h2>Golden signals</h2>
+          <div class="hint">Windowed health indicators</div>
+        </div>
+        {% if health_signals %}
+        <div class="signal-grid health-signal-grid">
+          <div class="signal-item">
+            <div class="label">TG success rate</div>
+            <div class="value">{{ health_signals.tg_success_rate }}</div>
+          </div>
+          <div class="signal-item">
+            <div class="label">Fallback rate</div>
+            <div class="value">{{ health_signals.fallback_rate }}</div>
+          </div>
+          <div class="signal-item">
+            <div class="label">Latency p95</div>
+            <div class="value">{{ health_signals.latency_p95 }}</div>
+          </div>
+        </div>
+        {% else %}
+        <div class="hint">Adjust scope to load health indicators.</div>
+        {% endif %}
+      </div>
+
+      <div class="card" data-testid="health-trend">
+        <div class="section-title">
+          <h2>Status trend</h2>
+          <div class="hint">Recent snapshots</div>
+        </div>
+        {% if health_trend %}
+        <div class="table-scroll">
+          <table class="table compact fixed">
+            <thead>
+              <tr>
+                <th>Time (UTC)</th>
+                <th>Mode</th>
+                <th>Gates</th>
+                <th>Metrics</th>
+                <th>Snapshot</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in health_trend %}
+              <tr data-testid="health-trend-row" data-snapshot="{{ row.snapshot }}">
+                <td class="mono">{{ row.ts }}</td>
+                <td><span class="badge muted">{{ row.mode }}</span></td>
+                <td class="truncate">{{ row.gates }}</td>
+                <td class="truncate">{{ row.metrics }}</td>
+                <td class="mono">{{ row.snapshot_short }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="hint">Awaiting health snapshots for this scope.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if engineer_mode %}
+  <div class="card engineer-card" data-testid="health-engineer-block">
+    <div class="section-title">
+      <h2>Health timeline</h2>
+      <div class="hint">Expanded window view</div>
+    </div>
+    {% if engineer_timeline %}
+    <div class="table-scroll">
+      <table class="table compact fixed">
+        <thead>
+          <tr>
+            <th>Time (UTC)</th>
+            <th>Mode</th>
+            <th>Gates</th>
+            <th>Metrics</th>
+            <th>Snapshot</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in engineer_timeline %}
+          <tr data-snapshot="{{ row.snapshot }}">
+            <td class="mono">{{ row.ts }}</td>
+            <td><span class="badge muted">{{ row.mode }}</span></td>
+            <td class="truncate">{{ row.gates }}</td>
+            <td class="truncate">{{ row.metrics }}</td>
+            <td class="mono">{{ row.snapshot_short }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="hint">Expand the window to review additional snapshots.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <script>
+    (function() {
+      const strip = document.getElementById('status-strip-content');
+      const offline = document.getElementById('status-strip-offline');
+      if (!strip || !offline) return;
+      const refresh = () => {
+        fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' })
+          .then((resp) => {
+            if (!resp.ok) throw new Error('status');
+            return resp.text();
+          })
+          .then((html) => {
+            strip.innerHTML = html;
+            offline.classList.remove('active');
+          })
+          .catch(() => {
+            offline.classList.add('active');
+          });
+      };
+      setInterval(refresh, {{ status_refresh_ms }});
+    })();
+
+    (function() {
+      const container = document.getElementById('health-overview-content');
+      const offline = document.getElementById('health-overview-offline');
+      if (!container || !offline) return;
+      const refresh = () => {
+        fetch(`/partial/health${window.location.search}`, { credentials: 'same-origin' })
+          .then((resp) => {
+            if (!resp.ok) throw new Error('health');
+            return resp.text();
+          })
+          .then((html) => {
+            container.innerHTML = html;
+            offline.classList.remove('active');
+          })
+          .catch(() => {
+            offline.classList.add('active');
+          });
+      };
+      setInterval(refresh, {{ health_refresh_ms }});
+    })();
+  </script>
+{% endblock %}
