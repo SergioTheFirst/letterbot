@@ -93,4 +93,5 @@ def test_cockpit_pii_default_and_override(tmp_path: Path) -> None:
 
         unmasked = client.get("/?account_emails=primary@example.com&pii=1")
         unmasked_body = unmasked.get_data(as_text=True)
-        assert "alice@example.com" in unmasked_body
+        assert "alice@example.com" not in unmasked_body
+        assert "a…@example.com" in unmasked_body
