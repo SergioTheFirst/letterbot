@@ -48,7 +48,9 @@ logger = logging.getLogger(__name__)
 ALLOWED_WINDOWS = {7, 30, 90}
 ALLOWED_ARCHIVE_WINDOWS = {1, 7, 30, 90}
 ARCHIVE_PAGE_SIZE = 50
+COMMITMENTS_PAGE_SIZE = 50
 ARCHIVE_STATUSES = {"any", "ok", "warn", "fail"}
+COMMITMENT_STATUSES = {"open", "closed", "all"}
 EVENTS_GROUP_PAGE_SIZE = 20
 EVENT_FILTERS = {"all", "processing", "delivery", "health", "learning"}
 WEB_EMAIL_REDACTED_PREVIEW = "Summary hidden"
@@ -94,6 +96,8 @@ _HEALTH_SUMMARY_CACHE = _TTLCache(15.0)
 _HEALTH_COMPONENT_CACHE = _TTLCache(30.0)
 _HEALTH_INCIDENT_CACHE = _TTLCache(30.0)
 _EVENTS_NARRATIVE_CACHE = _TTLCache(20.0)
+_COMMITMENTS_CACHE = _TTLCache(20.0)
+_COMMITMENTS_COUNT_CACHE = _TTLCache(15.0)
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -294,8 +298,38 @@ def _render_stub_html(
             f"<html><body>{header}<table>{header_row}{''.join(rows)}</table></body></html>"
         )
 
+    if template_name == "commitments.html":
+        commitments_rows = context.get("commitments_rows") if isinstance(context, Mapping) else []
+        rows = []
+        for row in commitments_rows or []:
+            rows.append(
+                """
+                <tr data-commitment-id="{commitment_id}">
+                  <td>{last_activity}</td><td>{counterparty}</td><td>{account}</td>
+                  <td>{kind}</td><td>{due}</td><td>{evidence}</td><td>{forensics}</td>
+                </tr>
+                """.format(
+                    commitment_id=html.escape(str(row.get("commitment_id") or "")),
+                    last_activity=html.escape(str(row.get("last_activity") or "")),
+                    counterparty=html.escape(str(row.get("counterparty_label") or "")),
+                    account=html.escape(str(row.get("account_label") or "")),
+                    kind=html.escape(str(row.get("kind") or "")),
+                    due=html.escape(str(row.get("due_signal") or "")),
+                    evidence=html.escape(str(row.get("evidence_count") or "")),
+                    forensics=html.escape(str(row.get("forensics_url") or "")),
+                )
+            )
+        header_row = (
+            "<tr><th>Last activity (UTC)</th><th>Counterparty</th><th>Account</th>"
+            "<th>Kind / Status</th><th>Age / Due</th><th>Evidence</th><th>Forensics</th></tr>"
+        )
+        return (
+            f"<html><body>{header}<table>{header_row}{''.join(rows)}</table></body></html>"
+        )
+
     if template_name == "email_detail.html":
         timeline_rows = context.get("timeline_rows") if isinstance(context, Mapping) else []
+        evidence_rows = context.get("evidence_rows") if isinstance(context, Mapping) else []
         engineer_mode = bool(context.get("engineer_mode")) if isinstance(context, Mapping) else False
         rows = []
         for row in timeline_rows or []:
@@ -316,7 +350,25 @@ def _render_stub_html(
                     extra_cols=extra_cols,
                 )
         )
-        return f"<html><body>{header}<table>{''.join(rows)}</table></body></html>"
+        evidence = []
+        for row in evidence_rows or []:
+            evidence.append(
+                """
+                <tr data-evidence-id="{evidence_id}">
+                  <td>{ts}</td><td>{kind}</td><td>{event_type}</td><td>{stage}</td><td>{duration}</td>
+                </tr>
+                """.format(
+                    evidence_id=html.escape(str(row.get("id") or "")),
+                    ts=html.escape(str(row.get("ts") or "")),
+                    kind=html.escape(str(row.get("kind") or "")),
+                    event_type=html.escape(str(row.get("event_type") or "")),
+                    stage=html.escape(str(row.get("stage") or "")),
+                    duration=html.escape(str(row.get("duration") or "")),
+                )
+            )
+        return (
+            f"<html><body>{header}<table>{''.join(evidence)}</table><table>{''.join(rows)}</table></body></html>"
+        )
 
     if template_name == "events.html":
         groups = context.get("groups") if isinstance(context, Mapping) else []
@@ -438,6 +490,32 @@ def _format_ts_utc(value: object) -> str:
     except (OverflowError, OSError, ValueError):
         return "–"
     return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _format_due_signal(*, created_ts: float | None, deadline_iso: str | None) -> str:
+    now = datetime.now(timezone.utc)
+    if deadline_iso:
+        try:
+            deadline = datetime.fromisoformat(deadline_iso).replace(tzinfo=timezone.utc)
+        except ValueError:
+            deadline = None
+        if deadline:
+            delta = deadline - now
+            days = int(delta.total_seconds() // 86400)
+            if days < 0:
+                return f"Overdue {-days}d"
+            if days == 0:
+                return "Due today"
+            return f"Due in {days}d"
+    if created_ts is None:
+        return "–"
+    try:
+        created = datetime.fromtimestamp(float(created_ts), tz=timezone.utc)
+    except (OverflowError, OSError, ValueError, TypeError):
+        return "–"
+    delta = now - created
+    days = max(0, int(delta.total_seconds() // 86400))
+    return f"Age {days}d"
 
 
 def _summarize_mapping(data: Mapping[str, object] | None, *, limit: int = 4) -> str:
@@ -570,6 +648,8 @@ def _sanitize_email_label(value: object, *, fallback: str) -> str:
     text = str(value).strip()
     if not text:
         return ""
+    if "…@" in text:
+        return text
     match = WEB_EMAIL_PATTERN.search(text)
     if not match:
         return fallback
@@ -723,6 +803,15 @@ def _parse_archive_status(raw: Optional[str]) -> tuple[str, Optional[str]]:
     if cleaned in ARCHIVE_STATUSES:
         return cleaned, None
     return "any", "status must be one of any, ok, warn, fail"
+
+
+def _parse_commitment_status(raw: Optional[str]) -> tuple[str, Optional[str]]:
+    if raw is None or raw == "":
+        return "open", None
+    cleaned = str(raw).strip().lower()
+    if cleaned in COMMITMENT_STATUSES:
+        return cleaned, None
+    return "open", "status must be one of open, closed, all"
 
 
 def _parse_window_days(
@@ -1525,6 +1614,33 @@ def create_app(
             if isinstance(engineer_payload, Mapping)
             else []
         )
+        open_commitments = 0
+        commitments_url = None
+        if account_emails and hasattr(analytics, "commitment_status_counts"):
+            commitments_cache_key = (
+                "commitments_open",
+                str(app.config["DB_PATH"]),
+                tuple(account_emails),
+            )
+            cached_counts = _COMMITMENTS_COUNT_CACHE.get(commitments_cache_key)
+            if cached_counts is None:
+                cached_counts = analytics.commitment_status_counts(
+                    account_email=account_emails[0],
+                    account_emails=account_emails,
+                )
+                _COMMITMENTS_COUNT_CACHE.set(commitments_cache_key, cached_counts)
+            if isinstance(cached_counts, Mapping):
+                open_commitments = int(cached_counts.get("pending") or 0)
+            commitments_params = {}
+            if account_emails:
+                commitments_params["account_emails"] = ",".join(account_emails)
+            commitments_params["window_days"] = str(window_days)
+            commitments_params["status"] = "open"
+            if reveal_pii:
+                commitments_params["pii"] = "1"
+            if mode:
+                commitments_params["mode"] = mode
+            commitments_url = url_for("commitments", **commitments_params)
 
         scope_hint = None
         if account_email:
@@ -1567,6 +1683,8 @@ def create_app(
             engineer_slowest=engineer_slowest,
             engineer_errors=engineer_errors,
             latency_distribution=latency_distribution,
+            open_commitments=open_commitments,
+            commitments_url=commitments_url,
             hide_limit=True,
             status_refresh_ms=STATUS_STRIP_REFRESH_MS,
         )
@@ -1711,6 +1829,176 @@ def create_app(
             hide_limit=True,
         )
 
+    @app.route("/commitments")
+    def commitments():
+        dashboard_vars = _dashboard_vars()
+        account_emails = _resolve_account_scope(dashboard_vars)
+        window_raw = request.args.get("window_days")
+        if window_raw is None and dashboard_vars.window_days:
+            window_raw = str(dashboard_vars.window_days)
+        window_days, window_error = _parse_window_days(
+            window_raw, default=7, allowed=ALLOWED_WINDOWS
+        )
+        status, status_error = _parse_commitment_status(request.args.get("status"))
+        page = _parse_page(request.args.get("page"), default=1)
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
+        )
+        mode = _resolve_cockpit_mode(request, session)
+
+        error_message = window_error or status_error
+        rows: list[dict[str, object]] = []
+        total_count = 0
+        if account_emails and window_days:
+            analytics = _analytics()
+            cache_key = (
+                "commitments",
+                str(app.config["DB_PATH"]),
+                tuple(account_emails),
+                window_days,
+                status,
+                page,
+                bool(reveal_pii),
+            )
+            payload = _COMMITMENTS_CACHE.get(cache_key)
+            if payload is None:
+                payload = analytics.commitments_ledger_page(
+                    account_emails=account_emails,
+                    window_days=window_days,
+                    status=status,
+                    page=page,
+                    page_size=COMMITMENTS_PAGE_SIZE,
+                    reveal_pii=reveal_pii,
+                    evidence_limit=8,
+                )
+                _COMMITMENTS_CACHE.set(cache_key, payload)
+            rows = payload.get("rows") if isinstance(payload, Mapping) else []
+            if not isinstance(rows, list):
+                rows = []
+            total_count = int(payload.get("total_count") or 0) if isinstance(payload, Mapping) else 0
+        else:
+            error_message = error_message or "Select an account to view commitments."
+
+        total_pages = (
+            max(1, int(math.ceil(total_count / COMMITMENTS_PAGE_SIZE))) if total_count else 1
+        )
+        if page > total_pages:
+            page = total_pages
+
+        def _base_params() -> dict[str, str]:
+            params: dict[str, str] = {}
+            if account_emails:
+                params["account_emails"] = ",".join(account_emails)
+            if window_days:
+                params["window_days"] = str(window_days)
+            if status and status != "open":
+                params["status"] = status
+            if reveal_pii:
+                params["pii"] = "1"
+            if mode:
+                params["mode"] = mode
+            return params
+
+        base_params = _base_params()
+        detail_params = dict(base_params)
+        detail_params["page"] = str(page)
+
+        prev_url = None
+        if page > 1:
+            prev_params = dict(base_params)
+            prev_params["page"] = str(page - 1)
+            prev_url = url_for("commitments", **prev_params)
+        next_url = None
+        if page < total_pages:
+            next_params = dict(base_params)
+            next_params["page"] = str(page + 1)
+            next_url = url_for("commitments", **next_params)
+
+        status_links = {
+            "open": url_for("commitments", **{**base_params, "status": "open"}),
+            "closed": url_for("commitments", **{**base_params, "status": "closed"}),
+            "all": url_for("commitments", **{**base_params, "status": "all"}),
+        }
+
+        formatted_rows = []
+        for row in rows:
+            evidence_items = row.get("evidence") if isinstance(row, Mapping) else []
+            evidence_rows = []
+            if isinstance(evidence_items, list):
+                for evidence in evidence_items:
+                    if not isinstance(evidence, Mapping):
+                        continue
+                    duration_ms = evidence.get("duration_ms")
+                    evidence_rows.append(
+                        {
+                            "ts": _format_ts_utc(evidence.get("ts_utc")),
+                            "event_type": evidence.get("event_type") or "",
+                            "stage": evidence.get("stage") or "",
+                            "outcome": evidence.get("outcome") or "",
+                            "duration": _format_duration_ms(duration_ms)
+                            if duration_ms is not None
+                            else "",
+                            "event_id": evidence.get("event_id") or "",
+                        }
+                    )
+            status_value = str(row.get("status") or "").strip()
+            status_label = status_value.upper() if status_value else "UNKNOWN"
+            source_label = str(row.get("source") or "").strip()
+            kind_label = status_label
+            if source_label:
+                kind_label = f"{status_label} · {source_label}"
+            email_id = row.get("email_id")
+            forensics_url = None
+            if email_id:
+                try:
+                    forensics_url = url_for(
+                        "email_details", email_id=int(email_id), **detail_params
+                    )
+                except (TypeError, ValueError):
+                    forensics_url = None
+            formatted_rows.append(
+                {
+                    "commitment_id": row.get("commitment_id"),
+                    "last_activity": _format_ts_utc(row.get("last_activity_ts")),
+                    "counterparty_label": row.get("counterparty_label") or "",
+                    "account_label": row.get("account_label") or "",
+                    "kind": kind_label,
+                    "due_signal": _format_due_signal(
+                        created_ts=row.get("created_ts"),
+                        deadline_iso=row.get("deadline_iso"),
+                    ),
+                    "evidence_count": int(row.get("evidence_count") or 0),
+                    "evidence_last_ts": _format_ts_utc(row.get("last_evidence_ts")),
+                    "evidence_rows": evidence_rows,
+                    "forensics_url": forensics_url,
+                }
+            )
+
+        return _render_template(
+            app,
+            "commitments.html",
+            title=app.config["APP_TITLE"],
+            page_title="Commitments Ledger",
+            dashboard_vars=dashboard_vars,
+            account_emails=account_emails,
+            window_days=window_days or 7,
+            status=status,
+            page=page,
+            total_pages=total_pages,
+            total_count=total_count,
+            page_size=COMMITMENTS_PAGE_SIZE,
+            commitments_rows=formatted_rows,
+            detail_params=detail_params,
+            prev_url=prev_url,
+            next_url=next_url,
+            status_links=status_links,
+            pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
+            pii_enabled=reveal_pii,
+            cockpit_mode=mode,
+            error=error_message,
+            hide_limit=True,
+        )
+
     @app.route("/email/<int:email_id>")
     def email_details(email_id: int):
         dashboard_vars = _dashboard_vars()
@@ -1753,6 +2041,61 @@ def create_app(
                     "outcome": row.get("outcome") or "",
                     "error_code": row.get("error_code") or "",
                     "span_id": row.get("span_id") or "",
+                }
+            )
+
+        evidence_items = []
+        event_evidence = analytics.email_forensics_events(email_id=email_id, limit=8)
+        for event in event_evidence:
+            evidence_items.append(
+                {
+                    "kind": "event",
+                    "id": event.get("event_id") or "",
+                    "ts_utc": event.get("ts_utc"),
+                    "event_type": event.get("event_type") or "",
+                    "stage": event.get("stage") or "",
+                    "outcome": event.get("outcome") or "",
+                    "duration_ms": event.get("duration_ms"),
+                }
+            )
+        span_seen: set[str] = set()
+        for row in timeline_raw:
+            span_id = str(row.get("span_id") or "").strip()
+            if not span_id or span_id in span_seen:
+                continue
+            span_seen.add(span_id)
+            evidence_items.append(
+                {
+                    "kind": "span",
+                    "id": span_id,
+                    "ts_utc": row.get("ts_start_utc"),
+                    "event_type": "processing_span",
+                    "stage": row.get("stage") or "",
+                    "outcome": row.get("outcome") or "",
+                    "duration_ms": row.get("duration_ms"),
+                }
+            )
+        evidence_items.sort(
+            key=lambda item: (
+                -float(item.get("ts_utc") or 0.0),
+                str(item.get("kind") or ""),
+                str(item.get("id") or ""),
+            )
+        )
+        evidence_rows = []
+        for item in evidence_items[:8]:
+            duration_ms = item.get("duration_ms")
+            evidence_rows.append(
+                {
+                    "kind": item.get("kind") or "",
+                    "id": item.get("id") or "",
+                    "ts": _format_ts_utc(item.get("ts_utc")),
+                    "event_type": item.get("event_type") or "",
+                    "stage": item.get("stage") or "",
+                    "outcome": item.get("outcome") or "",
+                    "duration": _format_duration_ms(duration_ms)
+                    if duration_ms is not None
+                    else "",
                 }
             )
 
@@ -1805,6 +2148,7 @@ def create_app(
                 "preview": detail.get("preview") or "",
             },
             timeline_rows=timeline_rows,
+            evidence_rows=evidence_rows,
             archive_url=archive_url,
             cockpit_url=url_for("index"),
         )

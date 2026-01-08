@@ -1085,6 +1085,32 @@ small {
   margin-bottom: 10px;
 }
 
+.evidence-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.evidence-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
 @media (max-width: 1200px) {
   .cockpit-grid {
     grid-template-columns: 1fr;
