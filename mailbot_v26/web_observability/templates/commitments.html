@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Commitments Ledger — {{ title }}{% endblock %}
+{% block content %}
+  <div class="card filters">
+    <form method="get" action="{{ url_for('commitments') }}" class="filters-form">
+      <div class="filter-group">
+        <label for="account_emails">Account scope</label>
+        <input id="account_emails" name="account_emails" type="text" value="{{ account_emails|join(',') }}" placeholder="comma-separated">
+      </div>
+      <div class="filter-group">
+        <label for="window_days">Window</label>
+        <select id="window_days" name="window_days">
+          {% for option in [7, 30, 90] %}
+          <option value="{{ option }}" {% if option == window_days %}selected{% endif %}>{{ option }}d</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          {% for option in ['open', 'closed', 'all'] %}
+          <option value="{{ option }}" {% if option == status %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if pii_enabled %}
+      <input type="hidden" name="pii" value="1">
+      {% endif %}
+      {% if cockpit_mode %}<input type="hidden" name="mode" value="{{ cockpit_mode }}">{% endif %}
+      <div class="filter-actions">
+        <button type="submit">Apply</button>
+      </div>
+    </form>
+    <div class="filter-meta">
+      <span class="badge">{{ total_count }} commitments</span>
+      <span class="muted">Page {{ page }} of {{ total_pages }}</span>
+      <div class="mode-toggle">
+        <a class="mode-pill {% if status == 'open' %}active{% endif %}" href="{{ status_links.open }}">Open</a>
+        <a class="mode-pill {% if status == 'closed' %}active{% endif %}" href="{{ status_links.closed }}">Closed</a>
+        <a class="mode-pill {% if status == 'all' %}active{% endif %}" href="{{ status_links.all }}">All</a>
+      </div>
+    </div>
+  </div>
+
+  {% if commitments_rows %}
+  <div class="table-scroll commitments-table">
+    <table class="table compact fixed">
+      <thead>
+        <tr>
+          <th class="col-time">Last activity (UTC)</th>
+          <th class="col-from">Counterparty</th>
+          <th class="col-account">Account</th>
+          <th class="col-status">Kind / Status</th>
+          <th class="col-status">Age / Due</th>
+          <th class="col-stage">Evidence</th>
+          <th class="col-status">Forensics</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in commitments_rows %}
+        <tr data-commitment-id="{{ row.commitment_id }}">
+          <td class="col-time">{{ row.last_activity }}</td>
+          <td class="col-from"><span class="truncate">{{ row.counterparty_label }}</span></td>
+          <td class="col-account"><span class="truncate">{{ row.account_label }}</span></td>
+          <td class="col-status"><span class="badge muted">{{ row.kind }}</span></td>
+          <td class="col-status">{{ row.due_signal }}</td>
+          <td class="col-stage">
+            <div class="evidence-meta">
+              <span class="badge muted">{{ row.evidence_count }} items</span>
+              <span class="muted">Last {{ row.evidence_last_ts }}</span>
+            </div>
+            {% if row.evidence_rows %}
+            <ul class="evidence-list">
+              {% for item in row.evidence_rows %}
+              <li>
+                <span class="mono">{{ item.ts }}</span>
+                <span class="badge muted">{{ item.event_type }}</span>
+                {% if item.stage %}<span class="muted">{{ item.stage }}</span>{% endif %}
+                {% if item.outcome %}<span class="muted">{{ item.outcome }}</span>{% endif %}
+                {% if item.duration %}<span class="muted">{{ item.duration }}</span>{% endif %}
+                <span class="mono">#{{ item.event_id }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <div class="muted">Evidence items are not available yet.</div>
+            {% endif %}
+          </td>
+          <td class="col-status">
+            {% if row.forensics_url %}
+            <a class="btn ghost" href="{{ row.forensics_url }}">Forensics</a>
+            {% else %}
+            <span class="muted">Unavailable</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state card">Commitment entries are not available for this filter set.</div>
+  {% endif %}
+
+  <div class="pagination">
+    {% if prev_url %}<a class="btn ghost" href="{{ prev_url }}">Previous</a>{% endif %}
+    {% if next_url %}<a class="btn ghost" href="{{ next_url }}">Next</a>{% endif %}
+  </div>
+{% endblock %}

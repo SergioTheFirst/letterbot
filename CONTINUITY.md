@@ -153,3 +153,5 @@ Working set (files / tables / tests):
 - events narrative page + screenshot harness hardened
 - Excel extractor: removed pandas dependency, added hard limits.
 One-click run_stack + start_mailbot.bat (worker+web, no extra deps)
+
+Commitments ledger + evidence citations (PII-safe, cached, indexed)

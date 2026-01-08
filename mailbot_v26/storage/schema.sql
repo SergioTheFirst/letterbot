@@ -222,6 +222,9 @@ CREATE INDEX IF NOT EXISTS idx_events_v1_email_id
 CREATE INDEX IF NOT EXISTS idx_events_v1_email_event_ts
     ON events_v1(email_id, event_type, ts_utc DESC);
 
+CREATE INDEX IF NOT EXISTS idx_events_v1_email_ts_id
+    ON events_v1(email_id, ts_utc DESC, id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts_iso
     ON events_v1(event_type, ts);
 
@@ -264,6 +267,9 @@ CREATE INDEX IF NOT EXISTS idx_commitments_status
 
 CREATE INDEX IF NOT EXISTS idx_commitments_deadline_iso
     ON commitments(deadline_iso);
+
+CREATE INDEX IF NOT EXISTS idx_commitments_email_status_created_id
+    ON commitments(email_row_id, status, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS processing_spans (
     span_id TEXT PRIMARY KEY,

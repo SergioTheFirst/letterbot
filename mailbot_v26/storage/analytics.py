@@ -59,6 +59,11 @@ class KnowledgeAnalytics:
         EventType.DAILY_DIGEST_SENT.value,
         EventType.WEEKLY_DIGEST_SENT.value,
     }
+    _COMMITMENT_EVENT_TYPES = {
+        EventType.COMMITMENT_CREATED.value,
+        EventType.COMMITMENT_STATUS_CHANGED.value,
+        EventType.COMMITMENT_EXPIRED.value,
+    }
 
     def __init__(self, path: Path | str, *, read_only: bool = False) -> None:
         self.path = Path(path)
@@ -1025,7 +1030,9 @@ class KnowledgeAnalytics:
         if resolved_limit <= 0:
             return []
         since_ts = self._window_start_ts(window_days)
-        since_iso = datetime.fromtimestamp(since_ts, tz=timezone.utc).isoformat()
+        since_iso = datetime.fromtimestamp(
+            since_ts, tz=timezone.utc
+        ).strftime("%Y-%m-%d %H:%M:%S")
         clause, clause_params = self._account_email_clause(account_ids)
         query = """
         SELECT id, account_email, from_email, action_line, body_summary, received_at
@@ -1577,6 +1584,44 @@ class KnowledgeAnalytics:
             )
         )
         return timeline
+
+    def email_forensics_events(
+        self, *, email_id: int, limit: int = 8
+    ) -> list[dict[str, object]]:
+        try:
+            resolved_limit = max(0, int(limit))
+        except (TypeError, ValueError):
+            resolved_limit = 0
+        if resolved_limit <= 0:
+            return []
+        query = """
+        SELECT id, event_type, ts_utc, payload, payload_json
+        FROM events_v1
+        WHERE email_id = ?
+        ORDER BY ts_utc DESC, id DESC
+        LIMIT ?
+        """
+        try:
+            rows = self._execute_select(query, [int(email_id), resolved_limit])
+        except sqlite3.OperationalError:
+            return []
+        results: list[dict[str, object]] = []
+        for row in rows:
+            payload = self._event_payload(row)
+            stage = str(payload.get("stage") or payload.get("reason") or "")
+            outcome = str(payload.get("outcome") or "")
+            duration_ms = payload.get("duration_ms")
+            results.append(
+                {
+                    "event_id": row.get("id"),
+                    "event_type": row.get("event_type"),
+                    "ts_utc": row.get("ts_utc"),
+                    "stage": stage,
+                    "outcome": outcome,
+                    "duration_ms": duration_ms,
+                }
+            )
+        return results
 
     def _priority_digest_counts(
         self,
@@ -3333,6 +3378,227 @@ class KnowledgeAnalytics:
             "pending": int(row.get("pending_count") or 0),
             "expired": int(row.get("expired_count") or 0),
         }
+
+    def commitments_ledger_page(
+        self,
+        *,
+        account_emails: Iterable[str],
+        window_days: int,
+        status: str,
+        page: int,
+        page_size: int,
+        reveal_pii: bool = False,
+        evidence_limit: int = 8,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope("", account_emails)
+        if not account_ids:
+            return {"rows": [], "total_count": 0}
+        try:
+            resolved_days = max(1, int(window_days))
+        except (TypeError, ValueError):
+            resolved_days = 7
+        try:
+            resolved_page = max(1, int(page))
+        except (TypeError, ValueError):
+            resolved_page = 1
+        try:
+            resolved_page_size = max(1, int(page_size))
+        except (TypeError, ValueError):
+            resolved_page_size = 50
+        try:
+            resolved_limit = max(0, int(evidence_limit))
+        except (TypeError, ValueError):
+            resolved_limit = 0
+
+        status_key = str(status or "").strip().lower()
+        status_values: tuple[str, ...] | None = None
+        if status_key == "open":
+            status_values = ("pending", "unknown")
+        elif status_key == "closed":
+            status_values = ("fulfilled", "expired")
+
+        since_ts = self._window_start_ts(resolved_days)
+        since_iso = datetime.fromtimestamp(since_ts, tz=timezone.utc).isoformat()
+        clause, clause_params = self._account_email_clause(account_ids)
+        status_clause = ""
+        status_params: list[object] = []
+        if status_values:
+            placeholders = ", ".join(["?"] * len(status_values))
+            status_clause = f" AND lower(c.status) IN ({placeholders})"
+            status_params.extend(status_values)
+        count_query = (
+            """
+            SELECT COUNT(*) AS total_count
+            FROM commitments c
+            JOIN emails e ON e.id = c.email_row_id
+            WHERE datetime(c.created_at) >= datetime(?)
+            """
+            + clause
+            + status_clause
+        )
+        params: list[object] = [since_iso, *clause_params, *status_params]
+        try:
+            count_rows = self._execute_select(count_query, params)
+        except sqlite3.OperationalError:
+            return {"rows": [], "total_count": 0}
+        total_count = int(count_rows[0].get("total_count") or 0) if count_rows else 0
+        offset = max(0, (resolved_page - 1) * resolved_page_size)
+
+        query = (
+            """
+            SELECT c.id, c.email_row_id, c.commitment_text, c.deadline_iso, c.status, c.source, c.created_at,
+                   e.account_email, e.from_email
+            FROM commitments c
+            JOIN emails e ON e.id = c.email_row_id
+            WHERE datetime(c.created_at) >= datetime(?)
+            """
+            + clause
+            + status_clause
+            + """
+            ORDER BY
+              CASE
+                WHEN c.deadline_iso IS NULL OR c.deadline_iso = '' THEN 1
+                ELSE 0
+              END ASC,
+              c.deadline_iso ASC,
+              c.id DESC
+            LIMIT ?
+            OFFSET ?
+            """
+        )
+        query_params: list[object] = [
+            since_iso,
+            *clause_params,
+            *status_params,
+            resolved_page_size,
+            offset,
+        ]
+        try:
+            rows = self._execute_select(query, query_params)
+        except sqlite3.OperationalError:
+            return {"rows": [], "total_count": 0}
+
+        commitments: list[dict[str, object]] = []
+        evidence_map: dict[int, list[dict[str, object]]] = {}
+        text_lookup: dict[tuple[int, str], int] = {}
+        for row in rows:
+            commitment_id = int(row.get("id") or 0)
+            if commitment_id <= 0:
+                continue
+            email_id = int(row.get("email_row_id") or 0)
+            deadline_iso = str(row.get("deadline_iso") or "").strip() or None
+            status_value = str(row.get("status") or "").strip()
+            source = str(row.get("source") or "").strip()
+            created_at = parse_sqlite_datetime(str(row.get("created_at") or ""))
+            created_ts = created_at.timestamp() if created_at else None
+            account_email = str(row.get("account_email") or "")
+            from_email = str(row.get("from_email") or "")
+            account_label = self._mask_email_address(account_email)
+            counterparty_label = self._mask_email_address(from_email)
+            commitments.append(
+                {
+                    "commitment_id": commitment_id,
+                    "email_id": email_id,
+                    "deadline_iso": deadline_iso,
+                    "status": status_value,
+                    "source": source,
+                    "created_ts": created_ts,
+                    "account_label": account_label,
+                    "counterparty_label": counterparty_label,
+                }
+            )
+            evidence_map[commitment_id] = []
+            key_text = str(row.get("commitment_text") or "").strip().lower()
+            if email_id and key_text:
+                text_lookup[(email_id, key_text)] = commitment_id
+
+        if not commitments:
+            return {"rows": [], "total_count": total_count}
+
+        email_ids = sorted({entry["email_id"] for entry in commitments if entry.get("email_id")})
+        if email_ids and resolved_limit > 0:
+            placeholders = ", ".join(["?"] * len(email_ids))
+            event_placeholders = ", ".join(["?"] * len(self._COMMITMENT_EVENT_TYPES))
+            evidence_query = f"""
+            SELECT id, event_type, ts_utc, email_id, payload, payload_json
+            FROM events_v1
+            WHERE email_id IN ({placeholders})
+              AND event_type IN ({event_placeholders})
+              AND ts_utc >= ?
+            ORDER BY ts_utc DESC, id DESC
+            """
+            evidence_params: list[object] = [
+                *email_ids,
+                *sorted(self._COMMITMENT_EVENT_TYPES),
+                since_ts,
+            ]
+            try:
+                event_rows = self._execute_select(evidence_query, evidence_params)
+            except sqlite3.OperationalError:
+                event_rows = []
+
+            for row in event_rows:
+                payload = self._event_payload(row)
+                commitment_id_raw = payload.get("commitment_id")
+                commitment_id = None
+                if commitment_id_raw is not None:
+                    try:
+                        commitment_id = int(commitment_id_raw)
+                    except (TypeError, ValueError):
+                        commitment_id = None
+                if not commitment_id:
+                    email_id = int(row.get("email_id") or 0)
+                    key_text = str(payload.get("commitment_text") or "").strip().lower()
+                    commitment_id = text_lookup.get((email_id, key_text))
+                if not commitment_id:
+                    continue
+                evidence_items = evidence_map.get(commitment_id)
+                if evidence_items is None:
+                    continue
+                stage = str(payload.get("stage") or payload.get("reason") or "")
+                outcome = str(payload.get("outcome") or "")
+                duration_ms = payload.get("duration_ms")
+                evidence_items.append(
+                    {
+                        "event_id": row.get("id"),
+                        "event_type": row.get("event_type"),
+                        "ts_utc": row.get("ts_utc"),
+                        "stage": stage,
+                        "outcome": outcome,
+                        "duration_ms": duration_ms,
+                    }
+                )
+
+        rows_out: list[dict[str, object]] = []
+        for entry in commitments:
+            commitment_id = int(entry["commitment_id"])
+            evidence_items = evidence_map.get(commitment_id, [])
+            evidence_items.sort(
+                key=lambda item: (
+                    -float(item.get("ts_utc") or 0.0),
+                    -int(item.get("event_id") or 0),
+                )
+            )
+            evidence_count = len(evidence_items)
+            evidence_trimmed = evidence_items[:resolved_limit] if resolved_limit > 0 else []
+            last_evidence_ts = None
+            if evidence_items:
+                last_evidence_ts = float(evidence_items[0].get("ts_utc") or 0.0)
+            last_activity_ts = entry.get("created_ts")
+            if last_evidence_ts is not None:
+                if last_activity_ts is None or last_evidence_ts > float(last_activity_ts):
+                    last_activity_ts = last_evidence_ts
+            rows_out.append(
+                {
+                    **entry,
+                    "last_activity_ts": last_activity_ts,
+                    "evidence_count": evidence_count,
+                    "last_evidence_ts": last_evidence_ts,
+                    "evidence": evidence_trimmed,
+                }
+            )
+
+        return {"rows": rows_out, "total_count": total_count}
 
     def commitment_chain_digest_items(
         self,

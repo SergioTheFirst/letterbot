@@ -210,6 +210,24 @@
     <div class="cockpit-right">
       <div class="card golden-card">
         <div class="section-title">
+          <h2>Commitments</h2>
+          <div class="hint">Follow-up ledger snapshot</div>
+        </div>
+        <div class="signal-grid">
+          <div class="signal-item">
+            <div class="label">Open commitments</div>
+            <div class="value">{{ open_commitments }}</div>
+          </div>
+        </div>
+        {% if commitments_url %}
+        <div class="card-actions">
+          <a class="btn ghost" href="{{ commitments_url }}">View ledger</a>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="card golden-card">
+        <div class="section-title">
           <h2>Golden signals</h2>
           <div class="hint">Windowed aggregates</div>
         </div>

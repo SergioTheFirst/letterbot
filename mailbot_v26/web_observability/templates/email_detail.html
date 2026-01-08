@@ -54,6 +54,42 @@
   {% endif %}
 
   <div class="card detail-card">
+    <div class="section-title">Evidence</div>
+    {% if evidence_rows %}
+    <div class="table-scroll">
+      <table class="table compact fixed">
+        <thead>
+          <tr>
+            <th class="col-time">Timestamp (UTC)</th>
+            <th class="col-stage">Type</th>
+            <th class="col-stage">Event</th>
+            <th class="col-stage">Stage</th>
+            <th class="col-latency">Duration</th>
+            <th class="col-status">Outcome</th>
+            <th class="col-status">ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in evidence_rows %}
+          <tr data-evidence-id="{{ row.id }}">
+            <td class="col-time">{{ row.ts }}</td>
+            <td class="col-stage">{{ row.kind }}</td>
+            <td class="col-stage">{{ row.event_type }}</td>
+            <td class="col-stage">{{ row.stage }}</td>
+            <td class="col-latency">{{ row.duration }}</td>
+            <td class="col-status"><span class="badge muted">{{ row.outcome }}</span></td>
+            <td class="col-status">{{ row.id }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="muted">Evidence entries are not available yet.</div>
+    {% endif %}
+  </div>
+
+  <div class="card detail-card">
     <div class="section-title">Processing timeline</div>
     {% if timeline_rows %}
     <div class="table-scroll">
