@@ -145,3 +145,4 @@ Working set (files / tables / tests):
 2026-01-06: premium base template + CSS tokens; login/latency pages now use base; noisy empty-state copy removed.
 
 - events narrative page + screenshot harness hardened
+- Excel extractor: removed pandas dependency, added hard limits.

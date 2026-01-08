@@ -22,20 +22,15 @@ def test_zip_like_attachment_not_leaking_pk():
 
 def _build_minimal_xlsx():
     import io
-    import zipfile
+
+    from openpyxl import Workbook
 
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr(
-            "xl/sharedStrings.xml",
-            """<?xml version='1.0' encoding='UTF-8'?>
-<sst xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main'><si><t>Цена</t></si></sst>""",
-        )
-        zf.writestr(
-            "xl/worksheets/sheet1.xml",
-            """<?xml version='1.0' encoding='UTF-8'?>
-<worksheet xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main'><sheetData><row r='1'><c r='A1' t='s'><v>0</v></c><c r='B1'><v>123</v></c></row></sheetData></worksheet>""",
-        )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "Цена"
+    sheet["B1"] = 123
+    workbook.save(buf)
     return buf.getvalue()
 
 
