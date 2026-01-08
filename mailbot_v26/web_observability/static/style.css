@@ -1018,6 +1018,70 @@ small {
   table-layout: fixed;
 }
 
+.attention-table th:first-child,
+.attention-table td:first-child {
+  width: 32%;
+}
+
+.attention-table th:nth-child(2),
+.attention-table td:nth-child(2) {
+  width: 14%;
+}
+
+.attention-table th:nth-child(3),
+.attention-table td:nth-child(3) {
+  width: 18%;
+}
+
+.attention-table th:nth-child(4),
+.attention-table td:nth-child(4) {
+  width: 18%;
+}
+
+.attention-table th:nth-child(5),
+.attention-table td:nth-child(5) {
+  width: 18%;
+}
+
+.attention-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lane-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 140px;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.lane-label {
+  font-weight: 600;
+  color: var(--text);
+  text-transform: capitalize;
+}
+
+.lane-bar {
+  height: 8px;
+  background: var(--surface-muted);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.lane-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), rgba(96, 165, 250, 0.4));
+}
+
+.lane-metrics {
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .engineer-card summary {
   cursor: pointer;
   font-weight: 700;

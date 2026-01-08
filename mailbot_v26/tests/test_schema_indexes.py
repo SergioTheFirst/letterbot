@@ -12,6 +12,7 @@ def test_schema_indexes_include_cockpit_support(tmp_path: Path) -> None:
             "idx_emails_account_received_at",
             "idx_emails_received_at_id",
             "idx_emails_account_received_at_id",
+            "idx_events_v1_event_account_ts",
             "idx_events_v1_email_event_ts",
             "idx_events_v1_email_ts_id",
             "idx_events_v1_account_ts_id",

@@ -156,3 +156,4 @@ One-click run_stack + start_mailbot.bat (worker+web, no extra deps)
 
 Commitments ledger + evidence citations (PII-safe, cached, indexed)
 - 2026-01-18: web cockpit lanes for bridge/archive/events (read-only, cached).
+Attention economics v1 (explainable, cached, CSV export, indexed).

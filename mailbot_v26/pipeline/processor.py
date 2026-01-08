@@ -3524,6 +3524,8 @@ def process_message(
             "from_email": from_email,
             "subject": subject,
             "attachments_count": len(attachments),
+            "body_chars": len(body_text or ""),
+            "word_count": len(re.findall(r"\b\w+\b", body_text or "")),
             "occurred_at_utc": received_at.timestamp(),
             "thread_key": thread_key,
         }

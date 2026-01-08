@@ -46,7 +46,8 @@ def _prepare_app(tmp_path: Path, *, attention_cost: float = 0.0):
             payload={
                 "from_email": "alice@example.com",
                 "subject": "Secret Subject",
-                "body_summary": "sensitive body",
+                "body_chars": 800,
+                "word_count": 160,
                 "attachments_count": 1,
             },
         )
@@ -60,7 +61,8 @@ def _prepare_app(tmp_path: Path, *, attention_cost: float = 0.0):
             payload={
                 "from_email": "bob@example.com",
                 "subject": "Hidden Subject",
-                "body_summary": "another body",
+                "body_chars": 400,
+                "word_count": 80,
                 "attachments_count": 0,
             },
         )
@@ -96,7 +98,13 @@ def _prepare_app(tmp_path: Path, *, attention_cost: float = 0.0):
         ts_utc=base_ts + 50,
         account_id="secondary@example.com",
         email_id=99,
-        payload={"from_email": "intruder@example.com", "subject": "PII", "body_summary": "leak", "attachments_count": 0},
+        payload={
+            "from_email": "intruder@example.com",
+            "subject": "PII",
+            "body_chars": 300,
+            "word_count": 60,
+            "attachments_count": 0,
+        },
     )
     return create_app(
         db_path=db_path,
@@ -112,6 +120,9 @@ def test_attention_auth_required(tmp_path: Path) -> None:
         response = client.get("/attention")
         assert response.status_code == 302
         assert "/login" in response.headers.get("Location", "")
+        client.post("/login", data={"password": "pw"})
+        response = client.get("/attention")
+        assert response.status_code == 200
 
 
 def test_attention_api_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -125,7 +136,7 @@ def test_attention_api_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyP
         query = {
             "account_email": "primary@example.com",
             "account_emails": "primary@example.com",
-            "limit": "50",
+            "sort": "time",
         }
         first = client.get(
             "/api/v1/intelligence/attention_economics", query_string=query
@@ -139,6 +150,7 @@ def test_attention_api_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyP
         payload = first.get_json()
         assert payload["totals"]["message_count"] == 5
         assert payload["entities"][0]["estimated_cost"] > 0
+        assert payload["sort"] == "time"
 
 
 def test_attention_scope_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,5 +230,4 @@ def test_attention_ui_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         )
         assert response.status_code == 200
         text = response.get_data(as_text=True)
-        assert "Итоги" in text
-        assert "Контакты" in text
+        assert "attention-table" in text

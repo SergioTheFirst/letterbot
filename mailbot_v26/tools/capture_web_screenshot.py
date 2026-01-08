@@ -52,6 +52,7 @@ def main() -> int:
         return 0
 
     from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import TargetClosedError
     from playwright.sync_api import sync_playwright
     from werkzeug.serving import make_server
 
@@ -100,6 +101,9 @@ def main() -> int:
                 page.get_by_role("button", name="Sign in").click(timeout=5000)
                 page.wait_for_timeout(1500)
                 page.screenshot(path=str(output), full_page=True)
+            except TargetClosedError:
+                print("Playwright crashed; screenshot skipped.")
+                return 0
             except PlaywrightError:
                 print("Playwright browser launch failed; run `python -m playwright install`.")
                 return 0
