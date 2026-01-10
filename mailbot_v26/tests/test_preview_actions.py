@@ -228,7 +228,13 @@ def test_preview_does_not_change_telegram_payload(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    assert baseline_payload["payload"] == preview_payload["payload"]
+    baseline = baseline_payload["payload"]
+    previewed = preview_payload["payload"]
+    assert (baseline.html_text, baseline.priority, baseline.metadata) == (
+        previewed.html_text,
+        previewed.priority,
+        previewed.metadata,
+    )
 
 
 def test_preview_enabled_no_proposals(monkeypatch, caplog) -> None:
@@ -426,7 +432,13 @@ def test_commitments_preview_block_and_payload_unchanged(monkeypatch) -> None:
     preview_text = str(preview_payload.get("preview_text") or "")
     assert "Обязательства" in preview_text
     assert "• \"Пришлю отчет до 25.12.2025\" — ожидается" in preview_text
-    assert baseline_payload["payload"] == commitment_payload["payload"]
+    baseline = baseline_payload["payload"]
+    commitment = commitment_payload["payload"]
+    assert (baseline.html_text, baseline.priority, baseline.metadata) == (
+        commitment.html_text,
+        commitment.priority,
+        commitment.metadata,
+    )
 
 
 def test_commitment_signal_preview_block(monkeypatch) -> None:

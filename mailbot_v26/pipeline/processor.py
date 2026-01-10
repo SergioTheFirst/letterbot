@@ -93,6 +93,7 @@ from mailbot_v26.observability.decision_trace_v1 import (
     DecisionTraceV1,
     compute_decision_key,
     compute_model_fingerprint,
+    sanitize_trace,
     to_canonical_json,
 )
 from mailbot_v26.observability.event_emitter import EventEmitter
@@ -122,6 +123,7 @@ from mailbot_v26.priority.priority_engine_v2 import (
     PriorityEngineV2,
     PriorityResultV2,
 )
+from mailbot_v26.telegram.decision_trace_ui import build_decision_trace_keyboard
 from mailbot_v26.text.clean_email import clean_email_body
 from .attention_gate import (
     AttentionGateInput,
@@ -1737,6 +1739,7 @@ def _build_minimal_telegram_payload(
     subject: str,
     attachments: list[dict[str, Any]],
     metadata: dict[str, Any],
+    reply_markup: dict[str, Any] | None,
 ) -> TelegramPayload:
     minimal_attachments: list[dict[str, Any]] = []
     for attachment in attachments:
@@ -1756,7 +1759,12 @@ def _build_minimal_telegram_payload(
         attachments=minimal_attachments,
     )
     trimmed_text = _trim_telegram_body(minimal_text)
-    return TelegramPayload(html_text=trimmed_text, priority=priority, metadata=metadata)
+    return TelegramPayload(
+        html_text=trimmed_text,
+        priority=priority,
+        metadata=metadata,
+        reply_markup=reply_markup,
+    )
 
 
 def _build_telegram_text(
@@ -2218,6 +2226,9 @@ def build_telegram_payload(
         html_text=telegram_text,
         priority=context.priority,
         metadata=metadata,
+        reply_markup=build_decision_trace_keyboard(
+            email_id=context.email_id, expanded=False
+        ),
     )
     assert "Сделать:" not in payload.html_text
     return payload, render_mode, payload_invalid
@@ -3831,6 +3842,7 @@ def process_message(
             ),
             explain_codes=attention_signals_fired,
         )
+        attention_trace = sanitize_trace(attention_trace)
         _emit_decision_trace(
             attention_trace,
             account_id=account_email,
@@ -3879,6 +3891,7 @@ def process_message(
                 model_fingerprint=priority_engine_v2.model_fingerprint(),
                 explain_codes=priority_engine_v2.explain_codes(priority_v2_result),
             )
+            priority_trace = sanitize_trace(priority_trace)
             _emit_decision_trace(
                 priority_trace,
                 account_id=account_email,
@@ -3995,6 +4008,7 @@ def process_message(
             ),
             explain_codes=llm_gate_signals_fired,
         )
+        llm_gate_trace = sanitize_trace(llm_gate_trace)
         _emit_decision_trace(
             llm_gate_trace,
             account_id=account_email,
@@ -4751,6 +4765,7 @@ def process_message(
             subject=subject,
             attachments=attachments,
             metadata=dict(payload.metadata),
+            reply_markup=payload.reply_markup,
         )
         edit_errors: list[str] = []
 
@@ -4779,6 +4794,7 @@ def process_message(
                 chat_id=chat_id,
                 message_id=message_id,
                 html_text=final_payload.html_text,
+                reply_markup=final_payload.reply_markup,
             )
 
         def _send_payload(message_payload: TelegramPayload) -> DeliveryResult:

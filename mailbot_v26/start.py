@@ -585,6 +585,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             ),
             feature_flags=processor_module.feature_flags,
             allowed_chat_ids=frozenset(allowed_chat_ids),
+            bot_token=config.keys.telegram_bot_token,
         )
         print("[OK] Ready to work\n")
 

@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +46,9 @@ except ModuleNotFoundError:
     USING_FLASK_STUB = True
 
 from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config
+from mailbot_v26.observability.decision_trace_store import load_latest_decision_traces
+from mailbot_v26.observability.decision_trace_v1 import from_canonical_json
+from mailbot_v26.observability.decision_trace_view import summaries_as_payload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
 logger = logging.getLogger(__name__)
@@ -116,6 +120,8 @@ _ATTENTION_TOTALS_CACHE = _TTLCache(20.0)
 _ATTENTION_TABLE_CACHE = _TTLCache(20.0)
 _BUDGET_CACHE = _TTLCache(20.0)
 _TRIAGE_LANES_CACHE = _TTLCache(20.0)
+_DECISION_TRACE_CACHE = _TTLCache(20.0)
+_DECISION_TRACE_HIST_CACHE = _TTLCache(30.0)
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -134,17 +140,7 @@ def _render_template(app: Flask, template_name: str, **context: object) -> str:
     context.setdefault("session", session)
     if USING_FLASK_STUB:
         template_path = Path(app.template_folder or "") / template_name
-        try:
-            from jinja2 import Environment, FileSystemLoader
-
-            env = Environment(
-                loader=FileSystemLoader(app.template_folder or ""), autoescape=False
-            )
-            env.globals["url_for"] = url_for
-            template = env.get_template(template_name)
-            return template.render(**context)
-        except ModuleNotFoundError:
-            return _render_stub_html(template_name, context, template_path)
+        return _render_stub_html(template_name, context, template_path)
     return render_template(template_name, **context)
 
 
@@ -1570,6 +1566,55 @@ def _db_size_bytes(db_path: Path) -> int | None:
         return None
 
 
+def _decision_trace_payload(db_path: Path, email_id: int) -> tuple[list[dict[str, object]], str]:
+    cache_key = ("decision_trace", str(db_path), int(email_id))
+    cached = _DECISION_TRACE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+    traces = load_latest_decision_traces(
+        db_path=db_path, email_id=email_id, limit=10, read_only=True
+    )
+    payload = summaries_as_payload(traces)
+    updated = datetime.now(timezone.utc).isoformat()
+    _DECISION_TRACE_CACHE.set(cache_key, (payload, updated))
+    return payload, updated
+
+
+def _decision_trace_histogram(db_path: Path, *, limit: int = 1000) -> tuple[list[dict[str, object]], str]:
+    cache_key = ("decision_trace_hist", str(db_path), int(limit))
+    cached = _DECISION_TRACE_HIST_CACHE.get(cache_key)
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+    counts: Counter[str] = Counter()
+    try:
+        with _open_readonly_connection(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM events_v1
+                WHERE event_type = ?
+                ORDER BY ts_utc DESC
+                LIMIT ?
+                """,
+                ("DECISION_TRACE_RECORDED", int(limit)),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    for (payload_json,) in rows:
+        trace = from_canonical_json(payload_json)
+        if not trace:
+            continue
+        for code in trace.explain_codes:
+            counts[code] += 1
+    histogram = [
+        {"code": code, "count": int(count)}
+        for code, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    updated = datetime.now(timezone.utc).isoformat()
+    _DECISION_TRACE_HIST_CACHE.set(cache_key, (histogram, updated))
+    return histogram, updated
+
+
 def _ensure_authenticated() -> bool:
     return bool(session.get("authenticated"))
 
@@ -2340,6 +2385,10 @@ def create_app(
             if value:
                 archive_params[key] = value
         archive_url = url_for("archive", **archive_params)
+        decision_traces, decision_trace_updated = _decision_trace_payload(
+            app.config["DB_PATH"], email_id
+        )
+        histogram, histogram_updated = _decision_trace_histogram(app.config["DB_PATH"])
 
         return _render_template(
             app,
@@ -2370,6 +2419,10 @@ def create_app(
             evidence_rows=evidence_rows,
             archive_url=archive_url,
             cockpit_url=url_for("index"),
+            decision_traces=decision_traces,
+            decision_trace_updated=decision_trace_updated,
+            decision_trace_histogram=histogram,
+            decision_trace_hist_updated=histogram_updated,
         )
 
     @app.route("/partial/status_strip")
@@ -2760,6 +2813,24 @@ def create_app(
                 "window_days": resolved_window,
                 "account_emails": _mask_account_emails(account_emails),
                 "distribution": payload,
+            }
+        )
+
+    @app.route("/api/v1/cockpit/decision-trace", methods=["GET"])
+    def api_cockpit_decision_trace():
+        raw_email_id = (request.args.get("email_id") or "").strip()
+        if not raw_email_id.isdigit():
+            return jsonify({"error": "email_id is required"}), 400
+        email_id = int(raw_email_id)
+        traces, updated = _decision_trace_payload(app.config["DB_PATH"], email_id)
+        histogram, histogram_updated = _decision_trace_histogram(app.config["DB_PATH"])
+        return jsonify(
+            {
+                "email_id": email_id,
+                "traces": traces,
+                "last_updated_ts": updated,
+                "histogram": histogram,
+                "histogram_last_updated_ts": histogram_updated,
             }
         )
 

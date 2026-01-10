@@ -374,4 +374,10 @@ def test_telegram_payload_not_changed(monkeypatch):
         telegram_chat_id="chat",
     )
 
-    assert baseline_payload["payload"] == with_auto_actions["payload"]
+    baseline = baseline_payload["payload"]
+    with_auto = with_auto_actions["payload"]
+    assert (baseline.html_text, baseline.priority, baseline.metadata) == (
+        with_auto.html_text,
+        with_auto.priority,
+        with_auto.metadata,
+    )

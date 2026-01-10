@@ -21,6 +21,7 @@ from mailbot_v26.telegram.inbound import (
     parse_command,
     run_inbound_polling,
 )
+from mailbot_v26.telegram.decision_trace_ui import build_decision_trace_keyboard
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
@@ -89,6 +90,7 @@ def _build_processor(tmp_path: Path, sent: list[str], gate_result: GateResult) -
         send_reply=_send_reply,
         feature_flags=feature_flags,
         allowed_chat_ids=frozenset({"chat"}),
+        bot_token="token",
     )
 
 
@@ -99,8 +101,18 @@ def test_parse_callback_data_priority() -> None:
     assert parsed == ("priority", {"email_id": "55", "priority": "🔵"})
     parsed = parse_callback_data("mb:help:priority")
     assert parsed == ("help", {"topic": "priority"})
+    parsed = parse_callback_data("mb:d:42")
+    assert parsed == ("details", {"email_id": "42"})
+    parsed = parse_callback_data("mb:h:7")
+    assert parsed == ("hide", {"email_id": "7"})
     assert parse_callback_data("mb:prio:bad") is None
     assert parse_callback_data("mb:prio::R") is None
+
+
+def test_decision_trace_callback_length() -> None:
+    keyboard = build_decision_trace_keyboard(email_id=123456, expanded=False)
+    callback = keyboard["inline_keyboard"][0][0]["callback_data"]
+    assert len(callback.encode("utf-8")) <= 64
 
 
 def test_parse_command_tolerates_spaces() -> None:

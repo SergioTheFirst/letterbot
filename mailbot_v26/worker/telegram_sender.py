@@ -46,6 +46,7 @@ def _post_message(
     chat_id: str,
     text: str,
     parse_mode: str | None,
+    reply_markup: dict[str, object] | None,
 ) -> "requests.Response":
     payload: dict[str, object] = {
         "chat_id": chat_id,
@@ -54,6 +55,8 @@ def _post_message(
     }
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     return requests.post(url, json=payload, timeout=15)
 
 
@@ -115,6 +118,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             chat_id=chat_id,
             text=payload.html_text,
             parse_mode="HTML",
+            reply_markup=payload.reply_markup,
         )
     except Exception as exc:
         log.error("Telegram send exception: %s", exc)
@@ -152,6 +156,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                     chat_id=chat_id,
                     text=stripped_text,
                     parse_mode=None,
+                    reply_markup=payload.reply_markup,
                 )
             except Exception as exc:
                 log.error("Telegram salvage exception: %s", exc)
@@ -260,6 +265,7 @@ def edit_telegram_message(
     chat_id: str,
     message_id: int,
     html_text: str,
+    reply_markup: dict[str, object] | None = None,
 ) -> bool:
     if not bot_token or not chat_id or not message_id or not html_text:
         log.error(
@@ -280,6 +286,8 @@ def edit_telegram_message(
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         resp = requests.post(url, json=payload, timeout=15)
     except Exception as exc:

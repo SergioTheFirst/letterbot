@@ -160,7 +160,13 @@ def test_telegram_payload_unchanged(monkeypatch, tmp_path):
     off_db, sent_off = _process_once(monkeypatch, tmp_path, enable_shadow=False)
     on_db, sent_on = _process_once(monkeypatch, tmp_path, enable_shadow=True)
 
-    assert sent_off["payload"] == sent_on["payload"]
+    off_payload = sent_off["payload"]
+    on_payload = sent_on["payload"]
+    assert (off_payload.html_text, off_payload.priority, off_payload.metadata) == (
+        on_payload.html_text,
+        on_payload.priority,
+        on_payload.metadata,
+    )
 
     with sqlite3.connect(off_db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM emails").fetchone()[0] == 1

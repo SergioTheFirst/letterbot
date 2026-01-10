@@ -9,6 +9,7 @@ from mailbot_v26.observability.decision_trace_v1 import (
     DecisionTraceEmitter,
     DecisionTraceV1,
     compute_decision_key,
+    sanitize_code,
     to_canonical_json,
 )
 from mailbot_v26.priority.priority_engine_v2 import PriorityEngineV2
@@ -134,3 +135,39 @@ def test_priority_trace_signal_hygiene(tmp_path: Path) -> None:
     for entry in trace.signals_evaluated + trace.signals_fired + trace.explain_codes:
         assert allowed_pattern.match(entry)
         assert heavy_digits.search(entry) is None
+
+
+def test_sanitize_code_scrubs_pii_like_strings() -> None:
+    assert sanitize_code("John_Smith") == "SANITIZED_CODE"
+    assert sanitize_code("alice@example.com") == "SANITIZED_CODE"
+
+
+def test_failure_log_written_and_rotated(tmp_path: Path) -> None:
+    class FailingEmitter:
+        def __init__(self) -> None:
+            self.db_path = tmp_path / "events.sqlite"
+
+        def emit(self, event: EventV1) -> bool:
+            raise RuntimeError("boom")
+
+    log_path = tmp_path / "logs" / "decision_trace_failures.ndjson"
+    emitter = FailingEmitter()
+    circuit = DecisionTraceEmitter(drop_threshold=1, failure_log_path=log_path)
+    event = EventV1(
+        event_type=EventType.DECISION_TRACE_RECORDED,
+        ts_utc=1.0,
+        account_id="acc",
+        entity_id=None,
+        email_id=1,
+        payload={"decision_kind": "ATTENTION_GATE"},
+        payload_json='{"decision_key":"abc"}',
+    )
+    circuit.emit(emitter, event)
+    assert log_path.exists()
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+
+    log_path.write_text("x" * (256 * 1024 + 5), encoding="utf-8")
+    circuit.emit(emitter, event)
+    rotated = log_path.with_suffix(log_path.suffix + ".1")
+    assert rotated.exists()
