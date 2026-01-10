@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import re
+from dataclasses import asdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ from mailbot_v26.facts.fact_extractor import FactExtractor
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.insights.commitment_tracker import Commitment, extract_deadline_ru
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.observability.decision_trace_v1 import compute_model_fingerprint
 
 
 @dataclass(frozen=True, slots=True)
@@ -389,6 +391,86 @@ class PriorityEngineV2:
             breakdown=tuple(breakdown),
             reason_codes=tuple(reason_codes),
         )
+
+    def evaluate_signals(
+        self,
+        *,
+        subject: str,
+        body_text: str,
+        from_email: str,
+        mail_type: str,
+        received_at: datetime,
+        commitments: Iterable[Commitment] | None = None,
+    ) -> dict[str, bool]:
+        combined_text = f"{subject or ''}\n{body_text or ''}".strip()
+        normalized_mail_type = (mail_type or "").strip().upper()
+        normalized_subject = subject or ""
+        reference_time = received_at or datetime.now(timezone.utc)
+
+        urgency_match = self._find_keyword(combined_text, self._URGENCY_KEYWORDS)
+        amount_value = self._max_amount_value(combined_text)
+        deadline_days = self._deadline_days_out(
+            combined_text,
+            reference_time,
+            commitments=commitments,
+        )
+        type_points, _ = self._mail_type_boost(normalized_mail_type)
+        events_window = self._recent_email_events(reference_time)
+        frequency_ratio = self._frequency_ratio(
+            events_window,
+            reference_time=reference_time,
+            from_email=from_email,
+        )
+        chain_count = self._reminder_chain_length(
+            events_window,
+            reference_time=reference_time,
+            from_email=from_email,
+            subject=normalized_subject,
+        )
+        vip_sender = self._vip_senders.matches(from_email)
+
+        return {
+            "URGENCY_KEYWORD": bool(urgency_match),
+            "URGENCY_WEIGHTED_BY_TYPE": bool(
+                urgency_match and self._is_weighted_urgency_type(normalized_mail_type)
+            ),
+            "AMOUNT_PRESENT": amount_value is not None,
+            "AMOUNT_10K": bool(amount_value is not None and amount_value > 10_000),
+            "AMOUNT_50K": bool(amount_value is not None and amount_value > 50_000),
+            "AMOUNT_100K": bool(amount_value is not None and amount_value > 100_000),
+            "DEADLINE_WITHIN_1D": bool(deadline_days is not None and deadline_days <= 1),
+            "DEADLINE_WITHIN_3D": bool(deadline_days is not None and deadline_days <= 3),
+            "DEADLINE_WITHIN_7D": bool(deadline_days is not None and deadline_days <= 7),
+            "MAIL_TYPE_BOOST": type_points > 0,
+            "FREQUENCY_SPIKE": bool(
+                frequency_ratio is not None
+                and frequency_ratio > self._config.freq_spike_threshold
+            ),
+            "REMINDER_CHAIN_2PLUS": chain_count >= 2,
+            "REMINDER_CHAIN_3PLUS": chain_count >= 3,
+            "VIP_SENDER": vip_sender,
+            "VIP_FYI_DAMPEN": bool(
+                vip_sender and self._contains_any(normalized_subject, self._FYI_MARKERS)
+            ),
+            "VIP_FREQ_DAMPEN": bool(
+                vip_sender
+                and frequency_ratio is not None
+                and frequency_ratio > self._config.freq_spike_threshold
+            ),
+            "VIP_COMMITMENT_BOOST": bool(
+                vip_sender and normalized_mail_type in self._COMMITMENT_TYPES
+            ),
+        }
+
+    def explain_codes(self, result: PriorityResultV2) -> list[str]:
+        return sorted(set(result.reason_codes))
+
+    def model_fingerprint(self) -> str:
+        snapshot = {
+            "config": asdict(self._config),
+            "vip_senders": asdict(self._vip_senders),
+        }
+        return compute_model_fingerprint(snapshot)
 
     def _recent_email_events(self, reference_time: datetime) -> list[dict[str, object]]:
         try:

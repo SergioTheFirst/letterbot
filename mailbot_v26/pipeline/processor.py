@@ -88,6 +88,13 @@ from mailbot_v26.observability import get_logger
 from mailbot_v26.telegram_utils import escape_tg_html
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
+from mailbot_v26.observability.decision_trace_v1 import (
+    DecisionTraceEmitter,
+    DecisionTraceV1,
+    compute_decision_key,
+    compute_model_fingerprint,
+    to_canonical_json,
+)
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.observability.metrics import (
     GateEvaluation,
@@ -161,6 +168,7 @@ relationship_health_snapshot_writer = RelationshipHealthSnapshotWriter(DB_PATH)
 context_store = ContextStore(DB_PATH)
 event_emitter = EventEmitter(DB_PATH)
 contract_event_emitter = ContractEventEmitter(DB_PATH)
+decision_trace_emitter = DecisionTraceEmitter()
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 priority_engine_v2 = PriorityEngineV2(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
@@ -279,6 +287,30 @@ def _emit_contract_event(
         contract_event_emitter.emit(event)
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("contract_event_emit_failed", event_type=event_type.value, error=str(exc))
+
+
+def _emit_decision_trace(
+    trace: DecisionTraceV1,
+    *,
+    account_id: str,
+    entity_id: str | None,
+    email_id: int | None,
+    ts_utc: float,
+) -> None:
+    event = EventV1(
+        event_type=EventType.DECISION_TRACE_RECORDED,
+        ts_utc=ts_utc,
+        account_id=account_id,
+        entity_id=entity_id,
+        email_id=email_id,
+        payload={
+            "decision_kind": trace.decision_kind,
+            "trace_schema": trace.trace_schema,
+            "trace_version": trace.trace_version,
+        },
+        payload_json=to_canonical_json(trace),
+    )
+    decision_trace_emitter.emit(contract_event_emitter, event)
 
 
 def _build_delivery_context(
@@ -2289,11 +2321,11 @@ def _compute_heuristic_priority(
     mail_type: str | None,
     received_at: datetime,
     commitments: list[Commitment],
-) -> str:
+) -> PriorityResultV2 | None:
     if not getattr(feature_flags, "ENABLE_PRIORITY_V2", False):
-        return "🔵"
+        return None
     try:
-        result = priority_engine_v2.compute(
+        return priority_engine_v2.compute(
             subject=subject,
             body_text=body_text or "",
             from_email=from_email,
@@ -2301,10 +2333,9 @@ def _compute_heuristic_priority(
             received_at=received_at,
             commitments=commitments,
         )
-        return result.priority
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("heuristic_priority_failed", error=str(exc))
-        return "🔵"
+        return None
 
 
 def _process_llm_queue_request(request: LLMRequest) -> None:
@@ -3767,7 +3798,48 @@ def process_message(
                     },
                 )
 
-        heuristic_priority = _compute_heuristic_priority(
+        anchor_ts_utc = received_at.timestamp()
+        attention_signals: dict[str, bool] = {
+            "TOP_PERCENTILE_CANDIDATE": use_llm_candidate,
+        }
+        if use_llm_candidate:
+            attention_signals["BUDGET_GATE_ALLOW"] = can_use_llm
+        attention_signals_evaluated = sorted(attention_signals.keys())
+        attention_signals_fired = sorted(
+            [key for key, fired in attention_signals.items() if fired]
+        )
+        attention_trace = DecisionTraceV1(
+            decision_key=compute_decision_key(
+                account_id=account_email,
+                email_id=message_id,
+                decision_kind="ATTENTION_GATE",
+                anchor_ts_utc=anchor_ts_utc,
+            ),
+            decision_kind="ATTENTION_GATE",
+            anchor_ts_utc=anchor_ts_utc,
+            signals_evaluated=attention_signals_evaluated,
+            signals_fired=attention_signals_fired,
+            evidence={
+                "matched": len(attention_signals_fired),
+                "total": len(attention_signals_evaluated),
+            },
+            model_fingerprint=compute_model_fingerprint(
+                {
+                    "usage_config": budget_usage_config,
+                    "gate_config": budget_gate_config,
+                }
+            ),
+            explain_codes=attention_signals_fired,
+        )
+        _emit_decision_trace(
+            attention_trace,
+            account_id=account_email,
+            entity_id=contract_event_entity_id,
+            email_id=message_id,
+            ts_utc=anchor_ts_utc,
+        )
+
+        priority_v2_result = _compute_heuristic_priority(
             subject=subject,
             body_text=body_text or "",
             from_email=from_email,
@@ -3775,15 +3847,57 @@ def process_message(
             received_at=received_at,
             commitments=commitments,
         )
+        heuristic_priority = priority_v2_result.priority if priority_v2_result else "🔵"
+        if priority_v2_result:
+            priority_signals = priority_engine_v2.evaluate_signals(
+                subject=subject,
+                body_text=body_text or "",
+                from_email=from_email,
+                mail_type=mail_type or "",
+                received_at=received_at,
+                commitments=commitments,
+            )
+            priority_signals_evaluated = sorted(priority_signals.keys())
+            priority_signals_fired = sorted(
+                [key for key, fired in priority_signals.items() if fired]
+            )
+            priority_trace = DecisionTraceV1(
+                decision_key=compute_decision_key(
+                    account_id=account_email,
+                    email_id=message_id,
+                    decision_kind="PRIORITY_HEURISTIC",
+                    anchor_ts_utc=anchor_ts_utc,
+                ),
+                decision_kind="PRIORITY_HEURISTIC",
+                anchor_ts_utc=anchor_ts_utc,
+                signals_evaluated=priority_signals_evaluated,
+                signals_fired=priority_signals_fired,
+                evidence={
+                    "matched": len(priority_signals_fired),
+                    "total": len(priority_signals_evaluated),
+                },
+                model_fingerprint=priority_engine_v2.model_fingerprint(),
+                explain_codes=priority_engine_v2.explain_codes(priority_v2_result),
+            )
+            _emit_decision_trace(
+                priority_trace,
+                account_id=account_email,
+                entity_id=contract_event_entity_id,
+                email_id=message_id,
+                ts_utc=anchor_ts_utc,
+            )
 
         llm_result = None
         input_chars = _estimate_input_chars(llm_body_text, attachments, subject)
+        llm_queue_path_enabled = (
+            llm_queue_config.llm_request_queue_enabled
+            and llm_queue_config.max_concurrent_llm_calls == 1
+            and run_llm_stage is _ORIGINAL_RUN_LLM_STAGE
+        )
+        llm_was_queued = False
+        llm_called_direct = False
         if use_llm_candidate and can_use_llm:
-            if (
-                llm_queue_config.llm_request_queue_enabled
-                and llm_queue_config.max_concurrent_llm_calls == 1
-                and run_llm_stage is _ORIGINAL_RUN_LLM_STAGE
-            ):
+            if llm_queue_path_enabled:
                 _ensure_llm_worker()
                 request = LLMRequest(
                     account_email=account_email,
@@ -3796,6 +3910,7 @@ def process_message(
                     input_chars=input_chars,
                 )
                 queued = llm_request_queue.enqueue(request, timeout_sec=0.5)
+                llm_was_queued = queued
                 if not queued:
                     logger.info("llm_queue_full", email_id=message_id)
                 llm_result = _build_heuristic_llm_result(
@@ -3816,6 +3931,7 @@ def process_message(
                         attachments=attachments,
                     )
                     llm_used = True
+                    llm_called_direct = True
                 except Exception as exc:
                     change = system_health.update_component(
                         "LLM",
@@ -3845,6 +3961,47 @@ def process_message(
             )
             llm_latency_ms = 0
             span.record_stage("llm", llm_latency_ms)
+
+        llm_gate_signals = {
+            "LLM_CANDIDATE": use_llm_candidate,
+            "LLM_BUDGET_OK": can_use_llm,
+            "LLM_QUEUE_ENABLED": llm_queue_path_enabled,
+            "LLM_QUEUED": llm_was_queued,
+            "LLM_CALLED_DIRECT": llm_called_direct,
+        }
+        llm_gate_signals_evaluated = sorted(llm_gate_signals.keys())
+        llm_gate_signals_fired = sorted(
+            [key for key, fired in llm_gate_signals.items() if fired]
+        )
+        llm_gate_trace = DecisionTraceV1(
+            decision_key=compute_decision_key(
+                account_id=account_email,
+                email_id=message_id,
+                decision_kind="LLM_GATE",
+                anchor_ts_utc=anchor_ts_utc,
+            ),
+            decision_kind="LLM_GATE",
+            anchor_ts_utc=anchor_ts_utc,
+            signals_evaluated=llm_gate_signals_evaluated,
+            signals_fired=llm_gate_signals_fired,
+            evidence={
+                "matched": len(llm_gate_signals_fired),
+                "total": len(llm_gate_signals_evaluated),
+            },
+            model_fingerprint=compute_model_fingerprint(
+                {
+                    "llm_queue_config": llm_queue_config,
+                }
+            ),
+            explain_codes=llm_gate_signals_fired,
+        )
+        _emit_decision_trace(
+            llm_gate_trace,
+            account_id=account_email,
+            entity_id=contract_event_entity_id,
+            email_id=message_id,
+            ts_utc=anchor_ts_utc,
+        )
 
         if not llm_result:
             change = system_health.update_component(

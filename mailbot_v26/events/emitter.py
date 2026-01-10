@@ -104,6 +104,7 @@ class EventEmitter:
             event.ts_utc, tz=timezone.utc
         ).isoformat()
         payload = json.dumps(event.payload, ensure_ascii=False)
+        payload_json = event.payload_json if event.payload_json is not None else payload
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
@@ -129,7 +130,7 @@ class EventEmitter:
                         event.entity_id,
                         event.email_id,
                         payload,
-                        payload,
+                        payload_json,
                         event.schema_version,
                         fp,
                     ),
