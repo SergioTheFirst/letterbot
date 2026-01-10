@@ -165,3 +165,4 @@ Commitments ledger + evidence citations (PII-safe, cached, indexed)
 Attention economics v1 (explainable, cached, CSV export, indexed).
 - 2026-01-10: Resource Budget Gate v1 (token tracking, yearly GigaChat freemium, top-20% LLM gating, FIFO queue, offline-first).
 - 2026-01-10: DecisionTraceV1 emission foundation (events_v1).
+- 2026-01-10: explainability surfaces (Telegram inline details, web decision trace API/UI, code scrubbing, failure log, explain-code histogram cache).

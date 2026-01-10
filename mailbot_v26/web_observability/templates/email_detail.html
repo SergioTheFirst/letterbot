@@ -124,4 +124,62 @@
     <div class="muted">Timeline entries are not available for this email.</div>
     {% endif %}
   </div>
+
+  <div class="card detail-card">
+    <div class="section-title">Decision trace</div>
+    {% if decision_traces %}
+    {% for trace in decision_traces %}
+    <div class="detail-block">
+      <div class="detail-label">{{ trace.decision_kind }}</div>
+      <div class="detail-value">{{ trace.decision_label }}</div>
+      {% if trace.evidence %}
+      <div class="muted">Signals: {{ trace.evidence.matched }}/{{ trace.evidence.total }}</div>
+      {% endif %}
+      {% if trace.explain_codes %}
+      <div class="muted">Codes: {{ trace.explain_codes|join(', ') }}</div>
+      {% endif %}
+      {% if trace.counterfactuals %}
+      <div class="muted">Counterfactuals:</div>
+      <ul class="compact-list">
+        {% for item in trace.counterfactuals %}
+        <li>Without {{ item.signal }} → {{ item.decision }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <div class="muted">Updated: {{ decision_trace_updated }}</div>
+    {% else %}
+    <div class="muted">Decision trace data is not available.</div>
+    {% endif %}
+  </div>
+
+  <div class="card detail-card">
+    <div class="section-title">Explain code histogram</div>
+    {% if decision_trace_histogram %}
+    <div class="table-scroll">
+      <table class="table compact fixed">
+        <thead>
+          <tr>
+            <th class="col-stage">Code</th>
+            <th class="col-latency">Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in decision_trace_histogram %}
+          <tr>
+            <td class="col-stage">{{ row.code }}</td>
+            <td class="col-latency">{{ row.count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="muted">No explain codes available yet.</div>
+    {% endif %}
+    {% if decision_trace_hist_updated %}
+    <div class="muted">Updated: {{ decision_trace_hist_updated }}</div>
+    {% endif %}
+  </div>
 {% endblock %}
