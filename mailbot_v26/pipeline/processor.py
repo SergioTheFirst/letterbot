@@ -3712,13 +3712,19 @@ def process_message(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("importance_score_store_failed", email_id=message_id, error=str(exc))
 
-        use_llm_candidate = is_top_percentile(
-            db_path=DB_PATH,
-            account_email=account_email,
-            current_score=importance.score,
-            percentile_threshold=budget_usage_config.llm_percentile_threshold,
-            window_days=budget_usage_config.window_days,
-        )
+        # Root cause: anchor budget percentile window to received_at for deterministic tests.
+        use_llm_candidate = False
+        try:
+            use_llm_candidate = is_top_percentile(
+                db_path=DB_PATH,
+                account_email=account_email,
+                current_score=importance.score,
+                percentile_threshold=budget_usage_config.llm_percentile_threshold,
+                window_days=budget_usage_config.window_days,
+                now=received_at,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("importance_score_percentile_failed", error=str(exc))
         can_use_llm = False
         if use_llm_candidate:
             can_use_llm = budget_gate.can_use_llm(account_email)
