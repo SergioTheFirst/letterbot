@@ -114,6 +114,8 @@ _COMMITMENTS_CACHE = _TTLCache(20.0)
 _COMMITMENTS_COUNT_CACHE = _TTLCache(15.0)
 _ATTENTION_TOTALS_CACHE = _TTLCache(20.0)
 _ATTENTION_TABLE_CACHE = _TTLCache(20.0)
+_BUDGET_CACHE = _TTLCache(20.0)
+_TRIAGE_LANES_CACHE = _TTLCache(20.0)
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -729,6 +731,10 @@ def _mask_email_address(value: object) -> str:
         return ""
     first = local[0] if local else ""
     return f"{first}…@{domain}"
+
+
+def _mask_account_emails(values: Iterable[str]) -> list[str]:
+    return [_mask_email_address(value) for value in values if value]
 
 
 def _sanitize_email_label(value: object, *, fallback: str) -> str:
@@ -2497,6 +2503,72 @@ def create_app(
             "limit": summary.get("limit", 50),
         }
 
+    def _budget_cockpit_payload(
+        *,
+        account_emails: list[str],
+        window_days: int,
+        trend_days: int,
+    ) -> dict[str, object]:
+        cache_key = (
+            "cockpit_budgets",
+            str(app.config["DB_PATH"]),
+            tuple(account_emails),
+            window_days,
+            trend_days,
+        )
+        cached = _BUDGET_CACHE.get(cache_key)
+        if isinstance(cached, Mapping):
+            return dict(cached)
+        analytics = _analytics()
+        status = analytics.budgets_llm_status(
+            account_emails=account_emails,
+            window_days=window_days,
+        )
+        trend = analytics.budgets_llm_trend(
+            account_emails=account_emails,
+            days=trend_days,
+        )
+        accounts = status.get("accounts") if isinstance(status, Mapping) else None
+        masked_accounts: list[dict[str, object]] = []
+        if isinstance(accounts, list):
+            for entry in accounts:
+                if not isinstance(entry, Mapping):
+                    continue
+                account_label = entry.get("account_label") or entry.get("account_email") or ""
+                masked_label = _mask_email_address(account_label)
+                sanitized = dict(entry)
+                sanitized["account_label"] = masked_label or ""
+                sanitized.pop("account_email", None)
+                masked_accounts.append(sanitized)
+        masked_status = dict(status) if isinstance(status, Mapping) else {}
+        if masked_accounts:
+            masked_status["accounts"] = masked_accounts
+        payload = {"status": masked_status, "trend": trend}
+        _BUDGET_CACHE.set(cache_key, payload)
+        return payload
+
+    def _triage_lane_payload(
+        *,
+        account_emails: list[str],
+        window_days: int,
+    ) -> dict[str, object]:
+        cache_key = (
+            "cockpit_lanes",
+            str(app.config["DB_PATH"]),
+            tuple(account_emails),
+            window_days,
+        )
+        cached = _TRIAGE_LANES_CACHE.get(cache_key)
+        if isinstance(cached, Mapping):
+            return dict(cached)
+        analytics = _analytics()
+        payload = analytics.triage_lane_distribution(
+            account_emails=account_emails,
+            window_days=window_days,
+        )
+        _TRIAGE_LANES_CACHE.set(cache_key, payload)
+        return payload
+
     def _health_summary_payload(
         *,
         account_emails: list[str],
@@ -2634,6 +2706,62 @@ def create_app(
         )
         _HEALTH_COMPONENT_CACHE.set(cache_key, components)
         return components
+
+    @app.route("/api/v1/cockpit/budgets", methods=["GET"])
+    @app.route("/api/cockpit/budgets", methods=["GET"])
+    def api_cockpit_budgets():
+        account_emails, window_days, _, error = _validate_attention_params(
+            args=request.args
+        )
+        if error:
+            resp = jsonify({"error": error})
+            resp.status_code = 400
+            return resp
+        trend_days, trend_error = _parse_window_days(
+            request.args.get("days"), 30, allowed=ALLOWED_WINDOWS
+        )
+        if trend_error:
+            resp = jsonify({"error": trend_error})
+            resp.status_code = 400
+            return resp
+        resolved_window = window_days or 30
+        resolved_trend = trend_days or 30
+        payload = _budget_cockpit_payload(
+            account_emails=account_emails,
+            window_days=resolved_window,
+            trend_days=resolved_trend,
+        )
+        return jsonify(
+            {
+                "window_days": resolved_window,
+                "account_emails": _mask_account_emails(account_emails),
+                "status": payload.get("status", {}),
+                "trend": payload.get("trend", {}),
+            }
+        )
+
+    @app.route("/api/v1/cockpit/lanes", methods=["GET"])
+    @app.route("/api/cockpit/lanes", methods=["GET"])
+    def api_cockpit_lanes():
+        account_emails, window_days, _, error = _validate_attention_params(
+            args=request.args
+        )
+        if error:
+            resp = jsonify({"error": error})
+            resp.status_code = 400
+            return resp
+        resolved_window = window_days or 30
+        payload = _triage_lane_payload(
+            account_emails=account_emails,
+            window_days=resolved_window,
+        )
+        return jsonify(
+            {
+                "window_days": resolved_window,
+                "account_emails": _mask_account_emails(account_emails),
+                "distribution": payload,
+            }
+        )
 
     @app.route("/api/v1/observability/latency_summary", methods=["GET"])
     def api_latency_summary():

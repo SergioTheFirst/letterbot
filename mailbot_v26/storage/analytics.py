@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from mailbot_v26.budgets.contract import BudgetPeriod, BudgetType, ResourceBudget
 from mailbot_v26.events.contract import EventType
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 
@@ -557,6 +558,24 @@ class KnowledgeAnalytics:
             return None
         return mapping.get(value)
 
+    @staticmethod
+    def _budget_period(value: object) -> BudgetPeriod:
+        if not value:
+            return BudgetPeriod.YEARLY
+        cleaned = str(value).strip().upper()
+        try:
+            return BudgetPeriod(cleaned)
+        except ValueError:
+            return BudgetPeriod.YEARLY
+
+    @staticmethod
+    def _budget_period_start(period: BudgetPeriod, now: datetime) -> datetime:
+        if period == BudgetPeriod.DAILY:
+            return now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if period == BudgetPeriod.MONTHLY:
+            return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+
     def event_count(
         self,
         *,
@@ -767,6 +786,198 @@ class KnowledgeAnalytics:
             if len(pairs) >= 3:
                 break
         return "; ".join(pairs)
+
+    def budgets_llm_status(self, account_emails: list[str], window_days: int) -> dict[str, object]:
+        account_ids = self._normalize_account_scope("", account_emails)
+        now = datetime.now(timezone.utc)
+        if not account_ids:
+            return {
+                "budget_type": BudgetType.LLM_TOKENS.value,
+                "window_days": int(window_days),
+                "totals": {
+                    "limit": 0,
+                    "consumed": 0,
+                    "remaining": 0,
+                    "percent_used": 0.0,
+                    "reset_at_utc": "",
+                },
+                "accounts": [],
+            }
+
+        placeholders = ", ".join(["?"] * len(account_ids))
+        budgets_query = (
+            "SELECT account_email, limit_value, period "
+            "FROM account_budgets "
+            f"WHERE budget_type = ? AND account_email IN ({placeholders}) "
+            "ORDER BY account_email ASC, updated_at DESC"
+        )
+        try:
+            budget_rows = self._execute_select(
+                budgets_query, [BudgetType.LLM_TOKENS.value, *account_ids]
+            )
+        except sqlite3.OperationalError:
+            budget_rows = []
+
+        budgets_by_account: dict[str, dict[str, object]] = {}
+        for row in budget_rows:
+            account_email = str(row.get("account_email") or "").strip()
+            if not account_email or account_email in budgets_by_account:
+                continue
+            budgets_by_account[account_email] = row
+
+        consumption_by_account: dict[str, int] = {}
+        if budgets_by_account:
+            conditions: list[str] = []
+            params: list[object] = [BudgetType.LLM_TOKENS.value]
+            for account_email, row in budgets_by_account.items():
+                period = self._budget_period(row.get("period"))
+                start = self._budget_period_start(period, now).isoformat()
+                conditions.append("(account_email = ? AND timestamp >= ?)")
+                params.extend([account_email, start])
+            consumption_query = (
+                "SELECT account_email, SUM(consumed) AS consumed "
+                "FROM budget_consumption "
+                "WHERE budget_type = ? AND (" + " OR ".join(conditions) + ") "
+                "GROUP BY account_email"
+            )
+            try:
+                consumption_rows = self._execute_select(consumption_query, params)
+            except sqlite3.OperationalError:
+                consumption_rows = []
+            for row in consumption_rows:
+                account_email = str(row.get("account_email") or "").strip()
+                if not account_email:
+                    continue
+                consumption_by_account[account_email] = int(row.get("consumed") or 0)
+
+        accounts: list[dict[str, object]] = []
+        limit_total = 0
+        consumed_total = 0
+        remaining_total = 0
+        reset_dates: list[datetime] = []
+
+        for account_email in account_ids:
+            row = budgets_by_account.get(account_email)
+            if not row:
+                continue
+            limit_value = int(row.get("limit_value") or 0)
+            period = self._budget_period(row.get("period"))
+            resource = ResourceBudget(
+                account_email=account_email,
+                budget_type=BudgetType.LLM_TOKENS,
+                limit_value=limit_value,
+                period=period,
+                created_at=None,
+                updated_at=None,
+            )
+            consumed = int(consumption_by_account.get(account_email, 0))
+            remaining = max(0, limit_value - consumed)
+            percent_used = (consumed / limit_value * 100.0) if limit_value > 0 else 0.0
+            reset_at = resource.reset_date(now=now)
+            reset_dates.append(reset_at)
+            accounts.append(
+                {
+                    "account_label": account_email,
+                    "limit": limit_value,
+                    "period": period.value,
+                    "consumed": consumed,
+                    "remaining": remaining,
+                    "percent_used": percent_used,
+                    "reset_at_utc": reset_at.isoformat(),
+                }
+            )
+            limit_total += limit_value
+            consumed_total += consumed
+            remaining_total += remaining
+
+        reset_at_total = min(reset_dates).isoformat() if reset_dates else ""
+        percent_total = (consumed_total / limit_total * 100.0) if limit_total > 0 else 0.0
+
+        return {
+            "budget_type": BudgetType.LLM_TOKENS.value,
+            "window_days": int(window_days),
+            "totals": {
+                "limit": limit_total,
+                "consumed": consumed_total,
+                "remaining": remaining_total,
+                "percent_used": percent_total,
+                "reset_at_utc": reset_at_total,
+            },
+            "accounts": accounts,
+        }
+
+    def budgets_llm_trend(self, account_emails: list[str], days: int) -> dict[str, object]:
+        account_ids = self._normalize_account_scope("", account_emails)
+        if not account_ids:
+            return {
+                "budget_type": BudgetType.LLM_TOKENS.value,
+                "days": int(days),
+                "trend": [],
+            }
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(days))).isoformat()
+        clause, clause_params = self._account_email_clause(account_ids)
+        query = (
+            "SELECT substr(timestamp, 1, 10) AS date_iso, SUM(consumed) AS tokens "
+            "FROM budget_consumption "
+            "WHERE budget_type = ?"
+            + clause
+            + " AND timestamp >= ? "
+            "GROUP BY date_iso "
+            "ORDER BY date_iso ASC"
+        )
+        params: list[object] = [BudgetType.LLM_TOKENS.value, *clause_params, cutoff]
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            rows = []
+        trend = [
+            {"date": str(row.get("date_iso") or ""), "tokens": int(row.get("tokens") or 0)}
+            for row in rows
+        ]
+        return {
+            "budget_type": BudgetType.LLM_TOKENS.value,
+            "days": int(days),
+            "trend": trend,
+        }
+
+    def triage_lane_distribution(self, account_emails: list[str], window_days: int) -> dict[str, object]:
+        account_ids = self._normalize_account_scope("", account_emails)
+        mapping = {"urgent": "🔴", "normal": "🟡", "delegated": "🔵 or deferred_for_digest"}
+        if not account_ids:
+            return {
+                "window_days": int(window_days),
+                "urgent": 0,
+                "normal": 0,
+                "delegated": 0,
+                "total": 0,
+                "mapping": mapping,
+            }
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(window_days))).isoformat()
+        clause, clause_params = self._account_email_clause(account_ids)
+        query = (
+            "SELECT "
+            "SUM(CASE WHEN priority = ? THEN 1 ELSE 0 END) AS urgent, "
+            "SUM(CASE WHEN priority = ? THEN 1 ELSE 0 END) AS normal, "
+            "SUM(CASE WHEN priority = ? OR deferred_for_digest = 1 THEN 1 ELSE 0 END) AS delegated, "
+            "COUNT(*) AS total "
+            "FROM emails "
+            "WHERE received_at >= ?"
+            + clause
+        )
+        params: list[object] = ["🔴", "🟡", "🔵", cutoff, *clause_params]
+        try:
+            rows = self._execute_select(query, params)
+        except sqlite3.OperationalError:
+            rows = []
+        row = rows[0] if rows else {}
+        return {
+            "window_days": int(window_days),
+            "urgent": int(row.get("urgent") or 0),
+            "normal": int(row.get("normal") or 0),
+            "delegated": int(row.get("delegated") or 0),
+            "total": int(row.get("total") or 0),
+            "mapping": mapping,
+        }
 
     def _events_narrative_groups(
         self,
