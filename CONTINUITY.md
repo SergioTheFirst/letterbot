@@ -36,6 +36,7 @@ Done:
 - IMAP UID bootstrap cursor behavior verified with criteria-aware tests.
 - 2026-01-17: web observability masks sender labels and preview content in UI.
 - 2026-01-10: cockpit budgets + triage lanes API (read-only) and tests.
+- 2026-01-19: budget percentile anchoring hardened; regression tests added.
 Now:
 - None.
 Next:
@@ -93,6 +94,9 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_silence_digest_hook.py
 - mailbot_v26/tests/test_trust_bootstrap_metrics.py
 - mailbot_v26/tests/test_web_cockpit_budgets.py
+- mailbot_v26/budgets/importance.py
+- mailbot_v26/tests/test_budget_gate.py
+- mailbot_v26/tests/test_budget_percentile_anchor.py
 2026-01-02: daily digest insights (deadlock+silence) behind enable_digest_insights.
 2026-01-02: daily behavioral metrics block behind enable_behavior_metrics_digest.
 2026-01-02: digest insight labels localized; i18n missing-key fallback returns empty.

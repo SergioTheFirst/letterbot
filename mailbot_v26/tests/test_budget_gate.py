@@ -188,11 +188,16 @@ def test_percentile_selection_top_20_percent() -> None:
                 current_score=90,
                 percentile_threshold=80,
                 window_days=7,
+                received_at=now,
                 connection_factory=_connection_factory(conn),
             )
-            _log_test_event(conn, "test_percentile_selection_top_20_percent", result)
+            _log_test_event(
+                conn,
+                "test_percentile_selection_top_20_percent",
+                {"is_top": result.is_top, "anchored": result.anchored},
+            )
             conn.close()
-            return result
+            return result.is_top and result.anchored
 
         result = _assert_deterministic(run)
         assert result is True
