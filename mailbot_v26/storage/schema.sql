@@ -204,6 +204,41 @@ CREATE TABLE IF NOT EXISTS events_v1 (
     fingerprint TEXT NOT NULL UNIQUE
 );
 
+CREATE TABLE IF NOT EXISTS account_budgets (
+    account_email TEXT NOT NULL,
+    budget_type TEXT NOT NULL,
+    limit_value INTEGER NOT NULL,
+    period TEXT DEFAULT 'YEARLY',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (account_email, budget_type, period)
+);
+
+CREATE TABLE IF NOT EXISTS budget_consumption (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_email TEXT NOT NULL,
+    budget_type TEXT NOT NULL,
+    consumed INTEGER NOT NULL,
+    reason TEXT,
+    event_id TEXT UNIQUE,
+    timestamp TEXT NOT NULL,
+    FOREIGN KEY (account_email) REFERENCES account_budgets(account_email)
+);
+
+CREATE TABLE IF NOT EXISTS email_importance_scores (
+    account_email TEXT NOT NULL,
+    email_id INTEGER NOT NULL,
+    score INTEGER NOT NULL,
+    ts_utc REAL NOT NULL,
+    PRIMARY KEY (account_email, email_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_budget_consumption_account_timestamp
+    ON budget_consumption(account_email, timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_email_importance_scores_account_ts
+    ON email_importance_scores(account_email, ts_utc);
+
 CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts
     ON events_v1(event_type, ts_utc);
 
