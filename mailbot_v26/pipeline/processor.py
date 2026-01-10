@@ -3533,6 +3533,12 @@ def process_message(
     NOTE: Поведение Telegram и LLM НЕ МЕНЯЕМ
     """
 
+    anchor_received_at: datetime | None = received_at
+    if received_at is None:
+        logger.warning("received_at_missing_fallback", email_id=message_id)
+        received_at = datetime.now(timezone.utc)
+        anchor_received_at = None
+
     span = processing_span_recorder.start(
         account_id=account_email, email_id=message_id
     )
@@ -3715,14 +3721,21 @@ def process_message(
         # Root cause: anchor budget percentile window to received_at for deterministic tests.
         use_llm_candidate = False
         try:
-            use_llm_candidate = is_top_percentile(
+            percentile_result = is_top_percentile(
                 db_path=DB_PATH,
                 account_email=account_email,
                 current_score=importance.score,
                 percentile_threshold=budget_usage_config.llm_percentile_threshold,
                 window_days=budget_usage_config.window_days,
-                now=received_at,
+                anchor_ts_utc=anchor_received_at.timestamp() if anchor_received_at else None,
+                received_at=anchor_received_at,
             )
+            if not percentile_result.anchored:
+                logger.warning(
+                    "importance_score_anchor_missing",
+                    email_id=message_id,
+                )
+            use_llm_candidate = percentile_result.is_top and percentile_result.anchored
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("importance_score_percentile_failed", error=str(exc))
         can_use_llm = False
