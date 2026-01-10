@@ -45,6 +45,7 @@ class EventType(str, Enum):
     BUDGET_LIMIT_NEAR = "budget_limit_near"
     GATE_FLIPPED = "gate_flipped"
     BUDGET_GATE_ERROR = "budget_gate_error"
+    DECISION_TRACE_RECORDED = "DECISION_TRACE_RECORDED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,10 +56,12 @@ class EventV1:
     entity_id: str | None
     email_id: int | None
     payload: dict[str, Any]
+    payload_json: str | None = None
     schema_version: int = 1
 
 
 def fingerprint(event: EventV1) -> str:
+    payload_value = event.payload_json if event.payload_json is not None else event.payload
     stable = json.dumps(
         {
             "event_type": event.event_type.value,
@@ -66,7 +69,7 @@ def fingerprint(event: EventV1) -> str:
             "account_id": event.account_id,
             "entity_id": event.entity_id,
             "email_id": event.email_id,
-            "payload": event.payload,
+            "payload": payload_value,
             "schema_version": event.schema_version,
         },
         sort_keys=True,
