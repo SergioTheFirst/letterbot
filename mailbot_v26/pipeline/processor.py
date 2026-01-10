@@ -10,9 +10,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from types import SimpleNamespace
+from typing import Any, Callable, Optional
 
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
+from mailbot_v26.budgets.consumer import BudgetConsumer
+from mailbot_v26.budgets.gate import BudgetGate
+from mailbot_v26.budgets.importance import (
+    heuristic_importance,
+    is_top_percentile,
+    record_importance_score,
+)
 from mailbot_v26.behavior.attention_engine import (
     DeliveryContext,
     DeliveryMode,
@@ -23,10 +31,15 @@ from mailbot_v26.behavior.deadlock_detector import maybe_emit_deadlock
 from mailbot_v26.behavior.threading import compute_thread_key
 from mailbot_v26.config.deadlock_policy import load_deadlock_policy_config
 from mailbot_v26.config.delivery_policy import load_delivery_policy_config
+from mailbot_v26.config.budget_policy import (
+    load_budget_gate_config,
+    load_budget_usage_config,
+)
 from mailbot_v26.config.flow_protection import (
     FlowProtectionConfig,
     load_flow_protection_config,
 )
+from mailbot_v26.config.llm_queue import load_llm_queue_config
 from mailbot_v26.config.premium_clarity import load_premium_clarity_config
 from mailbot_v26.config_loader import get_account_scope, resolve_account_scope
 from mailbot_v26.facts.fact_extractor import FactExtractor
@@ -125,6 +138,7 @@ from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
 from mailbot_v26.worker.telegram_sender import DeliveryResult, edit_telegram_message
+from mailbot_v26.llm.request_queue import BackgroundLLMWorker, LLMRequest, LLMRequestQueue
 from .signal_quality import evaluate_signal_quality
 from mailbot_v26.ui.i18n import (
     DEFAULT_LOCALE,
@@ -157,6 +171,9 @@ auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
 auto_priority_gate_config = load_auto_priority_gate_config()
 deadlock_policy = load_deadlock_policy_config()
 premium_clarity_config = load_premium_clarity_config()
+budget_gate_config = load_budget_gate_config()
+budget_usage_config = load_budget_usage_config()
+llm_queue_config = load_llm_queue_config()
 auto_priority_gate_state_store = AutoPriorityGateStateStore(knowledge_db)
 auto_priority_quality_gate = AutoPriorityQualityGate(
     analytics=analytics,
@@ -191,6 +208,11 @@ auto_action_engine = AutoActionEngine(
 system_orchestrator = SystemOrchestrator()
 notification_alert_store = NotificationAlertStore(DB_PATH)
 MAX_TELEGRAM_WAIT_SECONDS = 180
+budget_gate = BudgetGate(DB_PATH, budget_gate_config, emitter=contract_event_emitter)
+budget_consumer = BudgetConsumer(budget_gate)
+llm_request_queue = LLMRequestQueue(max_size=llm_queue_config.llm_request_queue_size)
+llm_worker: Optional[BackgroundLLMWorker] = None
+_ORIGINAL_RUN_LLM_STAGE = run_llm_stage
 
 
 @dataclass(frozen=True, slots=True)
@@ -2196,6 +2218,132 @@ def _read_llm_field(llm_result: Any, key: str, default: Any = None) -> Any:
     return getattr(llm_result, key, default)
 
 
+def _extract_llm_tokens(llm_result: Any) -> Optional[int]:
+    raw = _read_llm_field(llm_result, "tokens_used", None)
+    if raw is None:
+        raw = _read_llm_field(llm_result, "token_usage", None)
+    if raw is None:
+        raw = _read_llm_field(llm_result, "tokens", None)
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _estimate_input_chars(body_text: str, attachments: list[dict[str, Any]], subject: str) -> int:
+    total = len(subject or "") + len(body_text or "")
+    for attachment in attachments:
+        text = attachment.get("text") or ""
+        total += len(str(text))
+    return total
+
+
+def _build_heuristic_llm_result(
+    *, subject: str, body_text: str, priority: str, attachments: list[dict[str, Any]]
+) -> SimpleNamespace:
+    summary = _build_heuristic_summary(subject=subject, body_text=body_text)
+    action_line = _build_heuristic_action_line(priority=priority)
+    return SimpleNamespace(
+        priority=priority,
+        action_line=action_line,
+        body_summary=summary,
+        attachment_summaries=_build_heuristic_attachment_summaries(attachments),
+        llm_provider="heuristic",
+    )
+
+
+def _build_heuristic_summary(*, subject: str, body_text: str) -> str:
+    candidate = " ".join(part for part in [subject or "", body_text or ""] if part).strip()
+    candidate = re.sub(r"\s+", " ", candidate)
+    if len(candidate) >= 140:
+        candidate = candidate[:140].rsplit(" ", 1)[0]
+    if _is_meaningful_summary(candidate):
+        return candidate
+    fallback = f"Содержание письма: {subject or 'без темы'}"
+    return fallback
+
+
+def _build_heuristic_action_line(*, priority: str) -> str:
+    if priority in {"🔴", "🟡"}:
+        return "Ответить"
+    return "Действий не требуется"
+
+
+def _build_heuristic_attachment_summaries(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for attachment in attachments:
+        summaries.append(
+            {
+                "filename": attachment.get("filename"),
+                "summary": "",
+            }
+        )
+    return summaries
+
+
+def _compute_heuristic_priority(
+    *,
+    subject: str,
+    body_text: str,
+    from_email: str,
+    mail_type: str | None,
+    received_at: datetime,
+    commitments: list[Commitment],
+) -> str:
+    if not getattr(feature_flags, "ENABLE_PRIORITY_V2", False):
+        return "🔵"
+    try:
+        result = priority_engine_v2.compute(
+            subject=subject,
+            body_text=body_text or "",
+            from_email=from_email,
+            mail_type=mail_type or "",
+            received_at=received_at,
+            commitments=commitments,
+        )
+        return result.priority
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("heuristic_priority_failed", error=str(exc))
+        return "🔵"
+
+
+def _process_llm_queue_request(request: LLMRequest) -> None:
+    try:
+        llm_result = run_llm_stage(
+            subject=request.subject,
+            from_email=request.from_email,
+            body_text=request.body_text,
+            attachments=request.attachments,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("llm_queue_request_failed", email_id=request.email_id, error=str(exc))
+        return
+    if not llm_result:
+        logger.warning("llm_queue_empty_result", email_id=request.email_id)
+        return
+    tokens_used = _extract_llm_tokens(llm_result)
+    model_name = str(_read_llm_field(llm_result, "llm_provider", "gigachat") or "gigachat")
+    budget_consumer.on_llm_call(
+        account_email=request.account_email,
+        tokens_used=tokens_used,
+        input_chars=request.input_chars,
+        model=model_name,
+        success=True,
+    )
+
+
+def _ensure_llm_worker() -> BackgroundLLMWorker:
+    global llm_worker
+    if llm_worker is None:
+        llm_worker = BackgroundLLMWorker(
+            llm_request_queue,
+            _process_llm_queue_request,
+            poll_timeout_sec=llm_queue_config.llm_request_queue_timeout_sec,
+        )
+    llm_worker.start()
+    return llm_worker
+
+
 _PREVIEW_DECISION_LINE = "[Принять] [Отклонить]"
 _PREVIEW_PRIORITY_LINE = "[Сделать Высокий] [Сделать Средний] [Сделать Низкий]"
 
@@ -3395,6 +3543,7 @@ def process_message(
     llm_model_for_span: str | None = None
     llm_latency_ms: int | None = None
     llm_quality_score: float | None = None
+    llm_used = False
     health_snapshot_payload: dict[str, Any] | None = None
     fallback_used = False
     telegram_delivered = False
@@ -3545,35 +3694,139 @@ def process_message(
             )
         llm_body_text = llm_context.llm_body_text
         fallback_used = llm_context.fallback_used
-        llm_start = time.perf_counter()
+
+        importance = heuristic_importance(
+            subject=subject,
+            body_text=body_text or "",
+            from_email=from_email,
+            attachments=attachments,
+        )
         try:
-            llm_result = run_llm_stage(
+            record_importance_score(
+                db_path=DB_PATH,
+                account_email=account_email,
+                email_id=message_id,
+                score=importance.score,
+                occurred_at=received_at,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("importance_score_store_failed", email_id=message_id, error=str(exc))
+
+        use_llm_candidate = is_top_percentile(
+            db_path=DB_PATH,
+            account_email=account_email,
+            current_score=importance.score,
+            percentile_threshold=budget_usage_config.llm_percentile_threshold,
+            window_days=budget_usage_config.window_days,
+        )
+        can_use_llm = False
+        if use_llm_candidate:
+            can_use_llm = budget_gate.can_use_llm(account_email)
+            if not can_use_llm:
+                _emit_contract_event(
+                    EventType.GATE_FLIPPED,
+                    ts_utc=received_at.timestamp(),
+                    account_id=account_email,
+                    entity_id=contract_event_entity_id,
+                    email_id=message_id,
+                    payload={
+                        "feature_name": "clarity_formatter",
+                        "old_mode": "premium",
+                        "new_mode": "basic",
+                    },
+                )
+                _emit_contract_event(
+                    EventType.GATE_FLIPPED,
+                    ts_utc=received_at.timestamp(),
+                    account_id=account_email,
+                    entity_id=contract_event_entity_id,
+                    email_id=message_id,
+                    payload={
+                        "feature_name": "trust_bootstrap",
+                        "old_mode": "premium",
+                        "new_mode": "basic",
+                    },
+                )
+
+        heuristic_priority = _compute_heuristic_priority(
+            subject=subject,
+            body_text=body_text or "",
+            from_email=from_email,
+            mail_type=mail_type,
+            received_at=received_at,
+            commitments=commitments,
+        )
+
+        llm_result = None
+        input_chars = _estimate_input_chars(llm_body_text, attachments, subject)
+        if use_llm_candidate and can_use_llm:
+            if (
+                llm_queue_config.llm_request_queue_enabled
+                and llm_queue_config.max_concurrent_llm_calls == 1
+                and run_llm_stage is _ORIGINAL_RUN_LLM_STAGE
+            ):
+                _ensure_llm_worker()
+                request = LLMRequest(
+                    account_email=account_email,
+                    email_id=message_id,
+                    subject=subject,
+                    from_email=from_email,
+                    body_text=llm_body_text,
+                    attachments=attachments,
+                    received_at=received_at,
+                    input_chars=input_chars,
+                )
+                queued = llm_request_queue.enqueue(request, timeout_sec=0.5)
+                if not queued:
+                    logger.info("llm_queue_full", email_id=message_id)
+                llm_result = _build_heuristic_llm_result(
+                    subject=subject,
+                    body_text=body_text or "",
+                    priority=heuristic_priority,
+                    attachments=attachments,
+                )
+                llm_latency_ms = 0
+                span.record_stage("llm", llm_latency_ms)
+            else:
+                llm_start = time.perf_counter()
+                try:
+                    llm_result = run_llm_stage(
+                        subject=subject,
+                        from_email=from_email,
+                        body_text=llm_body_text,
+                        attachments=attachments,
+                    )
+                    llm_used = True
+                except Exception as exc:
+                    change = system_health.update_component(
+                        "LLM",
+                        False,
+                        reason=str(exc) or "LLM stage failed",
+                    )
+                    _notify_system_mode_change(
+                        change=change,
+                        chat_id=telegram_chat_id,
+                        account_email=account_email,
+                    )
+                    logger.error(
+                        "processing_error",
+                        stage="llm",
+                        email_id=message_id,
+                        error=str(exc),
+                    )
+                    raise
+                llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
+                span.record_stage("llm", llm_latency_ms)
+        else:
+            llm_result = _build_heuristic_llm_result(
                 subject=subject,
-                from_email=from_email,
-                body_text=llm_body_text,
+                body_text=body_text or "",
+                priority=heuristic_priority,
                 attachments=attachments,
             )
-        except Exception as exc:
-            change = system_health.update_component(
-                "LLM",
-                False,
-                reason=str(exc) or "LLM stage failed",
-            )
-            _notify_system_mode_change(
-                change=change,
-                chat_id=telegram_chat_id,
-                account_email=account_email,
-            )
-            logger.error(
-                "processing_error",
-                stage="llm",
-                email_id=message_id,
-                error=str(exc),
-            )
-            raise
-        llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
-        span.record_stage("llm", llm_latency_ms)
-    
+            llm_latency_ms = 0
+            span.record_stage("llm", llm_latency_ms)
+
         if not llm_result:
             change = system_health.update_component(
                 "LLM",
@@ -3600,15 +3853,16 @@ def process_message(
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.error("contract_event_emit_failed", error=str(exc))
             return
-        change = system_health.update_component("LLM", True)
-        _notify_system_mode_change(
-            change=change,
-            chat_id=telegram_chat_id,
-            account_email=account_email,
-        )
+        if llm_used:
+            change = system_health.update_component("LLM", True)
+            _notify_system_mode_change(
+                change=change,
+                chat_id=telegram_chat_id,
+                account_email=account_email,
+            )
         if fallback_used and outcome == "ok":
             outcome = "fallback"
-    
+
         priority = llm_result.priority
         original_priority: str | None = None
         priority_reason: str | None = None
@@ -3621,8 +3875,18 @@ def process_message(
         elif isinstance(llm_result, dict):
             llm_provider = llm_result.get("llm_provider")
         llm_provider_for_span = llm_provider
-    
-        # ---------- Shadow Priority (read-only, dry run) ----------
+
+        if llm_used:
+            tokens_used = _extract_llm_tokens(llm_result)
+            budget_consumer.on_llm_call(
+                account_email=account_email,
+                tokens_used=tokens_used,
+                input_chars=input_chars,
+                model=llm_provider or "gigachat",
+                success=True,
+            )
+
+# ---------- Shadow Priority (read-only, dry run) ----------
         priority_v2_result = None
         priority_v2_enabled = bool(getattr(feature_flags, "ENABLE_PRIORITY_V2", False))
         if priority_v2_enabled:

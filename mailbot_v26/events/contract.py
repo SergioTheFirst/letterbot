@@ -40,6 +40,11 @@ class EventType(str, Enum):
     CALIBRATION_PROPOSALS_GENERATED = "calibration_proposals_generated"
     ANOMALY_DETECTED = "anomaly_detected"
     TG_RENDER_RECORDED = "tg_render_recorded"
+    BUDGET_CONSUMED = "budget_consumed"
+    BUDGET_LIMIT_EXCEEDED = "budget_limit_exceeded"
+    BUDGET_LIMIT_NEAR = "budget_limit_near"
+    GATE_FLIPPED = "gate_flipped"
+    BUDGET_GATE_ERROR = "budget_gate_error"
 
 
 @dataclass(frozen=True, slots=True)
