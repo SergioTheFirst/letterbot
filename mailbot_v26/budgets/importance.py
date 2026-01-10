@@ -87,6 +87,7 @@ def is_top_percentile(
     current_score: int,
     percentile_threshold: int,
     window_days: int,
+    now: datetime | None = None,
     connection_factory: Optional[Callable[[], sqlite3.Connection]] = None,
 ) -> bool:
     """EN: Determine if score is in top percentile. RU: Проверить попадание в топ."""
@@ -95,6 +96,7 @@ def is_top_percentile(
         db_path=db_path,
         account_email=account_email,
         window_days=window_days,
+        now=now,
         connection_factory=connection_factory,
     )
     if not scores:
@@ -108,9 +110,11 @@ def _load_recent_scores(
     db_path: Path,
     account_email: str,
     window_days: int,
+    now: datetime | None = None,
     connection_factory: Optional[Callable[[], sqlite3.Connection]] = None,
 ) -> list[int]:
-    since_ts = (datetime.now(timezone.utc) - timedelta(days=window_days)).timestamp()
+    now_ts = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    since_ts = (now_ts - timedelta(days=window_days)).timestamp()
     with _connect(db_path, connection_factory) as conn:
         rows = conn.execute(
             """
