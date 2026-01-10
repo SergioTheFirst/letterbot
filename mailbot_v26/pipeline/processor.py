@@ -212,6 +212,7 @@ budget_gate = BudgetGate(DB_PATH, budget_gate_config, emitter=contract_event_emi
 budget_consumer = BudgetConsumer(budget_gate)
 llm_request_queue = LLMRequestQueue(max_size=llm_queue_config.llm_request_queue_size)
 llm_worker: Optional[BackgroundLLMWorker] = None
+_ORIGINAL_RUN_LLM_STAGE = run_llm_stage
 
 
 @dataclass(frozen=True, slots=True)
@@ -3762,6 +3763,7 @@ def process_message(
             if (
                 llm_queue_config.llm_request_queue_enabled
                 and llm_queue_config.max_concurrent_llm_calls == 1
+                and run_llm_stage is _ORIGINAL_RUN_LLM_STAGE
             ):
                 _ensure_llm_worker()
                 request = LLMRequest(

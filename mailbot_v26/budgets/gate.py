@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import contextlib
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from mailbot_v26.budgets.contract import BudgetPeriod, BudgetStatus, BudgetType, ResourceBudget
-from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.contract import EventType, EventV1, fingerprint
 from mailbot_v26.events.emitter import EventEmitter
 from mailbot_v26.observability import get_logger
 
@@ -50,10 +52,17 @@ class BudgetGate:
         db_path: Path,
         config: BudgetGateConfig,
         emitter: Optional[EventEmitter] = None,
+        connection_factory: Optional[Callable[[], sqlite3.Connection]] = None,
     ) -> None:
         self._db_path = db_path
         self._config = config
-        self._emitter = emitter or EventEmitter(db_path)
+        self._connection_factory = connection_factory
+        if emitter is not None:
+            self._emitter: Optional[EventEmitter] = emitter
+        elif connection_factory is None:
+            self._emitter = EventEmitter(db_path)
+        else:
+            self._emitter = None
 
     def can_use_llm(self, account_email: str) -> bool:
         """EN: Check if LLM budget is available. RU: Проверка доступности LLM."""
@@ -98,7 +107,7 @@ class BudgetGate:
     def get_budget_status(self, account_email: str, budget_type: BudgetType) -> BudgetStatus:
         """EN: Get budget status. RU: Получить статус бюджета."""
 
-        with sqlite3.connect(self._db_path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -157,7 +166,7 @@ class BudgetGate:
             return False
         try:
             event_id = f"budget_{account_email}_{budget_type.value}_{datetime.now(timezone.utc).timestamp()}"
-            with sqlite3.connect(self._db_path) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     """
                     INSERT INTO budget_consumption (
@@ -241,7 +250,50 @@ class BudgetGate:
             email_id=None,
             payload=payload,
         )
-        self._emitter.emit(event)
+        if self._emitter is not None:
+            self._emitter.emit(event)
+            return
+        try:
+            with self._connect() as conn:
+                fp = fingerprint(event)
+                ts_iso = datetime.fromtimestamp(event.ts_utc, tz=timezone.utc).isoformat()
+                payload_json = json.dumps(event.payload, ensure_ascii=False)
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO events_v1 (
+                        event_type,
+                        ts_utc,
+                        ts,
+                        account_id,
+                        entity_id,
+                        email_id,
+                        payload,
+                        payload_json,
+                        schema_version,
+                        fingerprint
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event.event_type.value,
+                        event.ts_utc,
+                        ts_iso,
+                        event.account_id,
+                        event.entity_id,
+                        event.email_id,
+                        payload_json,
+                        payload_json,
+                        event.schema_version,
+                        fp,
+                    ),
+                )
+                conn.commit()
+        except sqlite3.Error as exc:  # pragma: no cover - defensive logging
+            logger.error("budget_event_emit_failed", account=account_email, error=str(exc))
+
+    def _connect(self) -> contextlib.AbstractContextManager[sqlite3.Connection]:
+        if self._connection_factory is not None:
+            return contextlib.nullcontext(self._connection_factory())
+        return sqlite3.connect(self._db_path)
 
 
 def _period_start(period: BudgetPeriod) -> datetime:

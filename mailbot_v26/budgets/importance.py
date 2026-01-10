@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import math
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,10 +64,11 @@ def record_importance_score(
     email_id: int,
     score: int,
     occurred_at: datetime,
+    connection_factory: Optional[Callable[[], sqlite3.Connection]] = None,
 ) -> None:
     """EN: Persist importance score. RU: Сохранить оценку важности."""
 
-    with sqlite3.connect(db_path) as conn:
+    with _connect(db_path, connection_factory) as conn:
         conn.execute(
             """
             INSERT OR REPLACE INTO email_importance_scores (
@@ -85,6 +87,7 @@ def is_top_percentile(
     current_score: int,
     percentile_threshold: int,
     window_days: int,
+    connection_factory: Optional[Callable[[], sqlite3.Connection]] = None,
 ) -> bool:
     """EN: Determine if score is in top percentile. RU: Проверить попадание в топ."""
 
@@ -92,6 +95,7 @@ def is_top_percentile(
         db_path=db_path,
         account_email=account_email,
         window_days=window_days,
+        connection_factory=connection_factory,
     )
     if not scores:
         return False
@@ -104,9 +108,10 @@ def _load_recent_scores(
     db_path: Path,
     account_email: str,
     window_days: int,
+    connection_factory: Optional[Callable[[], sqlite3.Connection]] = None,
 ) -> list[int]:
     since_ts = (datetime.now(timezone.utc) - timedelta(days=window_days)).timestamp()
-    with sqlite3.connect(db_path) as conn:
+    with _connect(db_path, connection_factory) as conn:
         rows = conn.execute(
             """
             SELECT score
@@ -126,6 +131,15 @@ def _percentile(values: list[int], percentile: float) -> int:
     index = int(math.ceil(percentile * len(sorted_values))) - 1
     index = max(0, min(index, len(sorted_values) - 1))
     return int(sorted_values[index])
+
+
+def _connect(
+    db_path: Path,
+    connection_factory: Optional[Callable[[], sqlite3.Connection]],
+) -> contextlib.AbstractContextManager[sqlite3.Connection]:
+    if connection_factory is not None:
+        return contextlib.nullcontext(connection_factory())
+    return sqlite3.connect(db_path)
 
 
 __all__ = [
