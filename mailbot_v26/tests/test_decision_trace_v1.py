@@ -171,3 +171,29 @@ def test_failure_log_written_and_rotated(tmp_path: Path) -> None:
     circuit.emit(emitter, event)
     rotated = log_path.with_suffix(log_path.suffix + ".1")
     assert rotated.exists()
+
+
+def test_failure_log_write_errors_do_not_escape(tmp_path: Path, monkeypatch) -> None:
+    class FailingEmitter:
+        def __init__(self) -> None:
+            self.db_path = tmp_path / "events.sqlite"
+
+        def emit(self, event: EventV1) -> bool:
+            raise RuntimeError("boom")
+
+    def _raise_open(self, *args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "open", _raise_open)
+    log_path = tmp_path / "logs" / "decision_trace_failures.ndjson"
+    circuit = DecisionTraceEmitter(drop_threshold=1, failure_log_path=log_path)
+    event = EventV1(
+        event_type=EventType.DECISION_TRACE_RECORDED,
+        ts_utc=1.0,
+        account_id="acc",
+        entity_id=None,
+        email_id=1,
+        payload={"decision_kind": "ATTENTION_GATE"},
+        payload_json='{"decision_key":"abc"}',
+    )
+    circuit.emit(FailingEmitter(), event)

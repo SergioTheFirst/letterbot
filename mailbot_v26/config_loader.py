@@ -67,6 +67,13 @@ class IngestConfig:
 
 
 @dataclass
+class MaintenanceConfig:
+    """Maintenance mode settings."""
+
+    maintenance_mode: bool
+
+
+@dataclass
 class BotConfig:
     """Aggregate configuration bundle."""
 
@@ -76,6 +83,9 @@ class BotConfig:
     storage: "StorageConfig"
     ingest: IngestConfig = field(
         default_factory=lambda: IngestConfig(allow_prestart_emails=False)
+    )
+    maintenance: MaintenanceConfig = field(
+        default_factory=lambda: MaintenanceConfig(maintenance_mode=False)
     )
     llm_call: Optional[Callable[[str], str]] = None
 
@@ -277,6 +287,22 @@ def load_ingest_config(base_dir: Path = CONFIG_DIR) -> IngestConfig:
         raise ConfigError(f"Invalid value in config.ini [ingest]: {exc}") from exc
 
 
+def load_maintenance_config(base_dir: Path = CONFIG_DIR) -> MaintenanceConfig:
+    parser = _read_config_file(base_dir / "config.ini")
+    if "maintenance" not in parser:
+        return MaintenanceConfig(maintenance_mode=False)
+    section = parser["maintenance"]
+    try:
+        return MaintenanceConfig(
+            maintenance_mode=section.getboolean(
+                "maintenance_mode",
+                fallback=False,
+            )
+        )
+    except ValueError as exc:
+        raise ConfigError(f"Invalid value in config.ini [maintenance]: {exc}") from exc
+
+
 def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
     """Load and validate all configuration files.
 
@@ -288,12 +314,14 @@ def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
 
     general = load_general_config(base_dir)
     ingest = load_ingest_config(base_dir)
+    maintenance = load_maintenance_config(base_dir)
     accounts = load_accounts_config(base_dir)
     keys = load_keys_config(base_dir)
     storage = load_storage_config(base_dir)
     return BotConfig(
         general=general,
         ingest=ingest,
+        maintenance=maintenance,
         accounts=accounts,
         keys=keys,
         storage=storage,
@@ -307,6 +335,7 @@ __all__ = [
     "ConfigError",
     "GeneralConfig",
     "IngestConfig",
+    "MaintenanceConfig",
     "InvalidAccountIdError",
     "KeysConfig",
     "StorageConfig",
@@ -315,6 +344,7 @@ __all__ = [
     "load_accounts_config",
     "load_general_config",
     "load_ingest_config",
+    "load_maintenance_config",
     "load_keys_config",
     "load_storage_config",
     "resolve_account_scope",
