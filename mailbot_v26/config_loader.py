@@ -9,7 +9,7 @@ and per-account settings isolated.
 from __future__ import annotations
 
 import configparser
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 import re
 from pathlib import Path
@@ -60,6 +60,13 @@ class KeysConfig:
 
 
 @dataclass
+class IngestConfig:
+    """Mail ingest policies."""
+
+    allow_prestart_emails: bool
+
+
+@dataclass
 class BotConfig:
     """Aggregate configuration bundle."""
 
@@ -67,6 +74,9 @@ class BotConfig:
     accounts: List[AccountConfig]
     keys: KeysConfig
     storage: "StorageConfig"
+    ingest: IngestConfig = field(
+        default_factory=lambda: IngestConfig(allow_prestart_emails=False)
+    )
     llm_call: Optional[Callable[[str], str]] = None
 
 
@@ -251,6 +261,22 @@ def load_storage_config(base_dir: Path = CONFIG_DIR) -> StorageConfig:
     return StorageConfig(db_path=db_path)
 
 
+def load_ingest_config(base_dir: Path = CONFIG_DIR) -> IngestConfig:
+    parser = _read_config_file(base_dir / "config.ini")
+    if "ingest" not in parser:
+        return IngestConfig(allow_prestart_emails=False)
+    section = parser["ingest"]
+    try:
+        return IngestConfig(
+            allow_prestart_emails=section.getboolean(
+                "allow_prestart_emails",
+                fallback=False,
+            )
+        )
+    except ValueError as exc:
+        raise ConfigError(f"Invalid value in config.ini [ingest]: {exc}") from exc
+
+
 def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
     """Load and validate all configuration files.
 
@@ -261,10 +287,17 @@ def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
     """
 
     general = load_general_config(base_dir)
+    ingest = load_ingest_config(base_dir)
     accounts = load_accounts_config(base_dir)
     keys = load_keys_config(base_dir)
     storage = load_storage_config(base_dir)
-    return BotConfig(general=general, accounts=accounts, keys=keys, storage=storage)
+    return BotConfig(
+        general=general,
+        ingest=ingest,
+        accounts=accounts,
+        keys=keys,
+        storage=storage,
+    )
 
 
 __all__ = [
@@ -273,6 +306,7 @@ __all__ = [
     "BotConfig",
     "ConfigError",
     "GeneralConfig",
+    "IngestConfig",
     "InvalidAccountIdError",
     "KeysConfig",
     "StorageConfig",
@@ -280,6 +314,7 @@ __all__ = [
     "load_config",
     "load_accounts_config",
     "load_general_config",
+    "load_ingest_config",
     "load_keys_config",
     "load_storage_config",
     "resolve_account_scope",

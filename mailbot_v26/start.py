@@ -68,6 +68,7 @@ from mailbot_v26.tools.backfill_events import maybe_backfill_events
 from mailbot_v26.version import __version__
 
 LOG_PATH = CURRENT_DIR / "mailbot.log"
+RUN_STARTED_AT_UTC = datetime.now(timezone.utc)
 
 
 def _configure_logging() -> None:
@@ -461,7 +462,6 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
     print(f"Log file: {LOG_PATH}\n")
 
     logger.info("=== MailBot %s started ===", __version__)
-    program_start = datetime.now()
     try:
         processor_module.system_snapshotter.log_startup()
     except Exception as exc:  # pragma: no cover - optional observability
@@ -642,7 +642,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             imap = ResilientIMAP(
                                 account,
                                 state,
-                                program_start,
+                                RUN_STARTED_AT_UTC,
+                                allow_prestart_emails=config.ingest.allow_prestart_emails,
                                 max_email_mb=config.general.max_email_mb,
                             )
                             new_messages = imap.fetch_new_messages()

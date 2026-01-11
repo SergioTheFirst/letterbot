@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -34,22 +34,26 @@ class _FakeIMAPClient:
         if not criteria:
             return []
         self.search_calls.append(list(criteria))
-        command = criteria[0]
-        if command == "UID" and len(criteria) > 1:
-            range_spec = criteria[1]
+        matched = list(self._uids)
+        if "UID" in criteria:
+            range_spec = criteria[criteria.index("UID") + 1]
             if range_spec.endswith(":*"):
                 start = int(range_spec.split(":")[0])
-                return [uid for uid in self._uids if uid >= start]
-            return []
-        if command == "SINCE" and len(criteria) > 1:
-            since = datetime.strptime(criteria[1], "%d-%b-%Y").date()
-            matched = []
-            for uid in self._uids:
+                matched = [uid for uid in matched if uid >= start]
+            else:
+                matched = []
+        if "SINCE" in criteria:
+            since = datetime.strptime(
+                criteria[criteria.index("SINCE") + 1],
+                "%d-%b-%Y",
+            ).date()
+            filtered = []
+            for uid in matched:
                 internaldate = self._data[uid].get(b"INTERNALDATE")
                 if isinstance(internaldate, datetime) and internaldate.date() >= since:
-                    matched.append(uid)
-            return matched
-        return []
+                    filtered.append(uid)
+            matched = filtered
+        return matched
 
     def fetch(self, uids, fields):  # type: ignore[override]
         return {uid: self._data[uid] for uid in uids}
@@ -70,13 +74,13 @@ def account() -> AccountConfig:
 
 def test_fetch_skips_messages_before_start(monkeypatch, tmp_path: Path, account: AccountConfig) -> None:
     fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
-    start_time = datetime(2024, 1, 2, 12, 0, 0)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 
     fake_client.set_messages(
         {
-            1: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0)},
-            2: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0)},
-            3: {b"RFC822": b"newer", b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0)},
+            1: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
+            2: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0, tzinfo=timezone.utc)},
+            3: {b"RFC822": b"newer", b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0, tzinfo=timezone.utc)},
         }
     )
 
@@ -90,17 +94,18 @@ def test_fetch_skips_messages_before_start(monkeypatch, tmp_path: Path, account:
     assert state.get_last_uid(account.login) == 3
     assert state.get_last_check_time(account.login) is not None
     assert fake_client.search_calls[0] == ["UID", "1:*"]
-    assert fake_client.search_calls[1][0] == "SINCE"
+    assert fake_client.search_calls[1][:2] == ["UID", "1:*"]
+    assert "SINCE" in fake_client.search_calls[1]
 
 
 def test_baseline_updates_when_only_old(monkeypatch, tmp_path: Path, account: AccountConfig) -> None:
     fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
-    start_time = datetime(2024, 1, 2, 12, 0, 0)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 
     fake_client.set_messages(
         {
-            10: {b"RFC822": b"first", b"INTERNALDATE": datetime(2023, 12, 31, 23, 59, 0)},
-            11: {b"RFC822": b"second", b"INTERNALDATE": datetime(2024, 1, 1, 8, 0, 0)},
+            10: {b"RFC822": b"first", b"INTERNALDATE": datetime(2023, 12, 31, 23, 59, 0, tzinfo=timezone.utc)},
+            11: {b"RFC822": b"second", b"INTERNALDATE": datetime(2024, 1, 1, 8, 0, 0, tzinfo=timezone.utc)},
         }
     )
 
@@ -113,20 +118,20 @@ def test_baseline_updates_when_only_old(monkeypatch, tmp_path: Path, account: Ac
     assert messages == []
     assert state.get_last_uid(account.login) == 11
     assert fake_client.search_calls[0] == ["UID", "1:*"]
-    assert fake_client.search_calls[1][0] == "SINCE"
+    assert "SINCE" in fake_client.search_calls[1]
 
 
-def test_steady_state_uses_uid_cursor_only(
+def test_steady_state_filters_prestart_emails(
     monkeypatch, tmp_path: Path, account: AccountConfig
 ) -> None:
     fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
-    start_time = datetime(2024, 1, 2, 12, 0, 0)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 
     fake_client.set_messages(
         {
-            1: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0)},
-            2: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0)},
-            3: {b"RFC822": b"newer", b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0)},
+            1: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
+            2: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0, tzinfo=timezone.utc)},
+            3: {b"RFC822": b"newer", b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0, tzinfo=timezone.utc)},
         }
     )
 
@@ -139,14 +144,64 @@ def test_steady_state_uses_uid_cursor_only(
     fake_client.search_calls.clear()
     fake_client.set_messages(
         {
-            1: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0)},
-            2: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0)},
-            3: {b"RFC822": b"newer", b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0)},
-            4: {b"RFC822": b"late", b"INTERNALDATE": datetime(2024, 1, 1, 9, 0, 0)},
+            1: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
+            2: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0, tzinfo=timezone.utc)},
+            3: {b"RFC822": b"newer", b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0, tzinfo=timezone.utc)},
+            4: {b"RFC822": b"late", b"INTERNALDATE": datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc)},
         }
     )
 
     messages = client.fetch_new_messages()
 
-    assert [uid for uid, _ in messages] == [4]
-    assert fake_client.search_calls == [["UID", "4:*"]]
+    assert messages == []
+    assert state.get_last_uid(account.login) == 4
+    assert fake_client.search_calls[0] == ["UID", "4:*"]
+    assert "SINCE" in fake_client.search_calls[1]
+
+
+def test_cursor_advances_when_all_skipped(monkeypatch, tmp_path: Path, account: AccountConfig) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+    state = StateManager(tmp_path / "state.json")
+    state.update_last_uid(account.login, 1)
+
+    fake_client.set_messages(
+        {
+            2: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)},
+            3: {b"RFC822": b"older", b"INTERNALDATE": datetime(2024, 1, 2, 11, 59, 0, tzinfo=timezone.utc)},
+        }
+    )
+
+    monkeypatch.setattr(imap_client, "IMAPClient", lambda *args, **kwargs: fake_client)
+    client = ResilientIMAP(account, state, start_time=start_time)
+    messages = client.fetch_new_messages()
+
+    assert messages == []
+    assert state.get_last_uid(account.login) == 3
+
+
+def test_internaldate_timezone_normalization(monkeypatch, tmp_path: Path, account: AccountConfig) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+    local_tz = timezone(timedelta(hours=2))
+
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"on-time",
+                b"INTERNALDATE": datetime(2024, 1, 2, 14, 0, 0, tzinfo=local_tz),
+            },
+            2: {
+                b"RFC822": b"too-early",
+                b"INTERNALDATE": datetime(2024, 1, 2, 11, 0, 0, tzinfo=timezone.utc),
+            },
+        }
+    )
+
+    monkeypatch.setattr(imap_client, "IMAPClient", lambda *args, **kwargs: fake_client)
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(account, state, start_time=start_time)
+    messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [1]

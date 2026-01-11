@@ -37,6 +37,7 @@ Done:
 - 2026-01-17: web observability masks sender labels and preview content in UI.
 - 2026-01-10: cockpit budgets + triage lanes API (read-only) and tests.
 - 2026-01-19: budget percentile anchoring hardened; regression tests added.
+- 2026-01-20: post-start-only ingest gate with UTC filtering, optional allow_prestart_emails, updated IMAP tests.
 Now:
 - None.
 Next:
@@ -74,10 +75,13 @@ Working set (files / tables / tests):
 - docs/DELIVERY_POLICY.md
 - docs/ADR/ADR-004.md
 - mailbot_v26/start.py
+- mailbot_v26/imap_client.py
+- mailbot_v26/config_loader.py
 - mailbot_v26/features/flags.py
 - mailbot_v26/config/config.ini
 - mailbot_v26/tools/config_bootstrap.py
 - mailbot_v26/tests/test_premium_processor_routing.py
+- mailbot_v26/tests/test_imap_client.py
 - mailbot_v26/tests/integration/harness.py
 - mailbot_v26/tests/integration/test_degradation_scenarios.py
 - mailbot_v26/tests/test_telegram_delivery_pipeline.py
