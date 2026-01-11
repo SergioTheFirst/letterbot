@@ -98,6 +98,127 @@
     </section>
 
     <section>
+      <h2>Priority calibration</h2>
+      {% if calibration and calibration.get('models') %}
+      <div class="metrics-grid">
+        {% set total = calibration.get('totals', {}) %}
+        <div class="metric">
+          <div class="label">Corrections rate</div>
+          <div class="value">
+            {% if total.get('correction_rate') is not none %}
+              {{ '%.0f' % (total.get('correction_rate', 0) * 100) }}%
+            {% else %}
+              –
+            {% endif %}
+          </div>
+          <div class="label">Decisions / Corrections</div>
+          <div class="value">{{ total.get('decisions_total', 0) }} / {{ total.get('decisions_corrected', 0) }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Drift warnings</div>
+          {% if calibration.get('warnings') %}
+            <ul class="simple-list">
+              {% for warning in calibration.get('warnings', []) %}
+                <li>{{ warning }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="muted">No warnings.</div>
+          {% endif %}
+        </div>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Decisions</th>
+            <th>Corrections</th>
+            <th>Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for model in calibration.get('models', []) %}
+          <tr>
+            <td>{{ model.model_fingerprint }}</td>
+            <td>{{ model.decisions_total }}</td>
+            <td>{{ model.decisions_corrected }}</td>
+            <td>{% if model.correction_rate is not none %}{{ '%.1f' % (model.correction_rate * 100) }}%{% else %}–{% endif %}</td>
+          </tr>
+          {% if model.get('buckets') %}
+          <tr>
+            <td colspan="4">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Bucket</th>
+                    <th>Total</th>
+                    <th>Corrected</th>
+                    <th>Rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for bucket in model.get('buckets', []) %}
+                  <tr>
+                    <td>{{ bucket.bucket }}</td>
+                    <td>{{ bucket.total }}</td>
+                    <td>{{ bucket.corrected }}</td>
+                    <td>{% if bucket.correction_rate is not none %}{{ '%.1f' % (bucket.correction_rate * 100) }}%{% else %}–{% endif %}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <div class="empty-state">No calibration data.</div>
+      {% endif %}
+    </section>
+
+    <section>
+      <h2>Decision trace health</h2>
+      {% if decision_trace_health %}
+        {% set snapshot = decision_trace_health.get('snapshot', {}) %}
+        <div class="metrics-grid">
+          <div class="metric">
+            <div class="label">Attempted / Recorded / Dropped</div>
+            <div class="value">{{ snapshot.get('attempted', 0) }} / {{ snapshot.get('recorded', 0) }} / {{ snapshot.get('dropped', 0) }}</div>
+            <div class="label">Breaker open</div>
+            <div class="value">{{ snapshot.get('breaker_open') }}</div>
+          </div>
+          <div class="metric">
+            <div class="label">Trace coverage</div>
+            <div class="value">
+              {% if decision_trace_health.get('trace_coverage') is not none %}
+                {{ '%.0f' % (decision_trace_health.get('trace_coverage', 0) * 100) }}%
+              {% else %}
+                –
+              {% endif %}
+            </div>
+            <div class="label">Sample</div>
+            {% set sample = decision_trace_health.get('trace_coverage_sample', {}) %}
+            <div class="value">{{ sample.get('traced', 0) }} / {{ sample.get('delivered', 0) }}</div>
+          </div>
+        </div>
+        {% if decision_trace_health.get('drop_log_tail') %}
+          <h3>Drop log tail</h3>
+          <ul class="simple-list">
+            {% for line in decision_trace_health.get('drop_log_tail', []) %}
+              <li>{{ line }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="muted">No recent drops.</div>
+        {% endif %}
+      {% else %}
+        <div class="empty-state">No decision trace health data.</div>
+      {% endif %}
+    </section>
+
+    <section>
       <h2>Learning timeline</h2>
       {% if timeline.items %}
       <table class="data-table">

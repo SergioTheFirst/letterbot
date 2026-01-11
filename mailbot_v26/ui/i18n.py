@@ -139,6 +139,7 @@ _STRINGS_RU = {
     "sla.alert.top_error": "Главная ошибка",
     "sla.alert.action": "Действие",
     "inbound.bad_button": "Некорректная кнопка. Напишите /help.",
+    "inbound.ok": "Готово.",
     "inbound.bad_email_id": "Некорректный идентификатор письма.",
     "inbound.priority_ack": "Принято: приоритет исправлен на {priority}. Учту в качестве.",
     "inbound.priority_help": (
