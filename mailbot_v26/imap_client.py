@@ -6,7 +6,9 @@ mocks without opening real network connections.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Iterable, List, Sequence
 
 try:  # pragma: no cover - import guard
@@ -26,14 +28,59 @@ class ResilientIMAP:
         account: AccountConfig,
         state: StateManager,
         start_time: datetime | None = None,
+        allow_prestart_emails: bool = False,
         max_email_mb: int = 15,
     ) -> None:
         self.account = account
         self.state = state
         self.logger = logging.getLogger(__name__)
-        base_time = start_time or datetime.now()
-        self.start_time = base_time.replace(tzinfo=None)
+        base_time = start_time or datetime.now(timezone.utc)
+        self.run_start_utc = self._normalize_to_utc(base_time)
+        self.allow_prestart_emails = allow_prestart_emails
         self.max_email_bytes = max_email_mb * 1024 * 1024
+        self._skip_log_path = Path(__file__).resolve().parent / "logs" / "ingest_skips.ndjson"
+
+    @staticmethod
+    def _normalize_to_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def _resolve_since_datetime(self, last_check: datetime | None) -> datetime:
+        if self.allow_prestart_emails:
+            if last_check is not None:
+                return self._normalize_to_utc(last_check)
+            return datetime(1970, 1, 1, tzinfo=timezone.utc)
+        baseline = self._normalize_to_utc(last_check) if last_check else self.run_start_utc
+        if baseline < self.run_start_utc:
+            baseline = self.run_start_utc
+        return baseline
+
+    def _log_prestart_skip(self, uid: int, internaldate_utc: datetime) -> None:
+        self.logger.warning(
+            "imap_prestart_skip account_id=%s uid=%s internaldate_utc=%s run_start_utc=%s",
+            self.account.account_id,
+            uid,
+            internaldate_utc.isoformat(),
+            self.run_start_utc.isoformat(),
+        )
+        payload = {
+            "account_id": self.account.account_id,
+            "uid": uid,
+            "internaldate_utc": internaldate_utc.isoformat(),
+            "run_start_utc": self.run_start_utc.isoformat(),
+        }
+        try:
+            self._skip_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._skip_log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            self.logger.warning(
+                "imap_prestart_skip_log_failed account_id=%s uid=%s error=%s",
+                self.account.account_id,
+                uid,
+                exc,
+            )
 
     def _build_oversize_warning(
         self,
@@ -64,14 +111,12 @@ class ResilientIMAP:
     def _build_search(self) -> List[Sequence[str]]:
         last_uid = self.state.get_last_uid(self.account.login)
         last_check = self.state.get_last_check_time(self.account.login)
-        baseline = last_check or self.start_time
-        if baseline < self.start_time:
-            baseline = self.start_time
+        baseline = self._resolve_since_datetime(last_check)
         since_date = baseline.strftime("%d-%b-%Y")
 
         if last_uid <= 0:
-            return [["SINCE", since_date]]
-        return [["UID", f"{last_uid + 1}:*"]]
+            return [["UID", "1:*", "SINCE", since_date]]
+        return [["UID", f"{last_uid + 1}:*", "SINCE", since_date]]
 
     def fetch_new_messages(self) -> List[tuple[int, bytes]]:
         if IMAPClient is None:
@@ -90,36 +135,36 @@ class ResilientIMAP:
             client.select_folder("INBOX")
             last_uid = self.state.get_last_uid(self.account.login)
             last_check = self.state.get_last_check_time(self.account.login)
-            baseline = last_check or self.start_time
-            if baseline < self.start_time:
-                baseline = self.start_time
+            baseline = self._resolve_since_datetime(last_check)
             since_date = baseline.strftime("%d-%b-%Y")
 
             is_bootstrap = last_uid <= 0
             if is_bootstrap:
                 all_uids = list(client.search(["UID", "1:*"]))
                 max_uid = max(all_uids) if all_uids else 0
-                uid_list = list(client.search(["SINCE", since_date]))
+                uid_list = list(client.search(["UID", "1:*", "SINCE", since_date]))
                 latest_seen_uid = max_uid if max_uid > last_uid else last_uid
                 new_uids = uid_list
             else:
                 uids: Iterable[int] = client.search(["UID", f"{last_uid + 1}:*"])
                 uid_list = list(uids)
                 latest_seen_uid = max(uid_list) if uid_list else last_uid
-                new_uids = uid_list
+                new_uids = list(
+                    client.search(["UID", f"{last_uid + 1}:*", "SINCE", since_date])
+                )
             messages: List[tuple[int, bytes]] = []
             for uid in sorted(new_uids):
                 data = client.fetch([uid], ["RFC822.SIZE", "INTERNALDATE"])
                 envelope = data.get(uid, {})
                 internaldate = envelope.get(b"INTERNALDATE")
-                if isinstance(internaldate, datetime) and internaldate.tzinfo is not None:
-                    internaldate = internaldate.replace(tzinfo=None)
-                if (
-                    is_bootstrap
-                    and isinstance(internaldate, datetime)
-                    and internaldate < self.start_time
-                ):
-                    continue
+                if isinstance(internaldate, datetime):
+                    internaldate_utc = self._normalize_to_utc(internaldate)
+                    if (
+                        not self.allow_prestart_emails
+                        and internaldate_utc < self.run_start_utc
+                    ):
+                        self._log_prestart_skip(uid, internaldate_utc)
+                        continue
 
                 message_size = envelope.get(b"RFC822.SIZE")
                 if isinstance(message_size, bytes):
