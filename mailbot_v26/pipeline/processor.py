@@ -89,10 +89,10 @@ from mailbot_v26.telegram_utils import escape_tg_html
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.decision_trace_v1 import (
-    DecisionTraceEmitter,
     DecisionTraceV1,
     compute_decision_key,
     compute_model_fingerprint,
+    get_default_decision_trace_emitter,
     sanitize_trace,
     to_canonical_json,
 )
@@ -123,7 +123,7 @@ from mailbot_v26.priority.priority_engine_v2 import (
     PriorityEngineV2,
     PriorityResultV2,
 )
-from mailbot_v26.telegram.decision_trace_ui import build_decision_trace_keyboard
+from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.clean_email import clean_email_body
 from .attention_gate import (
     AttentionGateInput,
@@ -170,7 +170,7 @@ relationship_health_snapshot_writer = RelationshipHealthSnapshotWriter(DB_PATH)
 context_store = ContextStore(DB_PATH)
 event_emitter = EventEmitter(DB_PATH)
 contract_event_emitter = ContractEventEmitter(DB_PATH)
-decision_trace_emitter = DecisionTraceEmitter()
+decision_trace_emitter = get_default_decision_trace_emitter()
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 priority_engine_v2 = PriorityEngineV2(analytics)
 shadow_action_engine = ShadowActionEngine(analytics)
@@ -2226,8 +2226,10 @@ def build_telegram_payload(
         html_text=telegram_text,
         priority=context.priority,
         metadata=metadata,
-        reply_markup=build_decision_trace_keyboard(
-            email_id=context.email_id, expanded=False
+        reply_markup=build_email_actions_keyboard(
+            email_id=context.email_id,
+            expanded=False,
+            prio_menu=False,
         ),
     )
     assert "Сделать:" not in payload.html_text

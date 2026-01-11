@@ -13,7 +13,7 @@ import os
 import re
 import sqlite3
 import time
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,8 +46,12 @@ except ModuleNotFoundError:
     USING_FLASK_STUB = True
 
 from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config
+from mailbot_v26.observability.calibration_report import compute_priority_calibration_report
 from mailbot_v26.observability.decision_trace_store import load_latest_decision_traces
-from mailbot_v26.observability.decision_trace_v1 import from_canonical_json
+from mailbot_v26.observability.decision_trace_v1 import (
+    from_canonical_json,
+    get_default_decision_trace_emitter,
+)
 from mailbot_v26.observability.decision_trace_view import summaries_as_payload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
@@ -1619,6 +1623,93 @@ def _ensure_authenticated() -> bool:
     return bool(session.get("authenticated"))
 
 
+def _is_loopback(remote_addr: str | None) -> bool:
+    if not remote_addr:
+        return True
+    try:
+        return ipaddress.ip_address(remote_addr).is_loopback
+    except ValueError:
+        return False
+
+
+def _cockpit_token_ok(token: str | None, expected: str) -> bool:
+    if not expected:
+        return False
+    return bool(token) and token == expected
+
+
+def _scrub_pii_line(line: str) -> str:
+    cleaned = WEB_EMAIL_PATTERN.sub("[redacted]", line)
+    return cleaned[:200]
+
+
+def _tail_lines(path: Path, *, limit: int = 50) -> list[str]:
+    if limit <= 0:
+        return []
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            return list(deque(handle, maxlen=limit))
+    except OSError:
+        return []
+
+
+def _decision_trace_health_payload(
+    db_path: Path,
+    *,
+    limit: int = 300,
+) -> dict[str, object]:
+    emitter = get_default_decision_trace_emitter()
+    snapshot = emitter.snapshot()
+    delivered_ids: list[int] = []
+    traces_found: set[int] = set()
+    try:
+        with _open_readonly_connection(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT email_id
+                FROM events_v1
+                WHERE event_type = ?
+                  AND email_id IS NOT NULL
+                ORDER BY ts_utc DESC
+                LIMIT ?
+                """,
+                ("telegram_delivered", int(limit)),
+            ).fetchall()
+            delivered_ids = [int(row[0]) for row in rows if row and row[0] is not None]
+            if delivered_ids:
+                placeholders = ", ".join(["?"] * len(delivered_ids))
+                trace_rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT email_id
+                    FROM events_v1
+                    WHERE event_type = ?
+                      AND email_id IN ({placeholders})
+                    """,
+                    ["DECISION_TRACE_RECORDED", *delivered_ids],
+                ).fetchall()
+                traces_found = {int(row[0]) for row in trace_rows if row and row[0] is not None}
+    except sqlite3.OperationalError:
+        delivered_ids = []
+        traces_found = set()
+    delivered_total = len(set(delivered_ids))
+    traced_total = len(traces_found)
+    trace_coverage = (
+        traced_total / delivered_total if delivered_total else None
+    )
+    log_path = Path(snapshot.get("drop_log_path") or "logs/decision_trace_failures.ndjson")
+    tail_lines = _tail_lines(log_path, limit=50)
+    tail_payload = [_scrub_pii_line(line) for line in tail_lines if line]
+    return {
+        "snapshot": snapshot,
+        "trace_coverage": trace_coverage,
+        "trace_coverage_sample": {
+            "delivered": delivered_total,
+            "traced": traced_total,
+        },
+        "drop_log_tail": tail_payload,
+    }
+
+
 def create_app(
     *,
     db_path: Path,
@@ -1646,6 +1737,7 @@ def create_app(
             "on",
         }
     app.config["WEB_OBSERVABILITY_ALLOW_PII"] = bool(resolved_allow_pii)
+    app.config["COCKPIT_API_TOKEN"] = str(os.getenv("WEB_OBSERVABILITY_TOKEN", "")).strip()
     app.secret_key = secret_key
     app.config["ANALYTICS_FACTORY"] = lambda: KnowledgeAnalytics(
         app.config["DB_PATH"], read_only=True
@@ -1654,6 +1746,26 @@ def create_app(
     @app.before_request
     def _require_login():
         open_paths = {"login", "static"}
+        cockpit_endpoints = {
+            "api_cockpit_calibration",
+            "api_cockpit_decision_trace_health",
+        }
+        if request.endpoint in cockpit_endpoints:
+            try:
+                headers = request.headers
+            except Exception:
+                headers = {}
+            header_token = headers.get("X-Api-Token") if isinstance(headers, Mapping) else None
+            token = header_token or request.args.get("token")
+            try:
+                remote_addr = request.remote_addr
+            except Exception:
+                remote_addr = None
+            if not _is_loopback(remote_addr) or not _cockpit_token_ok(
+                token, app.config["COCKPIT_API_TOKEN"]
+            ):
+                return Response("Forbidden", status=403)
+            return None
         if request.endpoint in open_paths or request.path.startswith("/static"):
             return None
         if not _ensure_authenticated():
@@ -2834,6 +2946,37 @@ def create_app(
             }
         )
 
+    @app.route("/api/v1/cockpit/calibration", methods=["GET"])
+    def api_cockpit_calibration():
+        days, days_error = _parse_window_days(
+            request.args.get("days"), 30, allowed=ALLOWED_WINDOWS
+        )
+        if days_error:
+            return jsonify({"error": days_error}), 400
+        max_rows, limit_error = _parse_limit(
+            request.args.get("max_rows"), default=1000, max_limit=2000, min_value=10
+        )
+        if limit_error:
+            return jsonify({"error": limit_error}), 400
+        report = compute_priority_calibration_report(
+            db_path=app.config["DB_PATH"],
+            days=days or 30,
+            max_rows=max_rows or 1000,
+        )
+        return jsonify(report)
+
+    @app.route("/api/v1/cockpit/decision-trace/health", methods=["GET"])
+    def api_cockpit_decision_trace_health():
+        limit, limit_error = _parse_limit(
+            request.args.get("limit"), default=300, max_limit=1000, min_value=50
+        )
+        if limit_error:
+            return jsonify({"error": limit_error}), 400
+        payload = _decision_trace_health_payload(
+            app.config["DB_PATH"], limit=limit or 300
+        )
+        return jsonify(payload)
+
     @app.route("/api/v1/observability/latency_summary", methods=["GET"])
     def api_latency_summary():
         account_email, account_emails, window_days, error = _validate_latency_params(
@@ -3317,6 +3460,8 @@ def create_app(
         analytics = _analytics()
         summary: dict[str, object] | None = None
         timeline: dict[str, object] | None = None
+        calibration_report: dict[str, object] | None = None
+        decision_trace_health: dict[str, object] | None = None
         if not error_message and account_email:
             now_ts = datetime.now(timezone.utc).timestamp()
             resolved_window = window_days or 30
@@ -3333,6 +3478,15 @@ def create_app(
                 window_days=resolved_window,
                 limit=resolved_limit,
                 now_ts=now_ts,
+            )
+            calibration_report = compute_priority_calibration_report(
+                db_path=app.config["DB_PATH"],
+                days=resolved_window,
+                max_rows=1000,
+                now_ts_utc=now_ts,
+            )
+            decision_trace_health = _decision_trace_health_payload(
+                app.config["DB_PATH"], limit=300
             )
         account_options = _build_select_options(accounts, account_email)
         window_options = _build_window_options(window_days or 30)
@@ -3356,6 +3510,8 @@ def create_app(
             limit_value=limit_value,
             summary=summary or {},
             timeline=timeline or {"items": []},
+            calibration=calibration_report or {},
+            decision_trace_health=decision_trace_health or {},
         )
 
     @app.route("/health", methods=["GET"])

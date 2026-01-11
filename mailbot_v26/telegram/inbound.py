@@ -24,7 +24,14 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.system_health import system_health
-from mailbot_v26.telegram.decision_trace_ui import DETAILS_PREFIX, HIDE_PREFIX, build_decision_trace_keyboard
+from mailbot_v26.telegram.decision_trace_ui import (
+    DETAILS_PREFIX,
+    HIDE_PREFIX,
+    PRIO_BACK_PREFIX,
+    PRIO_MENU_PREFIX,
+    PRIO_SET_PREFIX,
+    build_email_actions_keyboard,
+)
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
 from mailbot_v26.ui.i18n import humanize_mode, t
 from mailbot_v26.worker.telegram_sender import (
@@ -74,6 +81,13 @@ def _format_percent(value: float) -> str:
 
 def _safe_chat_id(chat_id: object) -> str:
     return str(chat_id or "").strip()
+
+
+def _is_trace_expanded(message: dict[str, object] | None) -> bool:
+    if not message or not isinstance(message, dict):
+        return False
+    text = _clean_text(message.get("text"))
+    return "DecisionTraceV1" in text
 
 
 def _load_email_snapshot(db_path: Path, email_id: int) -> dict[str, object] | None:
@@ -191,6 +205,30 @@ def parse_callback_data(data: str) -> tuple[str, dict[str, str]] | None:
         if not email_id.isdigit():
             return None
         return "hide", {"email_id": email_id}
+    if raw.startswith(PRIO_MENU_PREFIX):
+        email_id = raw[len(PRIO_MENU_PREFIX) :].strip()
+        if not email_id.isdigit():
+            return None
+        return "prio_menu", {"email_id": email_id}
+
+    if raw.startswith(PRIO_BACK_PREFIX):
+        email_id = raw[len(PRIO_BACK_PREFIX) :].strip()
+        if not email_id.isdigit():
+            return None
+        return "prio_back", {"email_id": email_id}
+
+    if raw.startswith(PRIO_SET_PREFIX):
+        remainder = raw[len(PRIO_SET_PREFIX) :]
+        parts = remainder.split(":")
+        if len(parts) != 2:
+            return None
+        email_id, priority_raw = parts
+        email_id = email_id.strip()
+        priority = _PRIORITY_MAP.get(priority_raw.strip().upper())
+        if not email_id or not priority:
+            return None
+        return "prio_set", {"email_id": email_id, "priority": priority}
+
     for prefix in _CALLBACK_PREFIXES:
         if raw.startswith(prefix):
             remainder = raw[len(prefix) :]
@@ -389,6 +427,7 @@ class TelegramInboundProcessor:
         data = _clean_text(callback.get("data"))
         message = callback.get("message")
         chat_id = ""
+        callback_id = _clean_text(callback.get("id"))
         if isinstance(message, dict):
             chat = message.get("chat")
             if isinstance(chat, dict):
@@ -400,17 +439,34 @@ class TelegramInboundProcessor:
         parsed = parse_callback_data(data)
         if not parsed:
             self._reply(chat_id, _t("inbound.bad_button"))
+            self._answer_callback(callback_id, _t("inbound.bad_button"))
             return
 
         action, payload = parsed
         if action == "priority":
             self._apply_priority(chat_id, payload)
+            self._answer_callback(callback_id, _t("inbound.priority_ack", priority=payload.get("priority") or "🔵"))
         elif action == "toggle":
             self._apply_toggle(chat_id, payload)
+            self._answer_callback(callback_id, _t("inbound.ok"))
         elif action == "help":
             self._reply(chat_id, self._priority_help_text())
+            self._answer_callback(callback_id, _t("inbound.ok"))
         elif action in {"details", "hide"}:
             self._toggle_decision_trace(chat_id, message, payload, expanded=action == "details")
+            self._answer_callback(callback_id, _t("inbound.ok"))
+        elif action == "prio_menu":
+            self._open_priority_menu(chat_id, message, payload)
+            self._answer_callback(callback_id, _t("inbound.ok"))
+        elif action == "prio_back":
+            self._close_priority_menu(chat_id, message, payload)
+            self._answer_callback(callback_id, _t("inbound.ok"))
+        elif action == "prio_set":
+            self._apply_priority_edit(chat_id, message, payload)
+            self._answer_callback(
+                callback_id,
+                _t("inbound.priority_ack", priority=payload.get("priority") or "🔵"),
+            )
 
     def handle_message(self, message: dict[str, object]) -> None:
         chat_id = ""
@@ -452,6 +508,26 @@ class TelegramInboundProcessor:
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("telegram_inbound_reply_failed", error=str(exc))
 
+    def _answer_callback(self, callback_id: str, text: str) -> None:
+        if not callback_id:
+            return
+        try:
+            from mailbot_v26.worker.telegram_sender import requests as tg_requests
+        except Exception:
+            tg_requests = None
+        if tg_requests is None:
+            return
+        url = f"https://api.telegram.org/bot{self.bot_token}/answerCallbackQuery"
+        payload = {
+            "callback_query_id": callback_id,
+            "text": text[:200],
+            "show_alert": False,
+        }
+        try:
+            tg_requests.post(url, json=payload, timeout=5)
+        except Exception:
+            return
+
     def _is_allowed_chat(self, chat_id: str) -> bool:
         return chat_id in self.allowed_chat_ids
 
@@ -485,6 +561,216 @@ class TelegramInboundProcessor:
             chat_id,
             _t("inbound.priority_ack", priority=priority),
         )
+
+    def _apply_priority_edit(
+        self,
+        chat_id: str,
+        message: dict[str, object] | None,
+        payload: dict[str, str],
+    ) -> None:
+        email_id_raw = payload.get("email_id")
+        if not email_id_raw or not email_id_raw.isdigit():
+            self._reply(chat_id, _t("inbound.bad_email_id"))
+            return
+        if not message or not isinstance(message, dict):
+            return
+        message_id = message.get("message_id")
+        try:
+            message_id_int = int(message_id)
+        except (TypeError, ValueError):
+            return
+        email_id = int(email_id_raw)
+        snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
+        if not snapshot:
+            return
+        account_email = str(snapshot.get("account_email") or "")
+        sender_email = str(snapshot.get("from_email") or "")
+        old_priority = str(snapshot.get("priority") or "")
+        new_priority = payload.get("priority") or "🔵"
+        record_priority_correction(
+            knowledge_db=self.knowledge_db,
+            email_id=email_id,
+            correction=new_priority,
+            entity_id=None,
+            sender_email=sender_email or None,
+            account_email=account_email or None,
+            system_mode=system_health.mode,
+            event_emitter=self.event_emitter,
+            contract_event_emitter=self.contract_event_emitter,
+            old_priority=old_priority or None,
+            engine="priority_v2_auto",
+            source="telegram_inbound",
+            surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
+        )
+        tier1_text = _render_tier1_message(snapshot)
+        expanded = _is_trace_expanded(message)
+        if expanded:
+            try:
+                traces = load_latest_decision_traces(
+                    db_path=self.knowledge_db.path, email_id=email_id, limit=10
+                )
+                summaries = [build_decision_trace_summary(trace) for trace in traces]
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("telegram_inbound_trace_failed", error=str(exc))
+                summaries = []
+            trace_payload = [
+                {
+                    "decision_kind": summary.decision_kind,
+                    "decision_label": summary.decision_label,
+                    "evidence": summary.evidence,
+                    "explain_codes": summary.explain_codes,
+                    "counterfactuals": [
+                        {"signal": item.signal, "decision": item.decision}
+                        for item in summary.counterfactuals
+                    ],
+                }
+                for summary in summaries
+            ]
+            details_text = _render_decision_trace_details(trace_payload)
+            full_text = f"{tier1_text}\n\n{details_text}"
+        else:
+            full_text = tier1_text
+        confirmation = _t("inbound.priority_ack", priority=new_priority)
+        full_text = f"{full_text}\n\n{confirmation}"
+        reply_markup = build_email_actions_keyboard(
+            email_id=email_id, expanded=expanded, prio_menu=False
+        )
+        try:
+            edit_telegram_message(
+                bot_token=self.bot_token,
+                chat_id=chat_id,
+                message_id=message_id_int,
+                html_text=full_text,
+                reply_markup=reply_markup,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("telegram_inbound_edit_failed", error=str(exc))
+
+    def _open_priority_menu(
+        self,
+        chat_id: str,
+        message: dict[str, object] | None,
+        payload: dict[str, str],
+    ) -> None:
+        email_id_raw = payload.get("email_id")
+        if not email_id_raw or not email_id_raw.isdigit():
+            self._reply(chat_id, _t("inbound.bad_email_id"))
+            return
+        if not message or not isinstance(message, dict):
+            return
+        message_id = message.get("message_id")
+        try:
+            message_id_int = int(message_id)
+        except (TypeError, ValueError):
+            return
+        email_id = int(email_id_raw)
+        snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
+        if not snapshot:
+            return
+        expanded = _is_trace_expanded(message)
+        tier1_text = _render_tier1_message(snapshot)
+        if expanded:
+            try:
+                traces = load_latest_decision_traces(
+                    db_path=self.knowledge_db.path, email_id=email_id, limit=10
+                )
+                summaries = [build_decision_trace_summary(trace) for trace in traces]
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("telegram_inbound_trace_failed", error=str(exc))
+                summaries = []
+            trace_payload = [
+                {
+                    "decision_kind": summary.decision_kind,
+                    "decision_label": summary.decision_label,
+                    "evidence": summary.evidence,
+                    "explain_codes": summary.explain_codes,
+                    "counterfactuals": [
+                        {"signal": item.signal, "decision": item.decision}
+                        for item in summary.counterfactuals
+                    ],
+                }
+                for summary in summaries
+            ]
+            details_text = _render_decision_trace_details(trace_payload)
+            full_text = f"{tier1_text}\n\n{details_text}"
+        else:
+            full_text = tier1_text
+        reply_markup = build_email_actions_keyboard(
+            email_id=email_id, expanded=expanded, prio_menu=True
+        )
+        try:
+            edit_telegram_message(
+                bot_token=self.bot_token,
+                chat_id=chat_id,
+                message_id=message_id_int,
+                html_text=full_text,
+                reply_markup=reply_markup,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("telegram_inbound_edit_failed", error=str(exc))
+
+    def _close_priority_menu(
+        self,
+        chat_id: str,
+        message: dict[str, object] | None,
+        payload: dict[str, str],
+    ) -> None:
+        email_id_raw = payload.get("email_id")
+        if not email_id_raw or not email_id_raw.isdigit():
+            self._reply(chat_id, _t("inbound.bad_email_id"))
+            return
+        if not message or not isinstance(message, dict):
+            return
+        message_id = message.get("message_id")
+        try:
+            message_id_int = int(message_id)
+        except (TypeError, ValueError):
+            return
+        email_id = int(email_id_raw)
+        snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
+        if not snapshot:
+            return
+        expanded = _is_trace_expanded(message)
+        tier1_text = _render_tier1_message(snapshot)
+        if expanded:
+            try:
+                traces = load_latest_decision_traces(
+                    db_path=self.knowledge_db.path, email_id=email_id, limit=10
+                )
+                summaries = [build_decision_trace_summary(trace) for trace in traces]
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("telegram_inbound_trace_failed", error=str(exc))
+                summaries = []
+            trace_payload = [
+                {
+                    "decision_kind": summary.decision_kind,
+                    "decision_label": summary.decision_label,
+                    "evidence": summary.evidence,
+                    "explain_codes": summary.explain_codes,
+                    "counterfactuals": [
+                        {"signal": item.signal, "decision": item.decision}
+                        for item in summary.counterfactuals
+                    ],
+                }
+                for summary in summaries
+            ]
+            details_text = _render_decision_trace_details(trace_payload)
+            full_text = f"{tier1_text}\n\n{details_text}"
+        else:
+            full_text = tier1_text
+        reply_markup = build_email_actions_keyboard(
+            email_id=email_id, expanded=expanded, prio_menu=False
+        )
+        try:
+            edit_telegram_message(
+                bot_token=self.bot_token,
+                chat_id=chat_id,
+                message_id=message_id_int,
+                html_text=full_text,
+                reply_markup=reply_markup,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("telegram_inbound_edit_failed", error=str(exc))
 
     def _toggle_decision_trace(
         self,
@@ -536,7 +822,9 @@ class TelegramInboundProcessor:
             full_text = f"{tier1_text}\n\n{details_text}"
         else:
             full_text = tier1_text
-        reply_markup = build_decision_trace_keyboard(email_id=email_id, expanded=expanded)
+        reply_markup = build_email_actions_keyboard(
+            email_id=email_id, expanded=expanded, prio_menu=False
+        )
         try:
             edit_telegram_message(
                 bot_token=self.bot_token,

@@ -4,8 +4,10 @@ import hashlib
 import json
 import re
 import sqlite3
+import threading
+import time
 from dataclasses import replace
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -150,11 +152,18 @@ class DecisionTraceEmitter:
     dropped: int = 0
     disabled: bool = False
     failure_log_path: Path | None = None
+    breaker_until_ts: float | None = None
+    last_drop_reason: str | None = None
+    _lock: threading.Lock = field(init=False, repr=False, default_factory=threading.Lock)
 
     def emit(self, emitter: ContractEventEmitter, event: EventV1) -> bool:
-        self.attempted += 1
-        if self.disabled:
-            self.dropped += 1
+        with self._lock:
+            self.attempted += 1
+            disabled = self.disabled
+        if disabled:
+            with self._lock:
+                self.dropped += 1
+                self.last_drop_reason = "circuit_breaker"
             self._write_failure_log(
                 event,
                 error_type="circuit_breaker",
@@ -167,7 +176,8 @@ class DecisionTraceEmitter:
             self._record_drop(event, error_type=type(exc).__name__)
             return False
         if emitted:
-            self.succeeded += 1
+            with self._lock:
+                self.succeeded += 1
             return True
         if self._event_exists(emitter, event):
             return False
@@ -180,9 +190,12 @@ class DecisionTraceEmitter:
         *,
         error_type: str,
     ) -> None:
-        self.dropped += 1
-        if self.dropped >= self.drop_threshold:
-            self.disabled = True
+        with self._lock:
+            self.dropped += 1
+            self.last_drop_reason = error_type
+            if self.dropped >= self.drop_threshold:
+                self.disabled = True
+                self.breaker_until_ts = time.time()
         try:
             logger.error("decision_trace_emit_failed", error=error_type)
         except Exception:
@@ -236,11 +249,33 @@ class DecisionTraceEmitter:
             line = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
             with self.failure_log_path.open("a", encoding="utf-8") as handle:
                 handle.write(f"{line}\n")
-        except Exception:
+        except Exception as exc:
             try:
-                logger.error("decision_trace_failure_log_failed", error="write_failed")
+                logger.error(
+                    "decision_trace_failure_log_failed",
+                    error=str(exc)[:120],
+                )
             except Exception:
                 return
+
+    def snapshot(self) -> dict[str, object]:
+        with self._lock:
+            attempted = int(self.attempted)
+            succeeded = int(self.succeeded)
+            dropped = int(self.dropped)
+            disabled = bool(self.disabled)
+            breaker_until_ts = self.breaker_until_ts
+            last_drop_reason = self.last_drop_reason or ""
+            log_path = str(self.failure_log_path) if self.failure_log_path else ""
+        return {
+            "attempted": attempted,
+            "recorded": succeeded,
+            "dropped": dropped,
+            "breaker_open": disabled,
+            "breaker_until_ts": breaker_until_ts,
+            "last_drop_reason": last_drop_reason,
+            "drop_log_path": log_path,
+        }
 
     def _extract_decision_key(self, event: EventV1) -> str:
         raw = event.payload_json or ""
@@ -253,9 +288,17 @@ class DecisionTraceEmitter:
         return ""
 
 
+_DEFAULT_DECISION_TRACE_EMITTER = DecisionTraceEmitter()
+
+
+def get_default_decision_trace_emitter() -> DecisionTraceEmitter:
+    return _DEFAULT_DECISION_TRACE_EMITTER
+
+
 __all__ = [
     "DecisionTraceV1",
     "DecisionTraceEmitter",
+    "get_default_decision_trace_emitter",
     "compute_decision_key",
     "compute_model_fingerprint",
     "to_canonical_json",

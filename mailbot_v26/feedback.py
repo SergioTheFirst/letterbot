@@ -7,8 +7,8 @@ from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.observability import get_logger
+from mailbot_v26.observability.decision_trace_store import load_latest_decision_traces
 from mailbot_v26.observability.event_emitter import EventEmitter
-from mailbot_v26.config_loader import get_account_scope, resolve_account_scope
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.system_health import OperationalMode
 
@@ -139,21 +139,13 @@ def record_priority_correction(
             email_id=email_id,
             payload={
                 "correction": correction,
-                "sender_email": sender_email or "",
-                "account_email": account_email or "",
             },
         )
     if contract_event_emitter is not None and inserted:
         try:
-            resolved_scope = resolve_account_scope(account_email or "")
-            scope_chat_id = resolved_scope.chat_id if resolved_scope else None
-            scope_emails = list(resolved_scope.account_emails) if resolved_scope else None
-            if not scope_emails and account_email:
-                scope_emails = [account_email]
-            scope_payload = get_account_scope(
-                chat_id=scope_chat_id,
-                account_email=account_email,
-                account_emails=scope_emails,
+            trace_payload = _latest_priority_trace_payload(
+                knowledge_db=knowledge_db,
+                email_id=int(str(email_id)) if str(email_id).isdigit() else None,
             )
             event = EventV1(
                 event_type=EventType.PRIORITY_CORRECTION_RECORDED,
@@ -166,10 +158,8 @@ def record_priority_correction(
                     "new_priority": correction,
                     "engine": engine or "unknown",
                     "source": source or "unknown",
-                    "sender_email": sender_email or "",
-                    "account_email": account_email or "",
                     "system_mode": system_mode.value,
-                    **scope_payload,
+                    **trace_payload,
                 },
             )
             contract_event_emitter.emit(event)
@@ -187,7 +177,6 @@ def record_priority_correction(
                             "delta": _priority_delta(old_priority, correction),
                             "engine": engine or "unknown",
                             "source": source or "unknown",
-                            **scope_payload,
                         },
                     )
                 )
@@ -207,6 +196,46 @@ def record_priority_correction(
         system_mode=system_mode.value,
     )
     return feedback_id
+
+
+def _latest_priority_trace_payload(
+    *,
+    knowledge_db: KnowledgeDB,
+    email_id: int | None,
+) -> dict[str, object]:
+    if not email_id:
+        return {
+            "decision_key": None,
+            "model_fingerprint": None,
+            "decision_kind": "PRIORITY_HEURISTIC",
+        }
+    try:
+        traces = load_latest_decision_traces(
+            db_path=knowledge_db.path,
+            email_id=int(email_id),
+            limit=10,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("priority_feedback_trace_lookup_failed", error=str(exc))
+        traces = []
+    for trace in traces:
+        if trace.decision_kind == "PRIORITY_HEURISTIC":
+            evidence = trace.evidence if isinstance(trace.evidence, dict) else {}
+            matched = int(evidence.get("matched") or 0)
+            total = int(evidence.get("total") or 0)
+            return {
+                "decision_key": trace.decision_key or None,
+                "model_fingerprint": trace.model_fingerprint or None,
+                "decision_kind": trace.decision_kind,
+                "evidence": {"matched": matched, "total": total},
+                "signals_evaluated_count": len(trace.signals_evaluated or []),
+                "signals_fired_count": len(trace.signals_fired or []),
+            }
+    return {
+        "decision_key": None,
+        "model_fingerprint": None,
+        "decision_kind": "PRIORITY_HEURISTIC",
+    }
 
 
 def _priority_delta(old_priority: str, new_priority: str) -> int | None:

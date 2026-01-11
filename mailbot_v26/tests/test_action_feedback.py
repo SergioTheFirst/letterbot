@@ -146,8 +146,6 @@ telegram_chat_id = chat
     assert payload["old_priority"] == "🟡"
     assert payload["engine"] == "priority_v2_shadow"
     assert payload["source"] == "preview_buttons"
-    assert payload["chat_scope"] == "tg:chat"
-    assert payload["account_emails"] == ["account@example.com", "alt@example.com"]
 
 
 def test_get_account_scope() -> None:
@@ -207,11 +205,6 @@ telegram_chat_id = chat
 
     assert "priority_correction_recorded" in event_types
     assert "surprise_detected" in event_types
-    surprise_payload = next(
-        json.loads(row[1]) for row in event_rows if row[0] == "surprise_detected"
-    )
-    assert surprise_payload["chat_scope"] == "tg:chat"
-    assert surprise_payload["account_emails"] == ["account@example.com", "alt@example.com"]
 
 
 def test_priority_correction_payload_without_scope(tmp_path, monkeypatch) -> None:
