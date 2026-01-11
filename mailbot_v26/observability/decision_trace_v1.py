@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import sys
 import threading
 import time
 from dataclasses import replace
@@ -19,6 +20,8 @@ logger = get_logger("mailbot")
 
 _CODE_PATTERN = re.compile(r"^[A-Z0-9_]{2,40}$")
 _SANITIZED_CODE = "SANITIZED_CODE"
+_FAILURE_KEY_PATTERN = re.compile(r"^[a-f0-9]{8,64}$")
+_EMAIL_PATTERN = re.compile(r"[\w.+'-]+@[\w.-]+")
 
 
 def sanitize_code(code: str | None) -> str:
@@ -26,6 +29,19 @@ def sanitize_code(code: str | None) -> str:
     if _CODE_PATTERN.fullmatch(cleaned):
         return cleaned
     return _SANITIZED_CODE
+
+
+def _sanitize_failure_text(value: object | None, *, limit: int) -> str:
+    raw = str(value or "").strip()
+    scrubbed = _EMAIL_PATTERN.sub("[redacted]", raw)
+    return scrubbed[:limit]
+
+
+def _sanitize_failure_key(value: object | None) -> str:
+    raw = str(value or "").strip().lower()
+    if _FAILURE_KEY_PATTERN.fullmatch(raw):
+        return raw
+    return ""
 
 
 def sanitize_codes(codes: list[str] | tuple[str, ...]) -> list[str]:
@@ -241,9 +257,11 @@ class DecisionTraceEmitter:
                         pass
             payload = {
                 "ts_utc": float(event.ts_utc),
-                "decision_type": str(event.payload.get("decision_kind") or ""),
-                "decision_key": self._extract_decision_key(event),
-                "error_type": str(error_type)[:60],
+                "decision_type": sanitize_code(
+                    str(event.payload.get("decision_kind") or "")
+                ),
+                "decision_key": _sanitize_failure_key(self._extract_decision_key(event)),
+                "error_type": _sanitize_failure_text(error_type, limit=60),
                 "breaker_state": breaker_state,
             }
             line = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -251,9 +269,9 @@ class DecisionTraceEmitter:
                 handle.write(f"{line}\n")
         except Exception as exc:
             try:
-                logger.error(
-                    "decision_trace_failure_log_failed",
-                    error=str(exc)[:120],
+                sys.stderr.write(
+                    "decision_trace_failure_log_failed: "
+                    f"{_sanitize_failure_text(exc, limit=120)}\n"
                 )
             except Exception:
                 return

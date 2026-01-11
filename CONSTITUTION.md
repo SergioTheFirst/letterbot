@@ -148,6 +148,7 @@ VIII. Runtime-инварианты: надёжность, минимальные
 - Строгая идемпотентность и IMAP UID дисциплина: первичный SEARCH UID 1:*, max_uid как last_uid, предотвращение дублей, atomic state writes, UID-лог.
 - Ingest по умолчанию — только post-start (письма, поступившие после старта процесса).
 - Backfill допускается только при явном maintenance-конфиге.
+- Базовая точка отсчёта ingest — run_start_utc: обрабатываются только письма, поступившие после старта процесса; backfill возможен только при явном maintenance-флаге.
 - Разделение worker и web/UX процессов.
 
 IX. Development Rules
