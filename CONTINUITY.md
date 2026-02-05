@@ -45,6 +45,7 @@ Done:
 - 2026-02-05: ensured PyYAML dependency in requirements for yaml import.
 - 2026-02-05: requirements source unified in repo root with PyYAML>=6.0; bat scripts use venv python for pip/pytest.
 - Windows launchers consolidated (root run_mailbot.bat, thin wrapper, venv python, config bootstrap, health checks, simplified install_and_run, quickstart steps).
+- 2026-02-09: sentence-level TG dedup per field, message-level line dedup, regression tests.
 Now:
 - None.
 Next:

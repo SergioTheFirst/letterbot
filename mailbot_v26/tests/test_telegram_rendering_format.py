@@ -5,6 +5,7 @@ from mailbot_v26.pipeline.tg_renderer import (
     format_main_action,
     format_subject,
 )
+from mailbot_v26.pipeline import processor
 
 
 def test_subject_is_html_escaped() -> None:
@@ -37,3 +38,23 @@ def test_attachments_block_formatting_and_truncation() -> None:
     assert "notes.txt — <i>" in rendered
     assert "....</i>" in rendered
     assert "\n\n" not in rendered
+
+
+def test_full_message_no_duplicate_lines() -> None:
+    rendered = processor._build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Subject",
+        action_line="Позвонить клиенту сегодня",
+        body_summary="",
+        body_text="",
+        attachments=[],
+        attachment_summary="Позвонить клиенту сегодня",
+    )
+
+    matches = [
+        line
+        for line in rendered.splitlines()
+        if "Позвонить клиенту сегодня" in line
+    ]
+    assert len(matches) == 1

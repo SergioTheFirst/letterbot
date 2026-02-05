@@ -1709,7 +1709,8 @@ def _build_premium_clarity_text(
         spoiler_lines=spoiler_lines,
         dots_text=dots_text,
     )
-    return "\n".join(limited_lines)
+    deduped_lines = tg_renderer.dedup_rendered_lines(limited_lines)
+    return "\n".join(deduped_lines)
 
 
 def _trim_telegram_body(text: str) -> str:
@@ -1804,7 +1805,7 @@ def _build_telegram_text(
         )
     if attachment_summary:
         lines.append(attachment_summary)
-    return "\n".join(lines)
+    return tg_renderer.dedup_rendered_text("\n".join(lines))
 
 
 def _normalize_action_line(action_line: str) -> str:

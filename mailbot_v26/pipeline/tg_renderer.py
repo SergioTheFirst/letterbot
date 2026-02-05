@@ -103,6 +103,47 @@ def _is_trivial_sentence(text: str | None) -> bool:
     return len(tokens) < 2
 
 
+def split_text_into_sentences(text: str | None) -> list[str]:
+    if not text:
+        return []
+    normalized = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    sentences: list[str] = []
+    buffer: list[str] = []
+    index = 0
+    while index < len(normalized):
+        char = normalized[index]
+        if char in ".!?;\n":
+            if char == ".":
+                while index + 1 < len(normalized) and normalized[index + 1] == ".":
+                    index += 1
+            sentence = "".join(buffer).strip()
+            if sentence and not _is_trivial_sentence(sentence):
+                sentences.append(sentence)
+            buffer = []
+        else:
+            buffer.append(char)
+        index += 1
+    tail = "".join(buffer).strip()
+    if tail and not _is_trivial_sentence(tail):
+        sentences.append(tail)
+    return sentences
+
+
+def dedup_text_by_sentence(text: str | None) -> str:
+    sentences = split_text_into_sentences(text)
+    deduped = dedup_sentences(sentences)
+    if not deduped:
+        return ""
+    if len(deduped) == 1:
+        trailing = ""
+        if text:
+            match = re.search(r"([.!?;]+)\s*$", text.strip())
+            if match:
+                trailing = match.group(1)
+        return f"{deduped[0]}{trailing}"
+    return "\n".join(f"• {sentence}" for sentence in deduped)
+
+
 def dedup_sentences(sentences: Iterable[str]) -> list[str]:
     deduped: list[str] = []
     for sentence in sentences:
@@ -115,6 +156,30 @@ def dedup_sentences(sentences: Iterable[str]) -> list[str]:
     return deduped
 
 
+def dedup_rendered_lines(lines: Iterable[str]) -> list[str]:
+    deduped: list[str] = []
+    for line in lines:
+        if not line.strip():
+            deduped.append(line)
+            continue
+        cleaned = line.strip()
+        if "<tg-spoiler>" in cleaned or "</tg-spoiler>" in cleaned:
+            deduped.append(line)
+            continue
+        if any(
+            is_semantic_duplicate(cleaned, existing.strip())
+            for existing in deduped
+            if existing.strip()
+        ):
+            continue
+        deduped.append(line)
+    return deduped
+
+
+def dedup_rendered_text(text: str) -> str:
+    return "\n".join(dedup_rendered_lines(text.splitlines()))
+
+
 def apply_semantic_gates(
     *,
     action_line: str | None,
@@ -122,8 +187,8 @@ def apply_semantic_gates(
     insights: Iterable[str] | None = None,
     commitments: Iterable[str] | None = None,
 ) -> TelegramRenderFields:
-    resolved_action = (action_line or "").strip()
-    resolved_summary = (summary or "").strip()
+    resolved_action = dedup_text_by_sentence(action_line)
+    resolved_summary = dedup_text_by_sentence(summary)
     if _is_trivial_sentence(resolved_summary):
         resolved_summary = ""
 
@@ -134,8 +199,8 @@ def apply_semantic_gates(
 
     filtered_insights: list[str] = []
     for insight in insights or []:
-        cleaned = (insight or "").strip()
-        if _is_trivial_sentence(cleaned):
+        cleaned = dedup_text_by_sentence(insight)
+        if not cleaned:
             continue
         if not _has_context_signal(cleaned):
             continue
@@ -148,8 +213,8 @@ def apply_semantic_gates(
 
     filtered_commitments: list[str] = []
     for commitment in commitments or []:
-        cleaned = (commitment or "").strip()
-        if _is_trivial_sentence(cleaned):
+        cleaned = dedup_text_by_sentence(commitment)
+        if not cleaned:
             continue
         if resolved_action and is_semantic_duplicate(resolved_action, cleaned):
             continue
@@ -349,7 +414,7 @@ def build_telegram_text(
     if attachments_block:
         lines.append("")
         lines.append(attachments_block)
-    return "\n".join(lines)
+    return dedup_rendered_text("\n".join(lines))
 
 
 def render_telegram_message(
@@ -378,8 +443,8 @@ def render_telegram_message(
     )
     if fields.summary:
         safe_summary = _escape_dynamic(fields.summary)
-        return f"{base_text}\n<b><i>{safe_summary}</i></b>"
-    return base_text
+        return dedup_rendered_text(f"{base_text}\n<b><i>{safe_summary}</i></b>")
+    return dedup_rendered_text(base_text)
 
 
 def _resolve_action_line(action_line: str | None) -> str:
@@ -405,7 +470,7 @@ def build_tg_fallback(
     if attachments_block:
         lines.append("")
         lines.append(attachments_block)
-    return "\n".join(lines)
+    return dedup_rendered_text("\n".join(lines))
 
 
 def build_tg_short_template(*, priority: str, subject: str, from_email: str) -> str:
@@ -445,7 +510,7 @@ def build_minimal_telegram_text(
     attachments_block = format_attachments_block(minimal_attachments)
     if len(attachments) > max_attachment_names:
         attachments_block = f"{attachments_block}\n… и ещё {len(attachments) - len(minimal_attachments)}"
-    return "\n\n".join([base_text, attachments_block])
+    return dedup_rendered_text("\n\n".join([base_text, attachments_block]))
 
 
 __all__ = [
@@ -456,6 +521,9 @@ __all__ = [
     "build_tg_short_template",
     "build_minimal_telegram_text",
     "dedup_sentences",
+    "dedup_rendered_lines",
+    "dedup_rendered_text",
+    "dedup_text_by_sentence",
     "format_priority_line",
     "format_subject",
     "format_main_action",
@@ -464,4 +532,5 @@ __all__ = [
     "is_semantic_duplicate",
     "normalize_sentence",
     "render_telegram_message",
+    "split_text_into_sentences",
 ]

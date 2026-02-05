@@ -88,3 +88,35 @@ def test_tg_render_skips_short_summary() -> None:
     )
 
     assert "ок" not in rendered
+
+
+def test_summary_sentence_dedup() -> None:
+    fields = tg_renderer.apply_semantic_gates(
+        action_line="",
+        summary="Сделай отчёт сегодня. Сделай отчёт сегодня. Дедлайн сегодня.",
+    )
+
+    assert fields.summary == "• Сделай отчёт сегодня\n• Дедлайн сегодня"
+
+
+def test_action_vs_summary_duplicate_removed() -> None:
+    fields = tg_renderer.apply_semantic_gates(
+        action_line="Позвонить клиенту сегодня",
+        summary="Позвонить клиенту сегодня. Позвонить клиенту сегодня.",
+    )
+
+    assert fields.summary == ""
+
+
+def test_insights_commitments_internal_duplicates_removed() -> None:
+    fields = tg_renderer.apply_semantic_gates(
+        action_line="",
+        summary="",
+        insights=["Риск задержки высокий. Риск задержки высокий."],
+        commitments=[
+            "Обещал отправить договор завтра. Обещал отправить договор завтра."
+        ],
+    )
+
+    assert fields.insights == ("Риск задержки высокий.",)
+    assert fields.commitments == ("Обещал отправить договор завтра.",)
