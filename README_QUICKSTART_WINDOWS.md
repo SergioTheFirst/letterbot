@@ -6,6 +6,11 @@
 
 Для запуска из исходников репозитория используйте install_and_run.bat, затем run_mailbot.bat.
 
+## CI artifact (Windows one-folder)
+1) Откройте GitHub → Actions → последний run.
+2) Скачайте artifact: MailBot-windows-onefolder.
+3) Распакуйте архив и запустите run_dist.bat или MailBot.exe.
+
 ## Доступ по локальной сети
 1) Откройте config.yaml и задайте:
    - web_ui.bind = "0.0.0.0"
