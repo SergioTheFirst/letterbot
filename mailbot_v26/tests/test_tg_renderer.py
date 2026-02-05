@@ -44,3 +44,47 @@ def test_binary_suppression() -> None:
     assert "dump.bin — <i>" not in rendered
     assert "raw.bin — <i>" not in rendered
     assert "data=b'\\x00" not in rendered
+
+
+def test_tg_render_dedup_summary_equals_action_line() -> None:
+    rendered = tg_renderer.render_telegram_message(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Subject",
+        action_line="Проверить договор",
+        summary="Проверить договор",
+        attachments=[],
+    )
+
+    assert rendered.count("Проверить договор") == 1
+
+
+def test_tg_render_drops_duplicate_insight() -> None:
+    fields = tg_renderer.apply_semantic_gates(
+        action_line="Ответить на письмо",
+        summary="Риск срыва дедлайна",
+        insights=["Риск срыва дедлайна"],
+    )
+
+    assert fields.insights == ()
+
+
+def test_tg_render_dedup_almost_identical_sentences() -> None:
+    deduped = tg_renderer.dedup_sentences(
+        ["Согласовать оплату счета", "Оплату счета согласовать"]
+    )
+
+    assert deduped == ["Согласовать оплату счета"]
+
+
+def test_tg_render_skips_short_summary() -> None:
+    rendered = tg_renderer.render_telegram_message(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Subject",
+        action_line="Ответить",
+        summary="ок",
+        attachments=[],
+    )
+
+    assert "ок" not in rendered
