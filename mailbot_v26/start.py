@@ -118,8 +118,8 @@ def _resolve_config_path(config_path: Path | None) -> Path:
     if config_path is not None:
         return config_path
     candidates = [
-        CURRENT_DIR.parent / "config.yaml",
         CURRENT_DIR / "config.yaml",
+        CURRENT_DIR.parent / "config.yaml",
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -131,6 +131,12 @@ def _resolve_config_path(config_path: Path | None) -> Path:
     print(f"[ERROR] {message}")
     logger.error("config_missing %s", message)
     sys.exit(1)
+
+
+def load_config(config_dir: Path | None) -> tuple[Path, dict[str, object], BotConfig]:
+    config_path = _resolve_config_path(config_dir)
+    raw_config, config = _load_yaml_config_or_exit(config_path)
+    return config_path, raw_config, config
 
 
 def _load_yaml_config_or_exit(config_path: Path) -> tuple[dict[str, object], BotConfig]:
@@ -526,8 +532,17 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
     storage: Storage | None = None
     runtime_health = AccountRuntimeHealthManager(CURRENT_DIR / "data" / "runtime_health.json")
     try:
-        config_path = _resolve_config_path(config_dir)
-        raw_config, config = _load_yaml_config_or_exit(config_path)
+        config_result = load_config(config_dir)
+        if (
+            isinstance(config_result, tuple)
+            and len(config_result) == 3
+            and isinstance(config_result[0], Path)
+        ):
+            config_path, raw_config, config = config_result
+        else:
+            config_path = CURRENT_DIR / "config.yaml"
+            raw_config = {}
+            config = config_result
         flags = FeatureFlags(base_dir=CURRENT_DIR / "config")
         logger.info("Configuration loaded: %d accounts", len(config.accounts))
         print(f"[OK] Loaded {len(config.accounts)} accounts")

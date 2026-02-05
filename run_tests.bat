@@ -16,6 +16,7 @@ if not exist "%REPO_ROOT%.venv\Scripts\activate.bat" (
     exit /b 1
 )
 
+set "VENV_PY=%REPO_ROOT%.venv\Scripts\python.exe"
 call "%REPO_ROOT%.venv\Scripts\activate.bat"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Failed to activate virtual environment.
@@ -23,7 +24,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo Running smoke and full test suite...
-python -m pytest -q
+"%VENV_PY%" -m pytest -q
 set EXITCODE=%ERRORLEVEL%
 
 echo =============================================

@@ -43,6 +43,7 @@ Done:
 - Added validate_config unit tests for config.yaml rules.
 - 2026-01-23: run_mailbot.bat config bootstrap, simplified install_and_run.bat, config path priority, pytest.ini, missing-config subprocess test.
 - 2026-02-05: ensured PyYAML dependency in requirements for yaml import.
+- 2026-02-05: requirements source unified in repo root with PyYAML>=6.0; bat scripts use venv python for pip/pytest.
 Now:
 - None.
 Next:
