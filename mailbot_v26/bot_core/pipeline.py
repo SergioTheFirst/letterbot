@@ -279,10 +279,10 @@ def _extract_attachment_text(
             uncompressed_size = _zip_uncompressed_size(att.content)
             if uncompressed_size is not None and uncompressed_size > max_zip_uncompressed_bytes:
                 logger.warning(
-                    "zip_bomb_guard_triggered",
-                    filename=att.filename,
-                    uncompressed_bytes=uncompressed_size,
-                    max_bytes=max_zip_uncompressed_bytes,
+                    "zip_bomb_guard_triggered filename=%s uncompressed_bytes=%s max_bytes=%s",
+                    att.filename,
+                    uncompressed_size,
+                    max_zip_uncompressed_bytes,
                 )
                 return "[ERROR: Compressed content too large/untrusted]"
 

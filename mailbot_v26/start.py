@@ -114,24 +114,43 @@ def _prefix_account_text(text: str, account: AccountConfig) -> str:
     return f"[{label}] {text}"
 
 
+def _resolve_config_path(config_path: Path | None) -> Path:
+    if config_path is not None:
+        return config_path
+    candidates = [
+        CURRENT_DIR / "config.yaml",
+        CURRENT_DIR.parent / "config.yaml",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    message = (
+        "config.yaml not found. Expected at "
+        f"{candidates[0]} or {candidates[1]}."
+    )
+    print(f"[ERROR] {message}")
+    logger.error("config_missing %s", message)
+    sys.exit(1)
+
+
 def _load_yaml_config_or_exit(config_path: Path) -> tuple[dict[str, object], BotConfig]:
     try:
         raw_config = load_yaml_config(config_path)
     except FileNotFoundError as exc:
         message = str(exc)
-        logger.error("config_missing", error=message)
+        logger.error("config_missing %s", message)
         print(f"[ERROR] {message}")
         sys.exit(1)
     except YamlConfigError as exc:
         message = str(exc)
-        logger.error("config_invalid", error=message)
+        logger.error("config_invalid %s", message)
         print(f"[ERROR] {message}")
         sys.exit(1)
 
     ok, error = validate_yaml_config(raw_config)
     if not ok:
         message = error or "Invalid config.yaml"
-        logger.error("config_invalid", error=message)
+        logger.error("config_invalid %s", message)
         print(f"[ERROR] {message}")
         sys.exit(1)
     config = build_bot_config(raw_config, repo_root=REPO_ROOT)
@@ -502,12 +521,12 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
     try:
         processor_module.system_snapshotter.log_startup()
     except Exception as exc:  # pragma: no cover - optional observability
-        logger.error("system_health_snapshot_failed", error=str(exc))
+        logger.error("system_health_snapshot_failed error=%s", exc)
 
     storage: Storage | None = None
     runtime_health = AccountRuntimeHealthManager(CURRENT_DIR / "data" / "runtime_health.json")
     try:
-        config_path = config_dir or (REPO_ROOT / "config.yaml")
+        config_path = _resolve_config_path(config_dir)
         raw_config, config = _load_yaml_config_or_exit(config_path)
         flags = FeatureFlags(base_dir=CURRENT_DIR / "config")
         logger.info("Configuration loaded: %d accounts", len(config.accounts))
@@ -622,7 +641,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                         try:
                             reloaded_raw = load_yaml_config(config_path)
                         except (FileNotFoundError, YamlConfigError) as exc:
-                            logger.error("config_reload_failed", error=str(exc))
+                            logger.error("config_reload_failed error=%s", exc)
                         else:
                             ok, error = validate_yaml_config(reloaded_raw)
                             if ok:
@@ -644,11 +663,11 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                     config
                                 )
                                 logger.info(
-                                    "config_reloaded",
-                                    accounts=len(config.accounts),
+                                    "config_reloaded accounts=%s",
+                                    len(config.accounts),
                                 )
                             else:
-                                logger.error("config_reload_invalid", error=error)
+                                logger.error("config_reload_invalid error=%s", error)
 
                     try:
                         run_inbound_polling(

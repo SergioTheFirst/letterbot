@@ -269,10 +269,10 @@ def edit_telegram_message(
 ) -> bool:
     if not bot_token or not chat_id or not message_id or not html_text:
         log.error(
-            "telegram_edit_failed",
-            chat_id=chat_id,
-            message_id=message_id,
-            reason="missing required fields",
+            "telegram_edit_failed chat_id=%s message_id=%s reason=%s",
+            chat_id,
+            message_id,
+            "missing required fields",
         )
         return False
     if requests is None:

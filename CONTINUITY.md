@@ -176,7 +176,8 @@ Working set (files / tables / tests):
 
 - events narrative page + screenshot harness hardened
 - Excel extractor: removed pandas dependency, added hard limits.
-One-click run_stack + start_mailbot.bat (worker+web, no extra deps)
+One-click run_mailbot.bat (start.py); start_mailbot.bat wraps run_mailbot.bat.
+start.py loads config.yaml relative to start.py (module dir or repo root); standard logger kwargs removed.
 
 Commitments ledger + evidence citations (PII-safe, cached, indexed)
 - 2026-01-18: web cockpit lanes for bridge/archive/events (read-only, cached).
