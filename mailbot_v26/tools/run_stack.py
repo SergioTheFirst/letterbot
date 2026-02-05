@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Iterable
 
 from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config
+from mailbot_v26.config_yaml import (
+    ConfigError as YamlConfigError,
+    load_config as load_yaml_config,
+    validate_config as validate_yaml_config,
+)
 
 
 @dataclass(frozen=True)
@@ -38,25 +43,23 @@ def _build_web_command(
     *,
     config_dir: Path,
     db_path: Path,
-    bind: str,
-    port: int,
+    bind: str | None,
+    port: int | None,
 ) -> StackCommand:
-    return StackCommand(
-        "web",
-        [
-            python_exe,
-            "-m",
-            "mailbot_v26.web_observability.app",
-            "--config",
-            str(config_dir),
-            "--db",
-            str(db_path),
-            "--bind",
-            bind,
-            "--port",
-            str(port),
-        ],
-    )
+    args = [
+        python_exe,
+        "-m",
+        "mailbot_v26.web_observability.app",
+        "--config",
+        str(config_dir),
+        "--db",
+        str(db_path),
+    ]
+    if bind:
+        args.extend(["--bind", bind])
+    if port is not None:
+        args.extend(["--port", str(port)])
+    return StackCommand("web", args)
 
 
 def _build_doctor_command(python_exe: str, config_dir: Path | None) -> StackCommand:
@@ -231,8 +234,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--config-dir", type=Path, help="Config directory override")
     parser.add_argument("--db-path", type=Path, help="SQLite DB path override")
-    parser.add_argument("--bind", default="127.0.0.1", help="Web bind address")
-    parser.add_argument("--port", type=int, default=8111, help="Web port")
+    parser.add_argument("--bind", help="Web bind address")
+    parser.add_argument("--port", type=int, help="Web port")
     parser.add_argument(
         "--no-browser",
         action="store_true",
@@ -246,9 +249,47 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _resolve_yaml_config_path() -> Path | None:
+    current_dir = Path(__file__).resolve().parent.parent
+    candidates = [
+        current_dir / "config.yaml",
+        current_dir.parent / "config.yaml",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _load_web_ui_defaults() -> tuple[str | None, int | None]:
+    config_path = _resolve_yaml_config_path()
+    if not config_path:
+        return None, None
+    try:
+        raw = load_yaml_config(config_path)
+    except (FileNotFoundError, YamlConfigError):
+        return None, None
+    ok, _error = validate_yaml_config(raw)
+    if not ok:
+        return None, None
+    web_ui = raw.get("web_ui")
+    if not isinstance(web_ui, dict):
+        return None, None
+    bind = web_ui.get("bind")
+    port = web_ui.get("port")
+    return (str(bind).strip() if bind else None), (int(port) if port is not None else None)
+
+
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
+
+    bind = args.bind
+    port = args.port
+    if bind is None or port is None:
+        default_bind, default_port = _load_web_ui_defaults()
+        bind = bind or default_bind
+        port = port if port is not None else default_port
 
     python_exe = sys.executable
     commands = build_commands(
@@ -256,8 +297,8 @@ def main() -> int:
         mode=args.mode,
         config_dir=args.config_dir,
         db_path=args.db_path,
-        bind=args.bind,
-        port=args.port,
+        bind=bind or "127.0.0.1",
+        port=port or 8111,
     )
 
     if args.dry_run:
@@ -265,7 +306,7 @@ def main() -> int:
             print(f"{command.name}: {_format_command(command.args)}")
         return 0
 
-    web_url = f"http://{args.bind}:{args.port}/login"
+    web_url = f"http://{bind or '127.0.0.1'}:{port or 8111}/login"
     open_browser = (args.mode in {"all", "web"}) and not args.no_browser
     return _run_processes(
         commands,

@@ -21,6 +21,15 @@ def _base_config() -> dict:
             }
         ],
         "polling": {"interval_seconds": 60, "reload_config_seconds": 60},
+        "web_ui": {
+            "enabled": True,
+            "bind": "127.0.0.1",
+            "port": 8787,
+            "password": "pw",
+            "api_token": "token",
+            "allow_lan": False,
+            "allow_cidrs": ["192.168.0.0/16"],
+        },
     }
 
 
@@ -59,3 +68,33 @@ def test_validate_config_model_null_allowed() -> None:
 
     assert ok
     assert error is None
+
+
+def test_validate_config_default_local_ok() -> None:
+    config = _base_config()
+    config["web_ui"]["bind"] = "127.0.0.1"
+    config["web_ui"]["allow_lan"] = False
+
+    ok, error = validate_config(config)
+
+    assert ok
+    assert error is None
+
+
+def test_validate_config_lan_requires_allowlist() -> None:
+    config = _base_config()
+    config["web_ui"]["bind"] = "0.0.0.0"
+    config["web_ui"]["allow_lan"] = False
+
+    ok, error = validate_config(config)
+
+    assert not ok
+    assert error == "Ошибка в config.yaml: web_ui.allow_lan должен быть true для bind вне loopback"
+
+    config["web_ui"]["allow_lan"] = True
+    config["web_ui"]["allow_cidrs"] = []
+
+    ok, error = validate_config(config)
+
+    assert not ok
+    assert error == "Ошибка в config.yaml: web_ui.allow_cidrs должен быть непустым при allow_lan=true"

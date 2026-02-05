@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import ipaddress
 from typing import Any, Tuple
 
 import yaml
@@ -123,6 +124,47 @@ def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str | None]:
     if not _is_int(reload_interval):
         return False, "Ошибка в config.yaml: polling.reload_config_seconds отсутствует"
 
+    web_ui = cfg.get("web_ui")
+    if web_ui is not None:
+        if not isinstance(web_ui, dict):
+            return False, "Ошибка в config.yaml: web_ui должен быть словарём"
+        enabled = web_ui.get("enabled")
+        if not isinstance(enabled, bool):
+            return False, "Ошибка в config.yaml: web_ui.enabled должен быть true/false"
+        bind = web_ui.get("bind", "")
+        if not isinstance(bind, str) or not bind.strip():
+            return False, "Ошибка в config.yaml: web_ui.bind должен быть строкой"
+        port = web_ui.get("port")
+        if not _is_port(port):
+            return False, "Ошибка в config.yaml: web_ui.port должен быть числом 1..65535"
+        password = web_ui.get("password", "")
+        if enabled and not _is_non_empty_str(password):
+            return False, "Ошибка в config.yaml: web_ui.password отсутствует"
+        api_token = web_ui.get("api_token", "")
+        if api_token is not None and not isinstance(api_token, str):
+            return False, "Ошибка в config.yaml: web_ui.api_token должен быть строкой"
+        allow_lan = web_ui.get("allow_lan", False)
+        if not isinstance(allow_lan, bool):
+            return False, "Ошибка в config.yaml: web_ui.allow_lan должен быть true/false"
+        allow_cidrs = web_ui.get("allow_cidrs", [])
+        if allow_cidrs is None:
+            allow_cidrs = []
+        if not isinstance(allow_cidrs, list):
+            return False, "Ошибка в config.yaml: web_ui.allow_cidrs должен быть списком"
+        for index, cidr in enumerate(allow_cidrs):
+            if not _is_non_empty_str(cidr):
+                return False, f"Ошибка в config.yaml: web_ui.allow_cidrs[{index}] должен быть строкой"
+            if not _is_valid_cidr(cidr):
+                return False, f"Ошибка в config.yaml: web_ui.allow_cidrs[{index}] некорректный CIDR"
+        if enabled and not _is_loopback_bind(bind):
+            if not allow_lan:
+                return (
+                    False,
+                    "Ошибка в config.yaml: web_ui.allow_lan должен быть true для bind вне loopback",
+                )
+            if not allow_cidrs:
+                return False, "Ошибка в config.yaml: web_ui.allow_cidrs должен быть непустым при allow_lan=true"
+
     return True, None
 
 
@@ -205,3 +247,32 @@ def _is_int(value: Any) -> bool:
     if isinstance(value, str) and value.isdigit():
         return int(value) > 0
     return False
+
+
+def _is_port(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return 1 <= value <= 65535
+    if isinstance(value, str) and value.isdigit():
+        return 1 <= int(value) <= 65535
+    return False
+
+
+def _is_loopback_bind(bind: str) -> bool:
+    if not bind:
+        return False
+    if bind.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(bind).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_valid_cidr(cidr: str) -> bool:
+    try:
+        ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        return False
+    return True

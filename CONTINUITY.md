@@ -48,6 +48,7 @@ Done:
 - 2026-02-09: sentence-level TG dedup per field, message-level line dedup, regression tests.
 - Added PyInstaller one-folder build script/spec, dist run.bat, and tamper-evident manifest checks with tests.
 - Added repo-scoped Codex skills and index under .codex/skills.
+- 2026-02-XX: web UI LAN allowlist, config.yaml web_ui settings, CIDR gate, and docs/tests updates.
 Now:
 - None.
 Next:
@@ -118,6 +119,11 @@ Working set (files / tables / tests):
 - mailbot_v26/storage/knowledge_db.py
 - mailbot_v26/storage/schema.sql
 - mailbot_v26/tests/test_threading.py
+- mailbot_v26/web_observability/flask_stub.py
+- mailbot_v26/tools/run_stack.py
+- mailbot_v26/tests/test_web_ui_cidr.py
+- RUNNING.md
+- docs/WINDOWS_QUICKSTART.md
 - mailbot_v26/tests/test_threading_migration.py
 - mailbot_v26/tests/test_threading_premium_integration.py
 - mailbot_v26/tests/test_deadlock_detector.py
