@@ -118,8 +118,8 @@ def _resolve_config_path(config_path: Path | None) -> Path:
     if config_path is not None:
         return config_path
     candidates = [
-        CURRENT_DIR / "config.yaml",
         CURRENT_DIR.parent / "config.yaml",
+        CURRENT_DIR / "config.yaml",
     ]
     for candidate in candidates:
         if candidate.exists():
