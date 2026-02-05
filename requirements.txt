@@ -2,4 +2,4 @@ imapclient==2.3.1
 PyMuPDF
 mammoth
 openpyxl
-PyYAML==6.0.1
+PyYAML>=6.0
