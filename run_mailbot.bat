@@ -39,7 +39,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo Starting MailBot...
-python -m mailbot_v26
+python -m mailbot_v26.start
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: MailBot terminated with errors.
 ) else (
