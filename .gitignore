@@ -6,3 +6,5 @@ mailbot_v26/mailbot.log
 database.sqlite
 nul
 config.yaml
+build/
+dist/
