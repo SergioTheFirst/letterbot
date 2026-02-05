@@ -1,165 +1,258 @@
-# Codex Workspace Operating Rules (Binding)
+0) Canonical sources of truth (STRICT)
+Strategic truth
 
-These rules define how Codex (or any automated agent) must operate inside this repository.
-They are mandatory unless the user explicitly overrides them.
+CONSTITUTION.md определяет:
 
-This project is governed by two canonical documents:
-- CONSTITUTION.md — strategic principles and long-term direction
-- CONTINUITY.md — operational state and short-term memory
+что это за система;
 
-Confusing their roles is a critical error.
+что разрешено / запрещено;
 
----
+долгосрочные цели и философию.
 
-## 0) Canonical sources of truth (STRICT)
+Этот документ изменяется редко и намеренно.
 
-### Strategic truth
-- `CONSTITUTION.md` defines:
-  - what kind of system this is
-  - what is allowed / forbidden
-  - long-term goals and philosophy
-- It changes rarely and intentionally.
-- Codex MUST respect it at all times.
+Codex обязан всегда его соблюдать.
 
-### Operational truth
-- `CONTINUITY.md` defines:
-  - current goal
-  - current state of implementation
-  - what is done / now / next
-- It is NOT a roadmap and NOT a feature wishlist.
-- It is a ledger of facts, not intentions.
+Operational truth
 
-If something is not written in:
-- CONSTITUTION.md → it is not a principle
-- CONTINUITY.md → it is UNKNOWN
+CONTINUITY.md фиксирует:
 
-Do not invent missing context.
+текущую цель;
 
----
+текущее состояние реализации;
 
-## 1) Mandatory start-of-turn routine (ALWAYS)
+что уже сделано / что делается / что будет следующим.
 
-Before doing **any** work (analysis, planning, coding, refactoring, tests):
+Это не дорожная карта и не список желаний.
 
-1) Open and read `CONSTITUTION.md`
-2) Open and read `CONTINUITY.md`
-3) Verify that the planned action:
-   - does not violate the Constitution
-   - aligns with the current Goal / Now / Next
+Это летопись фактов, а не намерений.
 
-Only after that may you proceed.
+Если что‑то не написано в:
 
-If `CONTINUITY.md` does not exist:
-- Create it in the repository root using the required format (see Section 4)
-- Populate it with **minimal factual state**
-- Then continue
+CONSTITUTION.md → это не принцип;
 
----
+CONTINUITY.md → это неизвестно.
 
-## 2) When to update `CONTINUITY.md` (MANDATORY)
+Не изобретайте контекст.
 
-Update `CONTINUITY.md` immediately when any of the following occur:
+1) Mandatory start‑of‑turn routine (ALWAYS)
 
-- Goal or success criteria changed
-- A phase is completed (e.g. “Attention Gate implemented”)
-- A new invariant or constraint is discovered
-- A feature is fully implemented and tested
-- Tests are added/removed with architectural meaning
-- A decision with long-term impact is made
+Перед любой работой (анализ, планирование, код, тесты):
 
-### Update discipline
-- Keep it SHORT and factual
-- Use bullet points
-- No prose, no justifications
-- No chat logs
-- No speculation
-- Mark unknowns explicitly as `UNCONFIRMED`
-- Never store secrets or credentials
+Подумайте прежде чем действовать:
 
-⚠️ `CONTINUITY.md` is **documentation of reality**, not a plan for the future.
+проанализируйте контекст (какие файлы и модули затронуты);
 
----
+проверьте зависимости (что может сломаться);
 
-## 3) Development behavior (NON-NEGOTIABLE)
+составьте краткий план (3–5 шагов);
 
-- Prefer deterministic logic over probabilistic whenever possible
-- Never introduce LLM dependency where rules suffice
-- Any new layer must:
-  - fail safely
-  - not block mail processing
-  - not change Telegram payload schema unless explicitly approved
+определите, как проверите результат.
 
-### Code changes
-- Minimal, surgical diffs
-- Respect existing module boundaries
-- No reordering of pipeline stages unless instructed
-- Side-effects must be observable (logs, metrics)
+Прочитайте CONSTITUTION.md и CONTINUITY.md.
 
-### Error handling
-- Errors are logged, never hidden
-- A failure must not silently degrade user trust
-- If user-facing output degrades, it must say so explicitly
+Убедитесь, что ваш план:
 
----
+не нарушает Конституцию;
 
-## 4) Required `CONTINUITY.md` format (EXACT)
+соответствует текущему Goal / Now / Next в CONTINUITY.md.
 
-Use **exactly** these headings, in this order:
+Только после этого приступайте.
 
-- Goal (incl. success criteria):
-- Constraints / Assumptions:
-- Key decisions:
-- State:
-- Done:
-- Now:
-- Next:
-- Open questions (UNCONFIRMED if needed):
-- Working set (files / tables / tests):
+Если CONTINUITY.md отсутствует:
 
-No additional sections.
-No renaming.
-No narrative text.
+создайте его в корне репозитория по формату (см. раздел 4),
 
----
+заполните минимумом фактических данных,
 
-## 5) Relationship between documents (IMPORTANT)
+затем продолжайте.
 
-- CONSTITUTION.md answers: **“Why this system exists and what it must become”**
-- CONTINUITY.md answers: **“What is true right now”**
-- agents.md answers: **“How Codex must behave”**
+2) Когда обновлять CONTINUITY.md (MANDATORY)
 
-Codex must NEVER:
-- treat CONTINUITY.md as a roadmap
-- modify CONSTITUTION.md implicitly
-- invent “Next” items without user or expert consensus
+Обновляйте файл сразу, когда:
 
----
+изменилась цель или критерии успеха;
 
-## 6) Communication rules
+завершилась фаза (например, «Attention Gate внедрён»);
 
-- Be brief, concrete, and implementation-oriented
-- No ritual preambles
-- No motivational language
-- No emojis
-- No speculation presented as fact
+выявлено новое инвариантное правило или ограничение;
 
-Include a **“Constitution Snapshot”** in chat responses ONLY when:
-- the user explicitly asks for it, or
-- you made a material change to CONTINUITY.md
+функция полностью реализована и протестирована;
 
----
+добавлены/удалены тесты, влияющие на архитектуру;
 
-## 7) Escalation rule (CRITICAL)
+принято решение с долгосрочным эффектом.
 
-If you detect a conflict between:
-- requested action
-- CONSTITUTION.md
-- existing architecture
+Дисциплина обновления:
 
-You MUST:
-- stop
-- explain the conflict
-- propose 1–2 alternatives
-- wait for explicit approval
+запись должна быть КОРОТКОЙ и фактической;
 
-Silent compromise is forbidden.
+используйте списки;
+
+без описательной прозы, оправданий, логов из чата;
+
+явно помечайте неизвестные как UNCONFIRMED;
+
+никогда не храните секреты или учётные данные.
+
+⚠️ CONTINUITY.md — документ о реальности, а не план на будущее.
+
+3) Development behavior (NON‑NEGOTIABLE)
+Принципы
+
+Детерминизм прежде всего: избегайте вероятностных решений, если возможны правила.
+
+Никаких лишних LLM: не добавляйте зависимость от LLM там, где достаточно жёстких правил.
+
+Любой новый слой:
+
+должен безопасно отказывать;
+
+не блокировать основную обработку;
+
+не менять схему Telegram‑payload без явного одобрения.
+
+TDD‑подход: пишите тесты до/вместе с кодом.
+
+Изменения кода
+
+Минимальные, точечные диффы (не «рефакторинг на 500 строк»).
+
+Уважайте границы модулей.
+
+Не меняйте порядок стадий пайплайна без указания.
+
+Побочные эффекты должны быть наблюдаемыми (логи, метрики).
+
+Обработка ошибок
+
+Ошибки логируются, никогда не скрываются.
+
+Никаких try...except: pass.
+
+Сбой не должен тихо снижать доверие пользователя.
+
+Если качество пользовательского вывода снизилось, сообщите об этом прямо.
+
+4) Required CONTINUITY.md format (EXACT)
+
+Используйте только эти заголовки, строго в этом порядке:
+
+Goal (incl. success criteria):
+
+Constraints / Assumptions:
+
+Key decisions:
+
+State:
+
+Done:
+
+Now:
+
+Next:
+
+Open questions (UNCONFIRMED if needed):
+
+Working set (files / tables / tests):
+
+Никаких дополнительных секций, переименований и повествовательных текстов.
+
+5) Relationship between documents (IMPORTANT)
+
+CONSTITUTION.md отвечает на вопрос: «Зачем существует эта система и чем она должна стать?»
+
+CONTINUITY.md отвечает на вопрос: «Что истинно прямо сейчас?»
+
+AGENTS.md отвечает на вопрос: «Как должен вести себя Codex?»
+
+Codex никогда не должен:
+
+считать CONTINUITY.md дорожной картой;
+
+менять CONSTITUTION.md косвенно;
+
+придумывать пункты Next без согласия пользователя или эксперта.
+
+6) Communication rules
+
+Будьте кратки, конкретны, ориентированы на реализацию.
+
+Никаких ритуальных вступлений («Надеюсь, это поможет…»).
+
+Никакой мотивационной лирики.
+
+Никаких эмодзи.
+
+Никаких домыслов, выданных за факт.
+
+Рекомендуемый шаблон ответа:
+
+📋 Ledger Snapshot:
+Goal: [из CONTINUITY.md]
+Now: [чем вы заняты]
+Next: [что будет дальше]
+Blockers: [если есть]
+
+[ваша работа/объяснение]
+
+
+Снимок Конституции включайте только если:
+
+пользователь прямо его запросил, либо
+
+вы внесли существенное изменение в CONTINUITY.md.
+
+7) Escalation rule (CRITICAL)
+
+Если вы видите конфликт между:
+
+запросом пользователя,
+
+CONSTITUTION.md,
+
+текущей архитектурой,
+
+вы ОБЯЗАНЫ:
+
+остановиться;
+
+чётко объяснить конфликт;
+
+предложить 1–2 альтернативы с плюсами/минусами;
+
+ждать явного одобрения.
+
+Тихий компромисс запрещён.
+
+8) Anti‑patterns (NEVER DO THIS)
+
+❌ Ленивый код: «…остальная часть кода здесь…». Пишите полностью.
+
+❌ Галлюцинации: не импортируйте несуществующие библиотеки (сначала проверяйте requirements.txt).
+
+❌ Разрушение: не удаляйте код, если не было прямого указания (лучше закомментируйте).
+
+❌ Спекуляции: не добавляйте функции, которые «как будто нужны», без подтверждения.
+
+❌ Тихая обработка ошибок: не заглушайте исключения без логирования.
+
+9) Quality checklist (before marking task “Done”)
+
+ Код выполняется без ошибок.
+
+ Тесты написаны и проходят.
+
+ Типы указаны (Python: type hints; TypeScript: определения).
+
+ Проверка стиля проходит (PEP 8 / Black / ESLint).
+
+ Соблюдены требования CONSTITUTION.md.
+
+ Нет незакрытых TODO/FIXME.
+
+ CONTINUITY.md обновлён (пункты Done/Now/Next).
+
+ Нет скрытой обработки ошибок.
+
+ACTIVATION PHRASE: Ready. What's the first task from CONTINUITY.md?
