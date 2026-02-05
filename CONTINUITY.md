@@ -47,10 +47,11 @@ Done:
 - Windows launchers consolidated (root run_mailbot.bat, thin wrapper, venv python, config bootstrap, health checks, simplified install_and_run, quickstart steps).
 - 2026-02-09: sentence-level TG dedup per field, message-level line dedup, regression tests.
 - Added PyInstaller one-folder build script/spec, dist run.bat, and tamper-evident manifest checks with tests.
+- Added repo-scoped Codex skills and index under .codex/skills.
 Now:
 - None.
 Next:
-- UNCONFIRMED
+- UNCONFIRMED: optional one-file build or CI follow-up.
 Open questions (UNCONFIRMED if needed):
 - None.
 Working set (files / tables / tests):
