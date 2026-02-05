@@ -46,6 +46,7 @@ Done:
 - 2026-02-05: requirements source unified in repo root with PyYAML>=6.0; bat scripts use venv python for pip/pytest.
 - Windows launchers consolidated (root run_mailbot.bat, thin wrapper, venv python, config bootstrap, health checks, simplified install_and_run, quickstart steps).
 - 2026-02-09: sentence-level TG dedup per field, message-level line dedup, regression tests.
+- Added PyInstaller one-folder build script/spec, dist run.bat, and tamper-evident manifest checks with tests.
 Now:
 - None.
 Next:
@@ -88,6 +89,13 @@ Working set (files / tables / tests):
 - mailbot_v26/features/flags.py
 - config.example.yaml
 - .gitignore
+- build_windows_onefolder.bat
+- pyinstaller.spec
+- run_dist.bat
+- requirements-build.txt
+- mailbot_v26/integrity.py
+- mailbot_v26/tests/test_integrity_manifest.py
+- README_QUICKSTART_WINDOWS.md
 - README.md
 - requirements.txt
 - mailbot_v26/config_yaml.py

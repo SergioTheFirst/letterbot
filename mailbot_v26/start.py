@@ -39,6 +39,7 @@ from mailbot_v26.config_yaml import (
 )
 from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthcheck
 from mailbot_v26.imap_client import ResilientIMAP
+from mailbot_v26.integrity import verify_manifest
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor, event_emitter
 from mailbot_v26.features.flags import FeatureFlags
@@ -100,6 +101,21 @@ def _get_account_by_login(config: BotConfig, login: str) -> Optional["AccountCon
         if acc.login == login:
             return acc
     return None
+
+
+def _check_build_integrity() -> None:
+    manifest_path = REPO_ROOT / "manifest.sha256.json"
+    if not manifest_path.exists():
+        return
+    try:
+        ok, changed_files = verify_manifest(REPO_ROOT, manifest_path)
+    except Exception:
+        logger.exception("integrity_manifest_failed")
+        print("WARNING: build files modified (see log)")
+        return
+    if not ok:
+        logger.warning("integrity_manifest_changed files=%s", changed_files)
+        print("WARNING: build files modified (see log)")
 
 
 def _get_account_label(account: AccountConfig) -> str:
@@ -524,6 +540,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
     print(f"Log file: {LOG_PATH}\n")
 
     logger.info("=== MailBot %s started ===", __version__)
+    _check_build_integrity()
     try:
         processor_module.system_snapshotter.log_startup()
     except Exception as exc:  # pragma: no cover - optional observability
