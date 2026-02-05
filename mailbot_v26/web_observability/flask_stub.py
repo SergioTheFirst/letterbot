@@ -290,7 +290,10 @@ class Flask:
                 resp = Response(str(resp).encode("utf-8"))
             cookie_value = self._dump_session(sess_obj)
             resp.headers = resp.headers or {}
-            resp.headers.setdefault("Set-Cookie", f"session={cookie_value}; Path=/; HttpOnly")
+            resp.headers.setdefault(
+                "Set-Cookie",
+                f"session={cookie_value}; Path=/; HttpOnly; SameSite=Lax",
+            )
             return resp
         finally:
             _request_ctx.reset(token_req)
@@ -308,7 +311,7 @@ class Flask:
             data = fp.read()
         return Response(data, status_code=200, headers={"Content-Type": _guess_mime(file_path)})
 
-    def run(self, host: str = "127.0.0.1", port: int = 5000) -> None:
+    def run(self, host: str = "127.0.0.1", port: int = 5000, **_: Any) -> None:
         def app(environ, start_response):  # type: ignore[override]
             method = environ.get("REQUEST_METHOD", "GET")
             path = environ.get("PATH_INFO", "/")

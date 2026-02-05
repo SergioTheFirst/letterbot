@@ -11,7 +11,12 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 
 from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config
-from mailbot_v26.web_observability.app import _load_credentials, create_app
+from mailbot_v26.web_observability.app import (
+    _load_web_ui_secrets,
+    _load_web_ui_settings,
+    _resolve_yaml_config_path,
+    create_app,
+)
 
 
 def _resolve_target_path() -> str:
@@ -59,7 +64,10 @@ def main() -> int:
     config_dir = Path(os.environ.get("WEB_OBSERVABILITY_CONFIG", "") or CONFIG_DIR)
     storage = load_storage_config(config_dir)
     db_path = Path(os.environ.get("WEB_OBSERVABILITY_DB_PATH", "") or storage.db_path)
-    password, secret_key, attention_cost = _load_credentials(config_dir)
+    config_path = _resolve_yaml_config_path(None)
+    web_ui = _load_web_ui_settings(config_path)
+    secret_key, attention_cost = _load_web_ui_secrets(config_dir)
+    password = os.environ.get("WEB_PASSWORD") or web_ui.password
 
     output_path = os.environ.get("WEB_SCREENSHOT_PATH", "artifacts/health.png")
     output = Path(output_path)
@@ -75,6 +83,8 @@ def main() -> int:
             password=password,
             secret_key=secret_key,
             attention_cost_per_hour=attention_cost,
+            api_token=web_ui.api_token,
+            allow_cidrs=web_ui.allow_cidrs,
         )
 
         server = make_server("127.0.0.1", 0, app, threaded=True)

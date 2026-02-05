@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import configparser
+import hmac
 import html
 import io
 import ipaddress
@@ -46,6 +47,11 @@ except ModuleNotFoundError:
     USING_FLASK_STUB = True
 
 from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config
+from mailbot_v26.config_yaml import (
+    ConfigError as YamlConfigError,
+    load_config as load_yaml_config,
+    validate_config as validate_yaml_config,
+)
 from mailbot_v26.observability.calibration_report import compute_priority_calibration_report
 from mailbot_v26.observability.decision_trace_store import load_latest_decision_traces
 from mailbot_v26.observability.decision_trace_v1 import (
@@ -85,6 +91,17 @@ class DashboardVars:
     window_days: int
     limit: int
     pii: bool
+
+
+@dataclass(frozen=True)
+class WebUISettings:
+    enabled: bool
+    bind: str
+    port: int
+    password: str
+    api_token: str
+    allow_lan: bool
+    allow_cidrs: list[str]
 
 
 class _TTLCache:
@@ -845,7 +862,40 @@ def _health_timeline_block(timeline: list[dict[str, object]]) -> str:
     )
 
 
-def _load_credentials(config_dir: Path) -> tuple[str, str, float]:
+def _load_web_ui_settings(config_path: Path) -> WebUISettings:
+    try:
+        raw = load_yaml_config(config_path)
+    except FileNotFoundError as exc:
+        raise RuntimeError(str(exc)) from exc
+    except YamlConfigError as exc:
+        raise RuntimeError(str(exc)) from exc
+    ok, error = validate_yaml_config(raw)
+    if not ok:
+        raise RuntimeError(error or "Invalid config.yaml")
+    web_ui = raw.get("web_ui")
+    if not isinstance(web_ui, dict):
+        raise RuntimeError("config.yaml missing web_ui section")
+    enabled = bool(web_ui.get("enabled", False))
+    bind = str(web_ui.get("bind", "127.0.0.1")).strip()
+    port = int(web_ui.get("port", 8080))
+    password = str(web_ui.get("password", "")).strip()
+    api_token = str(web_ui.get("api_token", "") or "").strip()
+    allow_lan = bool(web_ui.get("allow_lan", False))
+    allow_cidrs = web_ui.get("allow_cidrs") or []
+    if not isinstance(allow_cidrs, list):
+        allow_cidrs = []
+    return WebUISettings(
+        enabled=enabled,
+        bind=bind,
+        port=port,
+        password=password,
+        api_token=api_token,
+        allow_lan=allow_lan,
+        allow_cidrs=[str(item) for item in allow_cidrs],
+    )
+
+
+def _load_web_ui_secrets(config_dir: Path) -> tuple[str, float]:
     parser = configparser.ConfigParser()
     config_path = config_dir / "config.ini"
     if config_path.exists():
@@ -853,14 +903,9 @@ def _load_credentials(config_dir: Path) -> tuple[str, str, float]:
             parser.read(config_path, encoding="utf-8")
         except (OSError, configparser.Error):
             logger.warning("Failed to read config.ini from %s", config_path)
-    password = os.environ.get("WEB_PASSWORD") or parser.get(
-        "general", "web_password", fallback=""
-    )
     secret_key = os.environ.get("WEB_SECRET_KEY") or parser.get(
         "general", "web_secret_key", fallback=""
     )
-    if not password:
-        raise RuntimeError("WEB_PASSWORD environment variable or [general] web_password is required")
     if not secret_key:
         raise RuntimeError(
             "WEB_SECRET_KEY environment variable or [general] web_secret_key is required"
@@ -872,7 +917,7 @@ def _load_credentials(config_dir: Path) -> tuple[str, str, float]:
     except (TypeError, ValueError, configparser.Error):
         attention_cost = 0.0
     attention_cost = max(0.0, attention_cost)
-    return password, secret_key, attention_cost
+    return secret_key, attention_cost
 
 
 def _parse_account_emails(raw: str | None) -> list[str]:
@@ -1635,7 +1680,62 @@ def _is_loopback(remote_addr: str | None) -> bool:
 def _cockpit_token_ok(token: str | None, expected: str) -> bool:
     if not expected:
         return False
-    return bool(token) and token == expected
+    if not token:
+        return False
+    return hmac.compare_digest(token, expected)
+
+
+def _parse_cidrs(values: Iterable[str]) -> list[ipaddress._BaseNetwork]:
+    networks: list[ipaddress._BaseNetwork] = []
+    for raw in values:
+        if not raw:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(str(raw), strict=False))
+        except ValueError:
+            logger.warning("Invalid CIDR in web_ui.allow_cidrs: %s", raw)
+    return networks
+
+
+def _ip_allowed(remote_addr: str | None, allow_cidrs: Iterable[ipaddress._BaseNetwork]) -> bool:
+    if _is_loopback(remote_addr):
+        return True
+    if not remote_addr:
+        return False
+    try:
+        address = ipaddress.ip_address(remote_addr)
+    except ValueError:
+        return False
+    for network in allow_cidrs:
+        if address in network:
+            return True
+    return False
+
+
+def _is_loopback_bind(bind: str) -> bool:
+    if not bind:
+        return False
+    if bind.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(bind).is_loopback
+    except ValueError:
+        return False
+
+
+def _resolve_yaml_config_path(config_path: Path | None) -> Path:
+    if config_path is not None:
+        return config_path
+    base_dir = Path(__file__).resolve().parent.parent
+    candidates = [
+        base_dir / "config.yaml",
+        base_dir.parent / "config.yaml",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    expected = " or ".join(str(candidate) for candidate in candidates)
+    raise RuntimeError(f"config.yaml not found. Expected at {expected}.")
 
 
 def _scrub_pii_line(line: str) -> str:
@@ -1718,6 +1818,8 @@ def create_app(
     title: str = "Observability Console",
     attention_cost_per_hour: float = 0.0,
     allow_pii: bool | None = None,
+    api_token: str = "",
+    allow_cidrs: Iterable[str] | None = None,
 ) -> Flask:
     app = Flask(
         __name__,
@@ -1737,14 +1839,25 @@ def create_app(
             "on",
         }
     app.config["WEB_OBSERVABILITY_ALLOW_PII"] = bool(resolved_allow_pii)
-    app.config["COCKPIT_API_TOKEN"] = str(os.getenv("WEB_OBSERVABILITY_TOKEN", "")).strip()
+    env_token = str(os.getenv("WEB_OBSERVABILITY_TOKEN", "")).strip()
+    app.config["COCKPIT_API_TOKEN"] = env_token or str(api_token or "").strip()
     app.secret_key = secret_key
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    allowed_networks = _parse_cidrs(allow_cidrs or [])
+    app.config["WEB_UI_ALLOWED_CIDRS"] = allowed_networks
     app.config["ANALYTICS_FACTORY"] = lambda: KnowledgeAnalytics(
         app.config["DB_PATH"], read_only=True
     )
 
     @app.before_request
     def _require_login():
+        try:
+            remote_addr = request.remote_addr
+        except Exception:
+            remote_addr = None
+        if not _ip_allowed(remote_addr, app.config.get("WEB_UI_ALLOWED_CIDRS", [])):
+            return Response("Forbidden", status=403)
         open_paths = {"login", "static"}
         cockpit_endpoints = {
             "api_cockpit_calibration",
@@ -1757,11 +1870,7 @@ def create_app(
                 headers = {}
             header_token = headers.get("X-Api-Token") if isinstance(headers, Mapping) else None
             token = header_token or request.args.get("token")
-            try:
-                remote_addr = request.remote_addr
-            except Exception:
-                remote_addr = None
-            if not _is_loopback(remote_addr) or not _cockpit_token_ok(
+            if not _cockpit_token_ok(
                 token, app.config["COCKPIT_API_TOKEN"]
             ):
                 return Response("Forbidden", status=403)
@@ -1777,7 +1886,7 @@ def create_app(
         error: str | None = None
         if request.method == "POST":
             provided = request.form.get("password", "")
-            if provided == app.config["WEB_PASSWORD"]:
+            if hmac.compare_digest(str(provided), str(app.config["WEB_PASSWORD"])):
                 session["authenticated"] = True
                 session.permanent = False
                 next_path = request.args.get("next")
@@ -4000,21 +4109,34 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="MailBot Observability Console")
     parser.add_argument("--db", type=Path, help="Path to SQLite database")
     parser.add_argument("--config", type=Path, default=CONFIG_DIR, help="Config directory")
-    parser.add_argument("--bind", default="127.0.0.1", help="Bind address (default 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8080, help="Port to listen on")
+    parser.add_argument("--config-yaml", type=Path, help="Path to config.yaml")
+    parser.add_argument("--bind", help="Bind address (default from config.yaml)")
+    parser.add_argument("--port", type=int, help="Port to listen on")
     args = parser.parse_args()
 
-    bind_address = args.bind or "127.0.0.1"
-    try:
-        parsed_bind = ipaddress.ip_address(bind_address)
-        if not parsed_bind.is_loopback:
-            raise RuntimeError("Bind address must be loopback (127.0.0.1 or ::1)")
-    except ValueError:
-        if bind_address.lower() != "localhost":
-            raise RuntimeError("Bind address must be loopback (127.0.0.1 or ::1)")
+    config_path = _resolve_yaml_config_path(args.config_yaml)
+    web_ui = _load_web_ui_settings(config_path)
+    if not web_ui.enabled:
+        raise RuntimeError("web_ui.enabled=false: refusing to start Web UI")
+
+    bind_address = args.bind or web_ui.bind or "127.0.0.1"
+    port = args.port or web_ui.port or 8080
+    if not _is_loopback_bind(bind_address):
+        if not web_ui.allow_lan:
+            raise RuntimeError("web_ui.allow_lan=false: bind outside loopback refused")
+        if not web_ui.allow_cidrs:
+            raise RuntimeError("web_ui.allow_cidrs must be set when allow_lan=true")
+    if web_ui.allow_lan:
+        logger.info(
+            "WEB_UI_LAN_ENABLED bind=%s port=%s allow_cidrs=%s",
+            bind_address,
+            port,
+            web_ui.allow_cidrs,
+        )
 
     config_dir = args.config if args.config else CONFIG_DIR
-    password, secret_key, attention_cost = _load_credentials(config_dir)
+    secret_key, attention_cost = _load_web_ui_secrets(config_dir)
+    password = os.environ.get("WEB_PASSWORD") or web_ui.password
 
     if args.db:
         db_path = args.db
@@ -4027,8 +4149,16 @@ def main() -> None:
         password=password,
         secret_key=secret_key,
         attention_cost_per_hour=attention_cost,
+        api_token=web_ui.api_token,
+        allow_cidrs=web_ui.allow_cidrs,
     )
-    app.run(host=str(bind_address), port=args.port)
+    app.run(
+        host=str(bind_address),
+        port=int(port),
+        debug=False,
+        use_reloader=False,
+        threaded=True,
+    )
 
 
 if __name__ == "__main__":
