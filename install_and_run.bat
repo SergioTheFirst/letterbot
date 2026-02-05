@@ -23,6 +23,7 @@ if not exist "%REPO_ROOT%.venv\Scripts\activate.bat" (
     )
 )
 
+set "VENV_PY=%REPO_ROOT%.venv\Scripts\python.exe"
 call "%REPO_ROOT%.venv\Scripts\activate.bat"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Failed to activate virtual environment.
@@ -30,14 +31,14 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo Upgrading pip...
-python -m pip install --upgrade pip
+"%VENV_PY%" -m pip install --upgrade pip
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: pip upgrade failed.
     exit /b 1
 )
 
 echo Installing dependencies from requirements.txt...
-python -m pip install -r "%REPO_ROOT%requirements.txt"
+"%VENV_PY%" -m pip install -r "%REPO_ROOT%requirements.txt"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Dependency installation failed.
     exit /b 1

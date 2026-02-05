@@ -14,21 +14,22 @@ echo =============================================
 echo   MailBot Premium - Run
 echo =============================================
 
-echo Checking Python 3.10+...
-python --version >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Python is not available in PATH.
-    exit /b 1
-)
-python -c "import sys; major, minor = sys.version_info[:2]; print(f'Python version detected: {major}.{minor}'); sys.exit(0 if (major, minor) >= (3, 10) else 1)"
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Python 3.10 or higher is required.
-    exit /b 1
-)
-
 echo Checking virtual environment...
 if not exist "%REPO_ROOT%.venv\Scripts\activate.bat" (
     echo ERROR: .venv not found. Please run install_and_run.bat first.
+    exit /b 1
+)
+
+set "VENV_PY=%REPO_ROOT%.venv\Scripts\python.exe"
+echo Checking Python 3.10+...
+"%VENV_PY%" --version >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Python is not available in the virtual environment.
+    exit /b 1
+)
+"%VENV_PY%" -c "import sys; major, minor = sys.version_info[:2]; print(f'Python version detected: {major}.{minor}'); sys.exit(0 if (major, minor) >= (3, 10) else 1)"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Python 3.10 or higher is required.
     exit /b 1
 )
 
@@ -55,7 +56,7 @@ if not exist "%CONFIG_FILE%" (
 )
 
 echo Starting MailBot...
-python -m mailbot_v26.start
+"%VENV_PY%" -m mailbot_v26.start
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: MailBot terminated with errors.
 ) else (

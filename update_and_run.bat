@@ -41,24 +41,21 @@ if not exist "%REPO_ROOT%.venv\Scripts\activate.bat" (
     exit /b 1
 )
 
+set "VENV_PY=%REPO_ROOT%.venv\Scripts\python.exe"
 call "%REPO_ROOT%.venv\Scripts\activate.bat"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Failed to activate virtual environment.
     exit /b 1
 )
 
-set "REQ_FILE="
-if exist "%REPO_ROOT%mailbot_v26\requirements.txt" (
-    set "REQ_FILE=%REPO_ROOT%mailbot_v26\requirements.txt"
-) else if exist "%REPO_ROOT%requirements.txt" (
-    set "REQ_FILE=%REPO_ROOT%requirements.txt"
-) else (
-    echo ERROR: requirements.txt not found in repo root or mailbot_v26\.
+set "REQ_FILE=%REPO_ROOT%requirements.txt"
+if not exist "%REQ_FILE%" (
+    echo ERROR: requirements.txt not found in repo root.
     exit /b 1
 )
 
 echo Installing dependencies from "%REQ_FILE%"...
-python -m pip install -r "%REQ_FILE%"
+"%VENV_PY%" -m pip install -r "%REQ_FILE%"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Dependency installation failed.
     exit /b 1
@@ -67,7 +64,7 @@ if %ERRORLEVEL% NEQ 0 (
 set "ACCOUNTS_FILE=%REPO_ROOT%mailbot_v26\config\accounts.ini"
 if not exist "%ACCOUNTS_FILE%" (
     echo Running init-config to create templates...
-    python -m mailbot_v26 init-config
+    "%VENV_PY%" -m mailbot_v26 init-config
     color 0C
     echo =============================================
     echo   CONFIGURATION REQUIRED
@@ -78,7 +75,7 @@ if not exist "%ACCOUNTS_FILE%" (
 )
 
 echo Running doctor checks...
-python -m mailbot_v26 doctor
+"%VENV_PY%" -m mailbot_v26 doctor
 if %ERRORLEVEL% NEQ 0 (
     color 0C
     echo =============================================
@@ -90,7 +87,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo Running config validation...
-python -m mailbot_v26 validate-config
+"%VENV_PY%" -m mailbot_v26 validate-config
 if %ERRORLEVEL% NEQ 0 (
     color 0C
     echo =============================================
@@ -101,7 +98,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo Starting MailBot...
-python -m mailbot_v26
+"%VENV_PY%" -m mailbot_v26
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: MailBot terminated with errors.
 ) else (
