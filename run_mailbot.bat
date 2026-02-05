@@ -38,6 +38,22 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+set "CONFIG_FILE=%REPO_ROOT%config.yaml"
+set "CONFIG_EXAMPLE=%REPO_ROOT%config.example.yaml"
+if not exist "%CONFIG_FILE%" (
+    if exist "%CONFIG_EXAMPLE%" (
+        copy /Y "%CONFIG_EXAMPLE%" "%CONFIG_FILE%" >nul
+        echo =============================================
+        echo   CONFIGURATION REQUIRED
+        echo   Откройте config.yaml и заполните значения.
+        echo =============================================
+        notepad "%CONFIG_FILE%"
+    ) else (
+        echo ERROR: config.example.yaml not found in repo root.
+    )
+    exit /b 1
+)
+
 echo Starting MailBot...
 python -m mailbot_v26.start
 if %ERRORLEVEL% NEQ 0 (

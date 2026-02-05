@@ -18,14 +18,12 @@ llm:
   cloudflare:
     api_token: "PASTE_CLOUDFLARE_API_TOKEN_HERE"    # пример: "cf_xxxxxxxxxxxxxxxxx"
     account_id: "PASTE_CLOUDFLARE_ACCOUNT_ID_HERE"  # пример: "a1b2c3d4e5"
-    # model: null → использовать дефолт Cloudflare
-    # пример модели: "llama-3.2-70b"
+    # model: null → дефолт API (пример: "llama-3.2-70b")
     model: null                                       # пример: null
 
   gigachat:
     api_token: "PASTE_GIGACHAT_API_TOKEN_HERE"      # пример: "giga_xxxxxxxxxxxxxxxxx"
-    # model: null → использовать дефолт GigaChat
-    # пример модели: "GigaChat-Max"
+    # model: null → дефолт API (пример: "GigaChat-Max")
     model: null                                       # пример: null
 
 accounts:

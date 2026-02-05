@@ -41,6 +41,7 @@ Done:
 - Added config.example.yaml and config.yaml gitignore entry; YAML config loader with validation and hot-reload.
 - Added multi-account prefixing and YAML-driven LLM provider config (Cloudflare/GigaChat).
 - Added validate_config unit tests for config.yaml rules.
+- 2026-01-23: run_mailbot.bat config bootstrap, simplified install_and_run.bat, config path priority, pytest.ini, missing-config subprocess test.
 Now:
 - None.
 Next:
@@ -115,6 +116,12 @@ Working set (files / tables / tests):
 - mailbot_v26/budgets/importance.py
 - mailbot_v26/tests/test_budget_gate.py
 - mailbot_v26/tests/test_budget_percentile_anchor.py
+- run_mailbot.bat
+- install_and_run.bat
+- mailbot_v26/start.py
+- config.example.yaml
+- pytest.ini
+- tests/test_start_config_missing.py
 2026-01-02: daily digest insights (deadlock+silence) behind enable_digest_insights.
 2026-01-02: daily behavioral metrics block behind enable_behavior_metrics_digest.
 2026-01-02: digest insight labels localized; i18n missing-key fallback returns empty.
