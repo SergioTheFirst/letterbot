@@ -29,13 +29,13 @@ from mailbot_v26.bot_core.pipeline import (
     store_inbound,
 )
 from mailbot_v26.bot_core.storage import Storage
-from mailbot_v26.config_loader import (
-    AccountConfig,
-    BotConfig,
-    InvalidAccountIdError,
-    load_config,
-    load_general_config,
-    load_keys_config,
+from mailbot_v26.config_loader import AccountConfig, BotConfig
+from mailbot_v26.config_yaml import (
+    ConfigError as YamlConfigError,
+    build_bot_config,
+    get_polling_intervals,
+    load_config as load_yaml_config,
+    validate_config as validate_yaml_config,
 )
 from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthcheck
 from mailbot_v26.imap_client import ResilientIMAP
@@ -69,6 +69,7 @@ from mailbot_v26.version import __version__
 
 LOG_PATH = CURRENT_DIR / "mailbot.log"
 RUN_STARTED_AT_UTC = datetime.now(timezone.utc)
+REPO_ROOT = CURRENT_DIR.parent
 
 
 def _configure_logging() -> None:
@@ -99,6 +100,42 @@ def _get_account_by_login(config: BotConfig, login: str) -> Optional["AccountCon
         if acc.login == login:
             return acc
     return None
+
+
+def _get_account_label(account: AccountConfig) -> str:
+    label = account.name or account.login or account.account_id
+    return label.strip()
+
+
+def _prefix_account_text(text: str, account: AccountConfig) -> str:
+    label = _get_account_label(account)
+    if not label:
+        return text
+    return f"[{label}] {text}"
+
+
+def _load_yaml_config_or_exit(config_path: Path) -> tuple[dict[str, object], BotConfig]:
+    try:
+        raw_config = load_yaml_config(config_path)
+    except FileNotFoundError as exc:
+        message = str(exc)
+        logger.error("config_missing", error=message)
+        print(f"[ERROR] {message}")
+        sys.exit(1)
+    except YamlConfigError as exc:
+        message = str(exc)
+        logger.error("config_invalid", error=message)
+        print(f"[ERROR] {message}")
+        sys.exit(1)
+
+    ok, error = validate_yaml_config(raw_config)
+    if not ok:
+        message = error or "Invalid config.yaml"
+        logger.error("config_invalid", error=message)
+        print(f"[ERROR] {message}")
+        sys.exit(1)
+    config = build_bot_config(raw_config, repo_root=REPO_ROOT)
+    return raw_config, config
 
 
 def _build_system_payload(
@@ -470,46 +507,21 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
     storage: Storage | None = None
     runtime_health = AccountRuntimeHealthManager(CURRENT_DIR / "data" / "runtime_health.json")
     try:
-        try:
-            base_config_dir = config_dir or CURRENT_DIR / "config"
-            config = load_config(base_config_dir)
-            flags = FeatureFlags(base_dir=base_config_dir)
-            logger.info("Configuration loaded: %d accounts", len(config.accounts))
-            print(f"[OK] Loaded {len(config.accounts)} accounts")
-        except InvalidAccountIdError as exc:
-            logger.exception("Invalid account id in accounts.ini")
-            print(f"[ERROR] Configuration error: {exc}")
-            try:
-                general = load_general_config(base_config_dir)
-                keys = load_keys_config(base_config_dir)
-                if general.admin_chat_id:
-                    payload = _build_system_payload(
-                        text=f"\U0001F6A8 INVALID ACCOUNT ID\n{exc}",
-                        bot_token=keys.telegram_bot_token,
-                        chat_id=general.admin_chat_id,
-                    )
-                    result = send_telegram(payload)
-                    ok = result.delivered
-                    if not ok:
-                        logger.error("Failed to send invalid account id alert")
-                else:
-                    logger.error("Invalid account id alert skipped: missing admin chat id")
-            except Exception:
-                logger.exception("Failed to send invalid account id alert")
-            time.sleep(10)
-            return
-        except Exception as exc:
-            logger.exception("Failed to load configuration")
-            print(f"[ERROR] Configuration error: {exc}")
-            time.sleep(10)
-            return
+        config_path = config_dir or (REPO_ROOT / "config.yaml")
+        raw_config, config = _load_yaml_config_or_exit(config_path)
+        flags = FeatureFlags(base_dir=CURRENT_DIR / "config")
+        logger.info("Configuration loaded: %d accounts", len(config.accounts))
+        print(f"[OK] Loaded {len(config.accounts)} accounts")
+
+        polling_interval, reload_interval = get_polling_intervals(raw_config)
+        last_reload_at = time.monotonic()
 
         accounts_to_poll = run_startup_mail_account_healthcheck(config, send_telegram)
         for account in config.accounts:
             runtime_health.register_account(account)
 
         try:
-            health_checker = StartupHealthChecker(base_config_dir, config)
+            health_checker = StartupHealthChecker(REPO_ROOT, config)
             results = health_checker.run()
             mode = health_checker.evaluate_mode(results)
             report = LaunchReportBuilder(
@@ -558,35 +570,40 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             event_emitter=processor_module.event_emitter,
             contract_event_emitter=processor_module.contract_event_emitter,
         )
-        allowed_chat_ids = {
-            chat_id
-            for chat_id in (
-                [config.general.admin_chat_id]
-                + [account.telegram_chat_id for account in config.accounts]
-            )
-            if chat_id
-        }
-        inbound_client = TelegramInboundClient(
-            bot_token=config.keys.telegram_bot_token,
-            timeout_s=5,
-        )
         inbound_state_store = InboundStateStore(processor_module.DB_PATH)
-        inbound_processor = TelegramInboundProcessor(
-            knowledge_db=processor_module.knowledge_db,
-            analytics=processor_module.analytics,
-            event_emitter=processor_module.event_emitter,
-            contract_event_emitter=processor_module.contract_event_emitter,
-            runtime_flag_store=processor_module.runtime_flag_store,
-            auto_priority_gate=processor_module.auto_priority_quality_gate,
-            auto_priority_gate_config=processor_module.auto_priority_gate_config,
-            override_store=RuntimeOverrideStore(processor_module.DB_PATH),
-            send_reply=lambda chat_id, text: inbound_client.send_message(
-                chat_id=chat_id, text=text
-            ),
-            feature_flags=processor_module.feature_flags,
-            allowed_chat_ids=frozenset(allowed_chat_ids),
-            bot_token=config.keys.telegram_bot_token,
-        )
+
+        def _build_inbound_stack(current_config: BotConfig):
+            allowed_ids = {
+                chat_id
+                for chat_id in (
+                    [current_config.general.admin_chat_id]
+                    + [account.telegram_chat_id for account in current_config.accounts]
+                )
+                if chat_id
+            }
+            client = TelegramInboundClient(
+                bot_token=current_config.keys.telegram_bot_token,
+                timeout_s=5,
+            )
+            processor = TelegramInboundProcessor(
+                knowledge_db=processor_module.knowledge_db,
+                analytics=processor_module.analytics,
+                event_emitter=processor_module.event_emitter,
+                contract_event_emitter=processor_module.contract_event_emitter,
+                runtime_flag_store=processor_module.runtime_flag_store,
+                auto_priority_gate=processor_module.auto_priority_quality_gate,
+                auto_priority_gate_config=processor_module.auto_priority_gate_config,
+                override_store=RuntimeOverrideStore(processor_module.DB_PATH),
+                send_reply=lambda chat_id, text: client.send_message(
+                    chat_id=chat_id, text=text
+                ),
+                feature_flags=processor_module.feature_flags,
+                allowed_chat_ids=frozenset(allowed_ids),
+                bot_token=current_config.keys.telegram_bot_token,
+            )
+            return client, processor, frozenset(allowed_ids)
+
+        inbound_client, inbound_processor, allowed_chat_ids = _build_inbound_stack(config)
         print("[OK] Ready to work\n")
 
         cycle = 0
@@ -599,6 +616,40 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 logger.info("Cycle #%d started", cycle)
 
                 try:
+                    now_mono = time.monotonic()
+                    if now_mono - last_reload_at >= reload_interval:
+                        last_reload_at = now_mono
+                        try:
+                            reloaded_raw = load_yaml_config(config_path)
+                        except (FileNotFoundError, YamlConfigError) as exc:
+                            logger.error("config_reload_failed", error=str(exc))
+                        else:
+                            ok, error = validate_yaml_config(reloaded_raw)
+                            if ok:
+                                updated_config = build_bot_config(
+                                    reloaded_raw,
+                                    repo_root=REPO_ROOT,
+                                )
+                                config = updated_config
+                                raw_config = reloaded_raw
+                                polling_interval, reload_interval = get_polling_intervals(
+                                    raw_config
+                                )
+                                processor.config = config
+                                configure_pipeline(config, processor)
+                                accounts_to_poll = list(config.accounts)
+                                for account in config.accounts:
+                                    runtime_health.register_account(account)
+                                inbound_client, inbound_processor, allowed_chat_ids = _build_inbound_stack(
+                                    config
+                                )
+                                logger.info(
+                                    "config_reloaded",
+                                    accounts=len(config.accounts),
+                                )
+                            else:
+                                logger.error("config_reload_invalid", error=error)
+
                     try:
                         run_inbound_polling(
                             client=inbound_client,
@@ -704,6 +755,10 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                     else:
                                         final_text = processor.process(login, inbound)
                                         if final_text and final_text.strip():
+                                            final_text = _prefix_account_text(
+                                                final_text,
+                                                account,
+                                            )
                                             payload = _build_system_payload(
                                                 text=final_text.strip(),
                                                 bot_token=config.keys.telegram_bot_token,
@@ -809,7 +864,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 except Exception:
                     logger.exception("State save failed after cycle %d", cycle)
 
-                delay = max(120, config.general.check_interval)
+                delay = max(120, polling_interval)
                 print(f"\n[WAIT] Sleeping {delay} seconds...")
                 try:
                     time.sleep(delay)

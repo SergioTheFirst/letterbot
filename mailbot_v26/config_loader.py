@@ -42,6 +42,9 @@ class AccountConfig:
     port: int
     use_ssl: bool
     telegram_chat_id: str
+    username: str = ""
+    name: str = ""
+    enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +165,8 @@ def load_accounts_config(base_dir: Path = CONFIG_DIR) -> List[AccountConfig]:
             account = AccountConfig(
                 account_id=section_name,
                 login=section["login"],
+                username=section.get("username", section["login"]),
+                name=section.get("name", section_name),
                 password=section["password"],
                 host=section.get("host", ""),
                 port=section.getint("port", fallback=993),

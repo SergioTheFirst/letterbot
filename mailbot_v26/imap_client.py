@@ -131,7 +131,10 @@ class ResilientIMAP:
                 ssl=self.account.use_ssl,
                 timeout=30,
             )
-            client.login(self.account.login, self.account.password)
+            client.login(
+                self.account.username or self.account.login,
+                self.account.password,
+            )
             client.select_folder("INBOX")
             last_uid = self.state.get_last_uid(self.account.login)
             last_check = self.state.get_last_check_time(self.account.login)
