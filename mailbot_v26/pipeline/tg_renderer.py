@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Iterable
 
 from mailbot_v26.telegram_utils import escape_tg_html
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
@@ -10,11 +11,159 @@ from mailbot_v26.text.sanitize import is_binaryish
 
 _ATTACHMENT_SNIPPET_LIMIT = 240
 _BASE64_FRAGMENT = re.compile(r"[A-Za-z0-9+/]{80,}={0,2}")
+_TOKEN_RE = re.compile(r"[a-zа-я0-9]+", re.IGNORECASE)
+_CONTEXT_KEYWORDS = (
+    "срок",
+    "дедлайн",
+    "сегодня",
+    "завтра",
+    "вчера",
+    "недел",
+    "месяц",
+    "день",
+    "истори",
+    "ранее",
+    "раньше",
+    "пауза",
+    "окно",
+    "риск",
+    "угроз",
+    "довер",
+    "сниж",
+    "ухудш",
+    "хуже",
+    "эскалац",
+    "просроч",
+    "задерж",
+)
+
+
+@dataclass(frozen=True)
+class TelegramRenderFields:
+    action_line: str
+    summary: str
+    insights: tuple[str, ...]
+    commitments: tuple[str, ...]
 
 
 def _escape_dynamic(text: str | None) -> str:
     cleaned = strip_disallowed_emojis(str(text or ""))
     return escape_tg_html(cleaned)
+
+
+def normalize_sentence(text: str | None) -> str:
+    if not text:
+        return ""
+    tokens = _TOKEN_RE.findall(text.lower())
+    return " ".join(tokens)
+
+
+def _token_set(text: str) -> set[str]:
+    return set(normalize_sentence(text).split())
+
+
+def _has_context_signal(text: str) -> bool:
+    normalized = normalize_sentence(text)
+    return any(keyword in normalized for keyword in _CONTEXT_KEYWORDS)
+
+
+def is_semantic_duplicate(left: str, right: str) -> bool:
+    normalized_left = normalize_sentence(left)
+    normalized_right = normalize_sentence(right)
+    if not normalized_left or not normalized_right:
+        return False
+    if normalized_left == normalized_right:
+        return True
+    shorter, longer = sorted(
+        (normalized_left, normalized_right), key=len
+    )
+    if shorter in longer and len(shorter) / max(len(longer), 1) >= 0.8:
+        return True
+    left_tokens = _token_set(left)
+    right_tokens = _token_set(right)
+    if not left_tokens or not right_tokens:
+        return False
+    intersection = left_tokens & right_tokens
+    union = left_tokens | right_tokens
+    if not union:
+        return False
+    jaccard = len(intersection) / len(union)
+    min_len = min(len(left_tokens), len(right_tokens))
+    overlap = len(intersection) / max(min_len, 1)
+    return (jaccard >= 0.85 and min_len >= 3) or (overlap >= 0.9 and min_len >= 2)
+
+
+def _is_trivial_sentence(text: str | None) -> bool:
+    if not text or not text.strip():
+        return True
+    stripped = text.strip()
+    if len(stripped) < 4:
+        return True
+    tokens = normalize_sentence(stripped).split()
+    return len(tokens) < 2
+
+
+def dedup_sentences(sentences: Iterable[str]) -> list[str]:
+    deduped: list[str] = []
+    for sentence in sentences:
+        cleaned = (sentence or "").strip()
+        if not cleaned:
+            continue
+        if any(is_semantic_duplicate(cleaned, existing) for existing in deduped):
+            continue
+        deduped.append(cleaned)
+    return deduped
+
+
+def apply_semantic_gates(
+    *,
+    action_line: str | None,
+    summary: str | None,
+    insights: Iterable[str] | None = None,
+    commitments: Iterable[str] | None = None,
+) -> TelegramRenderFields:
+    resolved_action = (action_line or "").strip()
+    resolved_summary = (summary or "").strip()
+    if _is_trivial_sentence(resolved_summary):
+        resolved_summary = ""
+
+    if resolved_summary and resolved_action and is_semantic_duplicate(
+        resolved_action, resolved_summary
+    ):
+        resolved_summary = ""
+
+    filtered_insights: list[str] = []
+    for insight in insights or []:
+        cleaned = (insight or "").strip()
+        if _is_trivial_sentence(cleaned):
+            continue
+        if not _has_context_signal(cleaned):
+            continue
+        if resolved_action and is_semantic_duplicate(resolved_action, cleaned):
+            continue
+        if resolved_summary and is_semantic_duplicate(resolved_summary, cleaned):
+            continue
+        filtered_insights.append(cleaned)
+    filtered_insights = dedup_sentences(filtered_insights)
+
+    filtered_commitments: list[str] = []
+    for commitment in commitments or []:
+        cleaned = (commitment or "").strip()
+        if _is_trivial_sentence(cleaned):
+            continue
+        if resolved_action and is_semantic_duplicate(resolved_action, cleaned):
+            continue
+        if resolved_summary and is_semantic_duplicate(resolved_summary, cleaned):
+            continue
+        filtered_commitments.append(cleaned)
+    filtered_commitments = dedup_sentences(filtered_commitments)
+
+    return TelegramRenderFields(
+        action_line=resolved_action,
+        summary=resolved_summary,
+        insights=tuple(filtered_insights),
+        commitments=tuple(filtered_commitments),
+    )
 
 
 def _normalize_attachment_text(text: Any) -> str:
@@ -203,6 +352,43 @@ def build_telegram_text(
     return "\n".join(lines)
 
 
+def render_telegram_message(
+    *,
+    priority: str,
+    from_email: str,
+    subject: str,
+    action_line: str | None,
+    summary: str | None = None,
+    insights: Iterable[str] | None = None,
+    commitments: Iterable[str] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+) -> str:
+    fields = apply_semantic_gates(
+        action_line=action_line,
+        summary=summary,
+        insights=insights,
+        commitments=commitments,
+    )
+    base_text = build_telegram_text(
+        priority=priority,
+        from_email=from_email,
+        subject=subject,
+        action_line=_resolve_action_line(fields.action_line),
+        attachments=attachments or [],
+    )
+    if fields.summary:
+        safe_summary = _escape_dynamic(fields.summary)
+        return f"{base_text}\n<b><i>{safe_summary}</i></b>"
+    return base_text
+
+
+def _resolve_action_line(action_line: str | None) -> str:
+    cleaned = (action_line or "").strip()
+    if cleaned:
+        return cleaned
+    return "Действий не требуется"
+
+
 def build_tg_fallback(
     *,
     priority: str,
@@ -263,13 +449,19 @@ def build_minimal_telegram_text(
 
 
 __all__ = [
+    "TelegramRenderFields",
+    "apply_semantic_gates",
     "build_telegram_text",
     "build_tg_fallback",
     "build_tg_short_template",
     "build_minimal_telegram_text",
+    "dedup_sentences",
     "format_priority_line",
     "format_subject",
     "format_main_action",
     "format_narrative_block",
     "format_attachments_block",
+    "is_semantic_duplicate",
+    "normalize_sentence",
+    "render_telegram_message",
 ]

@@ -174,3 +174,4 @@ Attention economics v1 (explainable, cached, CSV export, indexed).
 - 2026-01-20: Priority calibration report (cached) + drift warnings and web endpoint.
 - 2026-01-20: Decision-trace health endpoint with emitter snapshot and drop-log tail.
 - 2026-01-21: maintenance-mode indexes, decision-trace failure log hardening, post-start ingest rule clarified.
+- 2026-01-22: telegram renderer semantic dedupe gates and golden tests.

@@ -1779,22 +1779,22 @@ def _build_telegram_text(
     attachment_summary: str | None = None,
 ) -> str:
     if attachment_summary is None:
-        base_text = tg_renderer.build_telegram_text(
+        return tg_renderer.render_telegram_message(
             priority=priority,
             from_email=from_email,
             subject=subject,
             action_line=_resolve_action_line(action_line),
+            summary=body_summary,
             attachments=attachments or [],
         )
-        summary_text = (body_summary or "").strip()
-        if summary_text:
-            safe_summary = escape_tg_html(summary_text)
-            return f"{base_text}\n<b><i>{safe_summary}</i></b>"
-        return base_text
+    fields = tg_renderer.apply_semantic_gates(
+        action_line=_resolve_action_line(action_line),
+        summary=body_summary,
+    )
     safe_sender = escape_tg_html(from_email or "неизвестно")
     safe_subject = escape_tg_html(subject or "(без темы)")
-    safe_action = escape_tg_html(_resolve_action_line(action_line))
-    safe_summary = escape_tg_html(body_summary or "")
+    safe_action = escape_tg_html(_resolve_action_line(fields.action_line))
+    safe_summary = escape_tg_html(fields.summary or "")
     lines = [f"{priority} от {safe_sender} — {safe_subject}", safe_action]
     if safe_summary:
         lines.append(safe_summary)
@@ -1973,6 +1973,29 @@ def _build_insights_section(
     return "\n".join(lines)
 
 
+def _filter_insights_for_render(
+    insights: list[Insight],
+    *,
+    action_line: str,
+    summary: str,
+) -> list[Insight]:
+    filtered = tg_renderer.apply_semantic_gates(
+        action_line=action_line,
+        summary=summary,
+        insights=[insight.explanation for insight in insights],
+    ).insights
+    if not filtered:
+        return []
+    normalized = {
+        tg_renderer.normalize_sentence(sentence) for sentence in filtered if sentence
+    }
+    return [
+        insight
+        for insight in insights
+        if tg_renderer.normalize_sentence(insight.explanation) in normalized
+    ]
+
+
 def _extract_narrative_insight(
     insights: list[Insight],
 ) -> tuple[NarrativeResult | None, list[Insight]]:
@@ -2103,6 +2126,11 @@ def build_telegram_payload(
         telegram_text_raw = f"{telegram_text_raw}\n\n{no_llm_summary}"
 
     narrative, remaining_insights = _extract_narrative_insight(context.insights)
+    remaining_insights = _filter_insights_for_render(
+        remaining_insights,
+        action_line=_resolve_action_line(context.action_line),
+        summary=context.body_summary,
+    )
 
     if render_mode == TelegramRenderMode.FULL:
         ctx = EmailContext(
