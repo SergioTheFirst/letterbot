@@ -44,6 +44,7 @@ Done:
 - 2026-01-23: run_mailbot.bat config bootstrap, simplified install_and_run.bat, config path priority, pytest.ini, missing-config subprocess test.
 - 2026-02-05: ensured PyYAML dependency in requirements for yaml import.
 - 2026-02-05: requirements source unified in repo root with PyYAML>=6.0; bat scripts use venv python for pip/pytest.
+- Windows launchers consolidated (root run_mailbot.bat, thin wrapper, venv python, config bootstrap, health checks, simplified install_and_run, quickstart steps).
 Now:
 - None.
 Next:
@@ -119,10 +120,13 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_budget_gate.py
 - mailbot_v26/tests/test_budget_percentile_anchor.py
 - run_mailbot.bat
+- mailbot_v26/run_mailbot.bat
 - install_and_run.bat
+- README_QUICKSTART_WINDOWS.md
 - mailbot_v26/start.py
 - config.example.yaml
 - pytest.ini
+- tests/test_deprecated_bat_wrapper_docs_only.py
 - tests/test_start_config_missing.py
 2026-01-02: daily digest insights (deadlock+silence) behind enable_digest_insights.
 2026-01-02: daily behavioral metrics block behind enable_behavior_metrics_digest.
