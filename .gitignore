@@ -5,3 +5,4 @@ mailbot_v26/mailbot.log
 *.sqlite-shm
 database.sqlite
 nul
+config.yaml

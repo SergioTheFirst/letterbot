@@ -38,6 +38,9 @@ Done:
 - 2026-01-10: cockpit budgets + triage lanes API (read-only) and tests.
 - 2026-01-19: budget percentile anchoring hardened; regression tests added.
 - 2026-01-20: post-start-only ingest gate with UTC filtering, optional allow_prestart_emails, updated IMAP tests.
+- Added config.example.yaml and config.yaml gitignore entry; YAML config loader with validation and hot-reload.
+- Added multi-account prefixing and YAML-driven LLM provider config (Cloudflare/GigaChat).
+- Added validate_config unit tests for config.yaml rules.
 Now:
 - None.
 Next:
@@ -78,6 +81,17 @@ Working set (files / tables / tests):
 - mailbot_v26/imap_client.py
 - mailbot_v26/config_loader.py
 - mailbot_v26/features/flags.py
+- config.example.yaml
+- .gitignore
+- README.md
+- requirements.txt
+- mailbot_v26/config_yaml.py
+- mailbot_v26/llm/router.py
+- mailbot_v26/llm/providers.py
+- mailbot_v26/bot_core/pipeline.py
+- mailbot_v26/health/mail_accounts.py
+- mailbot_v26/mail_health/runtime_health.py
+- tests/test_validate_config_yaml.py
 - mailbot_v26/config/config.ini
 - mailbot_v26/tools/config_bootstrap.py
 - mailbot_v26/tests/test_premium_processor_routing.py

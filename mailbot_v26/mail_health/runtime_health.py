@@ -41,7 +41,7 @@ class AccountRuntimeHealthManager:
     def register_account(self, account: AccountConfig) -> None:
         self._account_meta[account.account_id] = _AccountMeta(
             account_id=account.account_id,
-            login=account.login,
+            login=account.username or account.login,
             host=account.host,
             port=account.port,
             use_ssl=account.use_ssl,

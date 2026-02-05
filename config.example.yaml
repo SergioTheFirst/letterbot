@@ -1,0 +1,39 @@
+# ======================================
+# MailBot — основной файл настроек
+# ======================================
+# Правило: ВСЕ ключи/токены/пароли пишите В КАВЫЧКАХ.
+# Исключение: null пишется БЕЗ кавычек.
+# ======================================
+
+telegram:
+  bot_token: "PASTE_YOUR_TELEGRAM_BOT_TOKEN_HERE"   # пример: "123456789:AAAbbbCCCdddEEE"
+  chat_id: "PASTE_YOUR_TELEGRAM_CHAT_ID_HERE"       # пример: "123456789"
+
+llm:
+  provider: "cloudflare"  # пример: "cloudflare" (или "gigachat")
+
+  cloudflare:
+    api_token: "PASTE_CLOUDFLARE_API_TOKEN_HERE"    # пример: "cf_xxxxxxxxxxxxxxxxx"
+    account_id: "PASTE_CLOUDFLARE_ACCOUNT_ID_HERE"  # пример: "a1b2c3d4e5"
+    # model: null → использовать дефолт Cloudflare
+    # пример модели: "llama-3.2-70b"
+    model: null                                       # пример: null
+
+  gigachat:
+    api_token: "PASTE_GIGACHAT_API_TOKEN_HERE"      # пример: "giga_xxxxxxxxxxxxxxxxx"
+    # model: null → использовать дефолт GigaChat
+    # пример модели: "GigaChat-Max"
+    model: null                                       # пример: null
+
+accounts:
+  - name: "Work Gmail"                               # пример: "Work Gmail"
+    email: "work@gmail.com"                          # пример: "work@gmail.com"
+    imap_host: "imap.gmail.com"                      # пример: "imap.gmail.com"
+    imap_port: 993                                   # обычно 993
+    username: "work@gmail.com"                       # обычно совпадает с email
+    password: "PASTE_APP_PASSWORD_HERE"              # пример: "abcd efgh ijkl mnop"
+    enabled: true                                    # пример: true
+
+polling:
+  interval_seconds: 60        # пример: 60 (как часто проверять почту)
+  reload_config_seconds: 60   # пример: 60 (как часто перечитывать config.yaml без перезапуска)

@@ -1,0 +1,207 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Tuple
+
+import yaml
+
+from mailbot_v26.config_loader import (
+    AccountConfig,
+    BotConfig,
+    GeneralConfig,
+    IngestConfig,
+    KeysConfig,
+    MaintenanceConfig,
+    StorageConfig,
+)
+
+DEFAULT_CHECK_INTERVAL_SEC = 60
+DEFAULT_RELOAD_CONFIG_SEC = 60
+DEFAULT_MAX_EMAIL_MB = 15
+DEFAULT_MAX_ATTACHMENT_MB = 15
+DEFAULT_MAX_ZIP_UNCOMPRESSED_MB = 80
+DEFAULT_MAX_EXTRACTED_CHARS = 50_000
+DEFAULT_MAX_EXTRACTED_TOTAL_CHARS = 120_000
+
+
+class ConfigError(RuntimeError):
+    pass
+
+
+def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
+    config_path = Path(path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"config.yaml not found: {config_path.resolve()}")
+    try:
+        content = config_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"Failed to read config.yaml: {exc}") from exc
+    try:
+        payload = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Failed to parse config.yaml: {exc}") from exc
+    if payload is None:
+        return {}
+    if not isinstance(payload, dict):
+        raise ConfigError("config.yaml must contain a mapping at the root")
+    return payload
+
+
+def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str | None]:
+    if not isinstance(cfg, dict):
+        return False, "Ошибка в config.yaml: корневой объект должен быть словарём"
+
+    telegram = cfg.get("telegram")
+    if not isinstance(telegram, dict):
+        return False, "Ошибка в config.yaml: telegram отсутствует"
+    if not _is_non_empty_str(telegram.get("bot_token")):
+        return False, "Ошибка в config.yaml: telegram.bot_token отсутствует"
+    if not _is_non_empty_str(telegram.get("chat_id")):
+        return False, "Ошибка в config.yaml: telegram.chat_id отсутствует"
+
+    llm = cfg.get("llm")
+    if not isinstance(llm, dict):
+        return False, "Ошибка в config.yaml: llm отсутствует"
+    provider = llm.get("provider")
+    if provider not in {"cloudflare", "gigachat"}:
+        return False, 'Ошибка в config.yaml: llm.provider должен быть "cloudflare" или "gigachat"'
+
+    cloudflare = llm.get("cloudflare")
+    gigachat = llm.get("gigachat")
+    if provider == "cloudflare":
+        if not isinstance(cloudflare, dict):
+            return False, "Ошибка в config.yaml: llm.cloudflare отсутствует"
+        if not _is_non_empty_str(cloudflare.get("api_token")):
+            return False, "Ошибка в config.yaml: llm.cloudflare.api_token отсутствует"
+        if not _is_non_empty_str(cloudflare.get("account_id")):
+            return False, "Ошибка в config.yaml: llm.cloudflare.account_id отсутствует"
+    if provider == "gigachat":
+        if not isinstance(gigachat, dict):
+            return False, "Ошибка в config.yaml: llm.gigachat отсутствует"
+        if not _is_non_empty_str(gigachat.get("api_token")):
+            return False, "Ошибка в config.yaml: llm.gigachat.api_token отсутствует"
+
+    for key, section in (("llm.cloudflare", cloudflare), ("llm.gigachat", gigachat)):
+        if section is None:
+            continue
+        if not isinstance(section, dict):
+            return False, f"Ошибка в config.yaml: {key} должен быть словарём"
+        model_value = section.get("model", "MISSING")
+        if model_value is not None and model_value != "MISSING" and not isinstance(model_value, str):
+            return False, f"Ошибка в config.yaml: {key}.model должен быть строкой или null"
+
+    accounts = cfg.get("accounts")
+    if not isinstance(accounts, list):
+        return False, "Ошибка в config.yaml: accounts отсутствует"
+    if not accounts:
+        return False, "Ошибка в config.yaml: accounts пустой"
+    for index, account in enumerate(accounts):
+        if not isinstance(account, dict):
+            return False, f"Ошибка в config.yaml: accounts[{index}] должен быть словарём"
+        if not _is_non_empty_str(account.get("name")):
+            return False, f"Ошибка в config.yaml: accounts[{index}].name отсутствует"
+        if not _is_non_empty_str(account.get("email")):
+            return False, f"Ошибка в config.yaml: accounts[{index}].email отсутствует"
+        if not _is_non_empty_str(account.get("imap_host")):
+            return False, f"Ошибка в config.yaml: accounts[{index}].imap_host отсутствует"
+        if not _is_int(account.get("imap_port")):
+            return False, f"Ошибка в config.yaml: accounts[{index}].imap_port отсутствует"
+        if not _is_non_empty_str(account.get("username")):
+            return False, f"Ошибка в config.yaml: accounts[{index}].username отсутствует"
+        if not _is_non_empty_str(account.get("password")):
+            return False, f"Ошибка в config.yaml: accounts[{index}].password отсутствует"
+        if not isinstance(account.get("enabled"), bool):
+            return False, f"Ошибка в config.yaml: accounts[{index}].enabled отсутствует"
+
+    polling = cfg.get("polling", {})
+    if polling is not None and not isinstance(polling, dict):
+        return False, "Ошибка в config.yaml: polling должен быть словарём"
+    interval = polling.get("interval_seconds", DEFAULT_CHECK_INTERVAL_SEC)
+    reload_interval = polling.get("reload_config_seconds", DEFAULT_RELOAD_CONFIG_SEC)
+    if not _is_int(interval):
+        return False, "Ошибка в config.yaml: polling.interval_seconds отсутствует"
+    if not _is_int(reload_interval):
+        return False, "Ошибка в config.yaml: polling.reload_config_seconds отсутствует"
+
+    return True, None
+
+
+def get_polling_intervals(cfg: dict[str, Any]) -> tuple[int, int]:
+    polling = cfg.get("polling", {})
+    interval = polling.get("interval_seconds", DEFAULT_CHECK_INTERVAL_SEC)
+    reload_interval = polling.get("reload_config_seconds", DEFAULT_RELOAD_CONFIG_SEC)
+    return int(interval), int(reload_interval)
+
+
+def build_bot_config(cfg: dict[str, Any], *, repo_root: Path) -> BotConfig:
+    telegram = cfg.get("telegram", {})
+    llm_section = cfg.get("llm", {})
+    cloudflare = llm_section.get("cloudflare", {}) if isinstance(llm_section, dict) else {}
+    interval, _reload = get_polling_intervals(cfg)
+
+    general = GeneralConfig(
+        check_interval=int(interval),
+        max_email_mb=DEFAULT_MAX_EMAIL_MB,
+        max_attachment_mb=DEFAULT_MAX_ATTACHMENT_MB,
+        max_zip_uncompressed_mb=DEFAULT_MAX_ZIP_UNCOMPRESSED_MB,
+        max_extracted_chars=DEFAULT_MAX_EXTRACTED_CHARS,
+        max_extracted_total_chars=DEFAULT_MAX_EXTRACTED_TOTAL_CHARS,
+        admin_chat_id=str(telegram.get("chat_id", "")).strip(),
+    )
+
+    telegram_chat_id = str(telegram.get("chat_id", "")).strip()
+    accounts: list[AccountConfig] = []
+    for account in cfg.get("accounts", []):
+        enabled = bool(account.get("enabled", True))
+        if not enabled:
+            continue
+        email = str(account.get("email", "")).strip()
+        name = str(account.get("name", "")).strip()
+        imap_port = int(account.get("imap_port", 993))
+        use_ssl = imap_port == 993
+        accounts.append(
+            AccountConfig(
+                account_id=email or name or "unknown",
+                login=email or str(account.get("username", "")).strip(),
+                username=str(account.get("username", "")).strip(),
+                name=name,
+                password=str(account.get("password", "")).strip(),
+                host=str(account.get("imap_host", "")).strip(),
+                port=imap_port,
+                use_ssl=use_ssl,
+                telegram_chat_id=telegram_chat_id,
+                enabled=enabled,
+            )
+        )
+
+    keys = KeysConfig(
+        telegram_bot_token=str(telegram.get("bot_token", "")).strip(),
+        cf_account_id=str(cloudflare.get("account_id", "")).strip(),
+        cf_api_token=str(cloudflare.get("api_token", "")).strip(),
+    )
+
+    db_path = repo_root / "data" / "mailbot.sqlite"
+    storage = StorageConfig(db_path=db_path)
+
+    return BotConfig(
+        general=general,
+        accounts=accounts,
+        keys=keys,
+        storage=storage,
+        ingest=IngestConfig(allow_prestart_emails=False),
+        maintenance=MaintenanceConfig(maintenance_mode=False),
+    )
+
+
+def _is_non_empty_str(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_int(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    if isinstance(value, str) and value.isdigit():
+        return int(value) > 0
+    return False

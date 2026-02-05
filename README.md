@@ -22,6 +22,16 @@
 
 ---
 
+# Установка/Запуск (5 шагов)
+
+1. Скопируйте `config.example.yaml` в `config.yaml`.
+2. Заполните все значения в кавычках.
+3. ВСЕ токены/пароли — в кавычках. `null` — без кавычек.
+4. Установите зависимости: `pip install -r requirements.txt`.
+5. Запустите бота: `python -m mailbot_v26.start`.
+
+---
+
 #  Архитектура Premium v26
 
 ```
@@ -280,5 +290,4 @@ http://localhost:8080
 
 * Analytics dashboard
 * Multi-account parallelism (в рамках Hell-mode ограничений)
-
 

@@ -16,8 +16,12 @@ from mailbot_v26.llm.providers import (
     LLMProvider,
 )
 from mailbot_v26.llm.runtime_flags import DEFAULT_RUNTIME_FLAGS_PATH, RuntimeFlagStore
+from mailbot_v26.config_yaml import ConfigError as YamlConfigError
+from mailbot_v26.config_yaml import load_config as load_yaml_config
+from mailbot_v26.config_yaml import validate_config as validate_yaml_config
 
 logger = logging.getLogger(__name__)
+DEFAULT_CLOUDFLARE_MODEL = "@cf/meta/llama-3-8b-instruct"
 
 
 @dataclass(frozen=True)
@@ -27,11 +31,11 @@ class LLMRouterConfig:
     gigachat_enabled: bool = False
     gigachat_api_key: str = ""
     gigachat_base_url: str = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-    gigachat_model: str = "GigaChat"
+    gigachat_model: str | None = "GigaChat"
     cloudflare_enabled: bool = True
     cloudflare_account_id: str = ""
     cloudflare_api_key: str = ""
-    cloudflare_model: str = "@cf/meta/llama-3-8b-instruct"
+    cloudflare_model: str | None = DEFAULT_CLOUDFLARE_MODEL
     runtime_flags_path: Path = DEFAULT_RUNTIME_FLAGS_PATH
     runtime_flags_poll_sec: float = 1.0
     gigachat_max_consecutive_errors: int = 3
@@ -70,11 +74,12 @@ class LLMRouter:
     def _build_providers(self, config: LLMRouterConfig) -> dict[str, LLMProvider]:
         providers: dict[str, LLMProvider] = {}
         if config.cloudflare_enabled:
+            model = config.cloudflare_model or DEFAULT_CLOUDFLARE_MODEL
             providers["cloudflare"] = CloudflareProvider(
                 CloudflareProviderConfig(
                     account_id=config.cloudflare_account_id,
                     api_token=config.cloudflare_api_key,
-                    model=config.cloudflare_model,
+                    model=model,
                 )
             )
         if config.gigachat_enabled or config.gigachat_api_key:
@@ -268,6 +273,10 @@ class LLMRouter:
 
 
 def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
+    yaml_config = _load_yaml_config(base_dir)
+    if yaml_config:
+        return yaml_config
+
     config_path = base_dir / "config.ini"
     keys_path = base_dir / "keys.ini"
     parser = configparser.ConfigParser()
@@ -297,9 +306,7 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         cloudflare_api_key=keys_cloudflare.get(
             "api_key", keys_cloudflare.get("api_token", "")
         ),
-        cloudflare_model=cloudflare_section.get(
-            "model", "@cf/meta/llama-3-8b-instruct"
-        ),
+        cloudflare_model=cloudflare_section.get("model", DEFAULT_CLOUDFLARE_MODEL),
         runtime_flags_path=Path(__file__).resolve().parents[1] / "runtime_flags.json",
         gigachat_max_consecutive_errors=safety_section.getint(
             "gigachat_max_consecutive_errors", fallback=3
@@ -310,6 +317,58 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         gigachat_cooldown_sec=safety_section.getint(
             "gigachat_cooldown_sec", fallback=600
         ),
+    )
+
+
+def _load_yaml_config(base_dir: Path) -> LLMRouterConfig | None:
+    candidates = [
+        base_dir / "config.yaml",
+        base_dir.parent / "config.yaml",
+        base_dir.parent.parent / "config.yaml",
+    ]
+    config_path = next((path for path in candidates if path.exists()), None)
+    if not config_path:
+        return None
+    try:
+        payload = load_yaml_config(config_path)
+    except (FileNotFoundError, YamlConfigError) as exc:
+        raise ValueError(str(exc)) from exc
+    ok, error = validate_yaml_config(payload)
+    if not ok:
+        raise ValueError(error or "Invalid config.yaml")
+
+    llm = payload.get("llm", {}) if isinstance(payload, dict) else {}
+    provider = llm.get("provider", "cloudflare")
+    cloudflare = llm.get("cloudflare", {}) if isinstance(llm, dict) else {}
+    gigachat = llm.get("gigachat", {}) if isinstance(llm, dict) else {}
+
+    cloudflare_model = cloudflare.get("model", DEFAULT_CLOUDFLARE_MODEL)
+    gigachat_model = gigachat.get("model", "GigaChat")
+    if gigachat_model is None:
+        gigachat_model = None
+    if cloudflare_model is None:
+        cloudflare_model = DEFAULT_CLOUDFLARE_MODEL
+
+    primary = str(provider).strip() or "cloudflare"
+    fallback = "cloudflare" if primary != "cloudflare" else "cloudflare"
+
+    return LLMRouterConfig(
+        primary=primary,
+        fallback=fallback,
+        gigachat_enabled=provider == "gigachat",
+        gigachat_api_key=str(gigachat.get("api_token", "")).strip(),
+        gigachat_base_url=str(
+            gigachat.get(
+                "base_url",
+                "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+            )
+        ).strip(),
+        gigachat_model=gigachat_model if gigachat_model != "" else None,
+        cloudflare_enabled=True,
+        cloudflare_account_id=str(cloudflare.get("account_id", "")).strip(),
+        cloudflare_api_key=str(cloudflare.get("api_token", "")).strip(),
+        cloudflare_model=cloudflare_model,
+        runtime_flags_path=Path(__file__).resolve().parents[1] / "runtime_flags.json",
     )
 
 

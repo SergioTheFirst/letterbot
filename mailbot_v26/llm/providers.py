@@ -104,7 +104,7 @@ class CloudflareProvider(LLMProvider):
 class GigaChatProviderConfig:
     api_key: str
     base_url: str = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-    model: str = "GigaChat"
+    model: str | None = "GigaChat"
     timeout_s: int = 20
 
 
@@ -144,7 +144,9 @@ class GigaChatProvider(LLMProvider):
         if not self.config.api_key:
             raise LLMProviderError("GigaChat API key missing")
 
-        payload: dict[str, Any] = {"model": self.config.model, "messages": messages}
+        payload: dict[str, Any] = {"messages": messages}
+        if self.config.model:
+            payload["model"] = self.config.model
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
         if temperature is not None:

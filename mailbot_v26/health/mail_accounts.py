@@ -44,7 +44,10 @@ def check_mail_accounts(
                     ssl=account.use_ssl,
                     timeout=timeout_sec,
                 )
-            client.login(account.login, account.password)
+            client.login(
+                account.username or account.login,
+                account.password,
+            )
             client.select_folder("INBOX")
             results.append(
                 MailAccountHealth(
@@ -60,7 +63,7 @@ def check_mail_accounts(
             )
         except Exception as exc:
             error_details = _format_exception(exc)
-            masked_login = _mask_login(account.login)
+            masked_login = _mask_login(account.username or account.login)
             logger.error(
                 "IMAP login failed for %s: %s (host=%s port=%s use_ssl=%s login=%s)",
                 account.account_id,

@@ -584,6 +584,10 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
     if not telegram_text or not telegram_text.strip():
         raise RuntimeError("telegram payload empty")
 
+    account_label = account.name or account.login or account.account_id
+    if account_label:
+        telegram_text = f"[{account_label}] {telegram_text}"
+
     payload = TelegramPayload(
         html_text=telegram_safe(telegram_text.strip()),
         priority="🔵",
