@@ -50,11 +50,13 @@ Done:
 - Added repo-scoped Codex skills and index under .codex/skills.
 - 2026-02-XX: web UI LAN allowlist, config.yaml web_ui settings, CIDR gate, and docs/tests updates.
 - Added GitHub Actions CI workflow for tests and Windows one-folder build artifacts.
+- 2026-02-10: added ci_local.bat as offline-first local CI runner (pip runtime+build deps, compileall, pytest, one-folder build, dist artifact checks).
 Now:
-- None.
+- Local CI runner documented and wired as root Windows pre-release entrypoint.
 Next:
-- UNCONFIRMED: optional one-file build or CI follow-up.
-- UNCONFIRMED: optional signing for Windows release artifacts.
+- UNCONFIRMED: optional GitHub Actions (private-only).
+- UNCONFIRMED: waitress prod_server flag.
+- UNCONFIRMED: doctor export.
 Open questions (UNCONFIRMED if needed):
 - None.
 Working set (files / tables / tests):
