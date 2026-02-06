@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- Added One-click Doctor export in Web UI (/doctor + diagnostics.zip with redaction and safe payload).
 - Added behavior engine module and delivery decision policy (IMMEDIATE/BATCH/DEFER/SILENT).
 - Added delivery policy config + feature flags (circadian, attention debt, surprise budget shadow).
 - Extended events_v1 contract and emissions (delivery policy, attention debt, surprise).
@@ -52,11 +53,11 @@ Done:
 - Added GitHub Actions CI workflow for tests and Windows one-folder build artifacts.
 - 2026-02-10: added ci_local.bat as offline-first local CI runner (pip runtime+build deps, compileall, pytest, one-folder build, dist artifact checks).
 Now:
-- Local CI runner documented and wired as root Windows pre-release entrypoint.
+- One-click Doctor diagnostics export implemented and under validation (compileall/pytest).
 Next:
+- Optional polish: diagnostics UX (retention metadata, operator hints, download ergonomics).
 - UNCONFIRMED: optional GitHub Actions (private-only).
 - UNCONFIRMED: waitress prod_server flag.
-- UNCONFIRMED: doctor export.
 Open questions (UNCONFIRMED if needed):
 - None.
 Working set (files / tables / tests):

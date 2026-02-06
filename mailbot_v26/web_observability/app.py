@@ -60,6 +60,8 @@ from mailbot_v26.observability.decision_trace_v1 import (
 )
 from mailbot_v26.observability.decision_trace_view import summaries_as_payload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.version import __version__
+from mailbot_v26.web_observability.doctor_export import build_diagnostics_zip
 
 logger = logging.getLogger(__name__)
 
@@ -1820,6 +1822,11 @@ def create_app(
     allow_pii: bool | None = None,
     api_token: str = "",
     allow_cidrs: Iterable[str] | None = None,
+    config_path: Path | None = None,
+    log_path: Path | None = None,
+    dist_root: Path | None = None,
+    web_ui_bind: str = "127.0.0.1",
+    web_ui_port: int = 8080,
 ) -> Flask:
     app = Flask(
         __name__,
@@ -1846,6 +1853,14 @@ def create_app(
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     allowed_networks = _parse_cidrs(allow_cidrs or [])
     app.config["WEB_UI_ALLOWED_CIDRS"] = allowed_networks
+    app.config["WEB_UI_STARTED_AT"] = time.monotonic()
+    app.config["DOCTOR_EXPORT_LAST_TS"] = {}
+    app.config["DOCTOR_EXPORT_COOLDOWN_SECONDS"] = 60
+    app.config["DOCTOR_CONFIG_PATH"] = Path(config_path) if config_path else Path("config.yaml")
+    app.config["DOCTOR_LOG_PATH"] = Path(log_path) if log_path else Path("mailbot.log")
+    app.config["DOCTOR_DIST_ROOT"] = Path(dist_root) if dist_root else Path.cwd()
+    app.config["WEB_UI_BIND"] = str(web_ui_bind)
+    app.config["WEB_UI_PORT"] = int(web_ui_port)
     app.config["ANALYTICS_FACTORY"] = lambda: KnowledgeAnalytics(
         app.config["DB_PATH"], read_only=True
     )
@@ -1888,6 +1903,7 @@ def create_app(
             provided = request.form.get("password", "")
             if hmac.compare_digest(str(provided), str(app.config["WEB_PASSWORD"])):
                 session["authenticated"] = True
+                session["auth_user"] = request.remote_addr or "local"
                 session.permanent = False
                 next_path = request.args.get("next")
                 return redirect(next_path or url_for("index"))
@@ -1900,6 +1916,65 @@ def create_app(
             hide_nav=True,
             error=error,
         )
+
+    @app.route("/doctor", methods=["GET"])
+    def doctor() -> str:
+        dist_root = Path(app.config["DOCTOR_DIST_ROOT"])
+        manifest_path = dist_root / "manifest.sha256.json"
+        if not manifest_path.exists():
+            manifest_status = "NO_MANIFEST"
+        else:
+            from mailbot_v26.integrity import verify_manifest
+
+            try:
+                ok, _changed_files = verify_manifest(dist_root, manifest_path)
+            except Exception:
+                ok = False
+            manifest_status = "OK" if ok else "MODIFIED"
+        return _render_template(
+            app,
+            "doctor.html",
+            title=app.config["APP_TITLE"],
+            page_title="One-click Doctor",
+            app_version=__version__,
+            manifest_status=manifest_status,
+            log_path=str(app.config["DOCTOR_LOG_PATH"]),
+        )
+
+    @app.route("/doctor/export", methods=["POST"])
+    def doctor_export() -> Response:
+        user_key = str(session.get("auth_user") or request.remote_addr or "local")
+        now_monotonic = time.monotonic()
+        last_by_user = app.config["DOCTOR_EXPORT_LAST_TS"]
+        assert isinstance(last_by_user, dict)
+        cooldown = int(app.config.get("DOCTOR_EXPORT_COOLDOWN_SECONDS", 60))
+        previous = float(last_by_user.get(user_key, 0.0) or 0.0)
+        if previous and now_monotonic - previous < cooldown:
+            wait_seconds = max(1, int(cooldown - (now_monotonic - previous)))
+            return Response(
+                f"Too many exports. Retry in {wait_seconds}s.",
+                status=429,
+            )
+        last_by_user[user_key] = now_monotonic
+        app.config["DOCTOR_EXPORT_LAST_TS"] = last_by_user
+
+        payload = build_diagnostics_zip(
+            Path(app.config["DOCTOR_CONFIG_PATH"]),
+            Path(app.config["DOCTOR_LOG_PATH"]),
+            Path(app.config["DB_PATH"]),
+            Path(app.config["DOCTOR_DIST_ROOT"]),
+            web_ui_bind=str(app.config["WEB_UI_BIND"]),
+            web_ui_port=int(app.config["WEB_UI_PORT"]),
+            uptime_seconds=int(now_monotonic - float(app.config["WEB_UI_STARTED_AT"])),
+        )
+        headers = {
+            "Content-Type": "application/zip",
+            "Content-Disposition": 'attachment; filename="diagnostics.zip"',
+            "Cache-Control": "no-store",
+        }
+        if USING_FLASK_STUB:
+            return Response(payload, status_code=200, headers=headers)
+        return Response(payload, status=200, headers=headers)
 
     @app.route("/")
     def index():
@@ -4144,6 +4219,7 @@ def main() -> None:
         storage = load_storage_config(config_dir)
         db_path = storage.db_path
 
+    project_root = Path(__file__).resolve().parents[2]
     app = create_app(
         db_path=db_path,
         password=password,
@@ -4151,6 +4227,11 @@ def main() -> None:
         attention_cost_per_hour=attention_cost,
         api_token=web_ui.api_token,
         allow_cidrs=web_ui.allow_cidrs,
+        config_path=config_path,
+        log_path=project_root / "mailbot.log",
+        dist_root=project_root,
+        web_ui_bind=bind_address,
+        web_ui_port=int(port),
     )
     app.run(
         host=str(bind_address),
