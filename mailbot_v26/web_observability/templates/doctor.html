@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <h2>Diagnostics</h2>
+  <dl>
+    <dt>Version</dt>
+    <dd>{{ app_version }}</dd>
+    <dt>Manifest status</dt>
+    <dd>{{ manifest_status }}</dd>
+    <dt>Log file</dt>
+    <dd>{{ log_path }}</dd>
+  </dl>
+  <form method="post" action="{{ url_for('doctor_export') }}">
+    <button type="submit">Export diagnostics.zip</button>
+  </form>
+</section>
+{% endblock %}
