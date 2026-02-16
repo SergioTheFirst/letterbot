@@ -12,6 +12,7 @@
     <dd>{{ log_path }}</dd>
   </dl>
   <form method="post" action="{{ url_for('doctor_export') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit">Export diagnostics.zip</button>
   </form>
 </section>

@@ -154,6 +154,12 @@ def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str | None]:
         allow_lan = web_ui.get("allow_lan", False)
         if not isinstance(allow_lan, bool):
             return False, "Ошибка в config.yaml: web_ui.allow_lan должен быть true/false"
+        prod_server = web_ui.get("prod_server", False)
+        if not isinstance(prod_server, bool):
+            return False, "Ошибка в config.yaml: web_ui.prod_server должен быть true/false"
+        require_strong_password_on_lan = web_ui.get("require_strong_password_on_lan", True)
+        if not isinstance(require_strong_password_on_lan, bool):
+            return False, "Ошибка в config.yaml: web_ui.require_strong_password_on_lan должен быть true/false"
         allow_cidrs = web_ui.get("allow_cidrs", [])
         if allow_cidrs is None:
             allow_cidrs = []
@@ -172,6 +178,14 @@ def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str | None]:
                 )
             if not allow_cidrs:
                 return False, "Ошибка в config.yaml: web_ui.allow_cidrs должен быть непустым при allow_lan=true"
+            if require_strong_password_on_lan:
+                if len(str(password)) < 10:
+                    return False, "Ошибка в config.yaml: web_ui.password должен быть не короче 10 символов для LAN"
+                if _is_default_weak_web_password(str(password)):
+                    return (
+                        False,
+                        "Ошибка в config.yaml: web_ui.password не должен быть значением по умолчанию для LAN",
+                    )
 
     return True, None
 
@@ -284,3 +298,17 @@ def _is_valid_cidr(cidr: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _is_default_weak_web_password(password: str) -> bool:
+    normalized = password.strip().lower()
+    blocked = {
+        "change_me",
+        "changeme",
+        "password",
+        "1234",
+        "12345",
+        "123456",
+        "qwerty",
+    }
+    return normalized in blocked

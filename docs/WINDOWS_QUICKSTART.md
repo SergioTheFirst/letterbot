@@ -11,3 +11,24 @@
 - На целевой машине: `.venv\Scripts\python -m pip install --no-index --find-links wheelhouse -r requirements.txt`
 
 > LAN-режим открывает доступ в вашей сети, используйте сильный пароль.
+
+
+## LAN mode (safe)
+```yaml
+web_ui:
+  enabled: true
+  bind: "0.0.0.0"
+  port: 8787
+  allow_lan: true
+  allow_cidrs:
+    - "192.168.1.0/24"
+  password: "use-10-plus-chars-here"
+  prod_server: true
+  require_strong_password_on_lan: true
+```
+
+Выбирайте CIDR только для своей подсети (обычно `192.168.x.0/24` или `10.x.x.0/24`), а не широкие диапазоны на весь офис/дом.
+
+При `require_strong_password_on_lan: true` запуск блокируется для короткого пароля и дефолтов вроде `CHANGE_ME`/`password`, чтобы случайное пробрасывание порта не оставило UI с известным паролем.
+
+`prod_server: true` включает waitress для LAN/production, а встроенный Flask-сервер оставляйте только для localhost и локальной отладки.

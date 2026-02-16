@@ -12,6 +12,7 @@ import logging
 import math
 import os
 import re
+import secrets
 import sqlite3
 import sys
 import time
@@ -106,6 +107,8 @@ class WebUISettings:
     api_token: str
     allow_lan: bool
     allow_cidrs: list[str]
+    prod_server: bool
+    require_strong_password_on_lan: bool
 
 
 class _TTLCache:
@@ -886,6 +889,8 @@ def _load_web_ui_settings(config_path: Path) -> WebUISettings:
     api_token = str(web_ui.get("api_token", "") or "").strip()
     allow_lan = bool(web_ui.get("allow_lan", False))
     allow_cidrs = web_ui.get("allow_cidrs") or []
+    prod_server = bool(web_ui.get("prod_server", False))
+    require_strong_password_on_lan = bool(web_ui.get("require_strong_password_on_lan", True))
     if not isinstance(allow_cidrs, list):
         allow_cidrs = []
     return WebUISettings(
@@ -896,6 +901,8 @@ def _load_web_ui_settings(config_path: Path) -> WebUISettings:
         api_token=api_token,
         allow_lan=allow_lan,
         allow_cidrs=[str(item) for item in allow_cidrs],
+        prod_server=prod_server,
+        require_strong_password_on_lan=require_strong_password_on_lan,
     )
 
 
@@ -1668,6 +1675,44 @@ def _decision_trace_histogram(db_path: Path, *, limit: int = 1000) -> tuple[list
     return histogram, updated
 
 
+def _get_or_create_csrf_token() -> str:
+    token = session.get("csrf_token")
+    if isinstance(token, str) and token:
+        return token
+    token = secrets.token_urlsafe(32)
+    session["csrf_token"] = token
+    return token
+
+
+def _validate_csrf_token() -> bool:
+    expected = session.get("csrf_token")
+    provided = request.form.get("csrf_token", "")
+    if not isinstance(expected, str) or not expected:
+        return False
+    if not isinstance(provided, str) or not provided:
+        return False
+    return hmac.compare_digest(provided, expected)
+
+
+
+
+
+def _text_response(body: str, status_code: int) -> Response:
+    if USING_FLASK_STUB:
+        return Response(body, status_code=status_code)
+    return Response(body, status=status_code)
+
+
+def _request_remote_addr() -> str | None:
+    try:
+        remote_addr = request.remote_addr
+    except Exception:
+        return None
+    if remote_addr is None:
+        return None
+    return str(remote_addr)
+
+
 def _ensure_authenticated() -> bool:
     return bool(session.get("authenticated"))
 
@@ -1869,10 +1914,7 @@ def create_app(
 
     @app.before_request
     def _require_login():
-        try:
-            remote_addr = request.remote_addr
-        except Exception:
-            remote_addr = None
+        remote_addr = _request_remote_addr()
         if not _ip_allowed(remote_addr, app.config.get("WEB_UI_ALLOWED_CIDRS", [])):
             return Response("Forbidden", status=403)
         open_paths = {"login", "static"}
@@ -1893,7 +1935,11 @@ def create_app(
                 return Response("Forbidden", status=403)
             return None
         if request.endpoint in open_paths or request.path.startswith("/static"):
+            if request.method == "POST" and not _validate_csrf_token():
+                return _text_response("Forbidden: invalid CSRF token", 403)
             return None
+        if request.method == "POST" and not _validate_csrf_token():
+            return _text_response("Forbidden: invalid CSRF token", 403)
         if not _ensure_authenticated():
             return redirect(url_for("login", next=request.path))
         return None
@@ -1905,7 +1951,7 @@ def create_app(
             provided = request.form.get("password", "")
             if hmac.compare_digest(str(provided), str(app.config["WEB_PASSWORD"])):
                 session["authenticated"] = True
-                session["auth_user"] = request.remote_addr or "local"
+                session["auth_user"] = _request_remote_addr() or "local"
                 session.permanent = False
                 next_path = request.args.get("next")
                 return redirect(next_path or url_for("index"))
@@ -1917,6 +1963,7 @@ def create_app(
             page_title="Login",
             hide_nav=True,
             error=error,
+            csrf_token=_get_or_create_csrf_token(),
         )
 
     @app.route("/doctor", methods=["GET"])
@@ -1941,11 +1988,12 @@ def create_app(
             app_version=__version__,
             manifest_status=manifest_status,
             log_path=str(app.config["DOCTOR_LOG_PATH"]),
+            csrf_token=_get_or_create_csrf_token(),
         )
 
     @app.route("/doctor/export", methods=["POST"])
     def doctor_export() -> Response:
-        user_key = str(session.get("auth_user") or request.remote_addr or "local")
+        user_key = str(session.get("auth_user") or _request_remote_addr() or "local")
         now_monotonic = time.monotonic()
         last_by_user = app.config["DOCTOR_EXPORT_LAST_TS"]
         assert isinstance(last_by_user, dict)
@@ -4204,6 +4252,10 @@ def main() -> None:
             raise RuntimeError("web_ui.allow_lan=false: bind outside loopback refused")
         if not web_ui.allow_cidrs:
             raise RuntimeError("web_ui.allow_cidrs must be set when allow_lan=true")
+        if not web_ui.prod_server:
+            raise RuntimeError(
+                "web_ui.prod_server=false: bind outside loopback requires waitress server (set web_ui.prod_server=true)"
+            )
     if web_ui.allow_lan:
         logger.info(
             "WEB_UI_LAN_ENABLED bind=%s port=%s allow_cidrs=%s",
@@ -4211,6 +4263,9 @@ def main() -> None:
             port,
             web_ui.allow_cidrs,
         )
+
+    if web_ui.prod_server:
+        require_runtime_for("web_ui_prod")
 
     config_dir = args.config if args.config else CONFIG_DIR
     secret_key, attention_cost = _load_web_ui_secrets(config_dir)
@@ -4236,6 +4291,12 @@ def main() -> None:
         web_ui_bind=bind_address,
         web_ui_port=int(port),
     )
+    if web_ui.prod_server:
+        from waitress import serve
+
+        serve(app, host=str(bind_address), port=int(port))
+        return
+
     app.run(
         host=str(bind_address),
         port=int(port),

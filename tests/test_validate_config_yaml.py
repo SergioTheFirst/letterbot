@@ -33,6 +33,8 @@ def _base_config() -> dict:
             "api_token": "token",
             "allow_lan": False,
             "allow_cidrs": ["192.168.0.0/16"],
+            "prod_server": False,
+            "require_strong_password_on_lan": True,
         },
     }
 
@@ -102,3 +104,22 @@ def test_validate_config_lan_requires_allowlist() -> None:
 
     assert not ok
     assert error == "Ошибка в config.yaml: web_ui.allow_cidrs должен быть непустым при allow_lan=true"
+
+
+def test_validate_config_lan_password_policy() -> None:
+    config = _base_config()
+    config["web_ui"]["bind"] = "0.0.0.0"
+    config["web_ui"]["allow_lan"] = True
+    config["web_ui"]["allow_cidrs"] = ["192.168.0.0/16"]
+    config["web_ui"]["password"] = "CHANGE_ME"
+
+    ok, error = validate_config(config)
+
+    assert not ok
+    assert error == "Ошибка в config.yaml: web_ui.password не должен быть значением по умолчанию для LAN"
+
+    config["web_ui"]["password"] = "short"
+    ok, error = validate_config(config)
+
+    assert not ok
+    assert error == "Ошибка в config.yaml: web_ui.password должен быть не короче 10 символов для LAN"

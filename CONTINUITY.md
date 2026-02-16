@@ -17,6 +17,9 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-16: web UI CSRF tokens enforced for POST login/doctor export; templates updated.
+- 2026-02-16: web_ui config extended with prod_server + require_strong_password_on_lan and LAN password validation.
+- 2026-02-16: prod_server waitress dependency gate added for web UI with clean-failure path and tests/docs updates.
 - Added One-click Doctor export in Web UI (/doctor + diagnostics.zip with redaction and safe payload).
 - Added behavior engine module and delivery decision policy (IMMEDIATE/BATCH/DEFER/SILENT).
 - Added delivery policy config + feature flags (circadian, attention debt, surprise budget shadow).
@@ -55,11 +58,10 @@ Done:
 - 2026-02-16: added production-readiness docs (stress audit for 1000 installs, production gates, Windows release checklist) under docs/.
 - 2026-02-16: dependency guard added (importlib.find_spec), yaml/imapclient lazy imports, clean-failure entrypoint handling, and missing-deps tests.
 Now:
-- Missing-deps path is guarded via unified dependency gate; entrypoints return one clean diagnostic instead of import-trace cascades.
+- Web UI premium LAN hardening implemented (CSRF + LAN password gate + prod_server toggle) and validated with targeted tests.
 Next:
+- Optional: migrate remaining legacy web tests to include CSRF token on login POST paths.
 - Optional polish: diagnostics UX (retention metadata, operator hints, download ergonomics).
-- UNCONFIRMED: optional GitHub Actions (private-only).
-- UNCONFIRMED: waitress prod_server flag.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

@@ -11,3 +11,9 @@
 - Двойной клик `ci_local.bat`.
 - Скрипт сам прогонит compileall, pytest и one-folder build.
 - Ожидаемый итог: `LOCAL CI OK`.
+
+
+## LAN mode (safe)
+- Set `web_ui.bind` to your LAN interface and keep `web_ui.allow_cidrs` limited to your subnet.
+- Use `web_ui.password` with 10+ characters; defaults like `CHANGE_ME` are rejected when LAN is enabled.
+- Set `web_ui.prod_server=true` to run Web UI on waitress; Flask built-in is for localhost development only.
