@@ -1,6 +1,8 @@
 import mailbot_v26.start as start
 from email.message import EmailMessage
 
+import pytest
+
 from mailbot_v26.bot_core import pipeline as core_pipeline
 from mailbot_v26.pipeline.processor import Attachment
 
@@ -21,6 +23,7 @@ def test_zip_like_attachment_not_leaking_pk():
 
 
 def _build_minimal_xlsx():
+    pytest.importorskip("openpyxl")
     import io
 
     from openpyxl import Workbook

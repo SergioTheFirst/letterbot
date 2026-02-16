@@ -84,7 +84,7 @@ def test_fetch_skips_messages_before_start(monkeypatch, tmp_path: Path, account:
         }
     )
 
-    monkeypatch.setattr(imap_client, "IMAPClient", lambda *args, **kwargs: fake_client)
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(account, state, start_time=start_time)
@@ -109,7 +109,7 @@ def test_baseline_updates_when_only_old(monkeypatch, tmp_path: Path, account: Ac
         }
     )
 
-    monkeypatch.setattr(imap_client, "IMAPClient", lambda *args, **kwargs: fake_client)
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(account, state, start_time=start_time)
@@ -135,7 +135,7 @@ def test_steady_state_filters_prestart_emails(
         }
     )
 
-    monkeypatch.setattr(imap_client, "IMAPClient", lambda *args, **kwargs: fake_client)
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(account, state, start_time=start_time)
@@ -172,7 +172,7 @@ def test_cursor_advances_when_all_skipped(monkeypatch, tmp_path: Path, account: 
         }
     )
 
-    monkeypatch.setattr(imap_client, "IMAPClient", lambda *args, **kwargs: fake_client)
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
     client = ResilientIMAP(account, state, start_time=start_time)
     messages = client.fetch_new_messages()
 
@@ -198,7 +198,7 @@ def test_internaldate_timezone_normalization(monkeypatch, tmp_path: Path, accoun
         }
     )
 
-    monkeypatch.setattr(imap_client, "IMAPClient", lambda *args, **kwargs: fake_client)
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(account, state, start_time=start_time)

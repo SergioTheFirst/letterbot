@@ -60,10 +60,12 @@ Done:
 - 2026-02-16: migrated legacy web tests to shared CSRF helper (browser-realistic login + doctor export token flow).
 - 2026-02-16: added read-before-write repo skill and indexed it in .codex/skills/README.md.
 - 2026-02-16: added support config block, authenticated /support web page, and optional rate-limited TG digest PS.
+- 2026-02-16: release-core QA: IMAP tests patch unified on _imap_client_cls seam; polling/main entrypoint tests now stub dependency guard for deterministic no-yaml test runs.
+- 2026-02-16: attachment extraction XLSX policy set to OPTIONAL in tests (openpyxl-specific assertion guarded with pytest.importorskip).
 Now:
-- Support/donate delivery is integrated across config validation, web UI, and daily digest scheduler.
+- Release-core QA stabilization for deterministic tests (openpyxl optional path, IMAP seam, YAML guard in unit tests) is completed and validated on targeted suite.
 Next:
-- Monitor support UX copy and keep methods/runtime state deterministic without pipeline order changes.
+- Re-run full local CI (ci_local.bat on Windows) to confirm end-to-end packaging and dependency installation path.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
@@ -86,6 +88,10 @@ Working set (files / tables / tests):
 - mailbot_v26/tools/capture_web_screenshot.py
 - mailbot_v26/tests/test_web_archive_forensics.py
 - mailbot_v26/tests/test_web_cockpit_home.py
+- mailbot_v26/tests/test_attachment_extraction.py
+- mailbot_v26/tests/test_imap_client.py
+- mailbot_v26/tests/test_main_entrypoint.py
+- mailbot_v26/tests/test_polling_loop.py
 - mailbot_v26/pipeline/daily_digest.py
 - mailbot_v26/pipeline/digest_scheduler.py
 - mailbot_v26/feedback.py
