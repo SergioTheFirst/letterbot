@@ -5,6 +5,7 @@ import sqlite3
 
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _app(tmp_path: Path):
@@ -33,7 +34,7 @@ def test_web_pages_avoid_empty_state_phrases(tmp_path: Path) -> None:
         "нет " + "данных",
     ]
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         for path in [
             "/",
             "/latency",

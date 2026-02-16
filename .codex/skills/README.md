@@ -4,3 +4,4 @@
 - tg-no-duplicates: Use when changing Telegram rendering or formatting to enforce sentence-level and line-level dedup rules.
 - windows-launcher-standard: Use when editing Windows .bat or run scripts to enforce launcher conventions and config bootstrap UX.
 - windows-release-onefolder: Use when changing Windows build/packaging/integrity to enforce one-folder release layout and manifest rules.
+- read-before-write: Mandatory pre-edit protocol for this repo (read AGENTS/CONSTITUTION/CONTINUITY, publish READ RECEIPTS, run at least one verification command).

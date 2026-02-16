@@ -57,11 +57,12 @@ Done:
 - 2026-02-10: added ci_local.bat as offline-first local CI runner (pip runtime+build deps, compileall, pytest, one-folder build, dist artifact checks).
 - 2026-02-16: added production-readiness docs (stress audit for 1000 installs, production gates, Windows release checklist) under docs/.
 - 2026-02-16: dependency guard added (importlib.find_spec), yaml/imapclient lazy imports, clean-failure entrypoint handling, and missing-deps tests.
+- 2026-02-16: migrated legacy web tests to shared CSRF helper (browser-realistic login + doctor export token flow).
+- 2026-02-16: added read-before-write repo skill and indexed it in .codex/skills/README.md.
 Now:
-- Web UI premium LAN hardening implemented (CSRF + LAN password gate + prod_server toggle) and validated with targeted tests.
+- CSRF helper migration completed for web tests; targeted web CSRF suites are green.
 Next:
-- Optional: migrate remaining legacy web tests to include CSRF token on login POST paths.
-- Optional polish: diagnostics UX (retention metadata, operator hints, download ergonomics).
+- Optional: run full pytest sweep and triage unrelated failures outside CSRF scope.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

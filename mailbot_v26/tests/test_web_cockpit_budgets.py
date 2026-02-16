@@ -4,6 +4,7 @@ from pathlib import Path
 
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _seed_budgets(db_path: Path, now: datetime) -> None:
@@ -77,7 +78,7 @@ def test_cockpit_budget_and_lane_endpoints(tmp_path: Path) -> None:
 
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
 
         budgets_resp = client.get(
             "/api/v1/cockpit/budgets",

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 class FakeAnalytics:
@@ -69,7 +70,7 @@ def test_cockpit_mode_gating(tmp_path: Path) -> None:
     analytics = FakeAnalytics()
     app.config["ANALYTICS_FACTORY"] = lambda: analytics
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
 
         basic_resp = client.get("/")
         assert basic_resp.status_code == 200
@@ -85,7 +86,7 @@ def test_cockpit_mode_gating(tmp_path: Path) -> None:
 def test_cockpit_pii_default_and_override(tmp_path: Path) -> None:
     app = _build_app_with_email(tmp_path, allow_pii=True)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         masked = client.get("/?account_emails=primary@example.com")
         masked_body = masked.get_data(as_text=True)
         assert "alice@example.com" not in masked_body

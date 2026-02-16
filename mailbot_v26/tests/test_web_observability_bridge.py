@@ -7,6 +7,7 @@ from mailbot_v26.web_observability.app import create_app
 from datetime import datetime, timezone
 from urllib.parse import quote
 import sqlite3
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 FORBIDDEN = [
@@ -30,8 +31,7 @@ def test_cockpit_requires_auth_and_renders_blocks(tmp_path: Path) -> None:
         assert response.status_code == 302
         assert "/login" in response.headers.get("Location", "")
 
-        login_resp = client.post("/login", data={"password": "pw"})
-        assert login_resp.status_code in (302, 303)
+        login_with_csrf(client, "pw")
 
         page = client.get("/")
         assert page.status_code == 200
@@ -46,7 +46,7 @@ def test_cockpit_requires_auth_and_renders_blocks(tmp_path: Path) -> None:
 def test_dashboard_vars_precedence(tmp_path: Path) -> None:
     app = _build_app(tmp_path)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
 
         page = client.get("/?window_days=30")
         text = page.get_data(as_text=True)
@@ -64,7 +64,7 @@ def test_dashboard_vars_precedence(tmp_path: Path) -> None:
 def test_share_link_button_present(tmp_path: Path) -> None:
     app = _build_app(tmp_path)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/")
         body = page.get_data(as_text=True)
         assert "copy-share-link" in body
@@ -92,7 +92,7 @@ def test_lane_pills_render_and_preserve_vars(tmp_path: Path) -> None:
     _insert_email_samples(db_path)
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/?account_emails=acct@example.com&window_days=7&limit=10")
         body = page.get_data(as_text=True)
         assert "lane-pills" in body
@@ -108,7 +108,7 @@ def test_lane_selection_filters_activity(tmp_path: Path) -> None:
     _insert_email_samples(db_path)
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/?account_emails=acct@example.com&window_days=7&lane=critical")
         body = page.get_data(as_text=True)
         assert "c…@acme.com" in body
@@ -124,7 +124,7 @@ def test_share_link_includes_lane_and_vars(tmp_path: Path) -> None:
     _insert_email_samples(db_path)
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get(
             "/?account_emails=acct@example.com&window_days=30&limit=25&lane=critical"
         )
