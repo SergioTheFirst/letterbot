@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-16: added doctor --print-lan-url, startup LAN/local URL logging (no 0.0.0.0 browsing URL), and Windows LAN/firewall docs + tests.
 - 2026-02-16: web UI CSRF tokens enforced for POST login/doctor export; templates updated.
 - 2026-02-16: web_ui config extended with prod_server + require_strong_password_on_lan and LAN password validation.
 - 2026-02-16: prod_server waitress dependency gate added for web UI with clean-failure path and tests/docs updates.
@@ -63,12 +64,17 @@ Done:
 - 2026-02-16: release-core QA: IMAP tests patch unified on _imap_client_cls seam; polling/main entrypoint tests now stub dependency guard for deterministic no-yaml test runs.
 - 2026-02-16: attachment extraction XLSX policy set to OPTIONAL in tests (openpyxl-specific assertion guarded with pytest.importorskip).
 Now:
-- Release-core QA stabilization for deterministic tests (openpyxl optional path, IMAP seam, YAML guard in unit tests) is completed and validated on targeted suite.
+- LAN access UX polish is implemented with deterministic doctor URL output and startup LAN URL logging.
 Next:
-- Re-run full local CI (ci_local.bat on Windows) to confirm end-to-end packaging and dependency installation path.
+- Re-run Windows local CI (ci_local.bat) to confirm packaged runtime behavior and docs alignment.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/doctor.py
+- mailbot_v26/tools/networking.py
+- tests/test_doctor_print_lan_url.py
+- RUNNING.md
+- docs/WINDOWS_QUICKSTART.md
 - mailbot_v26/behavior/attention_engine.py
 - mailbot_v26/behavior/deadlock_detector.py
 - mailbot_v26/behavior/silence_detector.py
