@@ -34,6 +34,7 @@ from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.config_loader import AccountConfig, BotConfig
 from mailbot_v26.config_yaml import (
     ConfigError as YamlConfigError,
+    SCHEMA_NEWER_MESSAGE,
     build_bot_config,
     get_polling_intervals,
     load_config as load_yaml_config,
@@ -176,6 +177,11 @@ def _load_yaml_config_or_exit(config_path: Path) -> tuple[dict[str, object], Bot
         message = error or "Invalid config.yaml"
         logger.error("config_invalid %s", message)
         print(f"[ERROR] {message}")
+        if message == SCHEMA_NEWER_MESSAGE:
+            if bool(getattr(sys, "frozen", False)):
+                print("[ERROR] Обновление: распакуйте новый ZIP в новую папку.")
+                print("[ERROR] Обновление: скопируйте старый config.yaml и запустите run.bat.")
+            sys.exit(2)
         sys.exit(1)
     config = build_bot_config(raw_config, repo_root=REPO_ROOT)
     return raw_config, config

@@ -4,6 +4,13 @@ import configparser
 from pathlib import Path
 
 from mailbot_v26.config_loader import ACCOUNT_ID_PATTERN, CONFIG_DIR
+from mailbot_v26.config_yaml import (
+    SUPPORTED_SCHEMA_VERSION,
+    ConfigError as YamlConfigError,
+    load_config as load_yaml_config,
+    validate_config_with_hints as validate_yaml_config_with_hints,
+    get_schema_version,
+)
 
 
 CONFIG_TEMPLATE = """[general]
@@ -295,14 +302,46 @@ def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
     return not errors, errors
 
 
-def run_validate_config(base_dir: Path = CONFIG_DIR) -> int:
-    ok, errors = validate_config(base_dir)
-    print("validate-config: configuration report")
-    if ok:
-        print("STATUS: OK")
-        return 0
+def _resolve_yaml_config_path(base_dir: Path = CONFIG_DIR) -> Path:
+    candidates = [
+        base_dir / "config.yaml",
+        base_dir.parent / "config.yaml",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
-    print("STATUS: FAIL")
-    for error in errors:
-        print(f"ERROR: {error}")
-    return 1
+
+def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False) -> int:
+    if not compat:
+        ok, errors = validate_config(base_dir)
+        print("validate-config: configuration report")
+        if ok:
+            print("STATUS: OK")
+            return 0
+
+        print("STATUS: FAIL")
+        for error in errors:
+            print(f"ERROR: {error}")
+        return 1
+
+    config_path = _resolve_yaml_config_path(base_dir)
+    try:
+        raw_config = load_yaml_config(config_path)
+    except (FileNotFoundError, YamlConfigError, OSError) as exc:
+        print(f"[ERROR] {exc}")
+        return 2
+
+    schema_version = get_schema_version(raw_config)
+    ok, error, hints = validate_yaml_config_with_hints(raw_config)
+
+    print(f"Supported schema_version: {SUPPORTED_SCHEMA_VERSION}")
+    print(f"Config schema_version: {schema_version}")
+    print(f"Status: {'OK' if ok else 'FAIL'}")
+    if error:
+        print(f"Error: {error}")
+    for hint in hints:
+        print(f"Hint: {hint}")
+
+    return 0 if ok else 2

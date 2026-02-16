@@ -8,6 +8,8 @@
 # Исключение: null пишется БЕЗ кавычек.
 # ======================================
 
+schema_version: 1
+
 telegram:
   bot_token: "PASTE_YOUR_TELEGRAM_BOT_TOKEN_HERE"   # пример: "123456789:AAAbbbCCCdddEEE"
   chat_id: "PASTE_YOUR_TELEGRAM_CHAT_ID_HERE"       # пример: "123456789"

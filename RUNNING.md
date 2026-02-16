@@ -36,3 +36,9 @@ web_ui:
 - Настройте `support.methods` в `config.yaml` (карта/СБП/ЮMoney).
 - После логина откройте `http://127.0.0.1:8787/support` (или ваш порт Web UI).
 - Опциональный P.S. в TG дайджесте включается через `support.telegram` и ограничен `frequency_days`.
+
+## Upgrading
+- Follow `docs/UPGRADE.md` for the safe new-folder upgrade flow.
+- Keep your old `config.yaml` and copy it into the new folder.
+- Run `python -m mailbot_v26 validate-config --compat` before normal start.
+
