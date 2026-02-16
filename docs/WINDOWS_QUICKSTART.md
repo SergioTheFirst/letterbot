@@ -39,3 +39,7 @@ web_ui:
 `netsh advfirewall firewall add rule name="MailBot Web UI 8787" protocol=TCP dir=in localport=8787 action=allow`
 
 `prod_server: true` включает waitress для LAN/production, а встроенный Flask-сервер оставляйте только для localhost и локальной отладки.
+
+
+## Windows SmartScreen (первый запуск)
+Если при запуске `MailBot.exe` видно «Windows protected your PC», это стандартное предупреждение для неподписанных файлов. Нажмите `More info` → `Run anyway` (или «Подробнее» → «Выполнить в любом случае»).

@@ -63,13 +63,19 @@ Done:
 - 2026-02-16: added support config block, authenticated /support web page, and optional rate-limited TG digest PS.
 - 2026-02-16: release-core QA: IMAP tests patch unified on _imap_client_cls seam; polling/main entrypoint tests now stub dependency guard for deterministic no-yaml test runs.
 - 2026-02-16: attachment extraction XLSX policy set to OPTIONAL in tests (openpyxl-specific assertion guarded with pytest.importorskip).
+- 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 Now:
-- LAN access UX polish is implemented with deterministic doctor URL output and startup LAN URL logging.
+- Release artifact contract and deterministic dist verification are implemented for one-folder build outputs.
 Next:
-- Re-run Windows local CI (ci_local.bat) to confirm packaged runtime behavior and docs alignment.
+- Run full Windows one-folder smoke on a clean host (ZIP extract -> run.bat bootstrap -> re-run with real config).
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- docs/RELEASE_ARTIFACT_CONTRACT.md
+- verify_dist.bat
+- mailbot_v26/tools/verify_dist.py
+- mailbot_v26/dist_self_check.py
+- mailbot_v26/tests/test_dist_self_check.py
 - mailbot_v26/doctor.py
 - mailbot_v26/tools/networking.py
 - tests/test_doctor_print_lan_url.py
