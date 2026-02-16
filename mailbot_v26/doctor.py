@@ -8,6 +8,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.config_loader import (
     ACCOUNT_ID_PATTERN,
     CONFIG_DIR,
@@ -80,6 +81,7 @@ _STATUS_LABELS_RU = {
 
 
 def run_doctor(config_dir: Path | None = None) -> DoctorReport:
+    require_runtime_for("doctor")
     base_dir = config_dir or CONFIG_DIR
     entries, config_data = run_doctor_checks(config_dir=base_dir, return_config=True)
 
@@ -446,7 +448,11 @@ def _send_report_to_telegram(
 
 
 def main() -> None:
-    run_doctor()
+    try:
+        run_doctor()
+    except DependencyError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(2)
 
 
 __all__ = [

@@ -11,13 +11,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
-try:  # pragma: no cover - import guard
-    from imapclient import IMAPClient
-except ModuleNotFoundError:  # pragma: no cover - handled at runtime
-    IMAPClient = None  # type: ignore
+from mailbot_v26 import deps
 
 from mailbot_v26.config_loader import AccountConfig
 from mailbot_v26.state_manager import StateManager
+
+
+def _imap_client_cls():
+    deps.require("imapclient", "imapclient", "Нужен для IMAP-подключения")
+    from imapclient import IMAPClient
+
+    return IMAPClient
 
 
 class ResilientIMAP:
@@ -119,13 +123,10 @@ class ResilientIMAP:
         return [["UID", f"{last_uid + 1}:*", "SINCE", since_date]]
 
     def fetch_new_messages(self) -> List[tuple[int, bytes]]:
-        if IMAPClient is None:
-            self.state.set_imap_status(self.account.login, "error", "imapclient missing")
-            self.logger.error("IMAP client dependency is not available; skipping fetch")
-            return []
+        imap_client_cls = _imap_client_cls()
         client = None
         try:
-            client = IMAPClient(
+            client = imap_client_cls(
                 self.account.host,
                 port=self.account.port,
                 ssl=self.account.use_ssl,

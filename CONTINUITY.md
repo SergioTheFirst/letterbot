@@ -53,8 +53,9 @@ Done:
 - Added GitHub Actions CI workflow for tests and Windows one-folder build artifacts.
 - 2026-02-10: added ci_local.bat as offline-first local CI runner (pip runtime+build deps, compileall, pytest, one-folder build, dist artifact checks).
 - 2026-02-16: added production-readiness docs (stress audit for 1000 installs, production gates, Windows release checklist) under docs/.
+- 2026-02-16: dependency guard added (importlib.find_spec), yaml/imapclient lazy imports, clean-failure entrypoint handling, and missing-deps tests.
 Now:
-- Highest risk identified: first-run environment mismatch (global Python without required deps) causes mass pytest/doctor import failures before app checks run.
+- Missing-deps path is guarded via unified dependency gate; entrypoints return one clean diagnostic instead of import-trace cascades.
 Next:
 - Optional polish: diagnostics UX (retention metadata, operator hints, download ergonomics).
 - UNCONFIRMED: optional GitHub Actions (private-only).

@@ -6,6 +6,11 @@
 3. Запустите `install_and_run.bat`.
 
 Скрипт создаст `.venv`, установит зависимости и запустит `python -m mailbot_v26`.
+Скрипт использует только `.venv\Scripts\python -m pip ...`, без глобального pip.
+
+Опционально для прокси/офлайн-среды:
+1. На машине с интернетом: `.venv\Scripts\python -m pip download -r requirements.txt -d wheelhouse`
+2. На целевой машине: `.venv\Scripts\python -m pip install --no-index --find-links wheelhouse -r requirements.txt`
 
 ## 2) Где лежат конфиги
 Все конфиги находятся в `mailbot_v26/config/`:

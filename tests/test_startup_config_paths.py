@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("yaml")
+
 from mailbot_v26 import start
 
 

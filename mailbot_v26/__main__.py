@@ -3,8 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from mailbot_v26.doctor import report_exit_code, run_doctor
-from mailbot_v26.start import main
+from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.version import __version__
 
 
@@ -42,40 +41,51 @@ def _run() -> None:
         print(__version__)
         return
 
-    if args.command == "doctor":
-        report = run_doctor()
-        sys.exit(report_exit_code(report))
+    try:
+        if args.command == "doctor":
+            require_runtime_for("doctor")
+            from mailbot_v26.doctor import report_exit_code, run_doctor
 
-    if args.command == "init-config":
-        from mailbot_v26.tools.config_bootstrap import run_init_config
+            report = run_doctor()
+            sys.exit(report_exit_code(report))
 
-        run_init_config()
-        return
+        if args.command == "init-config":
+            from mailbot_v26.tools.config_bootstrap import run_init_config
 
-    if args.command == "validate-config":
-        from mailbot_v26.tools.config_bootstrap import run_validate_config
+            run_init_config()
+            return
 
-        sys.exit(run_validate_config())
+        if args.command == "validate-config":
+            require_runtime_for("validate_config")
+            from mailbot_v26.tools.config_bootstrap import run_validate_config
 
-    if args.command == "backup":
-        from mailbot_v26.tools.backup import run_backup
+            sys.exit(run_validate_config())
 
-        run_backup()
-        return
+        if args.command == "backup":
+            from mailbot_v26.tools.backup import run_backup
 
-    if args.command == "restore":
-        from mailbot_v26.tools.restore import run_restore
+            run_backup()
+            return
 
-        run_restore(args.path)
-        return
+        if args.command == "restore":
+            from mailbot_v26.tools.restore import run_restore
 
-    if args.command == "export":
-        from mailbot_v26.tools.export_data import run_export
+            run_restore(args.path)
+            return
 
-        run_export(args.since)
-        return
+        if args.command == "export":
+            from mailbot_v26.tools.export_data import run_export
 
-    main()
+            run_export(args.since)
+            return
+
+        require_runtime_for("runtime")
+        from mailbot_v26.start import main
+
+        main()
+    except DependencyError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

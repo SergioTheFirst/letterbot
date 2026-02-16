@@ -1,5 +1,9 @@
 import io
 
+import pytest
+
+pytest.importorskip("openpyxl")
+
 from openpyxl import Workbook
 
 from mailbot_v26.bot_core.extractors.excel import extract_excel_text
