@@ -187,6 +187,50 @@ def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str | None]:
                         "Ошибка в config.yaml: web_ui.password не должен быть значением по умолчанию для LAN",
                     )
 
+    support = cfg.get("support")
+    if support is not None:
+        if not isinstance(support, dict):
+            return False, "Ошибка в config.yaml: support должен быть словарём"
+        enabled = support.get("enabled", False)
+        if not isinstance(enabled, bool):
+            return False, "Ошибка в config.yaml: support.enabled должен быть true/false"
+
+        methods = support.get("methods", [])
+        if not isinstance(methods, list):
+            return False, "Ошибка в config.yaml: support.methods должен быть списком"
+        if enabled and len(methods) == 0:
+            return False, "Ошибка в config.yaml: support.methods должен содержать хотя бы один метод"
+        for index, method in enumerate(methods):
+            if not isinstance(method, dict):
+                return False, f"Ошибка в config.yaml: support.methods[{index}] должен быть словарём"
+            method_type = str(method.get("type", "")).strip().lower()
+            if not method_type:
+                return False, f"Ошибка в config.yaml: support.methods[{index}].type отсутствует"
+            if method_type == "card" and not _is_non_empty_str(method.get("number")):
+                return False, f"Ошибка в config.yaml: support.methods[{index}].number отсутствует"
+            if method_type == "yoomoney":
+                url = str(method.get("url", "")).strip().lower()
+                if not url:
+                    return False, f"Ошибка в config.yaml: support.methods[{index}].url отсутствует"
+                if not (url.startswith("http://") or url.startswith("https://")):
+                    return False, f"Ошибка в config.yaml: support.methods[{index}].url должен начинаться с http(s)"
+
+        telegram_support = support.get("telegram", {})
+        if telegram_support is not None:
+            if not isinstance(telegram_support, dict):
+                return False, "Ошибка в config.yaml: support.telegram должен быть словарём"
+            tg_enabled = telegram_support.get("enabled", False)
+            if not isinstance(tg_enabled, bool):
+                return False, "Ошибка в config.yaml: support.telegram.enabled должен быть true/false"
+            frequency_days = telegram_support.get("frequency_days", 30)
+            if not isinstance(frequency_days, int) or isinstance(frequency_days, bool):
+                return False, "Ошибка в config.yaml: support.telegram.frequency_days должен быть числом 7..365"
+            if frequency_days < 7 or frequency_days > 365:
+                return False, "Ошибка в config.yaml: support.telegram.frequency_days должен быть числом 7..365"
+            text = telegram_support.get("text", "")
+            if tg_enabled and not _is_non_empty_str(text):
+                return False, "Ошибка в config.yaml: support.telegram.text отсутствует"
+
     return True, None
 
 

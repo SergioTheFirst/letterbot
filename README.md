@@ -30,6 +30,12 @@
 4. Установите зависимости: `pip install -r requirements.txt`.
 5. Запустите бота: `python -m mailbot_v26.start`.
 
+# Support
+
+MailBot остаётся бесплатным и без рекламного спама.
+Поддержать разработку можно через карту/СБП/ЮMoney — реквизиты задаются в `config.yaml` (`support.methods`) и доступны в Web UI на странице `/support` после логина.
+В Telegram это опционально: редкий P.S. в дайджесте включается через `support.telegram` (например, раз в 30 дней).
+
 ---
 
 #  Архитектура Premium v26
