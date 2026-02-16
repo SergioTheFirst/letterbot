@@ -123,3 +123,88 @@ def test_validate_config_lan_password_policy() -> None:
 
     assert not ok
     assert error == "Ошибка в config.yaml: web_ui.password должен быть не короче 10 символов для LAN"
+
+
+def test_validate_config_support_card_requires_number() -> None:
+    config = _base_config()
+    config["support"] = {
+        "enabled": True,
+        "methods": [{"type": "card", "label": "Card", "number": ""}],
+        "telegram": {"enabled": False, "frequency_days": 30, "text": ""},
+    }
+
+    ok, error = validate_config(config)
+
+    assert not ok
+    assert error == "Ошибка в config.yaml: support.methods[0].number отсутствует"
+
+
+def test_validate_config_support_telegram_requires_text_when_enabled() -> None:
+    config = _base_config()
+    config["support"] = {
+        "enabled": True,
+        "methods": [{"type": "card", "label": "Card", "number": "2200"}],
+        "telegram": {"enabled": True, "frequency_days": 30, "text": ""},
+    }
+
+    ok, error = validate_config(config)
+
+    assert not ok
+    assert error == "Ошибка в config.yaml: support.telegram.text отсутствует"
+
+
+def test_validate_config_support_frequency_range() -> None:
+    config = _base_config()
+    config["support"] = {
+        "enabled": True,
+        "methods": [{"type": "card", "label": "Card", "number": "2200"}],
+        "telegram": {"enabled": True, "frequency_days": 3, "text": "Support"},
+    }
+
+    ok, error = validate_config(config)
+
+    assert not ok
+    assert error == "Ошибка в config.yaml: support.telegram.frequency_days должен быть числом 7..365"
+
+
+def test_validate_config_support_yoomoney_url_scheme() -> None:
+    config = _base_config()
+    config["support"] = {
+        "enabled": True,
+        "methods": [{"type": "yoomoney", "label": "YM", "url": "ftp://bad"}],
+        "telegram": {"enabled": False, "frequency_days": 30, "text": ""},
+    }
+
+    ok, error = validate_config(config)
+
+    assert not ok
+    assert error == "Ошибка в config.yaml: support.methods[0].url должен начинаться с http(s)"
+
+
+def test_validate_config_support_success() -> None:
+    config = _base_config()
+    config["support"] = {
+        "enabled": True,
+        "ui": {"show_in_nav": True},
+        "methods": [
+            {
+                "type": "sbp",
+                "label": "СБП",
+                "details": "По телефону",
+                "phone": "+79990001122",
+                "qr_image": "assets/sbp_qr.png",
+            },
+            {"type": "card", "label": "Карта", "number": "2202 2000"},
+            {"type": "yoomoney", "label": "YM", "url": "https://yoomoney.ru/to/123"},
+        ],
+        "telegram": {
+            "enabled": True,
+            "frequency_days": 30,
+            "text": "MailBot бесплатный. Поддержка: /support",
+        },
+    }
+
+    ok, error = validate_config(config)
+
+    assert ok
+    assert error is None

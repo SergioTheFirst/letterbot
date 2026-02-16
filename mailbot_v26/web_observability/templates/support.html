@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title or "Support" }}{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h2>Поддержать разработку</h2>
+  <p>MailBot остаётся бесплатным. Если хотите поддержать развитие — выберите любой способ ниже.</p>
+</section>
+
+{% for method in support_methods %}
+<section class="panel">
+  <h3>{{ method.label or method.type|upper }}</h3>
+  <ul>
+    {% if method.details %}<li>{{ method.details }}</li>{% endif %}
+    {% if method.phone %}
+      <li>Телефон: <code id="phone-{{ loop.index }}">{{ method.phone }}</code>
+        <button type="button" class="ghost" onclick="copySupportValue('phone-{{ loop.index }}', this)">Скопировать</button>
+      </li>
+    {% endif %}
+    {% if method.number %}
+      <li>Карта: <code id="card-{{ loop.index }}">{{ method.number }}</code>
+        <button type="button" class="ghost" onclick="copySupportValue('card-{{ loop.index }}', this)">Скопировать</button>
+      </li>
+    {% endif %}
+    {% if method.url %}
+      <li>Ссылка: <a href="{{ method.url }}" target="_blank" rel="noopener noreferrer">{{ method.url }}</a></li>
+    {% endif %}
+  </ul>
+  {% if method.qr_image_data_uri %}
+    <div>
+      <img src="{{ method.qr_image_data_uri }}" alt="QR {{ method.label }}" style="max-width: 320px; border-radius: 8px;">
+    </div>
+  {% endif %}
+</section>
+{% endfor %}
+
+<script>
+function copySupportValue(elementId, button) {
+  const node = document.getElementById(elementId);
+  if (!node) return;
+  const value = (node.textContent || '').trim();
+  if (!value) return;
+  const success = function() {
+    const oldText = button.textContent;
+    button.textContent = 'Скопировано';
+    setTimeout(function() { button.textContent = oldText; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(value).then(success);
+    return;
+  }
+  const input = document.createElement('textarea');
+  input.value = value;
+  document.body.appendChild(input);
+  input.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(input);
+  success();
+}
+</script>
+{% endblock %}

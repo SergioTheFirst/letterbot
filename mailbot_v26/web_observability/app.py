@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import configparser
 import hmac
 import html
 import io
+import mimetypes
 import ipaddress
 import json
 import logging
@@ -111,6 +113,25 @@ class WebUISettings:
     require_strong_password_on_lan: bool
 
 
+@dataclass(frozen=True)
+class SupportMethod:
+    type: str
+    label: str
+    details: str
+    phone: str
+    number: str
+    url: str
+    qr_image: str
+    qr_image_data_uri: str
+
+
+@dataclass(frozen=True)
+class SupportSettings:
+    enabled: bool
+    show_in_nav: bool
+    methods: list[SupportMethod]
+
+
 class _TTLCache:
     def __init__(self, ttl_seconds: float) -> None:
         self._ttl_seconds = max(0.0, ttl_seconds)
@@ -166,6 +187,13 @@ def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
 def _render_template(app: Flask, template_name: str, **context: object) -> str:
     context.setdefault("request", request)
     context.setdefault("session", session)
+    support_settings = app.config.get("SUPPORT_SETTINGS")
+    support_nav_enabled = bool(
+        isinstance(support_settings, SupportSettings)
+        and support_settings.enabled
+        and support_settings.show_in_nav
+    )
+    context.setdefault("support_nav_enabled", support_nav_enabled)
     if USING_FLASK_STUB:
         template_path = Path(app.template_folder or "") / template_name
         return _render_stub_html(template_name, context, template_path)
@@ -430,6 +458,20 @@ def _render_stub_html(
         return (
             f"<html><body>{header}<table>{''.join(evidence)}</table><table>{''.join(rows)}</table></body></html>"
         )
+
+    if template_name == "support.html":
+        methods = context.get("support_methods") if isinstance(context, Mapping) else []
+        rows: list[str] = []
+        for method in methods or []:
+            label = html.escape(str(getattr(method, "label", "") or ""))
+            phone = html.escape(str(getattr(method, "phone", "") or ""))
+            number = html.escape(str(getattr(method, "number", "") or ""))
+            url = html.escape(str(getattr(method, "url", "") or ""))
+            details = html.escape(str(getattr(method, "details", "") or ""))
+            rows.append(
+                f'<div class="support-method"><h3>{label}</h3><p>{details}</p><p>{phone}</p><p>{number}</p><p>{url}</p><button>Скопировать</button></div>'
+            )
+        return f"<html><body>{header}{''.join(rows)}</body></html>"
 
     if template_name == "events.html":
         groups = context.get("groups") if isinstance(context, Mapping) else []
@@ -904,6 +946,60 @@ def _load_web_ui_settings(config_path: Path) -> WebUISettings:
         prod_server=prod_server,
         require_strong_password_on_lan=require_strong_password_on_lan,
     )
+
+
+def _image_data_uri(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return ""
+    mime_type, _ = mimetypes.guess_type(str(path))
+    if not mime_type or not mime_type.startswith("image/"):
+        mime_type = "image/png"
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _load_support_settings(config_path: Path | None) -> SupportSettings:
+    if config_path is None or not config_path.exists():
+        return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+    try:
+        raw = load_yaml_config(config_path)
+    except Exception as exc:
+        logger.warning("support_config_load_failed", error=str(exc))
+        return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+    support = raw.get("support") if isinstance(raw, dict) else None
+    if not isinstance(support, dict):
+        return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+    enabled = bool(support.get("enabled", False))
+    ui = support.get("ui") if isinstance(support.get("ui"), dict) else {}
+    show_in_nav = bool(ui.get("show_in_nav", False))
+    methods_raw = support.get("methods") if isinstance(support.get("methods"), list) else []
+    methods: list[SupportMethod] = []
+    base_dir = config_path.parent
+    for item in methods_raw:
+        if not isinstance(item, dict):
+            continue
+        qr_rel = str(item.get("qr_image", "") or "").strip()
+        qr_uri = ""
+        if qr_rel:
+            qr_path = (base_dir / qr_rel).resolve()
+            try:
+                qr_uri = _image_data_uri(qr_path)
+            except Exception as exc:
+                logger.warning("support_qr_load_failed", path=str(qr_path), error=str(exc))
+                qr_uri = ""
+        methods.append(
+            SupportMethod(
+                type=str(item.get("type", "") or "").strip(),
+                label=str(item.get("label", "") or "").strip(),
+                details=str(item.get("details", "") or "").strip(),
+                phone=str(item.get("phone", "") or "").strip(),
+                number=str(item.get("number", "") or "").strip(),
+                url=str(item.get("url", "") or "").strip(),
+                qr_image=qr_rel,
+                qr_image_data_uri=qr_uri,
+            )
+        )
+    return SupportSettings(enabled=enabled, show_in_nav=show_in_nav, methods=methods)
 
 
 def _load_web_ui_secrets(config_dir: Path) -> tuple[str, float]:
@@ -1874,6 +1970,7 @@ def create_app(
     dist_root: Path | None = None,
     web_ui_bind: str = "127.0.0.1",
     web_ui_port: int = 8080,
+    support_settings: SupportSettings | None = None,
 ) -> Flask:
     app = Flask(
         __name__,
@@ -1910,6 +2007,11 @@ def create_app(
     app.config["WEB_UI_PORT"] = int(web_ui_port)
     app.config["ANALYTICS_FACTORY"] = lambda: KnowledgeAnalytics(
         app.config["DB_PATH"], read_only=True
+    )
+    app.config["SUPPORT_SETTINGS"] = support_settings or SupportSettings(
+        enabled=False,
+        show_in_nav=False,
+        methods=[],
     )
 
     @app.before_request
@@ -1989,6 +2091,23 @@ def create_app(
             manifest_status=manifest_status,
             log_path=str(app.config["DOCTOR_LOG_PATH"]),
             csrf_token=_get_or_create_csrf_token(),
+        )
+
+    @app.route("/support", methods=["GET"])
+    def support() -> str:
+        support_settings = app.config.get("SUPPORT_SETTINGS")
+        if not isinstance(support_settings, SupportSettings) or not support_settings.enabled:
+            return _text_response("Not Found", 404)
+        return _render_template(
+            app,
+            "support.html",
+            title=app.config["APP_TITLE"],
+            page_title="Support",
+            support_methods=support_settings.methods,
+            hide_limit=True,
+            dashboard_vars=None,
+            pii_allowed=False,
+            share_url="",
         )
 
     @app.route("/doctor/export", methods=["POST"])
@@ -4242,6 +4361,7 @@ def main() -> None:
 
     config_path = _resolve_yaml_config_path(args.config_yaml)
     web_ui = _load_web_ui_settings(config_path)
+    support_settings = _load_support_settings(config_path)
     if not web_ui.enabled:
         raise RuntimeError("web_ui.enabled=false: refusing to start Web UI")
 
@@ -4290,6 +4410,7 @@ def main() -> None:
         dist_root=project_root,
         web_ui_bind=bind_address,
         web_ui_port=int(port),
+        support_settings=support_settings,
     )
     if web_ui.prod_server:
         from waitress import serve

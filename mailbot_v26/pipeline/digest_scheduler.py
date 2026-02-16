@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import configparser
+import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -26,6 +27,7 @@ from mailbot_v26.config.uncertainty_queue import (
 )
 from mailbot_v26.config.silence_policy import SilencePolicyConfig, load_silence_policy_config
 from mailbot_v26.features.flags import FeatureFlags
+from mailbot_v26.config_yaml import load_config as load_yaml_config
 from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.observability.logger import LoggerLike
 from mailbot_v26.observability.event_emitter import EventEmitter
@@ -107,6 +109,13 @@ class TrustBootstrapDigestConfig:
 @dataclass(frozen=True, slots=True)
 class RegretMinimizationDigestConfig:
     settings: RegretMinimizationConfig
+
+
+@dataclass(frozen=True, slots=True)
+class SupportTelegramConfig:
+    enabled: bool
+    frequency_days: int
+    text: str
 
 
 def _load_daily_digest_config() -> DailyDigestConfig:
@@ -312,6 +321,69 @@ def _evaluate_policy(
     )
 
 
+def _resolve_yaml_config_path() -> Path | None:
+    base_dir = Path(__file__).resolve().parents[1]
+    candidates = [base_dir / "config.yaml", base_dir.parent / "config.yaml"]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _load_support_telegram_config() -> SupportTelegramConfig:
+    config_path = _resolve_yaml_config_path()
+    if config_path is None:
+        return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
+    try:
+        raw = load_yaml_config(config_path)
+    except Exception:
+        return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
+    support = raw.get("support") if isinstance(raw, dict) else None
+    telegram = support.get("telegram") if isinstance(support, dict) else None
+    if not isinstance(telegram, dict):
+        return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
+    return SupportTelegramConfig(
+        enabled=bool(telegram.get("enabled", False)),
+        frequency_days=max(7, min(365, int(telegram.get("frequency_days", 30) or 30))),
+        text=str(telegram.get("text", "") or "").strip(),
+    )
+
+
+def _support_state_path(storage: DigestStorage) -> Path:
+    return storage.knowledge_db.path.parent / "support_state.json"
+
+
+def _support_due(*, now: datetime, state_path: Path, frequency_days: int) -> bool:
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    if not state_path.exists():
+        return True
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return True
+    last_shown_raw = payload.get("last_shown_utc") if isinstance(payload, dict) else None
+    if not isinstance(last_shown_raw, str) or not last_shown_raw.strip():
+        return True
+    try:
+        last_shown = datetime.fromisoformat(last_shown_raw)
+    except ValueError:
+        return True
+    if last_shown.tzinfo is None:
+        last_shown = last_shown.replace(tzinfo=timezone.utc)
+    return now >= last_shown + timedelta(days=max(7, frequency_days))
+
+
+def _store_support_shown_at(*, now: datetime, state_path: Path) -> None:
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = state_path.with_suffix(".tmp")
+    payload = {"last_shown_utc": now.astimezone(timezone.utc).isoformat()}
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(state_path)
+
+
 def _has_weekly_content(data: weekly_digest.WeeklyDigestData) -> bool:
     return bool(
         data.total_emails
@@ -336,8 +408,11 @@ def _build_daily_payload(
     chat_id: str,
     bot_token: str,
     data: daily_digest.DigestData,
+    support_ps: str = "",
 ) -> TelegramPayload:
     digest_text = daily_digest._build_digest_text(data)
+    if support_ps:
+        digest_text = f"{digest_text}\n\n<i>P.S. {support_ps}</i>"
     return TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",
@@ -590,6 +665,12 @@ def _run_daily_digest(
     scope_account_emails = (
         resolved_scope.account_emails if resolved_scope else None
     )
+    support_cfg = _load_support_telegram_config()
+    support_state_path = _support_state_path(storage)
+    support_ps = ""
+    if support_cfg.enabled and support_cfg.text:
+        if _support_due(now=now, state_path=support_state_path, frequency_days=support_cfg.frequency_days):
+            support_ps = support_cfg.text
 
     if not _is_daily_due(now, config):
         logger.info(
@@ -688,6 +769,7 @@ def _run_daily_digest(
         chat_id=chat_id,
         bot_token=bot_token,
         data=data,
+        support_ps=support_ps,
     )
 
     try:
@@ -707,6 +789,8 @@ def _run_daily_digest(
                 account_email=email,
                 sent_at=now,
             )
+        if support_ps:
+            _store_support_shown_at(now=now, state_path=support_state_path)
         logger.info(
             "digest_sent",
             digest_type="daily",

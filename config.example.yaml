@@ -52,3 +52,26 @@ web_ui:
     - "172.16.0.0/12"
   prod_server: false        # true -> запуск через waitress (для LAN/prod)
   require_strong_password_on_lan: true  # LAN требует пароль >=10 символов и не дефолтный
+
+support:
+  enabled: true
+  ui:
+    show_in_nav: true
+  methods:
+    - type: "sbp"
+      label: "СБП (QR / перевод по телефону)"
+      details: "Перевод по номеру телефона, банк: Сбер"
+      phone: "+7XXXXXXXXXX"
+      qr_image: "assets/sbp_qr.png"
+    - type: "card"
+      label: "Карта Сбер"
+      number: "2202 20XX XXXX XXXX"
+    - type: "yoomoney"
+      label: "ЮMoney"
+      url: "https://yoomoney.ru/to/4100XXXXXXXXXXX"
+  telegram:
+    enabled: true
+    frequency_days: 30
+    text: "MailBot бесплатный. Поддержать разработку: карта/СБП/ЮMoney — подробнее в /support"
+  # СБП статический QR не содержит сумму: пользователь вводит сумму сам (docs: https://www.nspk.ru/sbp/).
+  # ЮMoney: ссылка для быстрого пополнения позволяет перевод с карты/кошелька (docs: https://yoomoney.ru/page?id=536372).

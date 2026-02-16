@@ -59,10 +59,11 @@ Done:
 - 2026-02-16: dependency guard added (importlib.find_spec), yaml/imapclient lazy imports, clean-failure entrypoint handling, and missing-deps tests.
 - 2026-02-16: migrated legacy web tests to shared CSRF helper (browser-realistic login + doctor export token flow).
 - 2026-02-16: added read-before-write repo skill and indexed it in .codex/skills/README.md.
+- 2026-02-16: added support config block, authenticated /support web page, and optional rate-limited TG digest PS.
 Now:
-- CSRF helper migration completed for web tests; targeted web CSRF suites are green.
+- Support/donate delivery is integrated across config validation, web UI, and daily digest scheduler.
 Next:
-- Optional: run full pytest sweep and triage unrelated failures outside CSRF scope.
+- Monitor support UX copy and keep methods/runtime state deterministic without pipeline order changes.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
