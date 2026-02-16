@@ -52,14 +52,15 @@ Done:
 - 2026-02-XX: web UI LAN allowlist, config.yaml web_ui settings, CIDR gate, and docs/tests updates.
 - Added GitHub Actions CI workflow for tests and Windows one-folder build artifacts.
 - 2026-02-10: added ci_local.bat as offline-first local CI runner (pip runtime+build deps, compileall, pytest, one-folder build, dist artifact checks).
+- 2026-02-16: added production-readiness docs (stress audit for 1000 installs, production gates, Windows release checklist) under docs/.
 Now:
-- One-click Doctor diagnostics export implemented and under validation (compileall/pytest).
+- Highest risk identified: first-run environment mismatch (global Python without required deps) causes mass pytest/doctor import failures before app checks run.
 Next:
 - Optional polish: diagnostics UX (retention metadata, operator hints, download ergonomics).
 - UNCONFIRMED: optional GitHub Actions (private-only).
 - UNCONFIRMED: waitress prod_server flag.
 Open questions (UNCONFIRMED if needed):
-- None.
+- UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
 - mailbot_v26/behavior/attention_engine.py
 - mailbot_v26/behavior/deadlock_detector.py
