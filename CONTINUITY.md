@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-16: added Windows Smoke Kit docs (10 scenarios), Windows troubleshooting pack (15 symptom/cause/fix items), and tools/smoke_check.bat artifact generator for dev/dist triage.
 - 2026-02-16: added doctor --print-lan-url, startup LAN/local URL logging (no 0.0.0.0 browsing URL), and Windows LAN/firewall docs + tests.
 - 2026-02-16: web UI CSRF tokens enforced for POST login/doctor export; templates updated.
 - 2026-02-16: web_ui config extended with prod_server + require_strong_password_on_lan and LAN password validation.
@@ -65,12 +66,15 @@ Done:
 - 2026-02-16: attachment extraction XLSX policy set to OPTIONAL in tests (openpyxl-specific assertion guarded with pytest.importorskip).
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 Now:
-- Release artifact contract and deterministic dist verification are implemented for one-folder build outputs.
+- Smoke kit + triage pack delivered with artifact folder output for first-line support.
 Next:
-- Run full Windows one-folder smoke on a clean host (ZIP extract -> run.bat bootstrap -> re-run with real config).
+- Validate smoke_check.bat behavior on clean Windows host in dev mode and dist-only mode.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- docs/SMOKE_TESTS_WINDOWS.md
+- docs/TROUBLESHOOTING_WINDOWS.md
+- tools/smoke_check.bat
 - docs/RELEASE_ARTIFACT_CONTRACT.md
 - verify_dist.bat
 - mailbot_v26/tools/verify_dist.py
