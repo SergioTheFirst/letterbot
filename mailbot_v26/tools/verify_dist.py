@@ -11,6 +11,9 @@ _REQUIRED_FILES: tuple[str, ...] = (
     "config.example.yaml",
     "README_QUICKSTART_WINDOWS.md",
     "manifest.sha256.json",
+    "UPGRADE.md",
+    "SMARTSCREEN.md",
+    "CHANGELOG.md",
 )
 
 

@@ -40,6 +40,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print version and exit.",
     )
+    subparsers.add_parser("version", help="Print version and exit.")
     return parser
 
 
@@ -47,7 +48,7 @@ def _run() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    if args.version:
+    if args.version or args.command == "version":
         print(__version__)
         return
 

@@ -8,6 +8,9 @@ Product artifact: contents of `dist/MailBot/` packed as one-folder ZIP.
 - `config.example.yaml`
 - `README_QUICKSTART_WINDOWS.md`
 - `manifest.sha256.json`
+- `UPGRADE.md`
+- `SMARTSCREEN.md`
+- `CHANGELOG.md`
 
 ## User-editable file
 - Edit only `config.yaml` (created from `config.example.yaml` on first run).

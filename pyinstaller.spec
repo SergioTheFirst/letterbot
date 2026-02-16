@@ -37,6 +37,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
+    version=str(Path("build/windows_version_info.txt")),
 )
 coll = COLLECT(
     exe,

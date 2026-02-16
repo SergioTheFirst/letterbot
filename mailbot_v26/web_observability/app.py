@@ -194,6 +194,7 @@ def _render_template(app: Flask, template_name: str, **context: object) -> str:
         and support_settings.show_in_nav
     )
     context.setdefault("support_nav_enabled", support_nav_enabled)
+    context.setdefault("app_version", __version__)
     if USING_FLASK_STUB:
         template_path = Path(app.template_folder or "") / template_name
         return _render_stub_html(template_name, context, template_path)

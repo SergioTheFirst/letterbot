@@ -66,13 +66,21 @@ Done:
 - 2026-02-16: release-core QA: IMAP tests patch unified on _imap_client_cls seam; polling/main entrypoint tests now stub dependency guard for deterministic no-yaml test runs.
 - 2026-02-16: attachment extraction XLSX policy set to OPTIONAL in tests (openpyxl-specific assertion guarded with pytest.importorskip).
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
+- 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Manual upgrade compatibility contract is implemented and verified in unit tests.
+- Version stamping + SmartScreen trust pack changes are implemented and validated locally.
 Next:
-- Awaiting user review for schema_version policy and release wording.
+- Awaiting user review for release wording and version bump policy confirmation.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/version.py
+- mailbot_v26/__main__.py
+- build/windows_version_info.txt
+- docs/SMARTSCREEN.md
+- CHANGELOG.md
+- tests/test_cli_version.py
+- tests/test_version_surfaces.py
 - docs/UPGRADE.md
 - tests/test_schema_compatibility.py
 - docs/SMOKE_TESTS_WINDOWS.md

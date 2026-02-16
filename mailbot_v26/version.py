@@ -1,3 +1,6 @@
-__version__ = "27.1.0"
+"""Single source of truth for MailBot app version."""
 
-__all__ = ["__version__"]
+__version__ = "27.1.0"
+BUILD_METADATA = ""
+
+__all__ = ["__version__", "BUILD_METADATA"]
