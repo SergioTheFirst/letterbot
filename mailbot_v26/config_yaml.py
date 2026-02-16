@@ -23,6 +23,16 @@ DEFAULT_MAX_ATTACHMENT_MB = 15
 DEFAULT_MAX_ZIP_UNCOMPRESSED_MB = 80
 DEFAULT_MAX_EXTRACTED_CHARS = 50_000
 DEFAULT_MAX_EXTRACTED_TOTAL_CHARS = 120_000
+SUPPORTED_SCHEMA_VERSION = 1
+
+SCHEMA_NEWER_MESSAGE = (
+    "Конфиг новее этой версии MailBot. Скачайте более новую версию или "
+    "используйте config.example.yaml этой версии. См. docs/UPGRADE.md"
+)
+
+SCHEMA_OLDER_HINT = (
+    "Конфиг старой схемы. Запустите: python -m mailbot_v26 validate-config --compat"
+)
 
 
 class ConfigError(RuntimeError):
@@ -57,6 +67,10 @@ def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
 
 
 def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str | None]:
+    ok, error, _hint = validate_schema_version(cfg)
+    if not ok:
+        return False, error
+
     if not isinstance(cfg, dict):
         return False, "Ошибка в config.yaml: корневой объект должен быть словарём"
 
@@ -232,6 +246,43 @@ def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str | None]:
                 return False, "Ошибка в config.yaml: support.telegram.text отсутствует"
 
     return True, None
+
+
+def validate_config_with_hints(cfg: dict[str, Any]) -> tuple[bool, str | None, list[str]]:
+    ok, error = validate_config(cfg)
+    if not ok:
+        return False, error, []
+
+    schema_ok, schema_error, schema_hint = validate_schema_version(cfg)
+    if not schema_ok:
+        return False, schema_error, []
+
+    hints = [schema_hint] if schema_hint else []
+    return True, None, hints
+
+
+def get_schema_version(cfg: dict[str, Any]) -> int:
+    if not isinstance(cfg, dict):
+        return 1
+    value = cfg.get("schema_version", 1)
+    if value is None:
+        return 1
+    if isinstance(value, bool):
+        return -1
+    if isinstance(value, int):
+        return value
+    return -1
+
+
+def validate_schema_version(cfg: dict[str, Any]) -> tuple[bool, str | None, str | None]:
+    schema_version = get_schema_version(cfg)
+    if schema_version < 1:
+        return False, "Ошибка в config.yaml: schema_version должен быть целым числом >= 1", None
+    if schema_version > SUPPORTED_SCHEMA_VERSION:
+        return False, SCHEMA_NEWER_MESSAGE, None
+    if schema_version < SUPPORTED_SCHEMA_VERSION:
+        return True, None, SCHEMA_OLDER_HINT
+    return True, None, None
 
 
 def get_polling_intervals(cfg: dict[str, Any]) -> tuple[int, int]:

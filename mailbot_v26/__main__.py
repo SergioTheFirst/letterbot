@@ -18,7 +18,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print LAN-friendly Web UI URL based on config.yaml and exit.",
     )
     subparsers.add_parser("init-config", help="Create configuration templates.")
-    subparsers.add_parser("validate-config", help="Validate configuration files.")
+    validate_parser = subparsers.add_parser("validate-config", help="Validate configuration files.")
+    validate_parser.add_argument(
+        "--compat",
+        action="store_true",
+        help="Print compact config schema compatibility report.",
+    )
     subparsers.add_parser("backup", help="Create a data backup archive.")
 
     restore_parser = subparsers.add_parser("restore", help="Restore data from a backup archive.")
@@ -66,7 +71,7 @@ def _run() -> None:
             require_runtime_for("validate_config")
             from mailbot_v26.tools.config_bootstrap import run_validate_config
 
-            sys.exit(run_validate_config())
+            sys.exit(run_validate_config(compat=bool(args.compat)))
 
         if args.command == "backup":
             from mailbot_v26.tools.backup import run_backup
