@@ -122,6 +122,7 @@ def _install_common_patches(monkeypatch, accounts, tmp_path):
         "AccountRuntimeHealthManager",
         lambda *args, **kwargs: original_runtime_health(tmp_path / "runtime_health.json"),
     )
+    monkeypatch.setattr(start_module, "require_runtime_for", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(start_module, "time", start_module.time)
     monkeypatch.setattr(start_module.time, "sleep", lambda *_args, **_kwargs: None)
 
