@@ -4349,6 +4349,26 @@ def create_app(
     return app
 
 
+def _build_access_urls(*, bind_address: str, port: int) -> tuple[str, str | None]:
+    if _is_loopback_bind(bind_address):
+        return f"http://127.0.0.1:{port}/", None
+    if bind_address == "0.0.0.0":
+        detected = get_primary_ipv4()
+        local_url = f"http://127.0.0.1:{port}/"
+        if detected:
+            return local_url, f"http://{detected}:{port}/"
+        return local_url, None
+    try:
+        parsed = ipaddress.ip_address(bind_address)
+    except ValueError:
+        return f"http://127.0.0.1:{port}/", None
+    if parsed.version == 4 and parsed.is_private:
+        return f"http://127.0.0.1:{port}/", f"http://{bind_address}:{port}/"
+    return f"http://127.0.0.1:{port}/", None
+
+
+
+
 def main() -> None:
     require_runtime_for("web_ui")
     parser = argparse.ArgumentParser(description="MailBot Observability Console")
@@ -4396,6 +4416,12 @@ def main() -> None:
     else:
         storage = load_storage_config(config_dir)
         db_path = storage.db_path
+
+    local_url, lan_url = _build_access_urls(bind_address=str(bind_address), port=int(port))
+    logger.info("WEB_UI_URL_LOCAL %s", local_url)
+    if lan_url:
+        logger.info("WEB_UI_URL_LAN %s", lan_url)
+        logger.info("WEB_UI_FIREWALL_HINT Firewall may block incoming connections; see docs.")
 
     project_root = Path(__file__).resolve().parents[2]
     app = create_app(

@@ -14,9 +14,21 @@
 
 
 ## LAN mode (safe)
-- Set `web_ui.bind` to your LAN interface and keep `web_ui.allow_cidrs` limited to your subnet.
-- Use `web_ui.password` with 10+ characters; defaults like `CHANGE_ME` are rejected when LAN is enabled.
-- Set `web_ui.prod_server=true` to run Web UI on waitress; Flask built-in is for localhost development only.
+```yaml
+web_ui:
+  bind: "0.0.0.0"
+  allow_lan: true
+  allow_cidrs: ["192.168.0.0/16"]
+  prod_server: true
+```
+
+- Narrow `allow_cidrs` to your home subnet when possible.
+- Find your PC IPv4 with `ipconfig`.
+- Open from phone/other PC: `http://<PC IPv4>:<port>/`.
+- Do not open `http://0.0.0.0:<port>/` in browser.
+- If needed, allow inbound TCP port in firewall:
+  `netsh advfirewall firewall add rule name="MailBot Web UI <port>" protocol=TCP dir=in localport=<port> action=allow`
+- Keep `web_ui.password` strong (10+ chars) and keep `web_ui.prod_server=true` for LAN.
 
 
 ## Support

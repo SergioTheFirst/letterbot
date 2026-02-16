@@ -11,7 +11,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mailbot_v26")
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("doctor", help="Run system doctor checks.")
+    doctor_parser = subparsers.add_parser("doctor", help="Run system doctor checks.")
+    doctor_parser.add_argument(
+        "--print-lan-url",
+        action="store_true",
+        help="Print LAN-friendly Web UI URL based on config.yaml and exit.",
+    )
     subparsers.add_parser("init-config", help="Create configuration templates.")
     subparsers.add_parser("validate-config", help="Validate configuration files.")
     subparsers.add_parser("backup", help="Create a data backup archive.")
@@ -44,8 +49,10 @@ def _run() -> None:
     try:
         if args.command == "doctor":
             require_runtime_for("doctor")
-            from mailbot_v26.doctor import report_exit_code, run_doctor
+            from mailbot_v26.doctor import print_lan_url, report_exit_code, run_doctor
 
+            if args.print_lan_url:
+                sys.exit(print_lan_url())
             report = run_doctor()
             sys.exit(report_exit_code(report))
 

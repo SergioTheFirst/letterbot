@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import importlib
+import ipaddress
 import os
 import sqlite3
 import sys
@@ -18,12 +19,16 @@ from mailbot_v26.config_loader import (
     load_keys_config,
     load_storage_config,
 )
+from mailbot_v26.config_yaml import ConfigError as YamlConfigError
+from mailbot_v26.config_yaml import load_config as load_yaml_config
+from mailbot_v26.config_yaml import validate_config as validate_yaml_config
 from mailbot_v26.health.mail_accounts import check_mail_accounts
 from mailbot_v26.llm import router as llm_router
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.version import __version__
 from mailbot_v26.worker.telegram_sender import DeliveryResult, ping_telegram, send_telegram
+from mailbot_v26.tools.networking import get_primary_ipv4
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,47 @@ def run_doctor(config_dir: Path | None = None) -> DoctorReport:
         )
 
     return DoctorReport(entries=entries, telegram_sent=telegram_sent, telegram_error=telegram_error)
+
+
+def print_lan_url(config_dir: Path | None = None) -> int:
+    config_path = _resolve_yaml_config_path(config_dir)
+    try:
+        raw = load_yaml_config(config_path)
+    except FileNotFoundError as exc:
+        print(str(exc))
+        return 2
+    except YamlConfigError as exc:
+        print(str(exc))
+        return 2
+    ok, error = validate_yaml_config(raw)
+    if not ok:
+        print(error or "Invalid config.yaml")
+        return 2
+    web_ui = raw.get("web_ui") if isinstance(raw.get("web_ui"), dict) else {}
+    enabled = bool(web_ui.get("enabled", False))
+    bind = str(web_ui.get("bind", "127.0.0.1")).strip() or "127.0.0.1"
+    port = int(web_ui.get("port", 8080))
+    if not enabled:
+        print("Web UI disabled in config. Enable web_ui.enabled=true.")
+        return 2
+
+    if _is_loopback_bind(bind):
+        print(f"Local only: http://127.0.0.1:{port}/")
+        print("Not reachable from LAN. Set bind: '0.0.0.0' (or your LAN IP) to allow LAN access.")
+        return 0
+
+    if bind == "0.0.0.0":
+        detected = get_primary_ipv4()
+        if detected:
+            print(f"Open from another device: http://{detected}:{port}/")
+        else:
+            print(f"Open from another device: http://<PC IPv4>:{port}/")
+            print("Could not detect LAN IPv4 automatically. Run ipconfig and use IPv4 Address.")
+        print("Firewall may block incoming connections; see docs.")
+        return 0
+
+    print(f"Open from another device: http://{bind}:{port}/")
+    return 0
 
 
 def run_doctor_checks(
@@ -328,6 +374,35 @@ def _resolve_report_chat_id(data: dict[str, object]) -> str | None:
     return None
 
 
+def _resolve_yaml_config_path(config_dir: Path | None) -> Path:
+    if config_dir is not None and config_dir.is_file():
+        return config_dir
+    if config_dir is not None:
+        base_dir = config_dir
+    else:
+        base_dir = Path(__file__).resolve().parent
+    candidates = [
+        base_dir / "config.yaml",
+        base_dir.parent / "config.yaml",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    expected = " or ".join(str(item) for item in candidates)
+    raise FileNotFoundError(f"config.yaml not found. Expected at {expected}.")
+
+
+def _is_loopback_bind(bind: str) -> bool:
+    if not bind:
+        return False
+    if bind.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(bind).is_loopback
+    except ValueError:
+        return False
+
+
 def _check_sqlite(db_path: object) -> DoctorEntry:
     if not db_path:
         return DoctorEntry("SQLite", "FAIL", "db_path не указан")
@@ -463,4 +538,5 @@ __all__ = [
     "run_doctor",
     "run_doctor_checks",
     "main",
+    "print_lan_url",
 ]
