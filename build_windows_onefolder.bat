@@ -57,6 +57,12 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+
+call "%REPO_ROOT%verify_dist.bat"
+if %ERRORLEVEL% NEQ 0 (
+    exit /b 1
+)
+
 echo =============================================
 echo   Build complete: %DIST_DIR%
 echo =============================================

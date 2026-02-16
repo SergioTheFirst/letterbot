@@ -28,6 +28,7 @@ web_ui:
 - Do not open `http://0.0.0.0:<port>/` in browser.
 - If needed, allow inbound TCP port in firewall:
   `netsh advfirewall firewall add rule name="MailBot Web UI <port>" protocol=TCP dir=in localport=<port> action=allow`
+- Windows SmartScreen on first run may show “Windows protected your PC” for unsigned builds; click `More info` -> `Run anyway`.
 - Keep `web_ui.password` strong (10+ chars) and keep `web_ui.prod_server=true` for LAN.
 
 

@@ -19,3 +19,12 @@
    - web_ui.password = "СИЛЬНЫЙ_ПАРОЛЬ"
 2) Перезапустите MailBot.
 3) Убедитесь, что Windows Firewall разрешает входящие подключения на выбранный порт.
+
+
+## Если Windows показывает SmartScreen
+- На первом запуске неподписанного `MailBot.exe` может появиться окно «Windows protected your PC».
+- Нажмите `More info` → `Run anyway` (или «Подробнее» → «Выполнить в любом случае»).
+
+Не открывайте `http://0.0.0.0:8787/` в браузере. Используйте `http://<IPv4_вашего_ПК>:8787/`.
+
+Если LAN-страница не открывается, добавьте входящее правило Firewall: `netsh advfirewall firewall add rule name="MailBot Web UI 8787" protocol=TCP dir=in localport=8787 action=allow`

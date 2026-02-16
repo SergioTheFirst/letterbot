@@ -29,6 +29,7 @@ from mailbot_v26.bot_core.pipeline import (
     store_inbound,
 )
 from mailbot_v26.deps import DependencyError, require_runtime_for
+from mailbot_v26.dist_self_check import validate_dist_runtime
 from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.config_loader import AccountConfig, BotConfig
 from mailbot_v26.config_yaml import (
@@ -536,6 +537,14 @@ def _process_queue(
 
 def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> None:
     require_runtime_for("runtime")
+    dist_ok, dist_error = validate_dist_runtime(
+        frozen=bool(getattr(sys, "frozen", False)),
+        executable_path=Path(sys.executable),
+    )
+    if not dist_ok:
+        print(dist_error)
+        sys.exit(2)
+
     print("\n" + "=" * 60)
     print(f"MAILBOT PREMIUM {__version__} - STARTING")
     print("=" * 60)
