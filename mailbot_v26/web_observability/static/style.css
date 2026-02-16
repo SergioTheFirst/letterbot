@@ -1221,3 +1221,10 @@ small {
     top: 64px;
   }
 }
+
+
+.app-footer {
+  margin-top: 20px;
+  color: #8b95a7;
+  font-size: 12px;
+}

@@ -148,8 +148,9 @@ def build_diagnostics_zip(
         "uptime_seconds": max(0, int(uptime_seconds)),
     }
     health_payload.setdefault("generated_at_utc", datetime.now(timezone.utc).isoformat())
+    health_payload.setdefault("app_version", __version__)
 
-    metadata_lines: list[str] = []
+    metadata_lines: list[str] = [f"app_version={__version__}"]
     out = io.BytesIO()
     with zipfile.ZipFile(out, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         if log_path.exists():
