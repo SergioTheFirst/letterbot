@@ -50,7 +50,7 @@ def _make_config(tmp_path: Path, accounts: list[AccountConfig]) -> BotConfig:
 
 
 def test_all_accounts_ok_no_telegram_warning(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(mail_accounts, "IMAPClient", FakeIMAPClient)
+    monkeypatch.setattr(mail_accounts, "_imap_client_cls", lambda: FakeIMAPClient)
     config = _make_config(
         tmp_path,
         [
@@ -78,7 +78,7 @@ def test_all_accounts_ok_no_telegram_warning(monkeypatch, tmp_path: Path) -> Non
 
 
 def test_failed_account_sends_warning(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(mail_accounts, "IMAPClient", FakeIMAPClient)
+    monkeypatch.setattr(mail_accounts, "_imap_client_cls", lambda: FakeIMAPClient)
     config = _make_config(
         tmp_path,
         [
@@ -118,7 +118,7 @@ def test_failed_account_sends_warning(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_failed_account_excluded_from_polling(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(mail_accounts, "IMAPClient", FakeIMAPClient)
+    monkeypatch.setattr(mail_accounts, "_imap_client_cls", lambda: FakeIMAPClient)
     config = _make_config(
         tmp_path,
         [
@@ -156,7 +156,7 @@ def test_healthcheck_error_message_not_none(monkeypatch) -> None:
         def login(self, login: str, password: str) -> None:
             raise Exception(None)
 
-    monkeypatch.setattr(mail_accounts, "IMAPClient", EmptyMessageIMAPClient)
+    monkeypatch.setattr(mail_accounts, "_imap_client_cls", lambda: EmptyMessageIMAPClient)
 
     results = mail_accounts.check_mail_accounts(
         [
@@ -182,7 +182,7 @@ def test_healthcheck_imap_auth_failure_details(monkeypatch) -> None:
         def login(self, login: str, password: str) -> None:
             raise imaplib.IMAP4.error("AUTH failed")
 
-    monkeypatch.setattr(mail_accounts, "IMAPClient", AuthFailIMAPClient)
+    monkeypatch.setattr(mail_accounts, "_imap_client_cls", lambda: AuthFailIMAPClient)
 
     results = mail_accounts.check_mail_accounts(
         [

@@ -1,3 +1,7 @@
+import pytest
+
+pytest.importorskip("yaml")
+
 from mailbot_v26.config_yaml import validate_config
 
 

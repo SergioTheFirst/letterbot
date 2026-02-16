@@ -6,7 +6,7 @@ import logging
 import socket
 from typing import Callable, Iterable, List, Optional
 
-from imapclient import IMAPClient
+from mailbot_v26 import deps
 
 from mailbot_v26.config_loader import AccountConfig, BotConfig
 from mailbot_v26.observability import logger as observability_logger
@@ -14,6 +14,13 @@ from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.system_health import system_health
 from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.worker.telegram_sender import DeliveryResult
+
+
+def _imap_client_cls():
+    deps.require("imapclient", "imapclient", "Нужен для IMAP-подключения")
+    from imapclient import IMAPClient
+
+    return IMAPClient
 
 
 @dataclass
@@ -33,12 +40,13 @@ def check_mail_accounts(
     observability = observability_logger.get_logger("mailbot")
     logger = logging.getLogger(__name__)
     for account in accounts:
-        client: Optional[IMAPClient] = None
+        imap_client_cls = _imap_client_cls()
+        client: Optional[object] = None
         try:
             if timeout_sec is None:
-                client = IMAPClient(account.host, port=account.port, ssl=account.use_ssl)
+                client = imap_client_cls(account.host, port=account.port, ssl=account.use_ssl)
             else:
-                client = IMAPClient(
+                client = imap_client_cls(
                     account.host,
                     port=account.port,
                     ssl=account.use_ssl,

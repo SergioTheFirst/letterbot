@@ -3,6 +3,10 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
+
+pytest.importorskip("yaml")
+
 
 def test_missing_config_path_exits_cleanly() -> None:
     script = "\n".join(

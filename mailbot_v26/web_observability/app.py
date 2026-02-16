@@ -13,6 +13,7 @@ import math
 import os
 import re
 import sqlite3
+import sys
 import time
 from collections import Counter, deque
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ except ModuleNotFoundError:
     USING_FLASK_STUB = True
 
 from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config
+from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.config_yaml import (
     ConfigError as YamlConfigError,
     load_config as load_yaml_config,
@@ -4181,6 +4183,7 @@ def create_app(
 
 
 def main() -> None:
+    require_runtime_for("web_ui")
     parser = argparse.ArgumentParser(description="MailBot Observability Console")
     parser.add_argument("--db", type=Path, help="Path to SQLite database")
     parser.add_argument("--config", type=Path, default=CONFIG_DIR, help="Config directory")
@@ -4243,4 +4246,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except DependencyError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2)

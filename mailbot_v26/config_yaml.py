@@ -4,7 +4,7 @@ from pathlib import Path
 import ipaddress
 from typing import Any, Tuple
 
-import yaml
+from mailbot_v26 import deps
 
 from mailbot_v26.config_loader import (
     AccountConfig,
@@ -29,7 +29,15 @@ class ConfigError(RuntimeError):
     pass
 
 
+def _yaml_module():
+    deps.require("yaml", "PyYAML", "Нужен для загрузки config.yaml")
+    import yaml  # type: ignore
+
+    return yaml
+
+
 def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
+    yaml = _yaml_module()
     config_path = Path(path)
     if not config_path.exists():
         raise FileNotFoundError(f"config.yaml not found: {config_path.resolve()}")

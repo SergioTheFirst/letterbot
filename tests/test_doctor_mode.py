@@ -72,6 +72,7 @@ def test_doctor_mode_reports_and_sends(monkeypatch, tmp_path, capsys):
     _write_config(tmp_path, db_path)
 
     monkeypatch.setattr(doctor, "DEPENDENCY_IMPORTS", ["configparser", "sqlite3"])
+    monkeypatch.setattr(doctor, "require_runtime_for", lambda _mode: None)
     monkeypatch.setattr(doctor, "ping_telegram", lambda _token: (True, "reachable"))
 
     def fake_send(_payload):

@@ -28,6 +28,7 @@ from mailbot_v26.bot_core.pipeline import (
     stage_tg,
     store_inbound,
 )
+from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.config_loader import AccountConfig, BotConfig
 from mailbot_v26.config_yaml import (
@@ -534,6 +535,7 @@ def _process_queue(
 
 
 def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> None:
+    require_runtime_for("runtime")
     print("\n" + "=" * 60)
     print(f"MAILBOT PREMIUM {__version__} - STARTING")
     print("=" * 60)
@@ -937,4 +939,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except DependencyError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(2)
