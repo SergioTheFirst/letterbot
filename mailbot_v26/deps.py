@@ -18,11 +18,17 @@ class Requirement:
 RUNTIME_REQUIREMENTS = {
     "yaml": Requirement("yaml", "PyYAML", "Нужен для загрузки config.yaml"),
     "imapclient": Requirement("imapclient", "imapclient", "Нужен для IMAP-подключения"),
+    "waitress": Requirement(
+        "waitress",
+        "waitress",
+        "Нужен для web_ui.prod_server=true (production WSGI server)",
+    ),
 }
 
 MODE_REQUIREMENTS: dict[str, tuple[Requirement, ...]] = {
     "runtime": (RUNTIME_REQUIREMENTS["yaml"], RUNTIME_REQUIREMENTS["imapclient"]),
     "web_ui": (RUNTIME_REQUIREMENTS["yaml"],),
+    "web_ui_prod": (RUNTIME_REQUIREMENTS["yaml"], RUNTIME_REQUIREMENTS["waitress"]),
     "doctor": (RUNTIME_REQUIREMENTS["yaml"], RUNTIME_REQUIREMENTS["imapclient"]),
     "validate_config": (RUNTIME_REQUIREMENTS["yaml"],),
     "tests": (RUNTIME_REQUIREMENTS["yaml"], RUNTIME_REQUIREMENTS["imapclient"]),

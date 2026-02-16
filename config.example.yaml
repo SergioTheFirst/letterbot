@@ -50,3 +50,5 @@ web_ui:
     - "192.168.0.0/16"
     - "10.0.0.0/8"
     - "172.16.0.0/12"
+  prod_server: false        # true -> запуск через waitress (для LAN/prod)
+  require_strong_password_on_lan: true  # LAN требует пароль >=10 символов и не дефолтный

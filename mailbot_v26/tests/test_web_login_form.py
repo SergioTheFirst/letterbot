@@ -18,4 +18,5 @@ def test_login_form_has_password_label(tmp_path: Path) -> None:
         assert '<label for="password">Password</label>' in body
         assert 'id="password"' in body
         assert 'data-testid="login-password"' in body
+        assert 'name="csrf_token"' in body
         assert ">Sign in<" in body

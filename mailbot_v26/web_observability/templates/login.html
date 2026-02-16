@@ -9,6 +9,7 @@
       <div class="alert">{{ error }}</div>
       {% endif %}
       <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="filter-group">
           <label for="password">Password</label>
           <input id="password" type="password" name="password" required autocomplete="current-password" data-testid="login-password">

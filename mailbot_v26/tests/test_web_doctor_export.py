@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -9,6 +10,20 @@ from mailbot_v26.integrity import compute_manifest
 from mailbot_v26.web_observability.app import create_app
 from mailbot_v26.web_observability.doctor_export import build_diagnostics_zip
 
+
+
+
+def _extract_csrf_token(html_text: str) -> str:
+    match = re.search(r'name="csrf_token"\s+value="([^"]+)"', html_text)
+    assert match is not None
+    return match.group(1)
+
+
+def _login_with_csrf(client, password: str) -> None:
+    login_page = client.get("/login")
+    token = _extract_csrf_token(login_page.get_data(as_text=True))
+    response = client.post("/login", data={"password": password, "csrf_token": token})
+    assert response.status_code in {302, 303}
 
 def _read_zip(payload: bytes) -> dict[str, bytes]:
     with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
@@ -95,3 +110,28 @@ def test_doctor_requires_auth(tmp_path: Path) -> None:
     assert response.status_code in {302, 403}
     if response.status_code == 302:
         assert "/login" in response.headers.get("Location", "")
+
+
+def test_doctor_export_csrf_blocks_without_token(tmp_path: Path) -> None:
+    db_path = tmp_path / "mailbot.sqlite"
+    db_path.write_bytes(b"")
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        _login_with_csrf(client, "pw")
+        response = client.post("/doctor/export")
+
+    assert response.status_code == 403
+
+
+def test_doctor_export_csrf_allows_with_valid_token(tmp_path: Path) -> None:
+    db_path = tmp_path / "mailbot.sqlite"
+    db_path.write_bytes(b"")
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        _login_with_csrf(client, "pw")
+        doctor_page = client.get("/doctor")
+        doctor_token = _extract_csrf_token(doctor_page.get_data(as_text=True))
+        response = client.post("/doctor/export", data={"csrf_token": doctor_token})
+
+    assert response.status_code == 200
+    assert response.headers.get("Content-Type") == "application/zip"
