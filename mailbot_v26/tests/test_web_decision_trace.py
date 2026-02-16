@@ -7,6 +7,7 @@ from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.observability.decision_trace_v1 import DecisionTraceV1, to_canonical_json
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _build_app(tmp_path: Path):
@@ -47,7 +48,7 @@ def test_decision_trace_endpoint_scrubs_payload(tmp_path: Path) -> None:
     db_path, app = _build_app(tmp_path)
     _insert_decision_trace(db_path, email_id=1)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         resp = client.get("/api/v1/cockpit/decision-trace?email_id=1")
         assert resp.status_code == 200
         payload = resp.get_json()

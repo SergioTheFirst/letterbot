@@ -10,6 +10,7 @@ from mailbot_v26.observability.processing_span import ProcessingSpanRecorder
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _insert_processing_span(
@@ -232,8 +233,7 @@ def test_latency_auth_required(tmp_path: Path) -> None:
 def test_latency_summary_endpoint(tmp_path: Path) -> None:
     app = _build_app_with_data(tmp_path)
     with app.test_client() as client:
-        login_resp = client.post("/login", data={"password": "pw"})
-        assert login_resp.status_code in (302, 303)
+        login_with_csrf(client, "pw")
         response = client.get(
             "/api/v1/observability/latency_summary",
             query_string={
@@ -260,7 +260,7 @@ def test_latency_summary_forbidden_strings(tmp_path: Path) -> None:
         "digest_text",
     ]
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         response = client.get(
             "/api/v1/observability/latency_summary",
             query_string={
@@ -276,7 +276,7 @@ def test_latency_summary_forbidden_strings(tmp_path: Path) -> None:
 def test_latency_summary_deterministic(tmp_path: Path) -> None:
     app = _build_app_with_data(tmp_path)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         query = {
             "account_email": "primary@example.com",
             "account_emails": "primary@example.com,secondary@example.com",
@@ -290,7 +290,7 @@ def test_latency_summary_deterministic(tmp_path: Path) -> None:
 def test_latency_page_masks_forbidden_phrases(tmp_path: Path) -> None:
     app = _build_app_with_activity(tmp_path)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/latency", query_string={"account_email": "primary@example.com"})
         assert page.status_code == 200
         text = page.get_data(as_text=True).lower()
@@ -306,7 +306,7 @@ def test_latency_page_masks_forbidden_phrases(tmp_path: Path) -> None:
 def test_latency_activity_table_ordering(tmp_path: Path) -> None:
     app = _build_app_with_activity(tmp_path)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get(
             "/latency",
             query_string={"account_email": "primary@example.com", "window_days": "7"},
@@ -332,7 +332,7 @@ def test_latency_activity_table_ordering(tmp_path: Path) -> None:
 def test_latency_activity_masks_pii_by_default(tmp_path: Path) -> None:
     app = _build_app_with_activity(tmp_path)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/latency", query_string={"account_email": "primary@example.com"})
         assert page.status_code == 200
         analytics = KnowledgeAnalytics(app.config["DB_PATH"], read_only=True)

@@ -7,6 +7,7 @@ from pathlib import Path
 from mailbot_v26.events.contract import EventType, EventV1, fingerprint
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _build_app(tmp_path: Path) -> tuple[Path, object]:
@@ -161,7 +162,7 @@ def test_commitments_auth_required(tmp_path: Path) -> None:
         assert response.status_code == 302
         assert "/login" in response.headers.get("Location", "")
 
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/commitments")
         assert page.status_code == 200
 
@@ -187,7 +188,7 @@ def test_commitments_deterministic_ordering_and_pagination(tmp_path: Path) -> No
         )
 
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page1 = client.get(
             "/commitments", query_string={"account_emails": "acct@example.com"}
         )
@@ -234,7 +235,7 @@ def test_email_forensics_evidence_card(tmp_path: Path) -> None:
     )
 
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/email/42")
         body = page.get_data(as_text=True)
         assert "span-commit" in body

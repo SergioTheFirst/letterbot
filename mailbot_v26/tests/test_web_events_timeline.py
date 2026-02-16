@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _prepare_events_db(db_path: Path) -> None:
@@ -140,7 +141,7 @@ def test_events_api_ordering_and_scope(tmp_path: Path, monkeypatch: pytest.Monke
         lambda self, days: 0.0,
     )
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         query = {
             "account_email": "primary@example.com",
             "account_emails": "primary@example.com",
@@ -172,7 +173,7 @@ def test_events_pii_scrubbed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     )
     forbidden = ["PII should be hidden", "sensitive@example.com", "secret body", "should not leak"]
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         api_response = client.get(
             "/api/v1/events/timeline",
             query_string={"account_email": "primary@example.com"},
@@ -198,7 +199,7 @@ def test_events_default_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         lambda self, days: 0.0,
     )
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         response = client.get(
             "/api/v1/events/timeline",
             query_string={"account_email": "primary@example.com"},
@@ -219,7 +220,7 @@ def test_events_narrative_ordering_and_determinism(tmp_path: Path, monkeypatch: 
         lambda self, days: 0.0,
     )
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         query = {"account_emails": "primary@example.com", "window_days": "30"}
         first = client.get("/events", query_string=query)
         second = client.get("/events", query_string=query)
@@ -262,7 +263,7 @@ def test_events_narrative_pagination_stable(tmp_path: Path, monkeypatch: pytest.
             )
         conn.commit()
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         query_page_1 = {"account_emails": "primary@example.com", "page": "1"}
         query_page_2 = {"account_emails": "primary@example.com", "page": "2"}
         page_one = client.get("/events", query_string=query_page_1)

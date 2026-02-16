@@ -7,6 +7,7 @@ from pathlib import Path
 from mailbot_v26.events.contract import EventType, EventV1, fingerprint
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _insert_email(
@@ -138,7 +139,7 @@ def test_archive_auth_required_and_headers(tmp_path: Path) -> None:
         assert response.status_code == 302
         assert "/login" in response.headers.get("Location", "")
 
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/archive")
         body = page.get_data(as_text=True)
         assert page.status_code == 200
@@ -169,7 +170,7 @@ def test_archive_pagination_order_deterministic(tmp_path: Path) -> None:
 
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/archive", query_string={"account_emails": "acct@example.com"})
         body = page.get_data(as_text=True)
         ids = [int(match) for match in re.findall(r'data-email-id="(\d+)"', body)]
@@ -206,7 +207,7 @@ def test_email_details_timeline_sorted(tmp_path: Path) -> None:
     )
 
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/email/42")
         body = page.get_data(as_text=True)
         stages = re.findall(r'data-stage="([^"]+)"', body)

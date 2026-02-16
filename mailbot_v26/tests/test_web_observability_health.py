@@ -5,6 +5,7 @@ from pathlib import Path
 
 from mailbot_v26.observability.processing_span import ProcessingSpanRecorder
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _insert_health_snapshot(
@@ -87,7 +88,7 @@ def test_health_auth_required(tmp_path: Path) -> None:
 def test_health_default_window_selected_and_api(tmp_path: Path) -> None:
     _, app = _build_app_with_health_data(tmp_path)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
 
         page = client.get(
             "/health", query_string={"account_email": "primary@example.com"}
@@ -121,7 +122,7 @@ def test_health_payload_resilience_and_sanitization(tmp_path: Path) -> None:
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
 
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
 
         page = client.get(
             "/health", query_string={"account_email": "primary@example.com"}
@@ -145,7 +146,7 @@ def test_health_payload_resilience_and_sanitization(tmp_path: Path) -> None:
 def test_health_page_component_matrix(tmp_path: Path) -> None:
     _, app = _build_app_with_health_data(tmp_path)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get(
             "/health", query_string={"account_email": "primary@example.com"}
         )
@@ -158,7 +159,7 @@ def test_health_page_component_matrix(tmp_path: Path) -> None:
 def test_health_mode_blocks_toggle(tmp_path: Path) -> None:
     _, app = _build_app_with_health_data(tmp_path)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
 
         basic = client.get("/health?mode=basic")
         assert basic.status_code == 200
@@ -202,7 +203,7 @@ def test_health_trend_order_deterministic(tmp_path: Path) -> None:
     )
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         page = client.get("/health?account_email=primary@example.com")
         body = page.get_data(as_text=True)
         first = body.find('data-snapshot="snap-b"')

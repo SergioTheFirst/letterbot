@@ -8,6 +8,7 @@ from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _emit_event(
@@ -136,7 +137,7 @@ def test_learning_api_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     app = _prepare_app(tmp_path)
     _freeze_now(monkeypatch, ts=2_000.0)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         query = {
             "account_email": "primary@example.com",
             "account_emails": "primary@example.com",
@@ -157,7 +158,7 @@ def test_learning_scope_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     app = _prepare_app(tmp_path)
     _freeze_now(monkeypatch, ts=2_000.0)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         primary = client.get(
             "/api/v1/intelligence/learning_summary",
             query_string={"account_email": "primary@example.com", "account_emails": "primary@example.com"},
@@ -176,7 +177,7 @@ def test_learning_default_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     app = _prepare_app(tmp_path)
     _freeze_now(monkeypatch, ts=2_000.0)
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         response = client.get(
             "/api/v1/intelligence/learning_timeline",
             query_string={"account_email": "primary@example.com"},
@@ -194,7 +195,7 @@ def test_learning_pii_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     _freeze_now(monkeypatch, ts=2_000.0)
     forbidden_tokens = ["subject", "body", "raw", "from_email", "sender_email"]
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         api_response = client.get(
             "/api/v1/intelligence/learning_timeline",
             query_string={"account_email": "primary@example.com"},

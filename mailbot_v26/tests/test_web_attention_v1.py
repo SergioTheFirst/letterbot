@@ -9,6 +9,7 @@ from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _emit_event(
@@ -73,7 +74,7 @@ def test_attention_sort_determinism(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     )
     expected = ["alice@example.com", "bob@example.com", "charlie@example.com"]
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         for sort_mode in ("time", "cost", "count"):
             query = {"account_emails": "primary@example.com", "sort": sort_mode}
             first = client.get(
@@ -97,7 +98,7 @@ def test_attention_csv_matches_html_rows(tmp_path: Path, monkeypatch: pytest.Mon
         lambda self, days: 0.0,
     )
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         query = {"account_emails": "primary@example.com", "sort": "time"}
         html_response = client.get("/attention", query_string=query)
         csv_response = client.get("/attention.csv", query_string=query)
@@ -130,7 +131,7 @@ def test_attention_outputs_avoid_banned_phrases(tmp_path: Path, monkeypatch: pyt
         "нет " + "данных",
     ]
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         for path in ("/attention", "/attention.csv"):
             response = client.get(path, query_string={"account_emails": "primary@example.com"})
             assert response.status_code == 200

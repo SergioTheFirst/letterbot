@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 def _create_events_db(db_path: Path) -> None:
@@ -141,7 +142,7 @@ def test_relationships_deterministic_and_sorted(tmp_path: Path, monkeypatch: pyt
         lambda self, days: 0.0,
     )
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         query = {"account_email": "primary@example.com", "window_days": "30", "limit": "50"}
         first = client.get("/api/v1/relationships/graph", query_string=query).get_json()
         second = client.get("/api/v1/relationships/graph", query_string=query).get_json()
@@ -161,7 +162,7 @@ def test_relationships_scope_isolation(tmp_path: Path, monkeypatch: pytest.Monke
         lambda self, days: 0.0,
     )
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         query = {"account_email": "other@example.com", "account_emails": "other@example.com"}
         response = client.get("/api/v1/relationships/graph", query_string=query)
         assert response.status_code == 200
@@ -187,7 +188,7 @@ def test_relationships_pii_and_escaping(tmp_path: Path, monkeypatch: pytest.Monk
         "Beta<script>",
     ]
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         api_response = client.get(
             "/api/v1/relationships/graph",
             query_string={"account_email": "primary@example.com"},
@@ -205,7 +206,7 @@ def test_relationships_window_validation(tmp_path: Path) -> None:
     db_path = _build_relationships_app(tmp_path)
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         default_resp = client.get(
             "/api/v1/relationships/graph",
             query_string={"account_email": "primary@example.com"},

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
 BANNED_PHRASES = [
@@ -31,7 +32,7 @@ def test_banned_phrases_not_present(tmp_path: Path) -> None:
         login_page = client.get("/login")
         _assert_no_banned_phrases(login_page.get_data(as_text=True))
 
-        client.post("/login", data={"password": "pw"})
+        login_with_csrf(client, "pw")
         with sqlite3.connect(db_path) as conn:
             conn.execute(
                 """
