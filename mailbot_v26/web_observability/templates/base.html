@@ -26,7 +26,7 @@
           <a href="{{ url_for('events') }}" class="nav-link {% if request.path == '/events' %}active{% endif %}">Events</a>
           <a href="{{ url_for('relationships') }}" class="nav-link {% if request.path.startswith('/relationships') %}active{% endif %}">Relationships</a>
           <a href="{{ url_for('doctor') }}" class="nav-link {% if request.path.startswith('/doctor') %}active{% endif %}">Doctor</a>
-          {% if support_nav_enabled %}<a href="{{ url_for('support') }}" class="nav-link {% if request.path.startswith('/support') %}active{% endif %}">Support</a>{% endif %}
+          {% if cfg.features.donate_enabled and support_nav_enabled %}<a href="{{ url_for('support') }}" class="nav-link {% if request.path.startswith('/support') %}active{% endif %}">Support</a>{% endif %}
         </nav>
         {% set vars = dashboard_vars if dashboard_vars is defined and dashboard_vars else None %}
         <form method="get" action="{{ request.path }}" class="dashboard-vars">

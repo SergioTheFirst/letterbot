@@ -95,3 +95,5 @@ priority_yellow_threshold=35          ' Порог для “жёлтого” �
 enabled = 0
 url = https://...
 text = Поддержать проект
+[features]
+donate_enabled = false

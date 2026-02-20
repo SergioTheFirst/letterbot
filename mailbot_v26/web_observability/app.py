@@ -193,7 +193,9 @@ def _render_template(app: Flask, template_name: str, **context: object) -> str:
         and support_settings.enabled
         and support_settings.show_in_nav
     )
+    donate_enabled = bool(app.config.get("DONATE_ENABLED", False))
     context.setdefault("support_nav_enabled", support_nav_enabled)
+    context.setdefault("cfg", {"features": {"donate_enabled": donate_enabled}})
     context.setdefault("app_version", __version__)
     if USING_FLASK_STUB:
         template_path = Path(app.template_folder or "") / template_name
@@ -967,7 +969,13 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
     except Exception as exc:
         logger.warning("support_config_load_failed", error=str(exc))
         return SupportSettings(enabled=False, show_in_nav=False, methods=[])
-    support = raw.get("support") if isinstance(raw, dict) else None
+    if not isinstance(raw, dict):
+        return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+    features = raw.get("features")
+    donate_enabled = bool(features.get("donate_enabled", False)) if isinstance(features, dict) else False
+    if not donate_enabled:
+        return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+    support = raw.get("support")
     if not isinstance(support, dict):
         return SupportSettings(enabled=False, show_in_nav=False, methods=[])
     enabled = bool(support.get("enabled", False))
@@ -2009,11 +2017,13 @@ def create_app(
     app.config["ANALYTICS_FACTORY"] = lambda: KnowledgeAnalytics(
         app.config["DB_PATH"], read_only=True
     )
-    app.config["SUPPORT_SETTINGS"] = support_settings or SupportSettings(
+    resolved_support_settings = support_settings or SupportSettings(
         enabled=False,
         show_in_nav=False,
         methods=[],
     )
+    app.config["SUPPORT_SETTINGS"] = resolved_support_settings
+    app.config["DONATE_ENABLED"] = bool(resolved_support_settings.enabled)
 
     @app.before_request
     def _require_login():

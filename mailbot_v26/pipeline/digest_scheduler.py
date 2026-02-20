@@ -338,6 +338,14 @@ def _load_support_telegram_config() -> SupportTelegramConfig:
         raw = load_yaml_config(config_path)
     except Exception:
         return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
+    if not isinstance(raw, dict):
+        return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
+    features = raw.get("features")
+    donate_enabled = False
+    if isinstance(features, dict):
+        donate_enabled = bool(features.get("donate_enabled", False))
+    if not donate_enabled:
+        return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
     support = raw.get("support") if isinstance(raw, dict) else None
     telegram = support.get("telegram") if isinstance(support, dict) else None
     if not isinstance(telegram, dict):

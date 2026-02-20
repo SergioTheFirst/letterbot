@@ -54,6 +54,7 @@ def test_support_page_renders_methods(tmp_path: Path) -> None:
         assert "+70000000000" in body
         assert "https://yoomoney.ru/to/abc" in body
         assert "Скопировать" in body
+        assert "Поддержать разработку" in body
 
 
 def test_support_page_hides_when_disabled(tmp_path: Path) -> None:
@@ -73,3 +74,4 @@ def test_support_page_hides_when_disabled(tmp_path: Path) -> None:
         home = client.get("/")
         body = home.get_data(as_text=True)
         assert "Support" not in body
+        assert "Поддержать разработку" not in body
