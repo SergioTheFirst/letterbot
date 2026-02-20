@@ -18,8 +18,6 @@ venv/
 mailbot_v26/venv/
 
 # secrets/config
-*.ini
-!*.ini.example
 
 # runtime
 *.sqlite
