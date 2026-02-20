@@ -10,7 +10,10 @@ import ssl
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+from mailbot_v26.state_manager import StateManager
 
 try:
     from imapclient import IMAPClient  # type: ignore
@@ -90,7 +93,11 @@ def _parse_rfc822_size(fetch_data: Dict[bytes, Any]) -> Optional[int]:
 
 
 def _imapclient_available() -> bool:
-    return IMAPClient is not None
+    return (_imap_client_cls is not None) or (IMAPClient is not None)
+
+
+# для тестов/моков можно подменять фабрику на уровне модуля
+_imap_client_cls = None
 
 
 class ResilientIMAP:
@@ -102,11 +109,15 @@ class ResilientIMAP:
     """
 
     # для тестов/моков можно подменять класс клиента:
-    _imap_client_cls = IMAPClient
+    _imap_client_cls = None
 
     def __init__(
         self,
-        account: IMAPAccount,
+        account: Any,
+        state: Optional[StateManager] = None,
+        start_time: Optional[datetime] = None,
+        allow_prestart_emails: bool = False,
+        max_email_mb: Optional[int] = None,
         *,
         connect_timeout: float = 15.0,
         io_timeout: float = 30.0,
@@ -116,7 +127,19 @@ class ResilientIMAP:
         if not _imapclient_available():
             raise IMAPError("Пакет imapclient не установлен. Установите: pip install imapclient")
 
-        self.account = account
+        normalized_account = IMAPAccount(
+            host=getattr(account, "host", ""),
+            port=int(getattr(account, "port", 993) or 993),
+            ssl=bool(getattr(account, "ssl", getattr(account, "use_ssl", True))),
+            user=getattr(account, "user", getattr(account, "login", "")),
+            password=getattr(account, "password", ""),
+            mailbox=getattr(account, "mailbox", "INBOX"),
+            max_email_mb=int(max_email_mb or getattr(account, "max_email_mb", 15) or 15),
+        )
+        self.account = normalized_account
+        self._state = state
+        self._start_time_utc = _safe_dt(start_time)
+        self._allow_prestart_emails = bool(allow_prestart_emails)
         self.connect_timeout = float(connect_timeout)
         self.io_timeout = float(io_timeout)
         self.retries = int(retries)
@@ -125,7 +148,14 @@ class ResilientIMAP:
         self._client = None
 
     def _connect(self) -> Any:
-        cls = self._imap_client_cls
+        cls = _imap_client_cls or IMAPClient or self._imap_client_cls
+        if callable(cls) and cls is not IMAPClient:
+            try:
+                produced = cls()
+                if produced is not None:
+                    cls = produced
+            except TypeError:
+                pass
         if cls is None:
             raise IMAPError("IMAPClient недоступен.")
 
@@ -133,12 +163,22 @@ class ResilientIMAP:
         socket.setdefaulttimeout(self.io_timeout)
 
         try:
-            client = cls(
-                self.account.host,
-                port=self.account.port,
-                ssl=self.account.ssl,
-                timeout=self.connect_timeout,
-            )
+            try:
+                client = cls(
+                    self.account.host,
+                    port=self.account.port,
+                    ssl=self.account.ssl,
+                    timeout=self.connect_timeout,
+                )
+            except TypeError:
+                try:
+                    client = cls(self.account.host, self.account.port, self.account.ssl)
+                except TypeError:
+                    client = cls(
+                        self.account.host,
+                        port=self.account.port,
+                        ssl=self.account.ssl,
+                    )
             client.login(self.account.user, self.account.password)
             client.select_folder(self.account.mailbox)
             return client
@@ -207,7 +247,7 @@ class ResilientIMAP:
             return {}
 
         def _fetch(client):
-            return client.fetch(list(uids), [b"RFC822.HEADER", b"RFC822.SIZE"])
+            return client.fetch(list(uids), ["RFC822.HEADER", "RFC822.SIZE", "INTERNALDATE"])
 
         data = self._with_retries(_fetch) or {}
         # imapclient ключи uids -> dict
@@ -306,6 +346,59 @@ class ResilientIMAP:
 
                 emitted += 1
                 yield uid, msg
+
+    def fetch_new_messages(self, *, limit: int = 50) -> List[Tuple[int, bytes]]:
+        start_time_utc = self._start_time_utc or _utcnow()
+        range_start = 1
+        if self._state is not None and self.account.user:
+            range_start = max(1, self._state.get_last_uid(self.account.user) + 1)
+
+        def _search(client, criteria):
+            return client.search(criteria)
+
+        base_criteria = ["UID", f"{range_start}:*"]
+        all_uids = sorted(int(uid) for uid in (self._with_retries(_search, base_criteria) or []))
+
+        since_criteria = [*base_criteria, "SINCE", start_time_utc.strftime("%d-%b-%Y")]
+        scoped_uids = sorted(int(uid) for uid in (self._with_retries(_search, since_criteria) or []))
+        highest_seen = max(all_uids) if all_uids else None
+
+        messages: List[Tuple[int, bytes]] = []
+        max_bytes = int(self.account.max_email_mb) * 1024 * 1024
+        for uid in scoped_uids:
+            if len(messages) >= limit:
+                break
+            try:
+                meta = self.fetch_headers_and_size([uid]).get(uid, {})
+            except Exception:
+                continue
+            internal_date = _safe_dt(meta.get(b"INTERNALDATE") or meta.get("INTERNALDATE"))
+            if (not self._allow_prestart_emails) and internal_date and internal_date < start_time_utc:
+                continue
+            size = _parse_rfc822_size(meta)
+            if size is not None and size > max_bytes:
+                header_map = self._with_retries(
+                    lambda client: client.fetch([uid], ["BODY.PEEK[HEADER]"])
+                ) or {}
+                header_bytes = (header_map.get(uid) or {}).get(b"BODY[HEADER]", b"")
+                header_msg = email.message_from_bytes(header_bytes or b"")
+                synthetic = EmailMessage()
+                synthetic["From"] = header_msg.get("From", "")
+                synthetic["Subject"] = header_msg.get("Subject", "")
+                synthetic.set_content("Письмо слишком большое и не было загружено полностью.")
+                messages.append((uid, synthetic.as_bytes()))
+                continue
+            try:
+                raw = self.fetch_full_rfc822(uid)
+            except Exception:
+                continue
+            messages.append((uid, raw))
+
+        if self._state is not None and self.account.user:
+            if highest_seen is not None:
+                self._state.update_last_uid(self.account.user, highest_seen)
+            self._state.update_check_time(self.account.user)
+        return messages
 
 
 # ---- удобные helper-ы, если где-то в проекте нужно ----

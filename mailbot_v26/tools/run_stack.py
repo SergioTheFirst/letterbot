@@ -292,6 +292,38 @@ def main() -> int:
         port = port if port is not None else default_port
 
     python_exe = sys.executable
+    if args.dry_run:
+        dry_config_dir = args.config_dir or CONFIG_DIR
+        dry_db_path = args.db_path or Path("mailbot_v26/data/knowledge.db")
+        if args.mode == "worker":
+            commands = [_build_worker_command(python_exe, args.config_dir)]
+        elif args.mode == "web":
+            commands = [
+                _build_web_command(
+                    python_exe,
+                    config_dir=dry_config_dir,
+                    db_path=dry_db_path,
+                    bind=bind or "127.0.0.1",
+                    port=port or 8111,
+                )
+            ]
+        elif args.mode == "doctor":
+            commands = [_build_doctor_command(python_exe, args.config_dir)]
+        else:
+            commands = [
+                _build_worker_command(python_exe, args.config_dir),
+                _build_web_command(
+                    python_exe,
+                    config_dir=dry_config_dir,
+                    db_path=dry_db_path,
+                    bind=bind or "127.0.0.1",
+                    port=port or 8111,
+                ),
+            ]
+        for command in commands:
+            print(f"{command.name}: {_format_command(command.args)}")
+        return 0
+
     commands = build_commands(
         python_exe=python_exe,
         mode=args.mode,
@@ -300,11 +332,6 @@ def main() -> int:
         bind=bind or "127.0.0.1",
         port=port or 8111,
     )
-
-    if args.dry_run:
-        for command in commands:
-            print(f"{command.name}: {_format_command(command.args)}")
-        return 0
 
     web_url = f"http://{bind or '127.0.0.1'}:{port or 8111}/login"
     open_browser = (args.mode in {"all", "web"}) and not args.no_browser

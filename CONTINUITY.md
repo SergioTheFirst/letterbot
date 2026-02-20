@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-20: completed donate toggle verification end-to-end (UI nav + /support route + digest P.S.), restored IMAP compatibility seams for deterministic polling tests, fixed learning timeline template/runtime errors, and stabilized run_stack --dry-run without local config dependency.
 - 2026-02-20: implemented donate toggle `features.donate_enabled` in config examples/validator and gated support UI + TG support PS rendering with tests.
 - 2026-02-20: fixed config validation robustness/order (accounts-first, supports accounts[].imap.* with top-level imap fallback, no-throw tuple contract) and removed forbidden audit wording from PDF extractor docs/comments.
 - 2026-02-20: replaced user-facing product label "MailBot" -> "Letterbot" in web UI templates, launcher/help text, doctor/start banners, and related assertions; kept internal module/package identifiers unchanged.
@@ -71,9 +72,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Finalizing donate/no-donate toggle rollout (`features.donate_enabled`) and verifying UI/TG behavior parity under both flag states.
+- Donate/no-donate toggle phase is completed and fully covered by audit + pytest checks.
 Next:
-- After merge, run release smoke on real config presets to confirm donation paths remain fully hidden by default.
+- Run Windows-oriented smoke pass on real packaged artifact (run.bat/MailBot.exe flow) with donate_enabled=true/false presets before release cut.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

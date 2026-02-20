@@ -2252,8 +2252,10 @@ def create_app(
                 _COCKPIT_CACHE.set(lane_cache_key, lane_counts)
         digest_today = summary.get("today_digest") if isinstance(summary, Mapping) else {}
         digest_week = summary.get("week_digest") if isinstance(summary, Mapping) else {}
-        today_items = _summarize_digest_rows(digest_today.get("items", []))
-        week_items = _summarize_digest_rows(digest_week.get("items", []))
+        today_source = digest_today.get("items", []) if lane == "all" else []
+        week_source = digest_week.get("items", []) if lane == "all" else []
+        today_items = _summarize_digest_rows(today_source)
+        week_items = _summarize_digest_rows(week_source)
         golden_signals = _golden_signals_view(
             summary.get("golden_signals") if isinstance(summary, Mapping) else {}
         )
@@ -4382,7 +4384,7 @@ def _build_access_urls(*, bind_address: str, port: int) -> tuple[str, str | None
 
 def main() -> None:
     require_runtime_for("web_ui")
-    parser = argparse.ArgumentParser(description="MailBot Observability Console")
+    parser = argparse.ArgumentParser(description="Letterbot Observability Console")
     parser.add_argument("--db", type=Path, help="Path to SQLite database")
     parser.add_argument("--config", type=Path, default=CONFIG_DIR, help="Config directory")
     parser.add_argument("--config-yaml", type=Path, help="Path to config.yaml")
