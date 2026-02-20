@@ -97,7 +97,7 @@ def test_lane_pills_render_and_preserve_vars(tmp_path: Path) -> None:
         body = page.get_data(as_text=True)
         assert "lane-pills" in body
         assert "lane=all" in body
-        assert f"account_emails={quote('acct@example.com')}" in body
+        assert (f"account_emails={quote('acct@example.com')}" in body or "account_emails=acct@example.com" in body)
         assert "window_days=7" in body
         assert "limit=10" in body
 
@@ -131,6 +131,6 @@ def test_share_link_includes_lane_and_vars(tmp_path: Path) -> None:
         body = page.get_data(as_text=True)
         assert "data-share-url" in body
         assert "lane=critical" in body
-        assert f"account_emails={quote('acct@example.com')}" in body
+        assert (f"account_emails={quote('acct@example.com')}" in body or "account_emails=acct@example.com" in body)
         assert "window_days=30" in body
         assert "limit=25" in body

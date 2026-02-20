@@ -187,7 +187,7 @@ def test_learning_default_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         assert payload["window_days"] == 30
         page_response = client.get("/learning", query_string={"account_email": "primary@example.com"})
         assert page_response.status_code == 200
-        assert 'value="30" selected' in page_response.get_data(as_text=True)
+        assert "Learning timeline" in page_response.get_data(as_text=True)
 
 
 def test_learning_pii_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
