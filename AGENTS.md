@@ -1,258 +1,162 @@
-0) Canonical sources of truth (STRICT)
-Strategic truth
-
-CONSTITUTION.md определяет:
-
-что это за система;
-
-что разрешено / запрещено;
-
-долгосрочные цели и философию.
-
-Этот документ изменяется редко и намеренно.
-
-Codex обязан всегда его соблюдать.
-
-Operational truth
-
-CONTINUITY.md фиксирует:
-
-текущую цель;
-
-текущее состояние реализации;
-
-что уже сделано / что делается / что будет следующим.
-
-Это не дорожная карта и не список желаний.
-
-Это летопись фактов, а не намерений.
-
-Если что‑то не написано в:
-
-CONSTITUTION.md → это не принцип;
-
-CONTINUITY.md → это неизвестно.
-
-Не изобретайте контекст.
-
-1) Mandatory start‑of‑turn routine (ALWAYS)
-
-Перед любой работой (анализ, планирование, код, тесты):
-
-Подумайте прежде чем действовать:
-
-проанализируйте контекст (какие файлы и модули затронуты);
-
-проверьте зависимости (что может сломаться);
-
-составьте краткий план (3–5 шагов);
-
-определите, как проверите результат.
-
-Прочитайте CONSTITUTION.md и CONTINUITY.md.
-
-Убедитесь, что ваш план:
-
-не нарушает Конституцию;
-
-соответствует текущему Goal / Now / Next в CONTINUITY.md.
-
-Только после этого приступайте.
-
-Если CONTINUITY.md отсутствует:
-
-создайте его в корне репозитория по формату (см. раздел 4),
-
-заполните минимумом фактических данных,
-
-затем продолжайте.
-
-2) Когда обновлять CONTINUITY.md (MANDATORY)
-
-Обновляйте файл сразу, когда:
-
-изменилась цель или критерии успеха;
-
-завершилась фаза (например, «Attention Gate внедрён»);
-
-выявлено новое инвариантное правило или ограничение;
-
-функция полностью реализована и протестирована;
-
-добавлены/удалены тесты, влияющие на архитектуру;
-
-принято решение с долгосрочным эффектом.
-
-Дисциплина обновления:
-
-запись должна быть КОРОТКОЙ и фактической;
-
-используйте списки;
-
-без описательной прозы, оправданий, логов из чата;
-
-явно помечайте неизвестные как UNCONFIRMED;
-
-никогда не храните секреты или учётные данные.
-
-⚠️ CONTINUITY.md — документ о реальности, а не план на будущее.
-
-3) Development behavior (NON‑NEGOTIABLE)
-Принципы
-
-Детерминизм прежде всего: избегайте вероятностных решений, если возможны правила.
-
-Никаких лишних LLM: не добавляйте зависимость от LLM там, где достаточно жёстких правил.
-
-Любой новый слой:
-
-должен безопасно отказывать;
-
-не блокировать основную обработку;
-
-не менять схему Telegram‑payload без явного одобрения.
-
-TDD‑подход: пишите тесты до/вместе с кодом.
-
-Изменения кода
-
-Минимальные, точечные диффы (не «рефакторинг на 500 строк»).
-
-Уважайте границы модулей.
-
-Не меняйте порядок стадий пайплайна без указания.
-
-Побочные эффекты должны быть наблюдаемыми (логи, метрики).
-
-Обработка ошибок
-
-Ошибки логируются, никогда не скрываются.
-
-Никаких try...except: pass.
-
-Сбой не должен тихо снижать доверие пользователя.
-
-Если качество пользовательского вывода снизилось, сообщите об этом прямо.
-
-4) Required CONTINUITY.md format (EXACT)
-
-Используйте только эти заголовки, строго в этом порядке:
-
+# AGENTS.md — Letterbot (Codex instructions)
+
+This file is the single operational instruction set for Codex in this repo.
+
+Codex MUST:
+- follow these rules strictly;
+- keep diffs small and targeted;
+- prefer deterministic logic over heuristic/LLM dependency;
+- update CONTINUITY.md whenever state materially changes (Done/Now/Next).
+
+If any instruction here conflicts with CONSTITUTION.md, CONSTITUTION.md wins.
+
+---
+
+## 1) Sources of truth (priority order)
+1) CONSTITUTION.md — purpose, hard constraints, non-negotiables.
+2) CONTINUITY.md — what is true right now: Goal / State / Done / Now / Next.
+3) AGENTS.md — how to work in this repo (this file).
+
+If something is not in CONSTITUTION.md → it is NOT a principle.
+If something is not in CONTINUITY.md → it is UNKNOWN. Mark as UNCONFIRMED, do not invent context.
+
+---
+
+## 2) Mandatory start-of-turn routine (ALWAYS)
+Before any coding:
+1) Read CONSTITUTION.md and CONTINUITY.md.
+2) Identify the minimal working set (files/tests touched).
+3) Make a 3–5 step plan.
+4) Define verification (tests/commands).
+5) Only then implement.
+
+If CONTINUITY.md is missing:
+- Create it in repo root using the required format (section order is strict).
+- Fill only facts you can prove from repo state. Unknowns → UNCONFIRMED.
+
+---
+
+## 3) Repo quick map (update if structure changes)
+- Python project.
+- Primary package directory: `mailbot_v26/` (legacy naming; product name is "Letterbot").
+- Config templates: `mailbot_v26/config/`
+- Tests: `mailbot_v26/tests/` (pytest)
+
+When renaming user-facing text/branding:
+- Do NOT rename modules/packages unless explicitly requested.
+- Prefer changing UI strings, headings, CLI help, templates, README, and visible labels.
+
+---
+
+## 4) How to run (commands Codex should use)
+Environment assumptions:
+- Windows PowerShell or cmd is common; avoid bash-only commands unless confirmed.
+
+Preferred commands:
+- Run tests: `python -m pytest -q`
+- Run a specific test: `python -m pytest -q path\\to\\test_file.py -k test_name`
+- Lint/format: only if tools are present in repo (check `pyproject.toml` / `requirements*.txt` first).
+
+If commands are unknown:
+- Inspect repo files to confirm (pyproject.toml, requirements, README).
+- If still unclear, propose 1–2 options and ask user to confirm.
+
+---
+
+## 5) Development rules (NON-NEGOTIABLE)
+### Change strategy
+- Minimal diffs. No refactors "just because".
+- Preserve pipeline stage order unless explicitly required.
+- No silent error handling. Never `except: pass`. Always log + surface degraded output.
+
+### Determinism first
+- Prefer rules/heuristics over new LLM calls or probabilistic logic.
+- Do not add new external dependencies unless necessary and approved.
+
+### Safety & observability
+- Any new side effect must be observable (logs / metrics / explicit events).
+- If output quality degrades, say so explicitly in user-facing output.
+
+### Tests (TDD bias)
+- For behavior changes: add/adjust tests in the same PR.
+- Keep tests fast and deterministic.
+
+---
+
+## 6) CONTINUITY.md update policy (MANDATORY)
+Update CONTINUITY.md immediately when:
+- Goal or success criteria changes,
+- a phase is completed,
+- new invariant constraints appear,
+- a feature is fully implemented & tested,
+- tests added/removed that affect architecture,
+- a long-term decision is made.
+
+Rules:
+- short, factual bullets
+- no chat logs, no prose
+- unknowns → UNCONFIRMED
+- never store secrets/credentials
+
+Required section order in CONTINUITY.md:
 Goal (incl. success criteria):
-
 Constraints / Assumptions:
-
 Key decisions:
-
 State:
-
 Done:
-
 Now:
-
 Next:
-
 Open questions (UNCONFIRMED if needed):
-
 Working set (files / tables / tests):
 
-Никаких дополнительных секций, переименований и повествовательных текстов.
+---
 
-5) Relationship between documents (IMPORTANT)
+## 7) Communication format (responses Codex should produce)
+Be concise and implementation-oriented.
+No motivational filler. No invented facts.
 
-CONSTITUTION.md отвечает на вопрос: «Зачем существует эта система и чем она должна стать?»
+Use this template:
 
-CONTINUITY.md отвечает на вопрос: «Что истинно прямо сейчас?»
+Ledger Snapshot:
+- Goal: (from CONTINUITY.md)
+- Now:
+- Next:
+- Blockers:
 
-AGENTS.md отвечает на вопрос: «Как должен вести себя Codex?»
+Then:
+- What will change (files)
+- Exact commands to verify
+- Any risks
 
-Codex никогда не должен:
+---
 
-считать CONTINUITY.md дорожной картой;
+## 8) Escalation rule (CRITICAL)
+If there is a conflict between:
+- user request,
+- CONSTITUTION.md,
+- CONTINUITY.md,
+- architecture constraints,
 
-менять CONSTITUTION.md косвенно;
+Codex MUST stop and:
+1) explain the conflict clearly;
+2) propose 1–2 alternatives with pros/cons;
+3) wait for explicit approval.
 
-придумывать пункты Next без согласия пользователя или эксперта.
+Silent compromise is forbidden.
 
-6) Communication rules
+---
 
-Будьте кратки, конкретны, ориентированы на реализацию.
+## 9) Common tasks playbooks
+### Rename "mailbot" → "letterbot" in UI/branding
+- Search for user-visible strings: "mailbot", "MailBot", "MAILBOT"
+- Update:
+  - UI templates / web pages (if present)
+  - CLI help text / output strings
+  - README/docs
+- DO NOT rename python packages or folder names unless requested.
+- Add/adjust tests if output is asserted.
 
-Никаких ритуальных вступлений («Надеюсь, это поможет…»).
+---
 
-Никакой мотивационной лирики.
-
-Никаких эмодзи.
-
-Никаких домыслов, выданных за факт.
-
-Рекомендуемый шаблон ответа:
-
-📋 Ledger Snapshot:
-Goal: [из CONTINUITY.md]
-Now: [чем вы заняты]
-Next: [что будет дальше]
-Blockers: [если есть]
-
-[ваша работа/объяснение]
-
-
-Снимок Конституции включайте только если:
-
-пользователь прямо его запросил, либо
-
-вы внесли существенное изменение в CONTINUITY.md.
-
-7) Escalation rule (CRITICAL)
-
-Если вы видите конфликт между:
-
-запросом пользователя,
-
-CONSTITUTION.md,
-
-текущей архитектурой,
-
-вы ОБЯЗАНЫ:
-
-остановиться;
-
-чётко объяснить конфликт;
-
-предложить 1–2 альтернативы с плюсами/минусами;
-
-ждать явного одобрения.
-
-Тихий компромисс запрещён.
-
-8) Anti‑patterns (NEVER DO THIS)
-
-❌ Ленивый код: «…остальная часть кода здесь…». Пишите полностью.
-
-❌ Галлюцинации: не импортируйте несуществующие библиотеки (сначала проверяйте requirements.txt).
-
-❌ Разрушение: не удаляйте код, если не было прямого указания (лучше закомментируйте).
-
-❌ Спекуляции: не добавляйте функции, которые «как будто нужны», без подтверждения.
-
-❌ Тихая обработка ошибок: не заглушайте исключения без логирования.
-
-9) Quality checklist (before marking task “Done”)
-
- Код выполняется без ошибок.
-
- Тесты написаны и проходят.
-
- Типы указаны (Python: type hints; TypeScript: определения).
-
- Проверка стиля проходит (PEP 8 / Black / ESLint).
-
- Соблюдены требования CONSTITUTION.md.
-
- Нет незакрытых TODO/FIXME.
-
- CONTINUITY.md обновлён (пункты Done/Now/Next).
-
- Нет скрытой обработки ошибок.
-
-ACTIVATION PHRASE: Ready. What's the first task from CONTINUITY.md?
+ACTIVATION PHRASE:
+Ready. What's the first task from CONTINUITY.md?
