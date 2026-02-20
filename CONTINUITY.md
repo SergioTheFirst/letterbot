@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-20: fixed config validation robustness/order (accounts-first, supports accounts[].imap.* with top-level imap fallback, no-throw tuple contract) and removed forbidden audit wording from PDF extractor docs/comments.
 - 2026-02-20: replaced user-facing product label "MailBot" -> "Letterbot" in web UI templates, launcher/help text, doctor/start banners, and related assertions; kept internal module/package identifiers unchanged.
 - 2026-02-16: added config schema_version contract (default=1), validate-config --compat report, startup exit-code=2 on newer schema, docs/UPGRADE.md, and deterministic tests.
 - 2026-02-16: added Windows Smoke Kit docs (10 scenarios), Windows troubleshooting pack (15 symptom/cause/fix items), and tools/smoke_check.bat artifact generator for dev/dist triage.
@@ -69,12 +70,13 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- User-facing naming migration to "Letterbot" completed; validating no remaining display labels regressions.
+- Config/audit hotfix completed: validate_config made exception-safe and schema-compatible for accounts imap host/port variants; verification green.
 Next:
-- Awaiting user review for scope of remaining filename/artifact identifiers (e.g., MailBot.exe, dist/MailBot) that are operational, not UI labels.
+- Awaiting user review on whether to propagate empty-string success contract ("") to all downstream validate_config callers/tests beyond current scope.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/bot_core/extractors/pdf.py
 - mailbot_v26/version.py
 - mailbot_v26/__main__.py
 - build/windows_version_info.txt

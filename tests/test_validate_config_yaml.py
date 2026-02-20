@@ -43,7 +43,7 @@ def test_validate_config_success() -> None:
     ok, error = validate_config(_base_config())
 
     assert ok
-    assert error is None
+    assert error == ""
 
 
 def test_validate_config_missing_accounts() -> None:
@@ -73,7 +73,7 @@ def test_validate_config_model_null_allowed() -> None:
     ok, error = validate_config(config)
 
     assert ok
-    assert error is None
+    assert error == ""
 
 
 def test_validate_config_default_local_ok() -> None:
@@ -84,7 +84,7 @@ def test_validate_config_default_local_ok() -> None:
     ok, error = validate_config(config)
 
     assert ok
-    assert error is None
+    assert error == ""
 
 
 def test_validate_config_lan_requires_allowlist() -> None:
@@ -207,4 +207,4 @@ def test_validate_config_support_success() -> None:
     ok, error = validate_config(config)
 
     assert ok
-    assert error is None
+    assert error == ""
