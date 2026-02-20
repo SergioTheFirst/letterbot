@@ -95,6 +95,6 @@ def test_doctor_mode_reports_and_sends(monkeypatch, tmp_path, capsys):
     report = doctor.run_doctor(config_dir=tmp_path)
 
     output = capsys.readouterr().out
-    assert "ОТЧЁТ ДОКТОРА MAILBOT" in output
+    assert "ОТЧЁТ ДОКТОРА LETTERBOT" in output
     assert report.telegram_sent is True
     assert any(entry.component == "SQLite" for entry in report.entries)

@@ -224,7 +224,7 @@ def build_commands(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="MailBot stack launcher")
+    parser = argparse.ArgumentParser(description="Letterbot stack launcher")
     parser.add_argument(
         "mode",
         nargs="?",

@@ -7,7 +7,7 @@ set "REPO_ROOT=%~dp0"
 cd /d "%REPO_ROOT%"
 
 echo =============================================
-echo   MailBot Premium - Windows Build (one-folder)
+echo   Letterbot Premium - Windows Build (one-folder)
 echo =============================================
 
 set "VENV_PY=%REPO_ROOT%.venv\Scripts\python.exe"

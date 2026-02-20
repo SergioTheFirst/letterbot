@@ -1,10 +1,10 @@
-# Running MailBot (one-click)
+# Running Letterbot (one-click)
 
 1. Double-click `run_mailbot.bat` in the repository root.
 
 ## Troubleshooting
 - **Port in use**: stop the process using the port and retry.
-- **DB locked**: close any other MailBot processes that might be using `data/mailbot.sqlite`.
+- **DB locked**: close any other Letterbot processes that might be using `data/mailbot.sqlite`.
 - **Wrong password**: update `web_ui.password` in `config.yaml` and restart.
 
 ## Проверка перед релизом
@@ -27,7 +27,7 @@ web_ui:
 - Open from phone/other PC: `http://<PC IPv4>:<port>/`.
 - Do not open `http://0.0.0.0:<port>/` in browser.
 - If needed, allow inbound TCP port in firewall:
-  `netsh advfirewall firewall add rule name="MailBot Web UI <port>" protocol=TCP dir=in localport=<port> action=allow`
+  `netsh advfirewall firewall add rule name="Letterbot Web UI <port>" protocol=TCP dir=in localport=<port> action=allow`
 - Windows SmartScreen on first run may show “Windows protected your PC” for unsigned builds; click `More info` -> `Run anyway` and follow `docs/SMARTSCREEN.md`.
 - Keep `web_ui.password` strong (10+ chars) and keep `web_ui.prod_server=true` for LAN.
 

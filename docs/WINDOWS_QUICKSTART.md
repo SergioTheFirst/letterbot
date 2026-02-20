@@ -36,7 +36,7 @@ web_ui:
 
 Если страница не открывается, добавьте правило Windows Firewall (PowerShell/cmd):
 
-`netsh advfirewall firewall add rule name="MailBot Web UI 8787" protocol=TCP dir=in localport=8787 action=allow`
+`netsh advfirewall firewall add rule name="Letterbot Web UI 8787" protocol=TCP dir=in localport=8787 action=allow`
 
 `prod_server: true` включает waitress для LAN/production, а встроенный Flask-сервер оставляйте только для localhost и локальной отладки.
 

@@ -10,7 +10,7 @@ set "CONFIG_FILE=%~dp0config.yaml"
 set "CONFIG_EXAMPLE=%~dp0config.example.yaml"
 
 if not exist "%EXE_PATH%" (
-    echo ERROR: MailBot.exe not found.
+    echo ERROR: Letterbot executable (MailBot.exe) not found.
     exit /b 1
 )
 

@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}{{ title or "MailBot Web — Observability" }}{% endblock %}</title>
+  <title>{% block title %}{{ title or "Letterbot Web — Observability" }}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-stack">
-        <div class="brand">MailBot Web — Observability</div>
+        <div class="brand">Letterbot Web — Observability</div>
         {% if scope_hint %}<div class="subtitle">{{ scope_hint }}</div>{% endif %}
       </div>
       {% if not hide_nav %}
@@ -95,7 +95,7 @@
       {% block content %}{% endblock %}
     </main>
 
-    <footer class="app-footer">MailBot v{{ app_version }}</footer>
+    <footer class="app-footer">Letterbot v{{ app_version }}</footer>
   </div>
   <script>
     document.addEventListener('DOMContentLoaded', function() {

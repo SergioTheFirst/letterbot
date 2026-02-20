@@ -7,7 +7,7 @@ set "REPO_ROOT=%~dp0"
 cd /d "%REPO_ROOT%"
 
 echo =============================================
-echo   MailBot Premium - Tests
+echo   Letterbot Premium - Tests
 echo =============================================
 
 echo Checking virtual environment...

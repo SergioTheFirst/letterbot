@@ -200,7 +200,7 @@ def test_validate_config_support_success() -> None:
         "telegram": {
             "enabled": True,
             "frequency_days": 30,
-            "text": "MailBot бесплатный. Поддержка: /support",
+            "text": "Letterbot бесплатный. Поддержка: /support",
         },
     }
 

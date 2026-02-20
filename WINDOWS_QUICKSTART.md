@@ -1,4 +1,4 @@
-# MailBot Premium — Windows Quickstart
+# Letterbot Premium — Windows Quickstart
 
 ## 1) Установка и запуск одной командой
 1. Скачайте или клонируйте репозиторий.
