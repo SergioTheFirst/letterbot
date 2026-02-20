@@ -9,6 +9,8 @@ from mailbot_v26.priority.priority_engine_v2 import (
     PriorityEngineV2,
     PriorityV2Config,
     VipSenderMatcher,
+    load_priority_v2_config,
+    load_vip_senders,
 )
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
@@ -308,3 +310,34 @@ def test_deterministic_output(tmp_path: Path) -> None:
 
     assert result_a.score == result_b.score
     assert result_a.reason_codes == result_b.reason_codes
+
+
+def test_malformed_config_ini_falls_back_with_actionable_warning(tmp_path: Path, caplog) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.ini").write_text("check_interval=120\n", encoding="utf-8")
+    (config_dir / "config.ini.example").write_text("[priority_v2]\n", encoding="utf-8")
+
+    caplog.set_level("WARNING")
+    config = load_priority_v2_config(config_dir)
+    vip = load_vip_senders(config_dir)
+
+    assert config == PriorityV2Config()
+    assert vip == VipSenderMatcher()
+    assert "Invalid INI format" in caplog.text
+    assert "config.ini.example" in caplog.text
+    assert "INI must include [sections]" in caplog.text
+    assert "MissingSectionHeaderError" not in caplog.text
+
+
+def test_missing_config_ini_uses_deterministic_defaults(tmp_path: Path, caplog) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+
+    caplog.set_level("WARNING")
+    config = load_priority_v2_config(config_dir)
+    vip = load_vip_senders(config_dir)
+
+    assert config == PriorityV2Config()
+    assert vip == VipSenderMatcher()
+    assert "config.ini missing" in caplog.text

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import configparser
+import logging
 import re
 from dataclasses import asdict
 from dataclasses import dataclass
@@ -88,15 +89,49 @@ class VipSenderMatcher:
 _PRIORITY_CONFIG_SECTION = "priority_v2"
 _VIP_CONFIG_SECTION = "vip_senders"
 _DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+_LOGGER = logging.getLogger(__name__)
+
+
+class PriorityConfigError(RuntimeError):
+    """Raised when priority config.ini is malformed and cannot be parsed as INI."""
+
+
+def _invalid_ini_message(config_path: Path, config_example_path: Path) -> str:
+    return (
+        f"Invalid INI format in {config_path}. "
+        f"Use {config_example_path} as template. "
+        "INI must include [sections]. "
+        "Windows regenerate command: "
+        f"copy {config_example_path} {config_path}"
+    )
+
+
+def _load_ini_with_fallback(config_dir: Path) -> configparser.ConfigParser:
+    config_path = config_dir / "config.ini"
+    config_example_path = config_dir / "config.ini.example"
+    parser = configparser.ConfigParser()
+    if not config_path.exists():
+        _LOGGER.warning(
+            "priority config.ini missing at %s; using deterministic defaults for priority/vip settings.",
+            config_path,
+        )
+        return parser
+    try:
+        parser.read(config_path, encoding="utf-8")
+    except (configparser.MissingSectionHeaderError, configparser.ParsingError) as exc:
+        err = PriorityConfigError(_invalid_ini_message(config_path, config_example_path))
+        _LOGGER.warning(
+            "%s Falling back to deterministic defaults for priority/vip settings.",
+            err,
+        )
+        _LOGGER.debug("priority config parse error details", exc_info=exc)
+        return configparser.ConfigParser()
+    return parser
 
 
 def load_priority_v2_config(base_dir: Path | None = None) -> PriorityV2Config:
     config_dir = base_dir or _DEFAULT_CONFIG_DIR
-    config_path = config_dir / "config.ini"
-    parser = configparser.ConfigParser()
-    if not config_path.exists():
-        return PriorityV2Config()
-    parser.read(config_path, encoding="utf-8")
+    parser = _load_ini_with_fallback(config_dir)
     section = parser[_PRIORITY_CONFIG_SECTION] if _PRIORITY_CONFIG_SECTION in parser else {}
 
     def _get_int(key: str, default: int) -> int:
@@ -142,11 +177,7 @@ def load_priority_v2_config(base_dir: Path | None = None) -> PriorityV2Config:
 
 def load_vip_senders(base_dir: Path | None = None) -> VipSenderMatcher:
     config_dir = base_dir or _DEFAULT_CONFIG_DIR
-    config_path = config_dir / "config.ini"
-    parser = configparser.ConfigParser()
-    if not config_path.exists():
-        return VipSenderMatcher()
-    parser.read(config_path, encoding="utf-8")
+    parser = _load_ini_with_fallback(config_dir)
     if _VIP_CONFIG_SECTION not in parser:
         return VipSenderMatcher()
     patterns: list[str] = []
