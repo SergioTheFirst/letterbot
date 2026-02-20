@@ -36,7 +36,7 @@ def verify_dist_contract(dist_dir: Path) -> tuple[bool, str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify dist/MailBot release contract")
+    parser = argparse.ArgumentParser(description="Verify dist/Letterbot release contract")
     parser.add_argument("dist_dir", nargs="?", default="dist/MailBot")
     args = parser.parse_args()
 

@@ -59,7 +59,7 @@ def main() -> None:
 
     query = KnowledgeQuery(DEFAULT_DB_PATH)
 
-    print("=== MAILBOT CRM DIAGNOSTICS ===\n")
+    print("=== LETTERBOT CRM DIAGNOSTICS ===\n")
     _print_top_senders(query)
     print()
     _print_priority_distribution(query)

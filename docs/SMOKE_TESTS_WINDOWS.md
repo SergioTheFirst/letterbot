@@ -66,7 +66,7 @@ web_ui:
 - Fix: Run this command in `cmd` (replace `<port>`):
 
 ```bat
-netsh advfirewall firewall add rule name="MailBot Web UI <port>" protocol=TCP dir=in localport=<port> action=allow
+netsh advfirewall firewall add rule name="Letterbot Web UI <port>" protocol=TCP dir=in localport=<port> action=allow
 ```
 
 ## Scenario 7 — LAN enabled but CIDR allowlist blocks client

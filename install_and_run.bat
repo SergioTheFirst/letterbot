@@ -27,6 +27,6 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-echo [3/3] Starting MailBot...
+echo [3/3] Starting Letterbot...
 call "%~dp0run_mailbot.bat"
 exit /b %ERRORLEVEL%

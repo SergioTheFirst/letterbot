@@ -35,5 +35,5 @@ def validate_dist_runtime(*, frozen: bool, executable_path: Path) -> tuple[bool,
     return (
         False,
         "[ERROR] Dist package is incomplete. Missing: "
-        f"{missing_list}. Re-extract full MailBot ZIP and run run.bat.",
+        f"{missing_list}. Re-extract full Letterbot ZIP and run run.bat.",
     )

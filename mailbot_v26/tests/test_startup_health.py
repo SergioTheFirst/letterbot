@@ -107,7 +107,7 @@ def test_gigachat_unavailable_cloudflare_ok(tmp_path, monkeypatch) -> None:
 
 
 def test_launch_report_deterministic() -> None:
-    builder = LaunchReportBuilder(version_label="MailBot Premium v26")
+    builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
     results = [
         {"component": "Cloudflare", "status": HealthStatus.OK, "details": "active"},
         {"component": "GigaChat", "status": HealthStatus.DEGRADED, "details": "disabled"},

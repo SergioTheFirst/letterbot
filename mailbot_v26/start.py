@@ -1,4 +1,4 @@
-"""MailBot Premium v26 - Runtime orchestrator"""
+"""Letterbot Premium v26 - Runtime orchestrator"""
 from __future__ import annotations
 
 import logging
@@ -552,11 +552,11 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         sys.exit(2)
 
     print("\n" + "=" * 60)
-    print(f"MAILBOT PREMIUM {__version__} - STARTING")
+    print(f"LETTERBOT PREMIUM {__version__} - STARTING")
     print("=" * 60)
     print(f"Log file: {LOG_PATH}\n")
 
-    logger.info("=== MailBot %s started ===", __version__)
+    logger.info("=== Letterbot %s started ===", __version__)
     _check_build_integrity()
     try:
         processor_module.system_snapshotter.log_startup()
@@ -593,7 +593,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             results = health_checker.run()
             mode = health_checker.evaluate_mode(results)
             report = LaunchReportBuilder(
-                version_label=f"MailBot Premium {__version__}"
+                version_label=f"Letterbot Premium {__version__}"
             ).build(results, mode)
             launch_chat_id = config.general.admin_chat_id
             if not launch_chat_id and config.accounts:

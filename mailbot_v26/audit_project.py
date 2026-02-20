@@ -1,5 +1,5 @@
 """
-Audit-скрипт для MailBot v26.
+Audit-скрипт для Letterbot v26.
 
 Проверяет:
 - отсутствие использования запрещённых EXE-строк в КОДЕ
@@ -57,7 +57,7 @@ def scan_code() -> list[str]:
 
 
 def main():
-    print("=== MailBot v26 Audit ===")
+    print("=== Letterbot v26 Audit ===")
     print(f"Проект: {PROJECT_ROOT}")
 
     problems = scan_code()

@@ -17,7 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
-- 2026-02-20: full repo check run: restored config_yaml compatibility API, fixed LAN password validation order, removed forbidden PDF extractor token literal; audit + config/schema/attachment/main-entrypoint/import tests green.
+- 2026-02-20: replaced user-facing product label "MailBot" -> "Letterbot" in web UI templates, launcher/help text, doctor/start banners, and related assertions; kept internal module/package identifiers unchanged.
 - 2026-02-16: added config schema_version contract (default=1), validate-config --compat report, startup exit-code=2 on newer schema, docs/UPGRADE.md, and deterministic tests.
 - 2026-02-16: added Windows Smoke Kit docs (10 scenarios), Windows troubleshooting pack (15 symptom/cause/fix items), and tools/smoke_check.bat artifact generator for dev/dist triage.
 - 2026-02-16: added doctor --print-lan-url, startup LAN/local URL logging (no 0.0.0.0 browsing URL), and Windows LAN/firewall docs + tests.
@@ -69,9 +69,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Repo-wide consistency/audit pass completed; critical config loader regressions fixed and validated.
+- User-facing naming migration to "Letterbot" completed; validating no remaining display labels regressions.
 Next:
-- Awaiting user-approved next implementation task.
+- Awaiting user review for scope of remaining filename/artifact identifiers (e.g., MailBot.exe, dist/MailBot) that are operational, not UI labels.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

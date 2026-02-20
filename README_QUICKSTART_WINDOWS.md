@@ -1,4 +1,4 @@
-1) Распакуйте архив MailBot в любую папку.
+1) Распакуйте архив Letterbot в любую папку.
 2) Дважды кликните run.bat.
 3) Если config.yaml отсутствует, он создастся из config.example.yaml и откроется в Блокноте.
 4) Заполните значения в кавычках (null без кавычек), сохраните и закройте файл.
@@ -8,7 +8,7 @@
 
 ## CI artifact (Windows one-folder)
 1) Откройте GitHub → Actions → последний run.
-2) Скачайте artifact: MailBot-windows-onefolder.
+2) Скачайте artifact: Letterbot-windows-onefolder.
 3) Распакуйте архив и запустите run_dist.bat или MailBot.exe.
 
 ## Доступ по локальной сети
@@ -17,7 +17,7 @@
    - web_ui.allow_lan = true
    - web_ui.allow_cidrs = ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
    - web_ui.password = "СИЛЬНЫЙ_ПАРОЛЬ"
-2) Перезапустите MailBot.
+2) Перезапустите Letterbot.
 3) Убедитесь, что Windows Firewall разрешает входящие подключения на выбранный порт.
 
 
@@ -27,4 +27,4 @@
 
 Не открывайте `http://0.0.0.0:8787/` в браузере. Используйте `http://<IPv4_вашего_ПК>:8787/`.
 
-Если LAN-страница не открывается, добавьте входящее правило Firewall: `netsh advfirewall firewall add rule name="MailBot Web UI 8787" protocol=TCP dir=in localport=8787 action=allow`
+Если LAN-страница не открывается, добавьте входящее правило Firewall: `netsh advfirewall firewall add rule name="Letterbot Web UI 8787" protocol=TCP dir=in localport=8787 action=allow`

@@ -11,7 +11,7 @@ if not exist .git (
 )
 
 echo =============================================
-echo   MailBot Premium - Update and Run
+echo   Letterbot Premium - Update and Run
 echo =============================================
 
 echo Checking Git...
@@ -80,7 +80,7 @@ if %ERRORLEVEL% NEQ 0 (
     color 0C
     echo =============================================
     echo   CRITICAL DOCTOR ISSUES DETECTED
-    echo   MailBot will NOT start polling.
+    echo   Letterbot will NOT start polling.
     echo   Please review the doctor report and fix IMAP/Telegram/DB issues.
     echo =============================================
     exit /b 1
@@ -97,12 +97,12 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-echo Starting MailBot...
+echo Starting Letterbot...
 "%VENV_PY%" -m mailbot_v26
 if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: MailBot terminated with errors.
+    echo ERROR: Letterbot terminated with errors.
 ) else (
-    echo MailBot finished.
+    echo Letterbot finished.
 )
 
 echo =============================================

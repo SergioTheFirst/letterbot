@@ -6,7 +6,7 @@ set "PYTHONUTF8=1"
 cd /d "%~dp0"
 
 echo =============================================
-echo   MailBot Premium - Run
+echo   Letterbot Premium - Run
 echo =============================================
 
 set "VENV_PY=%~dp0.venv\Scripts\python.exe"
@@ -52,6 +52,6 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-echo Starting MailBot...
+echo Starting Letterbot...
 "%VENV_PY%" -m mailbot_v26.start
 exit /b %ERRORLEVEL%

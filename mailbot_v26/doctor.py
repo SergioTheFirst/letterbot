@@ -489,7 +489,7 @@ def _check_imap(accounts: object, *, timeout_sec: float = 10.0) -> list[DoctorEn
 
 def _format_report(entries: list[DoctorEntry], base_dir: Path) -> str:
     lines = [
-        "=== ОТЧЁТ ДОКТОРА MAILBOT ===",
+        "=== ОТЧЁТ ДОКТОРА LETTERBOT ===",
         f"Версия: {__version__}",
         f"Каталог конфигурации: {base_dir}",
         "",
