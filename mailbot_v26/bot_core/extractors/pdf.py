@@ -9,7 +9,7 @@ DLL-free, Windows-friendly, RAM-safe.
 - опционально OCR через EasyOCR (если RAM позволяет)
 
 Соответствует КОНСТИТУЦИИ:
-- никаких pdftotext.exe / poppler / внешних DLL
+- никаких внешних PDF-to-text EXE / poppler / DLL
 - только чистый Python и pip-зависимости
 - OCR включается ТОЛЬКО при достаточном объёме свободной RAM
 """
