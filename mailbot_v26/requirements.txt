@@ -21,4 +21,4 @@ Flask>=2.2.5
 
 # Doctor checks `import ldap` (we try the simplest pip package first).
 # If it doesn't satisfy import, we’ll handle it in the next step.
-ldap
+# ldap
