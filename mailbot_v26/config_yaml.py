@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import ipaddress
+from dataclasses import dataclass
 from typing import Any, Tuple
 
 from mailbot_v26 import deps
@@ -37,6 +38,23 @@ SCHEMA_OLDER_HINT = (
 
 class ConfigError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class ConfigFeatures:
+    donate_enabled: bool = False
+
+
+def _load_features_config(cfg: dict[str, Any]) -> ConfigFeatures:
+    features_raw = cfg.get("features")
+    if features_raw is None:
+        return ConfigFeatures()
+    if not isinstance(features_raw, dict):
+        raise ValueError("Ошибка в config.yaml: features должен быть словарём")
+    donate_enabled = features_raw.get("donate_enabled", False)
+    if not isinstance(donate_enabled, bool):
+        raise ValueError("Ошибка в config.yaml: features.donate_enabled должен быть true/false")
+    return ConfigFeatures(donate_enabled=donate_enabled)
 
 
 def _yaml_module():
@@ -259,8 +277,12 @@ def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str]:
                 if tg_enabled and not _is_non_empty_str(text):
                     return False, "Ошибка в config.yaml: support.telegram.text отсутствует"
 
+        _load_features_config(cfg)
+
         return True, ""
     except Exception as exc:
+        if str(exc).startswith("Ошибка в config.yaml:"):
+            return False, str(exc)
         return False, f"Ошибка в config.yaml: внутренняя ошибка валидации ({exc})"
 
 

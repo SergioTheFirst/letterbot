@@ -208,3 +208,22 @@ def test_validate_config_support_success() -> None:
 
     assert ok
     assert error == ""
+
+
+def test_validate_config_features_donate_enabled_default_off() -> None:
+    config = _base_config()
+
+    ok, error = validate_config(config)
+
+    assert ok
+    assert error == ""
+
+
+def test_validate_config_features_donate_enabled_type() -> None:
+    config = _base_config()
+    config["features"] = {"donate_enabled": "yes"}
+
+    ok, error = validate_config(config)
+
+    assert not ok
+    assert error == "Ошибка в config.yaml: features.donate_enabled должен быть true/false"

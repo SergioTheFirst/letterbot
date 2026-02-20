@@ -3,6 +3,7 @@
 {% block title %}{{ title or "Support" }}{% endblock %}
 
 {% block content %}
+{% if cfg.features.donate_enabled %}
 <section class="panel">
   <h2>Поддержать разработку</h2>
   <p>Letterbot остаётся бесплатным. Если хотите поддержать развитие — выберите любой способ ниже.</p>
@@ -34,6 +35,7 @@
   {% endif %}
 </section>
 {% endfor %}
+{% endif %}
 
 <script>
 function copySupportValue(elementId, button) {
