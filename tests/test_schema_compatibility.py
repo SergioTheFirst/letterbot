@@ -38,7 +38,7 @@ def test_missing_schema_version_defaults_to_one() -> None:
     assert config_yaml.get_schema_version(cfg) == 1
     ok, error = config_yaml.validate_config(cfg)
     assert ok
-    assert error is None
+    assert error == ""
 
 
 def test_validate_config_compat_fails_for_newer_schema(

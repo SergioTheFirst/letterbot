@@ -66,186 +66,202 @@ def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
     return payload
 
 
-def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str | None]:
-    ok, error, _hint = validate_schema_version(cfg)
-    if not ok:
-        return False, error
+def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str]:
+    try:
+        ok, error, _hint = validate_schema_version(cfg)
+        if not ok:
+            return False, error or "Ошибка в config.yaml: schema_version некорректен"
 
-    if not isinstance(cfg, dict):
-        return False, "Ошибка в config.yaml: корневой объект должен быть словарём"
+        if not isinstance(cfg, dict):
+            return False, "Ошибка в config.yaml: корневой объект должен быть словарём"
 
-    telegram = cfg.get("telegram")
-    if not isinstance(telegram, dict):
-        return False, "Ошибка в config.yaml: telegram отсутствует"
-    if not _is_non_empty_str(telegram.get("bot_token")):
-        return False, "Ошибка в config.yaml: telegram.bot_token отсутствует"
-    if not _is_non_empty_str(telegram.get("chat_id")):
-        return False, "Ошибка в config.yaml: telegram.chat_id отсутствует"
+        accounts = cfg.get("accounts")
+        if not isinstance(accounts, list):
+            return False, "Ошибка в config.yaml: accounts отсутствует"
+        if not accounts:
+            return False, "Ошибка в config.yaml: accounts пустой"
 
-    llm = cfg.get("llm")
-    if not isinstance(llm, dict):
-        return False, "Ошибка в config.yaml: llm отсутствует"
-    provider = llm.get("provider")
-    if provider not in {"cloudflare", "gigachat"}:
-        return False, 'Ошибка в config.yaml: llm.provider должен быть "cloudflare" или "gigachat"'
+        top_level_imap = cfg.get("imap")
+        for index, account in enumerate(accounts):
+            if not isinstance(account, dict):
+                return False, f"Ошибка в config.yaml: accounts[{index}] должен быть словарём"
+            if not _is_non_empty_str(account.get("name")):
+                return False, f"Ошибка в config.yaml: accounts[{index}].name отсутствует"
+            if not _is_non_empty_str(account.get("email")):
+                return False, f"Ошибка в config.yaml: accounts[{index}].email отсутствует"
 
-    cloudflare = llm.get("cloudflare")
-    gigachat = llm.get("gigachat")
-    if provider == "cloudflare":
-        if not isinstance(cloudflare, dict):
-            return False, "Ошибка в config.yaml: llm.cloudflare отсутствует"
-        if not _is_non_empty_str(cloudflare.get("api_token")):
-            return False, "Ошибка в config.yaml: llm.cloudflare.api_token отсутствует"
-        if not _is_non_empty_str(cloudflare.get("account_id")):
-            return False, "Ошибка в config.yaml: llm.cloudflare.account_id отсутствует"
-    if provider == "gigachat":
-        if not isinstance(gigachat, dict):
-            return False, "Ошибка в config.yaml: llm.gigachat отсутствует"
-        if not _is_non_empty_str(gigachat.get("api_token")):
-            return False, "Ошибка в config.yaml: llm.gigachat.api_token отсутствует"
+            account_imap = account.get("imap")
+            if account_imap is not None and not isinstance(account_imap, dict):
+                return False, f"Ошибка в config.yaml: accounts[{index}].imap должен быть словарём"
 
-    for key, section in (("llm.cloudflare", cloudflare), ("llm.gigachat", gigachat)):
-        if section is None:
-            continue
-        if not isinstance(section, dict):
-            return False, f"Ошибка в config.yaml: {key} должен быть словарём"
-        model_value = section.get("model", "MISSING")
-        if model_value is not None and model_value != "MISSING" and not isinstance(model_value, str):
-            return False, f"Ошибка в config.yaml: {key}.model должен быть строкой или null"
+            imap_host = account.get("imap_host")
+            if isinstance(top_level_imap, dict):
+                imap_host = top_level_imap.get("host", imap_host)
+            if isinstance(account_imap, dict):
+                imap_host = account_imap.get("host", imap_host)
+            if not _is_non_empty_str(imap_host):
+                return False, f"Ошибка в config.yaml: accounts[{index}].imap_host отсутствует"
 
-    accounts = cfg.get("accounts")
-    if not isinstance(accounts, list):
-        return False, "Ошибка в config.yaml: accounts отсутствует"
-    if not accounts:
-        return False, "Ошибка в config.yaml: accounts пустой"
-    for index, account in enumerate(accounts):
-        if not isinstance(account, dict):
-            return False, f"Ошибка в config.yaml: accounts[{index}] должен быть словарём"
-        if not _is_non_empty_str(account.get("name")):
-            return False, f"Ошибка в config.yaml: accounts[{index}].name отсутствует"
-        if not _is_non_empty_str(account.get("email")):
-            return False, f"Ошибка в config.yaml: accounts[{index}].email отсутствует"
-        if not _is_non_empty_str(account.get("imap_host")):
-            return False, f"Ошибка в config.yaml: accounts[{index}].imap_host отсутствует"
-        if not _is_int(account.get("imap_port")):
-            return False, f"Ошибка в config.yaml: accounts[{index}].imap_port отсутствует"
-        if not _is_non_empty_str(account.get("username")):
-            return False, f"Ошибка в config.yaml: accounts[{index}].username отсутствует"
-        if not _is_non_empty_str(account.get("password")):
-            return False, f"Ошибка в config.yaml: accounts[{index}].password отсутствует"
-        if not isinstance(account.get("enabled"), bool):
-            return False, f"Ошибка в config.yaml: accounts[{index}].enabled отсутствует"
+            imap_port = account.get("imap_port")
+            if isinstance(top_level_imap, dict):
+                imap_port = top_level_imap.get("port", imap_port)
+            if isinstance(account_imap, dict):
+                imap_port = account_imap.get("port", imap_port)
+            if not _is_int(imap_port):
+                return False, f"Ошибка в config.yaml: accounts[{index}].imap_port отсутствует"
 
-    polling = cfg.get("polling", {})
-    if polling is not None and not isinstance(polling, dict):
-        return False, "Ошибка в config.yaml: polling должен быть словарём"
-    interval = polling.get("interval_seconds", DEFAULT_CHECK_INTERVAL_SEC)
-    reload_interval = polling.get("reload_config_seconds", DEFAULT_RELOAD_CONFIG_SEC)
-    if not _is_int(interval):
-        return False, "Ошибка в config.yaml: polling.interval_seconds отсутствует"
-    if not _is_int(reload_interval):
-        return False, "Ошибка в config.yaml: polling.reload_config_seconds отсутствует"
+            if not _is_non_empty_str(account.get("username")):
+                return False, f"Ошибка в config.yaml: accounts[{index}].username отсутствует"
+            if not _is_non_empty_str(account.get("password")):
+                return False, f"Ошибка в config.yaml: accounts[{index}].password отсутствует"
+            if not isinstance(account.get("enabled"), bool):
+                return False, f"Ошибка в config.yaml: accounts[{index}].enabled отсутствует"
 
-    web_ui = cfg.get("web_ui")
-    if web_ui is not None:
-        if not isinstance(web_ui, dict):
-            return False, "Ошибка в config.yaml: web_ui должен быть словарём"
-        enabled = web_ui.get("enabled")
-        if not isinstance(enabled, bool):
-            return False, "Ошибка в config.yaml: web_ui.enabled должен быть true/false"
-        bind = web_ui.get("bind", "")
-        if not isinstance(bind, str) or not bind.strip():
-            return False, "Ошибка в config.yaml: web_ui.bind должен быть строкой"
-        port = web_ui.get("port")
-        if not _is_port(port):
-            return False, "Ошибка в config.yaml: web_ui.port должен быть числом 1..65535"
-        password = web_ui.get("password", "")
-        if enabled and not _is_non_empty_str(password):
-            return False, "Ошибка в config.yaml: web_ui.password отсутствует"
-        api_token = web_ui.get("api_token", "")
-        if api_token is not None and not isinstance(api_token, str):
-            return False, "Ошибка в config.yaml: web_ui.api_token должен быть строкой"
-        allow_lan = web_ui.get("allow_lan", False)
-        if not isinstance(allow_lan, bool):
-            return False, "Ошибка в config.yaml: web_ui.allow_lan должен быть true/false"
-        prod_server = web_ui.get("prod_server", False)
-        if not isinstance(prod_server, bool):
-            return False, "Ошибка в config.yaml: web_ui.prod_server должен быть true/false"
-        require_strong_password_on_lan = web_ui.get("require_strong_password_on_lan", True)
-        if not isinstance(require_strong_password_on_lan, bool):
-            return False, "Ошибка в config.yaml: web_ui.require_strong_password_on_lan должен быть true/false"
-        allow_cidrs = web_ui.get("allow_cidrs", [])
-        if allow_cidrs is None:
-            allow_cidrs = []
-        if not isinstance(allow_cidrs, list):
-            return False, "Ошибка в config.yaml: web_ui.allow_cidrs должен быть списком"
-        for index, cidr in enumerate(allow_cidrs):
-            if not _is_non_empty_str(cidr):
-                return False, f"Ошибка в config.yaml: web_ui.allow_cidrs[{index}] должен быть строкой"
-            if not _is_valid_cidr(cidr):
-                return False, f"Ошибка в config.yaml: web_ui.allow_cidrs[{index}] некорректный CIDR"
-        if enabled and not _is_loopback_bind(bind):
-            if not allow_lan:
-                return (
-                    False,
-                    "Ошибка в config.yaml: web_ui.allow_lan должен быть true для bind вне loopback",
-                )
-            if not allow_cidrs:
-                return False, "Ошибка в config.yaml: web_ui.allow_cidrs должен быть непустым при allow_lan=true"
-            if require_strong_password_on_lan:
-                if _is_default_weak_web_password(str(password)):
-                    return (
-                        False,
-                        "Ошибка в config.yaml: web_ui.password не должен быть значением по умолчанию для LAN",
-                    )
-                if len(str(password)) < 10:
-                    return False, "Ошибка в config.yaml: web_ui.password должен быть не короче 10 символов для LAN"
+        telegram = cfg.get("telegram")
+        if not isinstance(telegram, dict):
+            return False, "Ошибка в config.yaml: telegram отсутствует"
+        if not _is_non_empty_str(telegram.get("bot_token")):
+            return False, "Ошибка в config.yaml: telegram.bot_token отсутствует"
+        if not _is_non_empty_str(telegram.get("chat_id")):
+            return False, "Ошибка в config.yaml: telegram.chat_id отсутствует"
 
-    support = cfg.get("support")
-    if support is not None:
-        if not isinstance(support, dict):
-            return False, "Ошибка в config.yaml: support должен быть словарём"
-        enabled = support.get("enabled", False)
-        if not isinstance(enabled, bool):
-            return False, "Ошибка в config.yaml: support.enabled должен быть true/false"
+        llm = cfg.get("llm")
+        if not isinstance(llm, dict):
+            return False, "Ошибка в config.yaml: llm отсутствует"
+        provider = llm.get("provider")
+        if provider not in {"cloudflare", "gigachat"}:
+            return False, 'Ошибка в config.yaml: llm.provider должен быть "cloudflare" или "gigachat"'
 
-        methods = support.get("methods", [])
-        if not isinstance(methods, list):
-            return False, "Ошибка в config.yaml: support.methods должен быть списком"
-        if enabled and len(methods) == 0:
-            return False, "Ошибка в config.yaml: support.methods должен содержать хотя бы один метод"
-        for index, method in enumerate(methods):
-            if not isinstance(method, dict):
-                return False, f"Ошибка в config.yaml: support.methods[{index}] должен быть словарём"
-            method_type = str(method.get("type", "")).strip().lower()
-            if not method_type:
-                return False, f"Ошибка в config.yaml: support.methods[{index}].type отсутствует"
-            if method_type == "card" and not _is_non_empty_str(method.get("number")):
-                return False, f"Ошибка в config.yaml: support.methods[{index}].number отсутствует"
-            if method_type == "yoomoney":
-                url = str(method.get("url", "")).strip().lower()
-                if not url:
-                    return False, f"Ошибка в config.yaml: support.methods[{index}].url отсутствует"
-                if not (url.startswith("http://") or url.startswith("https://")):
-                    return False, f"Ошибка в config.yaml: support.methods[{index}].url должен начинаться с http(s)"
+        cloudflare = llm.get("cloudflare")
+        gigachat = llm.get("gigachat")
+        if provider == "cloudflare":
+            if not isinstance(cloudflare, dict):
+                return False, "Ошибка в config.yaml: llm.cloudflare отсутствует"
+            if not _is_non_empty_str(cloudflare.get("api_token")):
+                return False, "Ошибка в config.yaml: llm.cloudflare.api_token отсутствует"
+            if not _is_non_empty_str(cloudflare.get("account_id")):
+                return False, "Ошибка в config.yaml: llm.cloudflare.account_id отсутствует"
+        if provider == "gigachat":
+            if not isinstance(gigachat, dict):
+                return False, "Ошибка в config.yaml: llm.gigachat отсутствует"
+            if not _is_non_empty_str(gigachat.get("api_token")):
+                return False, "Ошибка в config.yaml: llm.gigachat.api_token отсутствует"
 
-        telegram_support = support.get("telegram", {})
-        if telegram_support is not None:
-            if not isinstance(telegram_support, dict):
-                return False, "Ошибка в config.yaml: support.telegram должен быть словарём"
-            tg_enabled = telegram_support.get("enabled", False)
-            if not isinstance(tg_enabled, bool):
-                return False, "Ошибка в config.yaml: support.telegram.enabled должен быть true/false"
-            frequency_days = telegram_support.get("frequency_days", 30)
-            if not isinstance(frequency_days, int) or isinstance(frequency_days, bool):
-                return False, "Ошибка в config.yaml: support.telegram.frequency_days должен быть числом 7..365"
-            if frequency_days < 7 or frequency_days > 365:
-                return False, "Ошибка в config.yaml: support.telegram.frequency_days должен быть числом 7..365"
-            text = telegram_support.get("text", "")
-            if tg_enabled and not _is_non_empty_str(text):
-                return False, "Ошибка в config.yaml: support.telegram.text отсутствует"
+        for key, section in (("llm.cloudflare", cloudflare), ("llm.gigachat", gigachat)):
+            if section is None:
+                continue
+            if not isinstance(section, dict):
+                return False, f"Ошибка в config.yaml: {key} должен быть словарём"
+            model_value = section.get("model", "MISSING")
+            if model_value is not None and model_value != "MISSING" and not isinstance(model_value, str):
+                return False, f"Ошибка в config.yaml: {key}.model должен быть строкой или null"
 
-    return True, None
+        polling = cfg.get("polling", {})
+        if polling is not None and not isinstance(polling, dict):
+            return False, "Ошибка в config.yaml: polling должен быть словарём"
+        interval = polling.get("interval_seconds", DEFAULT_CHECK_INTERVAL_SEC)
+        reload_interval = polling.get("reload_config_seconds", DEFAULT_RELOAD_CONFIG_SEC)
+        if not _is_int(interval):
+            return False, "Ошибка в config.yaml: polling.interval_seconds отсутствует"
+        if not _is_int(reload_interval):
+            return False, "Ошибка в config.yaml: polling.reload_config_seconds отсутствует"
+
+        web_ui = cfg.get("web_ui")
+        if web_ui is not None:
+            if not isinstance(web_ui, dict):
+                return False, "Ошибка в config.yaml: web_ui должен быть словарём"
+            enabled = web_ui.get("enabled")
+            if not isinstance(enabled, bool):
+                return False, "Ошибка в config.yaml: web_ui.enabled должен быть true/false"
+            bind = web_ui.get("bind", "")
+            if not isinstance(bind, str) or not bind.strip():
+                return False, "Ошибка в config.yaml: web_ui.bind должен быть строкой"
+            port = web_ui.get("port")
+            if not _is_port(port):
+                return False, "Ошибка в config.yaml: web_ui.port должен быть числом 1..65535"
+            password = web_ui.get("password", "")
+            if enabled and not _is_non_empty_str(password):
+                return False, "Ошибка в config.yaml: web_ui.password отсутствует"
+            api_token = web_ui.get("api_token", "")
+            if api_token is not None and not isinstance(api_token, str):
+                return False, "Ошибка в config.yaml: web_ui.api_token должен быть строкой"
+            allow_lan = web_ui.get("allow_lan", False)
+            if not isinstance(allow_lan, bool):
+                return False, "Ошибка в config.yaml: web_ui.allow_lan должен быть true/false"
+            prod_server = web_ui.get("prod_server", False)
+            if not isinstance(prod_server, bool):
+                return False, "Ошибка в config.yaml: web_ui.prod_server должен быть true/false"
+            require_strong_password_on_lan = web_ui.get("require_strong_password_on_lan", True)
+            if not isinstance(require_strong_password_on_lan, bool):
+                return False, "Ошибка в config.yaml: web_ui.require_strong_password_on_lan должен быть true/false"
+            allow_cidrs = web_ui.get("allow_cidrs", [])
+            if allow_cidrs is None:
+                allow_cidrs = []
+            if not isinstance(allow_cidrs, list):
+                return False, "Ошибка в config.yaml: web_ui.allow_cidrs должен быть списком"
+            for index, cidr in enumerate(allow_cidrs):
+                if not _is_non_empty_str(cidr):
+                    return False, f"Ошибка в config.yaml: web_ui.allow_cidrs[{index}] должен быть строкой"
+                if not _is_valid_cidr(cidr):
+                    return False, f"Ошибка в config.yaml: web_ui.allow_cidrs[{index}] некорректный CIDR"
+            if enabled and not _is_loopback_bind(bind):
+                if not allow_lan:
+                    return False, "Ошибка в config.yaml: web_ui.allow_lan должен быть true для bind вне loopback"
+                if not allow_cidrs:
+                    return False, "Ошибка в config.yaml: web_ui.allow_cidrs должен быть непустым при allow_lan=true"
+                if require_strong_password_on_lan:
+                    if _is_default_weak_web_password(str(password)):
+                        return False, "Ошибка в config.yaml: web_ui.password не должен быть значением по умолчанию для LAN"
+                    if len(str(password)) < 10:
+                        return False, "Ошибка в config.yaml: web_ui.password должен быть не короче 10 символов для LAN"
+
+        support = cfg.get("support")
+        if support is not None:
+            if not isinstance(support, dict):
+                return False, "Ошибка в config.yaml: support должен быть словарём"
+            enabled = support.get("enabled", False)
+            if not isinstance(enabled, bool):
+                return False, "Ошибка в config.yaml: support.enabled должен быть true/false"
+
+            methods = support.get("methods", [])
+            if not isinstance(methods, list):
+                return False, "Ошибка в config.yaml: support.methods должен быть списком"
+            if enabled and len(methods) == 0:
+                return False, "Ошибка в config.yaml: support.methods должен содержать хотя бы один метод"
+            for index, method in enumerate(methods):
+                if not isinstance(method, dict):
+                    return False, f"Ошибка в config.yaml: support.methods[{index}] должен быть словарём"
+                method_type = str(method.get("type", "")).strip().lower()
+                if not method_type:
+                    return False, f"Ошибка в config.yaml: support.methods[{index}].type отсутствует"
+                if method_type == "card" and not _is_non_empty_str(method.get("number")):
+                    return False, f"Ошибка в config.yaml: support.methods[{index}].number отсутствует"
+                if method_type == "yoomoney":
+                    url = str(method.get("url", "")).strip().lower()
+                    if not url:
+                        return False, f"Ошибка в config.yaml: support.methods[{index}].url отсутствует"
+                    if not (url.startswith("http://") or url.startswith("https://")):
+                        return False, f"Ошибка в config.yaml: support.methods[{index}].url должен начинаться с http(s)"
+
+            telegram_support = support.get("telegram", {})
+            if telegram_support is not None:
+                if not isinstance(telegram_support, dict):
+                    return False, "Ошибка в config.yaml: support.telegram должен быть словарём"
+                tg_enabled = telegram_support.get("enabled", False)
+                if not isinstance(tg_enabled, bool):
+                    return False, "Ошибка в config.yaml: support.telegram.enabled должен быть true/false"
+                frequency_days = telegram_support.get("frequency_days", 30)
+                if not isinstance(frequency_days, int) or isinstance(frequency_days, bool):
+                    return False, "Ошибка в config.yaml: support.telegram.frequency_days должен быть числом 7..365"
+                if frequency_days < 7 or frequency_days > 365:
+                    return False, "Ошибка в config.yaml: support.telegram.frequency_days должен быть числом 7..365"
+                text = telegram_support.get("text", "")
+                if tg_enabled and not _is_non_empty_str(text):
+                    return False, "Ошибка в config.yaml: support.telegram.text отсутствует"
+
+        return True, ""
+    except Exception as exc:
+        return False, f"Ошибка в config.yaml: внутренняя ошибка валидации ({exc})"
 
 
 def validate_config_with_hints(cfg: dict[str, Any]) -> tuple[bool, str | None, list[str]]:
