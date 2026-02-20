@@ -1,217 +1,317 @@
-"""IMAP helper implementing the UID+SINCE hybrid search mandated by the
-Constitution. The class is intentionally small so it can be tested with
-mocks without opening real network connections.
-"""
-
 from __future__ import annotations
 
+import email
+from email.header import decode_header
+from email.message import Message
+from email.utils import parsedate_to_datetime
 import logging
-import json
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Iterable, List, Sequence
+import socket
+import ssl
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from mailbot_v26 import deps
+try:
+    from imapclient import IMAPClient  # type: ignore
+except Exception:  # pragma: no cover
+    IMAPClient = None  # type: ignore
 
-from mailbot_v26.config_loader import AccountConfig
-from mailbot_v26.state_manager import StateManager
+
+log = logging.getLogger(__name__)
 
 
-def _imap_client_cls():
-    deps.require("imapclient", "imapclient", "Нужен для IMAP-подключения")
-    from imapclient import IMAPClient
+class IMAPError(RuntimeError):
+    pass
 
-    return IMAPClient
+
+@dataclass
+class IMAPAccount:
+    host: str
+    port: int = 993
+    ssl: bool = True
+    user: str = ""
+    password: str = ""
+    mailbox: str = "INBOX"
+    max_email_mb: int = 15  # защита от больших писем
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _safe_dt(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _decode_header_value(value: str) -> str:
+    try:
+        parts = decode_header(value)
+    except Exception:
+        return value
+    out = []
+    for chunk, enc in parts:
+        if isinstance(chunk, bytes):
+            try:
+                out.append(chunk.decode(enc or "utf-8", errors="replace"))
+            except Exception:
+                out.append(chunk.decode("utf-8", errors="replace"))
+        else:
+            out.append(chunk)
+    return "".join(out)
+
+
+def _get_msg_date_utc(msg: Message) -> Optional[datetime]:
+    raw = msg.get("Date")
+    if not raw:
+        return None
+    try:
+        dt = parsedate_to_datetime(raw)
+    except Exception:
+        return None
+    if dt is None:
+        return None
+    return _safe_dt(dt)
+
+
+def _parse_rfc822_size(fetch_data: Dict[bytes, Any]) -> Optional[int]:
+    # imapclient возвращает {b'RFC822.SIZE': int, ...} либо ключи str
+    for k in (b"RFC822.SIZE", "RFC822.SIZE"):
+        if k in fetch_data:
+            try:
+                return int(fetch_data[k])
+            except Exception:
+                return None
+    return None
+
+
+def _imapclient_available() -> bool:
+    return IMAPClient is not None
 
 
 class ResilientIMAP:
-    """IMAP client that combines UID and SINCE queries to avoid duplicates."""
+    """
+    IMAP-клиент с "живучестью":
+    - переподключение при сетевых ошибках
+    - ограничение на размер письма (max_email_mb)
+    - выборка писем порциями, без зависания
+    """
+
+    # для тестов/моков можно подменять класс клиента:
+    _imap_client_cls = IMAPClient
 
     def __init__(
         self,
-        account: AccountConfig,
-        state: StateManager,
-        start_time: datetime | None = None,
-        allow_prestart_emails: bool = False,
-        max_email_mb: int = 15,
-    ) -> None:
-        self.account = account
-        self.state = state
-        self.logger = logging.getLogger(__name__)
-        base_time = start_time or datetime.now(timezone.utc)
-        self.run_start_utc = self._normalize_to_utc(base_time)
-        self.allow_prestart_emails = allow_prestart_emails
-        self.max_email_bytes = max_email_mb * 1024 * 1024
-        self._skip_log_path = Path(__file__).resolve().parent / "logs" / "ingest_skips.ndjson"
-
-    @staticmethod
-    def _normalize_to_utc(value: datetime) -> datetime:
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-
-    def _resolve_since_datetime(self, last_check: datetime | None) -> datetime:
-        if self.allow_prestart_emails:
-            if last_check is not None:
-                return self._normalize_to_utc(last_check)
-            return datetime(1970, 1, 1, tzinfo=timezone.utc)
-        baseline = self._normalize_to_utc(last_check) if last_check else self.run_start_utc
-        if baseline < self.run_start_utc:
-            baseline = self.run_start_utc
-        return baseline
-
-    def _log_prestart_skip(self, uid: int, internaldate_utc: datetime) -> None:
-        self.logger.warning(
-            "imap_prestart_skip account_id=%s uid=%s internaldate_utc=%s run_start_utc=%s",
-            self.account.account_id,
-            uid,
-            internaldate_utc.isoformat(),
-            self.run_start_utc.isoformat(),
-        )
-        payload = {
-            "account_id": self.account.account_id,
-            "uid": uid,
-            "internaldate_utc": internaldate_utc.isoformat(),
-            "run_start_utc": self.run_start_utc.isoformat(),
-        }
-        try:
-            self._skip_log_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._skip_log_path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-        except Exception as exc:
-            self.logger.warning(
-                "imap_prestart_skip_log_failed account_id=%s uid=%s error=%s",
-                self.account.account_id,
-                uid,
-                exc,
-            )
-
-    def _build_oversize_warning(
-        self,
+        account: IMAPAccount,
         *,
-        headers: bytes,
-        message_size: int | None,
-    ) -> bytes:
-        size_mb = (message_size or 0) / (1024 * 1024)
-        limit_mb = self.max_email_bytes / (1024 * 1024)
-        warning_text = (
-            "Письмо слишком большое для загрузки.\n"
-            f"Размер: {size_mb:.1f} MB (лимит {limit_mb:.1f} MB).\n"
-            "Тело и вложения пропущены."
-        )
-        warning_body = warning_text.encode("utf-8")
-        if headers.endswith(b"\r\n"):
-            return headers + b"\r\n" + warning_body
-        return headers + b"\r\n\r\n" + warning_body
+        connect_timeout: float = 15.0,
+        io_timeout: float = 30.0,
+        retries: int = 3,
+        backoff_base: float = 0.7,
+    ) -> None:
+        if not _imapclient_available():
+            raise IMAPError("Пакет imapclient не установлен. Установите: pip install imapclient")
 
-    @staticmethod
-    def _extract_header_payload(envelope: dict[bytes, object]) -> bytes:
-        for key in (b"BODY[HEADER]", b"BODY.PEEK[HEADER]", b"RFC822.HEADER"):
-            payload = envelope.get(key)
-            if isinstance(payload, bytes):
-                return payload
-        return b""
+        self.account = account
+        self.connect_timeout = float(connect_timeout)
+        self.io_timeout = float(io_timeout)
+        self.retries = int(retries)
+        self.backoff_base = float(backoff_base)
 
-    def _build_search(self) -> List[Sequence[str]]:
-        last_uid = self.state.get_last_uid(self.account.login)
-        last_check = self.state.get_last_check_time(self.account.login)
-        baseline = self._resolve_since_datetime(last_check)
-        since_date = baseline.strftime("%d-%b-%Y")
+        self._client = None
 
-        if last_uid <= 0:
-            return [["UID", "1:*", "SINCE", since_date]]
-        return [["UID", f"{last_uid + 1}:*", "SINCE", since_date]]
+    def _connect(self) -> Any:
+        cls = self._imap_client_cls
+        if cls is None:
+            raise IMAPError("IMAPClient недоступен.")
 
-    def fetch_new_messages(self) -> List[tuple[int, bytes]]:
-        imap_client_cls = _imap_client_cls()
-        client = None
+        # socket timeout влияет на connect/recv
+        socket.setdefaulttimeout(self.io_timeout)
+
         try:
-            client = imap_client_cls(
+            client = cls(
                 self.account.host,
                 port=self.account.port,
-                ssl=self.account.use_ssl,
-                timeout=30,
+                ssl=self.account.ssl,
+                timeout=self.connect_timeout,
             )
-            client.login(
-                self.account.username or self.account.login,
-                self.account.password,
-            )
-            client.select_folder("INBOX")
-            last_uid = self.state.get_last_uid(self.account.login)
-            last_check = self.state.get_last_check_time(self.account.login)
-            baseline = self._resolve_since_datetime(last_check)
-            since_date = baseline.strftime("%d-%b-%Y")
+            client.login(self.account.user, self.account.password)
+            client.select_folder(self.account.mailbox)
+            return client
+        except Exception as e:
+            raise IMAPError(f"Не удалось подключиться к IMAP: {e}") from e
 
-            is_bootstrap = last_uid <= 0
-            if is_bootstrap:
-                all_uids = list(client.search(["UID", "1:*"]))
-                max_uid = max(all_uids) if all_uids else 0
-                uid_list = list(client.search(["UID", "1:*", "SINCE", since_date]))
-                latest_seen_uid = max_uid if max_uid > last_uid else last_uid
-                new_uids = uid_list
-            else:
-                uids: Iterable[int] = client.search(["UID", f"{last_uid + 1}:*"])
-                uid_list = list(uids)
-                latest_seen_uid = max(uid_list) if uid_list else last_uid
-                new_uids = list(
-                    client.search(["UID", f"{last_uid + 1}:*", "SINCE", since_date])
-                )
-            messages: List[tuple[int, bytes]] = []
-            for uid in sorted(new_uids):
-                data = client.fetch([uid], ["RFC822.SIZE", "INTERNALDATE"])
-                envelope = data.get(uid, {})
-                internaldate = envelope.get(b"INTERNALDATE")
-                if isinstance(internaldate, datetime):
-                    internaldate_utc = self._normalize_to_utc(internaldate)
-                    if (
-                        not self.allow_prestart_emails
-                        and internaldate_utc < self.run_start_utc
-                    ):
-                        self._log_prestart_skip(uid, internaldate_utc)
-                        continue
+    def _ensure(self) -> Any:
+        if self._client is None:
+            self._client = self._connect()
+        return self._client
 
-                message_size = envelope.get(b"RFC822.SIZE")
-                if isinstance(message_size, bytes):
-                    try:
-                        message_size = int(message_size.decode("utf-8"))
-                    except (TypeError, ValueError):
-                        message_size = None
-                raw: bytes
-                if isinstance(message_size, int) and message_size > self.max_email_bytes:
-                    header_data = client.fetch([uid], ["BODY.PEEK[HEADER]"])
-                    header_envelope = header_data.get(uid, {})
-                    headers = self._extract_header_payload(header_envelope)
-                    raw = self._build_oversize_warning(
-                        headers=headers,
-                        message_size=message_size,
-                    )
-                    self.logger.warning(
-                        "imap_message_oversize uid=%s size_bytes=%s max_bytes=%s",
-                        uid,
-                        message_size,
-                        self.max_email_bytes,
-                    )
-                else:
-                    data = client.fetch([uid], ["RFC822"])
-                    envelope = data.get(uid, {})
-                    raw = envelope[b"RFC822"]
-                messages.append((uid, raw))
-
-            if latest_seen_uid > last_uid:
-                self.state.update_last_uid(self.account.login, latest_seen_uid)
-            self.state.update_check_time(self.account.login)
-            self.state.set_imap_status(self.account.login, "ok")
-            return messages
-        except Exception as exc:  # network/imap errors should not crash pipeline
-            self.state.set_imap_status(self.account.login, "error", str(exc))
-            self.logger.exception("IMAP fetch failed for %s", self.account.login)
-            raise
-        finally:
-            if client is not None:
+    def close(self) -> None:
+        try:
+            if self._client is not None:
                 try:
-                    client.logout()
+                    self._client.logout()
                 except Exception:
-                    self.logger.warning("IMAP logout failed for %s", self.account.login)
+                    pass
+        finally:
+            self._client = None
+
+    def _with_retries(self, fn, *args, **kwargs):
+        last_exc: Optional[Exception] = None
+        for attempt in range(self.retries + 1):
+            try:
+                client = self._ensure()
+                return fn(client, *args, **kwargs)
+            except (socket.timeout, ssl.SSLError, OSError) as e:
+                last_exc = e
+                log.warning("IMAP сеть/SSL ошибка, переподключение (%s/%s): %s", attempt + 1, self.retries + 1, e)
+                self.close()
+            except Exception as e:
+                # любые прочие ошибки тоже попробуем один раз переподключением (часто IMAP рвёт сессию)
+                last_exc = e
+                log.warning("IMAP ошибка, переподключение (%s/%s): %s", attempt + 1, self.retries + 1, e)
+                self.close()
+
+            if attempt < self.retries:
+                time.sleep(self.backoff_base * (2**attempt))
+
+        raise IMAPError(f"IMAP операция не удалась после ретраев: {last_exc}") from last_exc
+
+    # ---------- API ----------
+
+    def search_uids_since(self, since_utc: datetime) -> List[int]:
+        """
+        Возвращает UID писем, у которых INTERNALDATE >= since (по дням),
+        а точную фильтрацию по времени делаем уже по заголовку Date при парсинге.
+        """
+        since_utc = _safe_dt(since_utc) or _utcnow()
+        # IMAP SINCE работает по дате (день), формат: DD-Mon-YYYY
+        since_str = since_utc.strftime("%d-%b-%Y")
+
+        def _search(client):
+            return client.search(["SINCE", since_str])
+
+        uids = self._with_retries(_search)
+        # imapclient может вернуть list[int] или tuple
+        return [int(x) for x in (uids or [])]
+
+    def fetch_headers_and_size(self, uids: Sequence[int]) -> Dict[int, Dict[bytes, Any]]:
+        """
+        Забираем заголовки (RFC822.HEADER) + размер (RFC822.SIZE) без тела.
+        """
+        if not uids:
+            return {}
+
+        def _fetch(client):
+            return client.fetch(list(uids), [b"RFC822.HEADER", b"RFC822.SIZE"])
+
+        data = self._with_retries(_fetch) or {}
+        # imapclient ключи uids -> dict
+        out: Dict[int, Dict[bytes, Any]] = {}
+        for k, v in data.items():
+            out[int(k)] = v
+        return out
+
+    def fetch_full_rfc822(self, uid: int) -> bytes:
+        """
+        Забираем полное письмо RFC822 (только если размер <= лимита).
+        """
+        max_bytes = int(self.account.max_email_mb) * 1024 * 1024
+
+        # сначала узнаем размер
+        meta = self.fetch_headers_and_size([uid]).get(int(uid), {})
+        size = _parse_rfc822_size(meta)
+        if size is not None and size > max_bytes:
+            raise IMAPError(f"Письмо UID={uid} слишком большое: {size} bytes > limit {max_bytes} bytes")
+
+        def _fetch(client):
+            data = client.fetch([int(uid)], [b"RFC822"])
+            # ожидаем {uid: {b'RFC822': bytes}}
+            d = data.get(int(uid)) or {}
+            payload = d.get(b"RFC822") or d.get("RFC822")
+            if not isinstance(payload, (bytes, bytearray)):
+                raise IMAPError(f"Не удалось получить RFC822 для UID={uid}")
+            return bytes(payload)
+
+        return self._with_retries(_fetch)
+
+    def iter_new_messages(
+        self,
+        *,
+        start_time_utc: datetime,
+        limit: int = 50,
+        uid_batch: int = 200,
+    ) -> Iterable[Tuple[int, Message]]:
+        """
+        Итератор новых писем:
+        1) ищем UID по SINCE (по дням)
+        2) тянем заголовки пачками, режем по max_email_mb
+        3) тянем полные письма только для подходящих
+        4) финальная фильтрация по заголовку Date >= start_time_utc (UTC)
+        """
+        start_time_utc = _safe_dt(start_time_utc) or _utcnow()
+        uids = self.search_uids_since(start_time_utc)
+        if not uids:
+            return iter(())
+
+        # UID лучше сортировать, чтобы было стабильно
+        uids = sorted(set(int(x) for x in uids))
+
+        emitted = 0
+        max_bytes = int(self.account.max_email_mb) * 1024 * 1024
+
+        for i in range(0, len(uids), uid_batch):
+            if emitted >= limit:
+                break
+
+            chunk = uids[i : i + uid_batch]
+            headers_map = self.fetch_headers_and_size(chunk)
+
+            # сначала отфильтруем крупные, затем по Date
+            candidates: List[int] = []
+            for uid in chunk:
+                meta = headers_map.get(int(uid), {})
+                size = _parse_rfc822_size(meta)
+                if size is not None and size > max_bytes:
+                    log.info("Skip oversize email UID=%s size=%s", uid, size)
+                    continue
+                candidates.append(int(uid))
+
+            for uid in candidates:
+                if emitted >= limit:
+                    break
+
+                try:
+                    raw = self.fetch_full_rfc822(uid)
+                except IMAPError as e:
+                    log.warning("Skip email UID=%s due to error: %s", uid, e)
+                    continue
+
+                try:
+                    msg = email.message_from_bytes(raw)
+                except Exception as e:
+                    log.warning("Skip broken MIME UID=%s: %s", uid, e)
+                    continue
+
+                msg_dt = _get_msg_date_utc(msg)
+                if msg_dt is None:
+                    # если Date нет — считаем старым, чтобы не спамить
+                    continue
+                if msg_dt < start_time_utc:
+                    continue
+
+                emitted += 1
+                yield uid, msg
 
 
-__all__ = ["ResilientIMAP"]
+# ---- удобные helper-ы, если где-то в проекте нужно ----
+
+def extract_basic_headers(msg: Message) -> Tuple[str, str, str]:
+    subject = _decode_header_value(msg.get("Subject", "") or "")
+    from_ = _decode_header_value(msg.get("From", "") or "")
+    to = _decode_header_value(msg.get("To", "") or "")
+    return subject, from_, to

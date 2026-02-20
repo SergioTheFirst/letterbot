@@ -1,0 +1,15 @@
+[mos_ru]
+enabled = true
+host = pochta.mos.ru
+port = 993
+use_ssl = true
+
+login = 
+password = 
+
+# Куда слать уведомления по этому ящику (можно пустым, если общий admin_chat_id в config.ini)
+telegram_chat_id 
+
+# Опционально (можно пустыми)
+username =
+name =

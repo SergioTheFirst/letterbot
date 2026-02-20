@@ -1,10 +1,28 @@
+# venv / python junk
+**/venv/
+**/.venv/
 __pycache__/
-mailbot_v26/mailbot.log
+*.pyc
+
+# logs
+*.log
+
+# secrets / local configs
+mailbot_v26/config/accounts.ini
+mailbot_v26/config/keys.ini
+mailbot_v26/config/config.ini
+mailbot_v26/config/*.zip
+
+# venv
+venv/
+mailbot_v26/venv/
+
+# secrets/config
+*.ini
+!*.ini.example
+
+# runtime
 *.sqlite
-*.sqlite-wal
-*.sqlite-shm
 database.sqlite
-nul
-config.yaml
-build/
-dist/
+mailbot_v26/database.sqlite
+data/
