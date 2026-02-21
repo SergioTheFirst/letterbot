@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import configparser
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
 
 from mailbot_v26.insights.anomaly_engine import compute_anomalies
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.insights.attention_economics import (
     AttentionEconomicsResult,
     compute_attention_economics,
@@ -34,6 +36,7 @@ from mailbot_v26.ui.i18n import DEFAULT_LOCALE, humanize_severity, t
 logger = get_logger("mailbot")
 
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.ini"
+_LOGGER = logging.getLogger(__name__)
 
 _WEEKDAY_ALIASES = {
     "mon": 0,
@@ -96,13 +99,19 @@ def _parse_weekday(value: str | None) -> int:
     return _WEEKDAY_ALIASES.get(cleaned, 0)
 
 
+def _load_ini_parser() -> configparser.ConfigParser:
+    return read_user_ini_with_defaults(
+        _CONFIG_PATH,
+        logger=_LOGGER,
+        scope_label="weekly digest settings",
+    )
+
+
 def _load_weekly_digest_config() -> WeeklyDigestConfig:
     weekday = 0
     hour = 9
     minute = 0
-    parser = configparser.ConfigParser()
-    if _CONFIG_PATH.exists():
-        parser.read(_CONFIG_PATH, encoding="utf-8")
+    parser = _load_ini_parser()
     section = parser["weekly_digest"] if "weekly_digest" in parser else None
     if section is not None:
         weekday = _parse_weekday(section.get("weekday", fallback="mon"))

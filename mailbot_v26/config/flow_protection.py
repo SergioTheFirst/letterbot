@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import configparser
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,10 +20,11 @@ class FlowProtectionConfig:
 def load_flow_protection_config(base_dir: Path | None = None) -> FlowProtectionConfig:
     config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
     config_path = config_dir / "config.ini"
-    parser = configparser.ConfigParser()
-    if not config_path.exists():
-        return FlowProtectionConfig()
-    parser.read(config_path, encoding="utf-8")
+    parser = read_user_ini_with_defaults(
+        config_path,
+        logger=_LOGGER,
+        scope_label="flow protection settings",
+    )
     section = parser["flow_protection"] if "flow_protection" in parser else None
     if section is None:
         return FlowProtectionConfig()

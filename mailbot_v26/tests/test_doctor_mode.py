@@ -28,4 +28,4 @@ def test_doctor_mode_missing_yaml_and_ini_warns_and_does_not_crash(
     assert "copy config.ini.example config.ini" in output
     assert any(entry.component == "config.yaml" and entry.status == "WARN" for entry in report.entries)
     assert any(entry.component == "config.ini" and entry.status == "WARN" for entry in report.entries)
-    assert "priority config.ini missing" in caplog.text
+    assert "config.ini missing" in caplog.text

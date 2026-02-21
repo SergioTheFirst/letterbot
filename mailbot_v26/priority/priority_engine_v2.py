@@ -15,6 +15,7 @@ from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.insights.commitment_tracker import Commitment, extract_deadline_ru
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.observability.decision_trace_v1 import compute_model_fingerprint
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,41 +93,15 @@ _DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 _LOGGER = logging.getLogger(__name__)
 
 
-class PriorityConfigError(RuntimeError):
-    """Raised when priority config.ini is malformed and cannot be parsed as INI."""
-
-
-def _invalid_ini_message(config_path: Path, config_example_path: Path) -> str:
-    return (
-        f"Invalid INI format in {config_path}. "
-        f"Use {config_example_path} as template. "
-        "INI must include [sections]. "
-        "Windows regenerate command: "
-        f"copy {config_example_path} {config_path}"
-    )
-
-
 def _load_ini_with_fallback(config_dir: Path) -> configparser.ConfigParser:
     config_path = config_dir / "config.ini"
     config_example_path = config_dir / "config.ini.example"
-    parser = configparser.ConfigParser()
-    if not config_path.exists():
-        _LOGGER.warning(
-            "priority config.ini missing at %s; using deterministic defaults for priority/vip settings.",
-            config_path,
-        )
-        return parser
-    try:
-        parser.read(config_path, encoding="utf-8")
-    except (configparser.MissingSectionHeaderError, configparser.ParsingError) as exc:
-        err = PriorityConfigError(_invalid_ini_message(config_path, config_example_path))
-        _LOGGER.warning(
-            "%s Falling back to deterministic defaults for priority/vip settings.",
-            err,
-        )
-        _LOGGER.debug("priority config parse error details", exc_info=exc)
-        return configparser.ConfigParser()
-    return parser
+    return read_user_ini_with_defaults(
+        config_path,
+        logger=_LOGGER,
+        scope_label="priority/vip settings",
+        template_path=config_example_path,
+    )
 
 
 def load_priority_v2_config(base_dir: Path | None = None) -> PriorityV2Config:

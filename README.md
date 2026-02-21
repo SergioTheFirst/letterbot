@@ -266,7 +266,7 @@ jinja2
 # 🚀 Как запускать
 
 ```
-python start.py
+python -m mailbot_v26.start
 ```
 
 Веб-панель мониторинга:

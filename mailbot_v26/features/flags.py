@@ -8,8 +8,14 @@ introducing new flags never alters runtime behavior unexpectedly.
 from __future__ import annotations
 
 import configparser
+import logging
 from pathlib import Path
 from typing import Optional
+
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class FeatureFlags:
@@ -65,11 +71,11 @@ class FeatureFlags:
         config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
         config_path = config_dir / "config.ini"
 
-        parser = configparser.ConfigParser()
-        if not config_path.exists():
-            return
-
-        parser.read(config_path, encoding="utf-8")
+        parser = read_user_ini_with_defaults(
+            config_path,
+            logger=_LOGGER,
+            scope_label="feature flags",
+        )
         self.ENABLE_AUTO_PRIORITY = self._get_flag(parser, "enable_auto_priority")
         self.ENABLE_AUTO_ACTIONS = self._get_flag(parser, "enable_auto_actions")
         self.ENABLE_TASK_SUGGESTIONS = self._get_flag(parser, "enable_task_suggestions")

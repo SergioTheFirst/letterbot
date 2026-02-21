@@ -324,9 +324,9 @@ def test_malformed_config_ini_falls_back_with_actionable_warning(tmp_path: Path,
 
     assert config == PriorityV2Config()
     assert vip == VipSenderMatcher()
-    assert "Invalid INI format" in caplog.text
+    assert "config.ini is invalid" in caplog.text
     assert "config.ini.example" in caplog.text
-    assert "INI must include [sections]" in caplog.text
+    assert "Windows command: copy" in caplog.text
     assert "MissingSectionHeaderError" not in caplog.text
 
 
@@ -341,3 +341,4 @@ def test_missing_config_ini_uses_deterministic_defaults(tmp_path: Path, caplog) 
     assert config == PriorityV2Config()
     assert vip == VipSenderMatcher()
     assert "config.ini missing" in caplog.text
+    assert "Windows command: copy" in caplog.text

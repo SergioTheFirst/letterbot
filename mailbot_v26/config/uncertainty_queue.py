@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import configparser
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,9 +22,11 @@ def load_uncertainty_queue_config(
     config_dir: Path | None = None,
 ) -> UncertaintyQueueConfig:
     config_path = (config_dir or Path(__file__).resolve().parent) / "config.ini"
-    parser = configparser.ConfigParser()
-    if config_path.exists():
-        parser.read(config_path, encoding="utf-8")
+    parser = read_user_ini_with_defaults(
+        config_path,
+        logger=_LOGGER,
+        scope_label="uncertainty queue settings",
+    )
     section = parser["uncertainty_queue"] if "uncertainty_queue" in parser else None
 
     window_days = 1

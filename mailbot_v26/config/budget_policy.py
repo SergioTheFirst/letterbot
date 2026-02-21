@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import configparser
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from mailbot_v26.budgets.gate import BudgetGateConfig
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,10 +23,11 @@ class BudgetUsageConfig:
 def load_budget_gate_config(base_dir: Path | None = None) -> BudgetGateConfig:
     config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
     config_path = config_dir / "config.ini"
-    parser = configparser.ConfigParser()
-    if not config_path.exists():
-        return BudgetGateConfig()
-    parser.read(config_path, encoding="utf-8")
+    parser = read_user_ini_with_defaults(
+        config_path,
+        logger=_LOGGER,
+        scope_label="budget gate settings",
+    )
     budgets = parser["budgets"] if "budgets" in parser else None
     gates = parser["gates"] if "gates" in parser else None
     return BudgetGateConfig(
@@ -45,10 +51,11 @@ def load_budget_gate_config(base_dir: Path | None = None) -> BudgetGateConfig:
 def load_budget_usage_config(base_dir: Path | None = None) -> BudgetUsageConfig:
     config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
     config_path = config_dir / "config.ini"
-    parser = configparser.ConfigParser()
-    if not config_path.exists():
-        return BudgetUsageConfig()
-    parser.read(config_path, encoding="utf-8")
+    parser = read_user_ini_with_defaults(
+        config_path,
+        logger=_LOGGER,
+        scope_label="budget usage settings",
+    )
     usage = parser["llm_usage"] if "llm_usage" in parser else None
     return BudgetUsageConfig(
         llm_percentile_threshold=_get_int(usage, "llm_percentile_threshold", 80),

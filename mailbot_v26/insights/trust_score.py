@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import configparser
+import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.ini"
 
 _QUALITY_OK = "OK"
 _QUALITY_LOW = "LOW_DATA"
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -73,9 +77,11 @@ class TrustScoreCalculator:
         min_response_samples = self.DEFAULT_MIN_RESPONSE_SAMPLES
         min_trend_samples = self.DEFAULT_MIN_TREND_SAMPLES
 
-        parser = configparser.ConfigParser()
-        if _CONFIG_PATH.exists():
-            parser.read(_CONFIG_PATH, encoding="utf-8")
+        parser = read_user_ini_with_defaults(
+            _CONFIG_PATH,
+            logger=_LOGGER,
+            scope_label="trust score settings",
+        )
         section = parser["trust"] if "trust" in parser else None
         if section is not None:
             try:
