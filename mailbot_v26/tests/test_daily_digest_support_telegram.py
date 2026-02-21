@@ -110,3 +110,42 @@ def test_support_telegram_config_enabled_when_feature_flag_on(monkeypatch) -> No
 
     assert cfg.enabled is True
     assert cfg.text == "Letterbot бесплатный. Поддержка: /support"
+
+
+def test_support_telegram_config_enabled_via_support_enabled(monkeypatch) -> None:
+    monkeypatch.setattr(digest_scheduler, "_resolve_yaml_config_path", lambda: Path("config.yaml"))
+    monkeypatch.setattr(
+        digest_scheduler,
+        "load_yaml_config",
+        lambda _path: {
+            "support": {
+                "enabled": True,
+                "telegram": {"enabled": True, "frequency_days": 30, "text": "Letterbot бесплатный. Поддержка: /support"},
+            },
+        },
+    )
+
+    cfg = digest_scheduler._load_support_telegram_config()
+
+    assert cfg.enabled is True
+    assert cfg.text == "Letterbot бесплатный. Поддержка: /support"
+
+
+def test_support_telegram_config_support_enabled_overrides_legacy_feature(monkeypatch) -> None:
+    monkeypatch.setattr(digest_scheduler, "_resolve_yaml_config_path", lambda: Path("config.yaml"))
+    monkeypatch.setattr(
+        digest_scheduler,
+        "load_yaml_config",
+        lambda _path: {
+            "features": {"donate_enabled": True},
+            "support": {
+                "enabled": False,
+                "telegram": {"enabled": True, "frequency_days": 30, "text": "Letterbot бесплатный. Поддержка: /support"},
+            },
+        },
+    )
+
+    cfg = digest_scheduler._load_support_telegram_config()
+
+    assert cfg.enabled is False
+    assert cfg.text == ""

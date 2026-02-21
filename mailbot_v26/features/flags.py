@@ -201,6 +201,8 @@ class FeatureFlags:
     @staticmethod
     def _get_support_flag(parser: configparser.ConfigParser) -> bool:
         try:
+            if parser.has_option("support", "enabled"):
+                return parser.getboolean("support", "enabled", fallback=False)
             if parser.has_option("features", "support"):
                 return parser.getboolean("features", "support", fallback=False)
             return parser.getboolean("features", "donate_enabled", fallback=False)

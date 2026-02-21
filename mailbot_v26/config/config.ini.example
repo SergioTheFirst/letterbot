@@ -1,6 +1,17 @@
-; Letterbot full INI template (safe for `copy ... config.ini` on Windows)
+; Letterbot INI template (Windows-safe for `copy ... config.ini`)
+; Quick start (edit these first):
+; 1) [general] check_interval
+; 2) accounts.ini -> account login/password/imap_host/imap_port/telegram_chat_id
+; 3) keys.ini -> telegram_bot_token + LLM API keys
+; 4) config.yaml -> web_ui.bind / web_ui.password (used by Web UI)
+; 5) [support] enabled = true|false (user-facing support switch)
+; Legacy compatibility: [features] donate_enabled is still accepted,
+; but [support] enabled has higher priority when both are present.
 ; Compact template: mailbot_v26/config/config.ini.compact.example
 
+; =====================
+; Core runtime settings
+; =====================
 [general]
 check_interval = 120
 max_email_mb = 15
@@ -11,15 +22,21 @@ max_extracted_total_chars = 120000
 admin_chat_id =
 attention_cost_per_hour = 0
 
+[storage]
+db_path = mailbot.sqlite
+
 [ingest]
 allow_prestart_emails = false
 
 [maintenance]
 maintenance_mode = 0
 
-[storage]
-db_path = mailbot.sqlite
+[ui]
+locale = ru
 
+; =====================
+; LLM providers
+; =====================
 [llm]
 primary = gigachat
 fallback = cloudflare
@@ -36,9 +53,15 @@ gigachat_max_consecutive_errors = 3
 gigachat_max_latency_sec = 10
 gigachat_cooldown_sec = 600
 
-[ui]
-locale = ru
+; =====================
+; User-facing support switch
+; =====================
+[support]
+enabled = false
 
+; =====================
+; Feature flags (advanced)
+; =====================
 [features]
 enable_auto_priority = false
 enable_daily_digest = true
@@ -60,8 +83,12 @@ enable_regret_minimization = false
 enable_uncertainty_queue = false
 enable_commitment_chain_digest = false
 support = false
+; legacy fallback (kept for backward compatibility):
 donate_enabled = false
 
+; =====================
+; Advanced tuning
+; =====================
 [auto_priority_gate]
 enabled = false
 window_days = 30

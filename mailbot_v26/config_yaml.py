@@ -45,6 +45,16 @@ class ConfigFeatures:
     donate_enabled: bool = False
 
 
+def resolve_support_enabled(cfg: dict[str, Any]) -> bool:
+    support_raw = cfg.get("support") if isinstance(cfg, dict) else None
+    if isinstance(support_raw, dict) and "enabled" in support_raw:
+        return bool(support_raw.get("enabled", False))
+    features_raw = cfg.get("features") if isinstance(cfg, dict) else None
+    if isinstance(features_raw, dict):
+        return bool(features_raw.get("donate_enabled", False))
+    return False
+
+
 def _load_features_config(cfg: dict[str, Any]) -> ConfigFeatures:
     features_raw = cfg.get("features")
     if features_raw is None:
@@ -54,7 +64,7 @@ def _load_features_config(cfg: dict[str, Any]) -> ConfigFeatures:
     donate_enabled = features_raw.get("donate_enabled", False)
     if not isinstance(donate_enabled, bool):
         raise ValueError("Ошибка в config.yaml: features.donate_enabled должен быть true/false")
-    return ConfigFeatures(donate_enabled=donate_enabled)
+    return ConfigFeatures(donate_enabled=resolve_support_enabled(cfg))
 
 
 def _yaml_module():
