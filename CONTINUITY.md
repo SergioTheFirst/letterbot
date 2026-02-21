@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-21: added shared guarded INI reader (`config/ini_utils.py`), refactored user INI loaders to deterministic fallback + one-time actionable warning, fixed `auto_priority_gate` import crash path, replaced `config.ini.example` with valid sectioned template, and added malformed/missing config.ini processor-import regression tests.
 - 2026-02-21: added compact INI UX flow (new config.ini.compact.example + deterministic generator), INI support alias (`features.support`) with precedence over `features.donate_enabled`, and doctor hint with Windows copy command to compact template; tests added.
 - 2026-02-21: doctor now uses build_bot_config with deterministic fallback/default BotConfig on YAML errors, loads priority/vip INI via fallback-safe loaders, and prints template+copy hints instead of crashing when config files are missing; added missing-config doctor-mode regression test.
 - 2026-02-20: hardened priority config INI loading on Windows startup path; malformed/missing config.ini now logs actionable warning (template + Windows copy command) and deterministically falls back to defaults, with regression tests for malformed/missing files.
@@ -75,12 +76,15 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Изменения по compact INI/support alias реализованы и подтверждены audit+pytest.
+- Guarded INI loading rollout completed for user-provided config.ini readers; running full regression validation.
 Next:
-- Подтвердить UX-copy и выпустить как улучшение шаблонов конфигурации.
+- Release Windows startup resilience/docs update for malformed config.ini handling.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/tests/test_ini_runtime_guard.py
+- mailbot_v26/config/auto_priority_gate.py
+- mailbot_v26/config/ini_utils.py
 - mailbot_v26/features/flags.py
 - mailbot_v26/tools/make_ini_compact.py
 - mailbot_v26/config/config.ini.compact.example

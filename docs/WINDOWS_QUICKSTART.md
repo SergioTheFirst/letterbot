@@ -43,3 +43,8 @@ web_ui:
 
 ## Windows SmartScreen (первый запуск)
 Если при запуске `MailBot.exe` видно «Windows protected your PC», это стандартное предупреждение для неподписанных файлов. Нажмите `More info` → `Run anyway` (или «Подробнее» → «Выполнить в любом случае»).
+
+## Module-based commands (recommended)
+- Doctor diagnostics: `python -m mailbot_v26.doctor`
+- Normal startup: `python -m mailbot_v26.start`
+- Avoid direct script launch (`python start.py`) on Windows; module mode resolves package paths deterministically.

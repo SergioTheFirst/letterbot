@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Callable, Iterable
 
 from mailbot_v26.behavior.silence_detector import run_silence_scan
 from mailbot_v26.config_loader import resolve_account_scope
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.regret_minimization import (
     RegretMinimizationConfig,
     load_regret_minimization_config,
@@ -45,6 +47,7 @@ from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.ini"
+_LOGGER = logging.getLogger(__name__)
 _runtime_flag_store = RuntimeFlagStore()
 _system_orchestrator = SystemOrchestrator()
 _system_gates = SystemGates()
@@ -118,12 +121,18 @@ class SupportTelegramConfig:
     text: str
 
 
+def _load_ini_parser() -> configparser.ConfigParser:
+    return read_user_ini_with_defaults(
+        _CONFIG_PATH,
+        logger=_LOGGER,
+        scope_label="digest scheduler settings",
+    )
+
+
 def _load_daily_digest_config() -> DailyDigestConfig:
     hour = 9
     minute = 0
-    parser = configparser.ConfigParser()
-    if _CONFIG_PATH.exists():
-        parser.read(_CONFIG_PATH, encoding="utf-8")
+    parser = _load_ini_parser()
     section = parser["daily_digest"] if "daily_digest" in parser else None
     if section is not None:
         try:
@@ -141,9 +150,7 @@ def _load_weekly_digest_config() -> WeeklyDigestConfig:
     weekday = 0
     hour = 9
     minute = 0
-    parser = configparser.ConfigParser()
-    if _CONFIG_PATH.exists():
-        parser.read(_CONFIG_PATH, encoding="utf-8")
+    parser = _load_ini_parser()
     section = parser["weekly_digest"] if "weekly_digest" in parser else None
     if section is not None:
         weekday = weekly_digest._parse_weekday(section.get("weekday", fallback="mon"))
@@ -160,9 +167,7 @@ def _load_weekly_digest_config() -> WeeklyDigestConfig:
 
 def _load_weekly_accuracy_report_config() -> WeeklyAccuracyReportConfig:
     window_days = 7
-    parser = configparser.ConfigParser()
-    if _CONFIG_PATH.exists():
-        parser.read(_CONFIG_PATH, encoding="utf-8")
+    parser = _load_ini_parser()
     section = (
         parser["weekly_accuracy_report"]
         if "weekly_accuracy_report" in parser
@@ -180,9 +185,7 @@ def _load_weekly_calibration_report_config() -> WeeklyCalibrationReportConfig:
     window_days = 7
     top_n = 3
     min_corrections = 10
-    parser = configparser.ConfigParser()
-    if _CONFIG_PATH.exists():
-        parser.read(_CONFIG_PATH, encoding="utf-8")
+    parser = _load_ini_parser()
     section = (
         parser["weekly_calibration_report"]
         if "weekly_calibration_report" in parser
@@ -211,9 +214,7 @@ def _load_weekly_calibration_report_config() -> WeeklyCalibrationReportConfig:
 def _load_digest_insights_config() -> DigestInsightsConfig:
     window_days = 7
     max_items = 3
-    parser = configparser.ConfigParser()
-    if _CONFIG_PATH.exists():
-        parser.read(_CONFIG_PATH, encoding="utf-8")
+    parser = _load_ini_parser()
     section = parser["digest_insights"] if "digest_insights" in parser else None
     if section is not None:
         try:
@@ -229,9 +230,7 @@ def _load_digest_insights_config() -> DigestInsightsConfig:
 
 def _load_behavior_metrics_digest_config() -> BehaviorMetricsDigestConfig:
     window_days = 7
-    parser = configparser.ConfigParser()
-    if _CONFIG_PATH.exists():
-        parser.read(_CONFIG_PATH, encoding="utf-8")
+    parser = _load_ini_parser()
     section = (
         parser["behavior_metrics_digest"] if "behavior_metrics_digest" in parser else None
     )

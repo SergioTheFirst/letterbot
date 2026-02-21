@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import configparser
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,10 +24,11 @@ class LLMQueueConfig:
 def load_llm_queue_config(base_dir: Path | None = None) -> LLMQueueConfig:
     config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
     config_path = config_dir / "config.ini"
-    parser = configparser.ConfigParser()
-    if not config_path.exists():
-        return LLMQueueConfig()
-    parser.read(config_path, encoding="utf-8")
+    parser = read_user_ini_with_defaults(
+        config_path,
+        logger=_LOGGER,
+        scope_label="llm queue settings",
+    )
     section = parser["threading"] if "threading" in parser else None
     return LLMQueueConfig(
         max_concurrent_llm_calls=_get_int(section, "max_concurrent_llm_calls", 1),
