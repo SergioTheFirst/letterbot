@@ -407,9 +407,13 @@ def _resolve_yaml_config_path(config_dir: Path | None) -> Path:
 
 def _config_template_hint(config_path: Path) -> str:
     example_path = config_path.with_name(f"{config_path.name}.example")
+    compact_example_path = config_path.with_name("config.ini.compact.example")
     return (
         f"Файл не найден: {config_path}. Используйте шаблон {example_path} "
-        f"и скопируйте: copy {example_path.name} {config_path.name}"
+        f"или начните с компактного {compact_example_path}. "
+        f"Скопировать (полный): copy {example_path.name} {config_path.name}. "
+        f"Скопировать (compact): copy mailbot_v26\\config\\config.ini.compact.example "
+        f"mailbot_v26\\config\\config.ini"
     )
 
 

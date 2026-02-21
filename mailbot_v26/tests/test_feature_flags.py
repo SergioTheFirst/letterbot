@@ -64,3 +64,26 @@ enable_auto_priority = notabool
     )
     flags = FeatureFlags(tmp_path)
     assert flags.ENABLE_AUTO_PRIORITY is False
+
+
+def test_support_alias_overrides_donate_enabled(tmp_path: Path) -> None:
+    write_config(
+        tmp_path,
+        """[features]
+donate_enabled = false
+support = true
+""",
+    )
+    flags = FeatureFlags(tmp_path)
+    assert flags.DONATE_ENABLED is True
+
+
+def test_support_alias_falls_back_to_donate_enabled(tmp_path: Path) -> None:
+    write_config(
+        tmp_path,
+        """[features]
+donate_enabled = true
+""",
+    )
+    flags = FeatureFlags(tmp_path)
+    assert flags.DONATE_ENABLED is True
