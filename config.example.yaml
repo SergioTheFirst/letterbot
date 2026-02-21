@@ -41,9 +41,6 @@ polling:
   interval_seconds: 60        # пример: 60 (как часто проверять почту)
   reload_config_seconds: 60   # пример: 60 (как часто перечитывать config.yaml без перезапуска)
 
-features:
-  donate_enabled: false
-
 web_ui:
   enabled: true
   bind: "127.0.0.1"         # по умолчанию только локально
@@ -59,7 +56,7 @@ web_ui:
   require_strong_password_on_lan: true  # LAN требует пароль >=10 символов и не дефолтный
 
 support:
-  enabled: true
+  enabled: true  # пользовательский переключатель поддержки (приоритет выше legacy features.donate_enabled)
   ui:
     show_in_nav: true
   methods:

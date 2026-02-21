@@ -78,7 +78,22 @@ support = true
     assert flags.DONATE_ENABLED is True
 
 
-def test_support_alias_falls_back_to_donate_enabled(tmp_path: Path) -> None:
+def test_support_section_enabled_overrides_features_flags(tmp_path: Path) -> None:
+    write_config(
+        tmp_path,
+        """[features]
+donate_enabled = false
+support = false
+
+[support]
+enabled = true
+""",
+    )
+    flags = FeatureFlags(tmp_path)
+    assert flags.DONATE_ENABLED is True
+
+
+def test_support_section_falls_back_to_legacy_donate_flag(tmp_path: Path) -> None:
     write_config(
         tmp_path,
         """[features]

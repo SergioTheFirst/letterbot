@@ -33,6 +33,7 @@ web_ui:
 
 
 ## Support
+- Включите поддержку через `support.enabled: true` (приоритет над legacy `features.donate_enabled`).
 - Настройте `support.methods` в `config.yaml` (карта/СБП/ЮMoney).
 - После логина откройте `http://127.0.0.1:8787/support` (или ваш порт Web UI).
 - Опциональный P.S. в TG дайджесте включается через `support.telegram` и ограничен `frequency_days`.

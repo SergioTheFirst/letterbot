@@ -56,6 +56,7 @@ from mailbot_v26.config_yaml import (
     ConfigError as YamlConfigError,
     load_config as load_yaml_config,
     validate_config as validate_yaml_config,
+    resolve_support_enabled,
 )
 from mailbot_v26.observability.calibration_report import compute_priority_calibration_report
 from mailbot_v26.observability.decision_trace_store import load_latest_decision_traces
@@ -971,9 +972,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
         return SupportSettings(enabled=False, show_in_nav=False, methods=[])
     if not isinstance(raw, dict):
         return SupportSettings(enabled=False, show_in_nav=False, methods=[])
-    features = raw.get("features")
-    donate_enabled = bool(features.get("donate_enabled", False)) if isinstance(features, dict) else False
-    if not donate_enabled:
+    if not resolve_support_enabled(raw):
         return SupportSettings(enabled=False, show_in_nav=False, methods=[])
     support = raw.get("support")
     if not isinstance(support, dict):

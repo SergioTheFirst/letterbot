@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("yaml")
 
-from mailbot_v26.config_yaml import validate_config
+from mailbot_v26.config_yaml import resolve_support_enabled, validate_config
 
 
 def _base_config() -> dict:
@@ -227,3 +227,26 @@ def test_validate_config_features_donate_enabled_type() -> None:
 
     assert not ok
     assert error == "Ошибка в config.yaml: features.donate_enabled должен быть true/false"
+
+
+def test_resolve_support_enabled_prefers_support_enabled() -> None:
+    config = _base_config()
+    config["features"] = {"donate_enabled": False}
+    config["support"] = {"enabled": True}
+
+    assert resolve_support_enabled(config) is True
+
+
+def test_resolve_support_enabled_falls_back_to_features_donate_enabled() -> None:
+    config = _base_config()
+    config["features"] = {"donate_enabled": True}
+
+    assert resolve_support_enabled(config) is True
+
+
+def test_resolve_support_enabled_support_disables_legacy_flag() -> None:
+    config = _base_config()
+    config["features"] = {"donate_enabled": True}
+    config["support"] = {"enabled": False}
+
+    assert resolve_support_enabled(config) is False

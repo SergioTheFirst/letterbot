@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-21: reformatted `config.ini.example` with Quick start + advanced headers, moved INI support toggle to `[support].enabled` (with legacy fallback), unified YAML/runtime support gating precedence (`support.enabled` > `features.donate_enabled`) for web + digest, updated docs, and added precedence regression tests.
 - 2026-02-21: added shared guarded INI reader (`config/ini_utils.py`), refactored user INI loaders to deterministic fallback + one-time actionable warning, fixed `auto_priority_gate` import crash path, replaced `config.ini.example` with valid sectioned template, and added malformed/missing config.ini processor-import regression tests.
 - 2026-02-21: added compact INI UX flow (new config.ini.compact.example + deterministic generator), INI support alias (`features.support`) with precedence over `features.donate_enabled`, and doctor hint with Windows copy command to compact template; tests added.
 - 2026-02-21: doctor now uses build_bot_config with deterministic fallback/default BotConfig on YAML errors, loads priority/vip INI via fallback-safe loaders, and prints template+copy hints instead of crashing when config files are missing; added missing-config doctor-mode regression test.
@@ -76,9 +77,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Guarded INI loading rollout completed for user-provided config.ini readers; running full regression validation.
+- Support toggle precedence rollout complete across INI/YAML runtime paths; targeted regression suite green.
 Next:
-- Release Windows startup resilience/docs update for malformed config.ini handling.
+- Run broader full-suite regression when packaging changes are queued.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
