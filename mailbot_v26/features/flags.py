@@ -58,6 +58,7 @@ class FeatureFlags:
         self.ENABLE_REGRET_MINIMIZATION = False
         self.ENABLE_UNCERTAINTY_QUEUE = False
         self.ENABLE_COMMITMENT_CHAIN_DIGEST = False
+        self.DONATE_ENABLED = False
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
@@ -152,6 +153,7 @@ class FeatureFlags:
         self.ENABLE_COMMITMENT_CHAIN_DIGEST = self._get_flag(
             parser, "enable_commitment_chain_digest"
         )
+        self.DONATE_ENABLED = self._get_support_flag(parser)
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_priority_confidence_threshold", default=0.6
         )
@@ -189,6 +191,15 @@ class FeatureFlags:
         if raw in {"false", "no", "0", "off"}:
             return "disabled"
         return default
+
+    @staticmethod
+    def _get_support_flag(parser: configparser.ConfigParser) -> bool:
+        try:
+            if parser.has_option("features", "support"):
+                return parser.getboolean("features", "support", fallback=False)
+            return parser.getboolean("features", "donate_enabled", fallback=False)
+        except ValueError:
+            return False
 
 
 __all__ = ["FeatureFlags"]

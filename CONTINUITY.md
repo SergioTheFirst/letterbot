@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-21: added compact INI UX flow (new config.ini.compact.example + deterministic generator), INI support alias (`features.support`) with precedence over `features.donate_enabled`, and doctor hint with Windows copy command to compact template; tests added.
 - 2026-02-21: doctor now uses build_bot_config with deterministic fallback/default BotConfig on YAML errors, loads priority/vip INI via fallback-safe loaders, and prints template+copy hints instead of crashing when config files are missing; added missing-config doctor-mode regression test.
 - 2026-02-20: hardened priority config INI loading on Windows startup path; malformed/missing config.ini now logs actionable warning (template + Windows copy command) and deterministically falls back to defaults, with regression tests for malformed/missing files.
 - 2026-02-20: completed donate toggle verification end-to-end (UI nav + /support route + digest P.S.), restored IMAP compatibility seams for deterministic polling tests, fixed learning timeline template/runtime errors, and stabilized run_stack --dry-run without local config dependency.
@@ -74,12 +75,17 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Doctor config loading hardened: missing/invalid YAML and missing INI now produce actionable warnings and continue with deterministic defaults.
+- Изменения по compact INI/support alias реализованы и подтверждены audit+pytest.
 Next:
-- Run Windows-oriented smoke pass on real packaged artifact (run.bat/MailBot.exe flow), explicitly validating doctor fallback UX for missing config.yaml/config.ini before release cut.
+- Подтвердить UX-copy и выпустить как улучшение шаблонов конфигурации.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/features/flags.py
+- mailbot_v26/tools/make_ini_compact.py
+- mailbot_v26/config/config.ini.compact.example
+- mailbot_v26/tests/test_ini_compact_template.py
+- mailbot_v26/tests/test_feature_flags.py
 - mailbot_v26/doctor.py
 - mailbot_v26/tests/test_doctor_mode.py
 - tests/test_doctor_print_lan_url.py
@@ -149,7 +155,6 @@ Working set (files / tables / tests):
 - mailbot_v26/start.py
 - mailbot_v26/imap_client.py
 - mailbot_v26/config_loader.py
-- mailbot_v26/features/flags.py
 - config.example.yaml
 - .gitignore
 - build_windows_onefolder.bat
