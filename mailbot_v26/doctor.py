@@ -3,6 +3,7 @@ from __future__ import annotations
 import configparser
 import importlib
 import ipaddress
+import logging
 import os
 import sqlite3
 import sys
@@ -13,6 +14,7 @@ from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.config_loader import (
     ACCOUNT_ID_PATTERN,
     CONFIG_DIR,
+    BotConfig,
     ConfigError,
     load_accounts_config,
     load_general_config,
@@ -20,10 +22,12 @@ from mailbot_v26.config_loader import (
     load_storage_config,
 )
 from mailbot_v26.config_yaml import ConfigError as YamlConfigError
+from mailbot_v26.config_yaml import build_bot_config
 from mailbot_v26.config_yaml import load_config as load_yaml_config
 from mailbot_v26.config_yaml import validate_config as validate_yaml_config
 from mailbot_v26.health.mail_accounts import check_mail_accounts
 from mailbot_v26.llm import router as llm_router
+from mailbot_v26.priority.priority_engine_v2 import load_priority_v2_config, load_vip_senders
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.version import __version__
@@ -85,6 +89,9 @@ _STATUS_LABELS_RU = {
 }
 
 
+logger = logging.getLogger(__name__)
+
+
 def run_doctor(config_dir: Path | None = None) -> DoctorReport:
     require_runtime_for("doctor")
     base_dir = config_dir or CONFIG_DIR
@@ -111,18 +118,10 @@ def run_doctor(config_dir: Path | None = None) -> DoctorReport:
 
 
 def print_lan_url(config_dir: Path | None = None) -> int:
-    config_path = _resolve_yaml_config_path(config_dir)
-    try:
-        raw = load_yaml_config(config_path)
-    except FileNotFoundError as exc:
-        print(str(exc))
-        return 2
-    except YamlConfigError as exc:
-        print(str(exc))
-        return 2
-    ok, error = validate_yaml_config(raw)
-    if not ok:
-        print(error or "Invalid config.yaml")
+    raw, _config, errors = _load_doctor_bot_config(config_dir)
+    if errors:
+        for error in errors:
+            print(error)
         return 2
     web_ui = raw.get("web_ui") if isinstance(raw.get("web_ui"), dict) else {}
     enabled = bool(web_ui.get("enabled", False))
@@ -242,9 +241,23 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
     entries: list[DoctorEntry] = []
     data: dict[str, object] = {"accounts": [], "account_configs": []}
 
+    raw_config, bot_config, yaml_errors = _load_doctor_bot_config(base_dir)
+    if yaml_errors:
+        entries.append(DoctorEntry("config.yaml", "WARN", "; ".join(yaml_errors)))
+    else:
+        entries.append(DoctorEntry("config.yaml", "OK", "загружен"))
+    data["raw_config"] = raw_config
+    data["bot_config"] = bot_config
+
+    if not (base_dir / "config.ini").exists():
+        entries.append(DoctorEntry("config.ini", "WARN", _config_template_hint(base_dir / "config.ini")))
+
+    data["priority_v2_config"] = load_priority_v2_config(base_dir)
+    data["vip_senders"] = load_vip_senders(base_dir)
+
     try:
         general = load_general_config(base_dir)
-        entries.append(DoctorEntry("config.ini", "OK", "загружен"))
+        entries.append(DoctorEntry("config.ini (general)", "OK", "загружен"))
         data["admin_chat_id"] = general.admin_chat_id
     except ConfigError as exc:
         entries.append(DoctorEntry("config.ini", "FAIL", str(exc)))
@@ -390,6 +403,57 @@ def _resolve_yaml_config_path(config_dir: Path | None) -> Path:
             return candidate
     expected = " or ".join(str(item) for item in candidates)
     raise FileNotFoundError(f"config.yaml not found. Expected at {expected}.")
+
+
+def _config_template_hint(config_path: Path) -> str:
+    example_path = config_path.with_name(f"{config_path.name}.example")
+    return (
+        f"Файл не найден: {config_path}. Используйте шаблон {example_path} "
+        f"и скопируйте: copy {example_path.name} {config_path.name}"
+    )
+
+
+def _build_default_bot_config() -> BotConfig:
+    repo_root = Path(__file__).resolve().parents[1]
+    return build_bot_config({}, repo_root=repo_root)
+
+
+def _yaml_template_hint(config_dir: Path | None) -> str:
+    if config_dir is not None and config_dir.is_file():
+        config_path = config_dir
+    else:
+        base_dir = config_dir or Path(__file__).resolve().parent
+        config_path = base_dir / "config.yaml"
+    example_candidates = [
+        config_path.with_name("config.example.yaml"),
+        config_path.with_name("config.yaml.example"),
+    ]
+    example = next((item for item in example_candidates if item.exists()), example_candidates[0])
+    return (
+        f"Файл не найден: {config_path}. Используйте шаблон {example} "
+        f"и скопируйте: copy {example.name} {config_path.name}"
+    )
+
+
+def _load_doctor_bot_config(config_dir: Path | None) -> tuple[dict[str, object], BotConfig, list[str]]:
+    try:
+        config_path = _resolve_yaml_config_path(config_dir)
+        raw = load_yaml_config(config_path)
+    except FileNotFoundError:
+        message = _yaml_template_hint(config_dir)
+        logger.warning(message)
+        return {}, _build_default_bot_config(), [message]
+    except YamlConfigError as exc:
+        message = str(exc)
+        logger.warning(message)
+        return {}, _build_default_bot_config(), [message]
+
+    ok, error = validate_yaml_config(raw)
+    if not ok:
+        message = error or "Invalid config.yaml"
+        logger.warning("doctor config.yaml invalid: %s; using defaults", message)
+        return raw, _build_default_bot_config(), [message]
+    return raw, build_bot_config(raw, repo_root=Path(__file__).resolve().parents[1]), []
 
 
 def _is_loopback_bind(bind: str) -> bool:

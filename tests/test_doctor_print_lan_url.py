@@ -37,10 +37,8 @@ def _base_config(*, bind: str, port: int, enabled: bool = True) -> dict[str, obj
     }
 
 
-def _stub_config(monkeypatch, tmp_path: Path, cfg: dict[str, object]) -> None:
-    (tmp_path / "config.yaml").write_text("stub", encoding="utf-8")
-    monkeypatch.setattr(doctor, "load_yaml_config", lambda _path: cfg)
-    monkeypatch.setattr(doctor, "validate_yaml_config", lambda _raw: (True, None))
+def _stub_config(monkeypatch, _tmp_path: Path, cfg: dict[str, object]) -> None:
+    monkeypatch.setattr(doctor, "_load_doctor_bot_config", lambda _config_dir: (cfg, object(), []))
 
 
 def test_print_lan_url_all_interfaces_uses_detected_ipv4(monkeypatch, tmp_path, capsys) -> None:
