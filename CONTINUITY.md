@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-24: converted LAN config examples in RUNNING.md and docs/WINDOWS_QUICKSTART.md from YAML snippets to INI snippets (`[web_ui]`) to match two-file primary setup.
 - 2026-02-24: corrected TROUBLESHOOTING_WINDOWS.md items 2-3 to two-file mode examples/validation (`settings.ini` + `accounts.ini`) and removed YAML-primary wording.
 - 2026-02-24: consolidated setup docs to two-file mode (settings.ini + accounts.ini)
   as the only primary path; legacy config.ini/keys.ini/config.yaml guidance moved to

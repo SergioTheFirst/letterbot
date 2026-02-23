@@ -16,12 +16,12 @@
 
 
 ## LAN mode (safe)
-```yaml
-web_ui:
-  bind: "0.0.0.0"
-  allow_lan: true
-  allow_cidrs: ["192.168.0.0/16"]
-  prod_server: true
+```ini
+[web_ui]
+bind = 0.0.0.0
+allow_lan = true
+allow_cidrs = 192.168.0.0/16
+prod_server = true
 ```
 
 - Narrow `allow_cidrs` to your home subnet when possible.
