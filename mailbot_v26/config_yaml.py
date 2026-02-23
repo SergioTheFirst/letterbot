@@ -37,7 +37,27 @@ SCHEMA_OLDER_HINT = (
 
 
 class ConfigError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, raw_detail: str | None = None) -> None:
+        super().__init__(message)
+        self.raw_detail = raw_detail
+
+
+WINDOWS_BACKSLASH_HINT = (
+    "Use single quotes for Windows usernames/paths, e.g. 'HQ\\User', or "
+    "escape backslashes as \\\\" 
+)
+
+
+def _is_windows_backslash_yaml_error(detail: str) -> bool:
+    lowered = detail.lower()
+    has_escape_error = "unknown escape" in lowered or "invalid escape" in lowered
+    return has_escape_error and "\\" in detail
+
+
+def format_yaml_parse_error_message(detail: str) -> str:
+    if _is_windows_backslash_yaml_error(detail):
+        return f"Failed to parse config.yaml. {WINDOWS_BACKSLASH_HINT}"
+    return "Failed to parse config.yaml. Please fix YAML syntax in config.yaml."
 
 
 @dataclass(frozen=True)
@@ -86,7 +106,11 @@ def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
     try:
         payload = yaml.safe_load(content)
     except yaml.YAMLError as exc:
-        raise ConfigError(f"Failed to parse config.yaml: {exc}") from exc
+        raw_detail = str(exc)
+        raise ConfigError(
+            format_yaml_parse_error_message(raw_detail),
+            raw_detail=raw_detail,
+        ) from exc
     if payload is None:
         return {}
     if not isinstance(payload, dict):

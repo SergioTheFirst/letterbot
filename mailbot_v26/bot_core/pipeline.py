@@ -32,6 +32,7 @@ from mailbot_v26.worker.telegram_sender import DeliveryResult, send_telegram
 
 try:  # local import to avoid circular typing issues
     from mailbot_v26.config_loader import AccountConfig, BotConfig
+    from mailbot_v26.account_identity import normalize_login
 except Exception:  # pragma: no cover - defensive import for early boot
     AccountConfig = None  # type: ignore
     BotConfig = None  # type: ignore
@@ -69,7 +70,7 @@ def configure_pipeline(config: BotConfig, processor: MessageProcessor) -> None:
     global _PIPELINE_CONFIG, _PIPELINE_PROCESSOR, _ACCOUNT_MAP
     _PIPELINE_CONFIG = config
     _PIPELINE_PROCESSOR = processor
-    _ACCOUNT_MAP = {acc.login: acc for acc in (config.accounts or [])}
+    _ACCOUNT_MAP = {normalize_login(acc.login): acc for acc in (config.accounts or [])}
 
 
 def remember_raw_email(email_id: int, raw_email: bytes) -> None:
@@ -572,7 +573,7 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
     if _PIPELINE_CONFIG is None:
         raise RuntimeError("Config unavailable for TG stage")
 
-    account = _ACCOUNT_MAP.get(ctx.account_email)
+    account = _ACCOUNT_MAP.get(normalize_login(ctx.account_email))
     if not account:
         raise RuntimeError(f"Account config missing for {ctx.account_email}")
 

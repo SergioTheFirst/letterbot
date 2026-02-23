@@ -47,3 +47,24 @@ def test_start_cli_invalid_config_ini_exits_without_traceback(
     assert exit_code == 1
     assert "INI configuration invalid" in output
     assert "Traceback" not in output
+
+
+def test_start_yaml_windows_backslash_error_shows_actionable_hint_and_no_traceback(
+    tmp_path,
+    capsys,
+) -> None:
+    config_dir = tmp_path
+    config_path = config_dir / "config.yaml"
+    config_path.write_text("username: \"HQ\\MedvedevSS\"\n", encoding="utf-8")
+    (config_dir / "config.ini").write_text("[general]\n", encoding="utf-8")
+    (config_dir / "accounts.ini").write_text("[acc]\nlogin=user@example.com\npassword=p\nhost=h\n", encoding="utf-8")
+    (config_dir / "keys.ini").write_text(
+        "[telegram]\nbot_token=t\n[cloudflare]\naccount_id=a\napi_token=k\n",
+        encoding="utf-8",
+    )
+
+    _raw, _config = start_module._load_yaml_config_or_defaults(config_path, config_dir)
+
+    output = capsys.readouterr().out
+    assert "Use single quotes for Windows usernames/paths" in output
+    assert "Traceback" not in output

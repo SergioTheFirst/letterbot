@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from mailbot_v26.account_identity import normalize_login
 
 CONFIG_DIR = Path(__file__).resolve().parent / "config"
 
@@ -213,7 +214,7 @@ def _load_account_scopes(base_dir: str) -> dict[str, AccountScope]:
     for account in accounts:
         if not account.telegram_chat_id:
             continue
-        scopes[account.login] = AccountScope(
+        scopes[normalize_login(account.login)] = AccountScope(
             chat_id=account.telegram_chat_id,
             account_emails=chat_groups.get(account.telegram_chat_id, []),
         )
@@ -228,7 +229,7 @@ def resolve_account_scope(
         return None
     config_dir = base_dir or CONFIG_DIR
     scopes = _load_account_scopes(str(config_dir))
-    return scopes.get(account_email)
+    return scopes.get(normalize_login(account_email))
 
 
 def _normalize_account_emails(account_emails: Iterable[str] | None) -> list[str]:
