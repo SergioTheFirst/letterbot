@@ -8,15 +8,15 @@ Each block is one symptom, one cause, one fix.
 - Cause: `settings.ini` and `accounts.ini` were just created from examples and need user values.
 - Fix: Fill required values in `settings.ini` and `accounts.ini`, save, then run launcher again.
 
-## 2) `config.example.yaml not found`
-- Symptom: Launcher says `config.example.yaml not found`.
-- Cause: Example config file is missing in current folder.
-- Fix: Restore `config.example.yaml` into repo/dist root and rerun launcher.
+## 2) `settings.ini.example` or `accounts.ini.example` not found
+- Symptom: Launcher says that one of the required example files is missing.
+- Cause: Template config file is missing in current folder/release bundle.
+- Fix: Restore `mailbot_v26/config/settings.ini.example` and `mailbot_v26/config/accounts.ini.example`, then rerun launcher.
 
-## 3) `validate-config` fails with YAML error
+## 3) `validate-config` fails for INI configuration
 - Symptom: `.venv\Scripts\python.exe -m mailbot_v26 validate-config` exits non-zero.
-- Cause: YAML indentation or structure is invalid.
-- Fix: Replace with clean `config.example.yaml`, then edit only required values.
+- Cause: Invalid value or syntax in `settings.ini` (`[general]` / `[web_ui]`) or `accounts.ini` account section.
+- Fix: Restore from `settings.ini.example` / `accounts.ini.example`, then re-apply values carefully and re-run validation.
 
 ## 4) Telegram doctor check fails
 - Symptom: Doctor output marks Telegram as FAIL.
