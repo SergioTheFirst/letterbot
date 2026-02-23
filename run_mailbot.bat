@@ -20,14 +20,43 @@ echo =============================================
 echo   Letterbot Premium - Run
 echo =============================================
 
-if not exist "%SETTINGS_FILE%" (
-  echo [WARN] settings.ini not found. Creating defaults...
-  "%VENV_PY%" -m mailbot_v26 init-config >nul 2>nul
+REM === ONBOARDING GATE ===
+REM If either required config file is missing, run init-config to create templates.
+REM Then check for unconfigured placeholders and stop cleanly if found.
+
+set "FIRST_RUN=0"
+if not exist "%SETTINGS_FILE%" set "FIRST_RUN=1"
+if not exist "%ACCOUNTS_FILE%" set "FIRST_RUN=1"
+
+if "%FIRST_RUN%"=="1" (
+    echo [SETUP] Создаю шаблоны конфигурации...
+    "%VENV_PY%" -m mailbot_v26 init-config --config-dir "%CONFIG_DIR%" >nul 2>nul
 )
-if not exist "%ACCOUNTS_FILE%" (
-  echo [WARN] accounts.ini not found. Creating template...
-  "%VENV_PY%" -m mailbot_v26 init-config >nul 2>nul
+
+REM Check for unconfigured state: CHANGE_ME in accounts.ini means user hasn't filled in credentials
+findstr /m "CHANGE_ME" "%ACCOUNTS_FILE%" >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo =============================================
+    echo   LETTERBOT — ТРЕБУЕТСЯ НАСТРОЙКА
+    echo =============================================
+    echo.
+    echo  Шаг 1. Сейчас откроется файл accounts.ini в Блокноте.
+    echo  Шаг 2. Замените CHANGE_ME на реальные значения:
+    echo         - login      = ваш email (например user@mail.ru)
+    echo         - password   = пароль приложения (не основной пароль!)
+    echo         - host       = IMAP-сервер (например imap.mail.ru)
+    echo         - bot_token  = токен Telegram-бота (от @BotFather)
+    echo         - telegram_chat_id = ваш Telegram ID (от @userinfobot)
+    echo  Шаг 3. Сохраните файл и запустите run_mailbot.bat снова.
+    echo.
+    echo  Подробная инструкция: README_QUICKSTART_WINDOWS.md
+    echo.
+    start notepad.exe "%ACCOUNTS_FILE%"
+    echo [OK] Letterbot ждёт настройки. Это нормально — не ошибка.
+    exit /b 0
 )
+REM === END ONBOARDING GATE ===
 
 echo Running doctor checks ^(warning-first^)...
 "%VENV_PY%" -m mailbot_v26.doctor --config-dir "mailbot_v26\config"
