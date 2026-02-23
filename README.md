@@ -22,14 +22,14 @@
 
 ---
 
-# Установка/Запуск (5 шагов)
+# Установка/Запуск
 
-1. Скопируйте INI-шаблон: `copy mailbot_v26\config\config.ini.example mailbot_v26\config\config.ini`.
-2. Скопируйте YAML-шаблон: `copy config.yaml.example config.yaml` (в корне репозитория или рядом с `mailbot_v26/start.py`).
-3. Заполните все значения в кавычках.
-4. ВСЕ токены/пароли — в кавычках. `null` — без кавычек.
-5. Установите зависимости: `pip install -r requirements.txt`.
-6. Запустите бота: `python -m mailbot_v26.start`.
+1. Установите зависимости: `pip install -r requirements.txt`.
+2. Заполните реальные конфиги в `mailbot_v26/config/config.ini`, `mailbot_v26/config/accounts.ini`, `mailbot_v26/config/keys.ini`.
+3. Рекомендуемый запуск на Windows: `run_mailbot.bat`.
+4. Ручные команды:
+   - Проверка: `python -m mailbot_v26.doctor`
+   - Запуск: `python -m mailbot_v26.start`
 
 # Support
 

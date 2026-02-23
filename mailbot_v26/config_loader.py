@@ -9,11 +9,14 @@ and per-account settings isolated.
 from __future__ import annotations
 
 import configparser
+import logging
 from dataclasses import dataclass, field
 from functools import lru_cache
 import re
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
+
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 
 CONFIG_DIR = Path(__file__).resolve().parent / "config"
 
@@ -113,13 +116,21 @@ class InvalidAccountIdError(ConfigError):
 
 
 ACCOUNT_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
+_LOGGER = logging.getLogger(__name__)
 
 
 def _read_config_file(path: Path) -> configparser.ConfigParser:
-    parser = configparser.ConfigParser()
     if not path.exists():
         raise ConfigError(f"Config file not found: {path}")
-    parser.read(path, encoding="utf-8")
+    parser = read_user_ini_with_defaults(
+        path,
+        logger=_LOGGER,
+        scope_label=f"{path.name} settings",
+    )
+    if not parser.sections() and not parser.defaults():
+        raise ConfigError(
+            f"Invalid {path.name}: missing INI sections. Add sections like [general] (config.ini), [telegram]/[cloudflare] (keys.ini), or [account_id] (accounts.ini)."
+        )
     return parser
 
 

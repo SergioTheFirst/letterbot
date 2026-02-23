@@ -31,12 +31,17 @@ def read_user_ini_with_defaults(
         return parser
 
     try:
-        parser.read(ini_path, encoding="utf-8")
-    except (
-        configparser.MissingSectionHeaderError,
-        configparser.ParsingError,
-        OSError,
-    ) as exc:
+        parsed, used_legacy = _read_ini_with_legacy_support(parser, ini_path)
+        if used_legacy:
+            _warn_once(
+                active_logger,
+                ini_path,
+                reason="invalid",
+                scope_label=scope_label,
+                template_path=resolved_template,
+            )
+        return parsed
+    except (configparser.MissingSectionHeaderError, configparser.ParsingError, OSError) as exc:
         _warn_once(
             active_logger,
             ini_path,
@@ -47,7 +52,20 @@ def read_user_ini_with_defaults(
         active_logger.debug("INI read failure details for %s", ini_path, exc_info=exc)
         return configparser.ConfigParser()
 
-    return parser
+
+def _read_ini_with_legacy_support(
+    parser: configparser.ConfigParser,
+    ini_path: Path,
+) -> tuple[configparser.ConfigParser, bool]:
+    raw_text = ini_path.read_text(encoding="utf-8")
+    if not raw_text.strip():
+        return parser, False
+    try:
+        parser.read_string(raw_text, source=str(ini_path))
+        return parser, False
+    except (configparser.MissingSectionHeaderError, configparser.ParsingError):
+        parser.read_string(f"[main]\n{raw_text}", source=str(ini_path))
+        return parser, True
 
 
 def _warn_once(

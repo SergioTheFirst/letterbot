@@ -167,6 +167,19 @@ from mailbot_v26.ui.i18n import (
 
 logger = get_logger("mailbot")
 
+class _LazyFeatureFlags:
+    def __init__(self) -> None:
+        self._flags: FeatureFlags | None = None
+
+    def _resolve(self) -> FeatureFlags:
+        if self._flags is None:
+            self._flags = FeatureFlags()
+        return self._flags
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._resolve(), name)
+
+
 # === Инициализация write-only БД ===
 DB_PATH = Path("database.sqlite")
 knowledge_db = KnowledgeDB(DB_PATH)
@@ -204,7 +217,7 @@ metrics_aggregator = MetricsAggregator(DB_PATH)
 system_gates = SystemGates()
 system_snapshotter = SystemHealthSnapshotter(metrics_aggregator, system_gates)
 processing_span_recorder = ProcessingSpanRecorder(DB_PATH)
-feature_flags = FeatureFlags()
+feature_flags = _LazyFeatureFlags()
 runtime_flag_store = RuntimeFlagStore()
 trust_score_calculator = TrustScoreCalculator(analytics)
 relationship_health_calculator = RelationshipHealthCalculator(
@@ -224,7 +237,7 @@ auto_priority_engine = AutoPriorityEngine(
     enabled_flag=lambda: feature_flags.ENABLE_AUTO_PRIORITY,
 )
 auto_action_engine = AutoActionEngine(
-    confidence_threshold=feature_flags.AUTO_ACTION_CONFIDENCE_THRESHOLD
+    confidence_threshold=0.75
 )
 system_orchestrator = SystemOrchestrator()
 notification_alert_store = NotificationAlertStore(DB_PATH)

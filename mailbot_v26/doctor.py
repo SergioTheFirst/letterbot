@@ -26,6 +26,8 @@ from mailbot_v26.config_yaml import build_bot_config
 from mailbot_v26.config_yaml import load_config as load_yaml_config
 from mailbot_v26.config_yaml import validate_config as validate_yaml_config
 from mailbot_v26.health.mail_accounts import check_mail_accounts
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.llm import router as llm_router
 from mailbot_v26.priority.priority_engine_v2 import load_priority_v2_config, load_vip_senders
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
@@ -291,11 +293,14 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
 
 def _validate_accounts_ini(base_dir: Path) -> tuple[DoctorEntry, list[dict[str, object]]]:
     path = base_dir / "accounts.ini"
-    parser = configparser.ConfigParser()
     if not path.exists():
         return DoctorEntry("accounts.ini", "FAIL", f"Файл не найден: {path}"), []
 
-    parser.read(path, encoding="utf-8")
+    parser = read_user_ini_with_defaults(
+        path,
+        logger=logger,
+        scope_label="doctor accounts.ini check",
+    )
     accounts: list[dict[str, object]] = []
     issues: list[str] = []
     has_critical = False
@@ -387,22 +392,8 @@ def _resolve_report_chat_id(data: dict[str, object]) -> str | None:
     return None
 
 
-def _resolve_yaml_config_path(config_dir: Path | None) -> Path:
-    if config_dir is not None and config_dir.is_file():
-        return config_dir
-    if config_dir is not None:
-        base_dir = config_dir
-    else:
-        base_dir = Path(__file__).resolve().parent
-    candidates = [
-        base_dir / "config.yaml",
-        base_dir.parent / "config.yaml",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    expected = " or ".join(str(item) for item in candidates)
-    raise FileNotFoundError(f"config.yaml not found. Expected at {expected}.")
+def _resolve_yaml_config_path(config_dir: Path | None) -> Path | None:
+    return resolve_config_paths(config_dir).yaml_path
 
 
 def _config_template_hint(config_path: Path) -> str:
@@ -440,13 +431,14 @@ def _yaml_template_hint(config_dir: Path | None) -> str:
 
 
 def _load_doctor_bot_config(config_dir: Path | None) -> tuple[dict[str, object], BotConfig, list[str]]:
-    try:
-        config_path = _resolve_yaml_config_path(config_dir)
-        raw = load_yaml_config(config_path)
-    except FileNotFoundError:
+    config_path = _resolve_yaml_config_path(config_dir)
+    if config_path is None:
         message = _yaml_template_hint(config_dir)
         logger.warning(message)
         return {}, _build_default_bot_config(), [message]
+
+    try:
+        raw = load_yaml_config(config_path)
     except YamlConfigError as exc:
         message = str(exc)
         logger.warning(message)
