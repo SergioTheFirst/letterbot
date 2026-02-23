@@ -56,7 +56,7 @@ class TrustScoreCalculator:
 
     def __init__(self, analytics: KnowledgeAnalytics) -> None:
         self.analytics = analytics
-        self._config = self._load_config()
+        self._config: TrustScoreCalculator._TrustConfig | None = None
 
     @dataclass(frozen=True)
     class _TrustConfig:
@@ -132,6 +132,11 @@ class TrustScoreCalculator:
             min_trend_samples=min_trend_samples,
         )
 
+    def _get_config(self) -> _TrustConfig:
+        if self._config is None:
+            self._config = self._load_config()
+        return self._config
+
     def compute(
         self,
         *,
@@ -142,6 +147,7 @@ class TrustScoreCalculator:
     ) -> TrustScoreResult:
         response_window = response_window_days or self.RESPONSE_WINDOW_DAYS
         trend_window = trend_window_days or self.TREND_WINDOW_DAYS
+        config = self._get_config()
         now = datetime.now(timezone.utc)
         commitment_score, commitment_samples = self._commitment_reliability(
             entity_id,
@@ -188,9 +194,9 @@ class TrustScoreCalculator:
             )
 
         weight_sum = (
-            self._config.weight_commitment
-            + self._config.weight_response
-            + self._config.weight_trend
+            config.weight_commitment
+            + config.weight_response
+            + config.weight_trend
         )
         if weight_sum <= 0:
             weight_sum = (
@@ -202,9 +208,9 @@ class TrustScoreCalculator:
             weight_response = self.DEFAULT_WEIGHT_RESPONSE
             weight_trend = self.DEFAULT_WEIGHT_TREND
         else:
-            weight_commitment = self._config.weight_commitment / weight_sum
-            weight_response = self._config.weight_response / weight_sum
-            weight_trend = self._config.weight_trend / weight_sum
+            weight_commitment = config.weight_commitment / weight_sum
+            weight_response = config.weight_response / weight_sum
+            weight_trend = config.weight_trend / weight_sum
 
         trust_score = (
             weight_commitment * commitment_score
@@ -301,7 +307,7 @@ class TrustScoreCalculator:
             if weight <= 0:
                 continue
             values.append((hours, weight))
-        if len(values) >= self._config.min_response_samples:
+        if len(values) >= self._get_config().min_response_samples:
             return self._normalized_consistency(values)
 
         fallback_rows = self.analytics.event_rows_for_entity(
@@ -323,7 +329,7 @@ class TrustScoreCalculator:
             if weight <= 0:
                 continue
             deltas.append((delta_hours, weight))
-        if len(deltas) < self._config.min_response_samples:
+        if len(deltas) < self._get_config().min_response_samples:
             return None, len(deltas)
         return self._normalized_consistency(deltas)
 
@@ -354,7 +360,7 @@ class TrustScoreCalculator:
             else:
                 previous += 1
         total = recent + previous
-        if total < self._config.min_trend_samples:
+        if total < self._get_config().min_trend_samples:
             return None, total
         if previous == 0:
             return (1.0 if recent > 0 else None), total
@@ -368,7 +374,7 @@ class TrustScoreCalculator:
         if event_ts <= 0:
             return 0.0
         age_days = max(0.0, (now_ts - event_ts) / 86400.0)
-        return math.exp(-age_days / self._config.half_life_days)
+        return math.exp(-age_days / self._get_config().half_life_days)
 
     def _normalized_consistency(
         self,
@@ -383,7 +389,7 @@ class TrustScoreCalculator:
         ) / weight_sum
         stddev = math.sqrt(variance)
         normalized = 1.0 - min(
-            max(stddev / self._config.max_response_stddev_hours, 0.0),
+            max(stddev / self._get_config().max_response_stddev_hours, 0.0),
             1.0,
         )
         return normalized, len(values)

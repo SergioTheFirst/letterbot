@@ -18,6 +18,7 @@ State:
 - Premium processor routing available behind feature flag.
 Done:
 - 2026-02-23: unified config path resolution via `config/paths.py` (root `config.yaml` -> `mailbot_v26/config/config.yaml`), hardened INI readers for legacy no-section parsing + parse-error handling, removed startup YAML/example-file hard dependency, made pipeline processor import config-IO lazy, aligned batch entrypoint to `run_mailbot.bat`, and added regression tests for no import-time INI reads + malformed INI warning behavior.
+- 2026-02-23: standardized Windows one-click chain (start_mailbot.bat -> run_mailbot.bat -> python -m mailbot_v26.start), added explicit required INI file checks with init-config hint, added start.py CLI (--help/--config-dir/--max-cycles), and added regression tests for no import-time config reads plus doctor/start behavior on missing/invalid INI.
 - 2026-02-23: removed import-time config.ini reads from pipeline processor via lazy cached getters; auto-priority gate INI loader now supports guarded parse + legacy no-section mode + inline comments and deterministic defaults with warnings; added regression tests for malformed/legacy configs and processor import no-config-read; docs updated with Windows copy commands and added config.yaml.example.
 - 2026-02-21: reformatted `config.ini.example` with Quick start + advanced headers, moved INI support toggle to `[support].enabled` (with legacy fallback), unified YAML/runtime support gating precedence (`support.enabled` > `features.donate_enabled`) for web + digest, updated docs, and added precedence regression tests.
 - 2026-02-21: added shared guarded INI reader (`config/ini_utils.py`), refactored user INI loaders to deterministic fallback + one-time actionable warning, fixed `auto_priority_gate` import crash path, replaced `config.ini.example` with valid sectioned template, and added malformed/missing config.ini processor-import regression tests.
@@ -79,12 +80,15 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Startup/config hardening for clean Windows launch is complete; required startup + full pytest validation executed.
+- One-click Windows startup chain and config-failure UX hardening are complete with required verification commands executed.
 Next:
-- Monitor packaging/dist scripts for any remaining references to YAML example bootstrap and keep startup messaging consistent.
+- Monitor downstream docs/dist wrappers for drift from the standardized startup chain and keep error hints aligned.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- start_mailbot.bat
+- update_and_run.bat
+- mailbot_v26/tests/test_start_config_failures.py
 - mailbot_v26/tests/test_ini_runtime_guard.py
 - mailbot_v26/config/auto_priority_gate.py
 - mailbot_v26/config/ini_utils.py

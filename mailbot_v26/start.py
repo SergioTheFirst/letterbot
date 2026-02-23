@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import argparse
 import sys
 import time
 from datetime import datetime, timezone
@@ -991,9 +992,35 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             storage.close()
 
 
-if __name__ == "__main__":
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="python -m mailbot_v26.start")
+    parser.add_argument(
+        "--config-dir",
+        type=Path,
+        default=None,
+        help="Optional config directory (default: mailbot_v26/config).",
+    )
+    parser.add_argument(
+        "--max-cycles",
+        type=int,
+        default=None,
+        help="Run finite number of polling cycles (for diagnostics/tests).",
+    )
+    return parser
+
+
+def main_cli(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
     try:
-        main()
+        main(config_dir=args.config_dir, max_cycles=args.max_cycles)
     except DependencyError as exc:
         print(str(exc), file=sys.stderr)
-        sys.exit(2)
+        return 2
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        return code
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main_cli())
