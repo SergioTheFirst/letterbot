@@ -390,8 +390,7 @@ def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False, st
 
     config_path = _resolve_yaml_config_path(base_dir)
     if config_path is None:
-        print("[INFO] Optional legacy config.yaml not found. Skipping compat report.")
-        return 0
+        config_path = Path(base_dir) / "config.yaml"
     try:
         raw_config = load_yaml_config(config_path)
     except (FileNotFoundError, YamlConfigError, OSError) as exc:
@@ -411,4 +410,4 @@ def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False, st
 
     if ok:
         return 0
-    return 2 if strict else 0
+    return 2

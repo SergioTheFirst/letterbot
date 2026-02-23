@@ -102,7 +102,7 @@ def _run() -> None:
             require_runtime_for("validate_config")
             from mailbot_v26.tools.config_bootstrap import run_validate_config
 
-            sys.exit(run_validate_config(Path(args.config_dir), compat=bool(args.compat), strict=bool(args.strict)))
+            sys.exit(run_validate_config(Path(args.config_dir), compat=bool(args.compat), strict=True))
 
         if args.command == "backup":
             from mailbot_v26.tools.backup import run_backup

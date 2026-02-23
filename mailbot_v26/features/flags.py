@@ -72,7 +72,7 @@ class FeatureFlags:
         config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
         resolved = resolve_config_paths(config_dir)
         config_path = resolved.settings_path
-        if not resolved.two_file_mode and not config_path.exists():
+        if not config_path.exists():
             config_path = resolved.legacy_ini_path
 
         parser = read_user_ini_with_defaults(

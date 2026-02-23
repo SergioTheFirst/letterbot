@@ -269,8 +269,19 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
 
     try:
         keys = load_keys_config(base_dir)
+        token = keys.telegram_bot_token
         if resolved.two_file_mode:
-            entries.append(DoctorEntry("accounts.ini (secrets)", "OK", "загружен"))
+            details = "загружен"
+            if not token and resolved.keys_path.exists():
+                legacy_keys = read_user_ini_with_defaults(
+                    resolved.keys_path,
+                    logger=logger,
+                    scope_label="doctor legacy keys fallback",
+                )
+                token = str(legacy_keys.get("telegram", "bot_token", fallback="")).strip()
+                if token:
+                    details = "загружен (legacy keys.ini fallback)"
+            entries.append(DoctorEntry("accounts.ini (secrets)", "OK", details))
         else:
             status = "OK"
             details = "загружен"
@@ -278,7 +289,7 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
                 status = "WARN"
                 details = "legacy keys.ini не найден"
             entries.append(DoctorEntry("keys.ini", status, details))
-        data["telegram_bot_token"] = keys.telegram_bot_token
+        data["telegram_bot_token"] = token
     except ConfigError as exc:
         entries.append(DoctorEntry("accounts.ini/keys.ini", "WARN", str(exc)))
 
