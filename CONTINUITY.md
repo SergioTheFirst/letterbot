@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-24: restored full-suite stability after import/web_ui fix: validate-config CLI now exits non-zero on warnings by default, compat report runs without requiring on-disk config.yaml and returns non-zero on schema failure, doctor uses legacy keys.ini token fallback in two-file mode diagnostics only, feature flags fall back to legacy config.ini when settings.ini is absent.
 - 2026-02-24: fixed bare package imports in health_monitor.py and intelligence/__init__.py (ModuleNotFoundError on import; added regression tests in test_import_smoke.py).
 - 2026-02-24: fixed config_yaml.py web_ui validator requiring bind/port when enabled=false; first-time minimal config now passes validation (regression tests added to test_validate_config_yaml.py).
 - 2026-02-24: added python -m compileall mailbot_v26 step to ci_local.bat and ci.yml to catch bare-import bugs at CI time before they reach users.
