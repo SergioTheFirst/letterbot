@@ -5,8 +5,8 @@ Each block is one symptom, one cause, one fix.
 
 ## 1) `CONFIGURATION REQUIRED` appears and app exits
 - Symptom: Launcher prints `CONFIGURATION REQUIRED` and stops.
-- Cause: `config.yaml` was just created from example and needs user values.
-- Fix: Fill `config.yaml` placeholders, save, then run launcher again.
+- Cause: `settings.ini` and `accounts.ini` were just created from examples and need user values.
+- Fix: Fill required values in `settings.ini` and `accounts.ini`, save, then run launcher again.
 
 ## 2) `config.example.yaml not found`
 - Symptom: Launcher says `config.example.yaml not found`.
@@ -21,17 +21,17 @@ Each block is one symptom, one cause, one fix.
 ## 4) Telegram doctor check fails
 - Symptom: Doctor output marks Telegram as FAIL.
 - Cause: Invalid bot token or wrong chat id.
-- Fix: Set valid `telegram.bot_token` and `telegram.chat_id` in `config.yaml`.
+- Fix: Set valid `telegram_bot_token` and `telegram_chat_id` in `accounts.ini` (target account section).
 
 ## 5) One IMAP account fails, others pass
 - Symptom: Doctor IMAP check fails only for one account.
 - Cause: Wrong credentials or provider app-password policy for that account.
-- Fix: Update that account credentials in `config.yaml` and rerun doctor.
+- Fix: Update that account credentials in `accounts.ini` and rerun doctor.
 
 ## 6) Opens on localhost but cannot open from phone
 - Symptom: `http://127.0.0.1:<port>/` works, phone cannot connect.
 - Cause: LAN bind/firewall path is incomplete.
-- Fix: Set `web_ui.bind: "0.0.0.0"`, confirm `allow_lan: true`, then add firewall rule for the port.
+- Fix: Set `bind = 0.0.0.0` and `allow_lan = true` in `settings.ini` (section `[web_ui]`), then add firewall rule for the port.
 
 ## 7) Browser opened `http://0.0.0.0:<port>/` and page does not work
 - Symptom: User tries `0.0.0.0` URL directly.
@@ -40,13 +40,13 @@ Each block is one symptom, one cause, one fix.
 
 ## 8) `Forbidden` from LAN client
 - Symptom: UI returns `Forbidden` (HTTP 403) from another LAN device.
-- Cause: Client IP is not included in `web_ui.allow_cidrs`.
+- Cause: Client IP is not included in `allow_cidrs` in `settings.ini` (section `[web_ui]`).
 - Fix: Add correct client subnet CIDR and restart MailBot.
 
 ## 9) `Address already in use` or port bind failure
 - Symptom: Startup reports port bind conflict.
-- Cause: Another process already uses `web_ui.port`.
-- Fix: Change `web_ui.port` to an unused value and restart.
+- Cause: Another process already uses `port` in `settings.ini` (section `[web_ui]`).
+- Fix: Change `port` to an unused value and restart.
 
 ## 10) `waitress` missing while `prod_server=true`
 - Symptom: Startup fails with message about missing waitress.
@@ -77,3 +77,22 @@ Each block is one symptom, one cause, one fix.
 - Symptom: Triage is blocked due to missing technical bundle.
 - Cause: `diagnostics.zip` was not exported.
 - Fix: Open `/doctor`, export `diagnostics.zip`, attach it with smoke checklist results.
+
+---
+
+## Устаревшие форматы конфигурации (legacy)
+
+> **Только для существующих пользователей** с `config.yaml`, `config.ini`, или `keys.ini`.
+> Новая установка: используйте `settings.ini` + `accounts.ini` (см. README.md).
+
+### config.yaml (legacy YAML-режим)
+- Поддерживается для обратной совместимости, но не является рекомендуемым форматом.
+- Если используете — не переходите на новый формат посреди работы без резервной копии.
+- При ошибке `Ошибка в config.yaml: web_ui.bind должен быть строкой` — добавьте
+  `bind: "127.0.0.1"` и `port: 8787` в секцию `web_ui`.
+
+### config.ini + keys.ini (legacy INI-режим)
+- Устаревший двухфайловый формат (не `settings.ini`).
+- Если до сих пор работает — оставьте как есть. Для новой установки не используйте.
+- Для миграции: скопируйте значения из `config.ini`/`keys.ini` в соответствующие
+  секции `settings.ini`, значения аккаунтов — в `accounts.ini`.

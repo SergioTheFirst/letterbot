@@ -25,16 +25,19 @@
 # Установка/Запуск
 
 1. Установите зависимости: `pip install -r requirements.txt`.
-2. Заполните реальные конфиги в `mailbot_v26/config/config.ini`, `mailbot_v26/config/accounts.ini`, `mailbot_v26/config/keys.ini`.
-3. Рекомендуемый запуск на Windows: `run_mailbot.bat`.
-4. Ручные команды:
+2. Скопируйте шаблоны конфигурации:
+   - `copy mailbot_v26\config\settings.ini.example mailbot_v26\config\settings.ini`
+   - `copy mailbot_v26\config\accounts.ini.example mailbot_v26\config\accounts.ini`
+3. Откройте оба файла и заполните свои данные (email, пароль, Telegram-токен).
+4. Рекомендуемый запуск на Windows: `run_mailbot.bat`.
+5. Ручные команды:
    - Проверка: `python -m mailbot_v26.doctor`
    - Запуск: `python -m mailbot_v26.start`
 
 # Support
 
 Letterbot остаётся бесплатным и без рекламного спама.
-Поддержать разработку можно через карту/СБП/ЮMoney — реквизиты задаются в `config.yaml` (`support.methods`) и доступны в Web UI на странице `/support` после логина.
+Поддержать разработку можно через карту/СБП/ЮMoney — реквизиты задаются в `settings.ini` (секция `[support]`, ключ `methods`) и доступны в Web UI на странице `/support` после логина.
 Пользовательский переключатель поддержки: `support.enabled` (имеет приоритет над legacy `features.donate_enabled`).
 В Telegram это опционально: редкий P.S. в дайджесте включается через `support.telegram` (например, раз в 30 дней).
 
@@ -86,7 +89,7 @@ mailbot_v26/
 │   └── tesseract/           # OCR (light configuration)
 │
 ├── accounts.ini             # IMAP-аккаунты
-├── config.ini               # Настройки бота
+├── settings.ini             # Настройки бота
 ├── requirements.txt         # Минимальные зависимости
 └── state/
     ├── state.json           # UID, heartbeat, thread history
