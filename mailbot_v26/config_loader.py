@@ -20,6 +20,7 @@ from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.account_identity import normalize_login
 
 CONFIG_DIR = Path(__file__).resolve().parent / "config"
+SETTINGS_INI_NAME = "settings.ini"
 
 
 @dataclass
@@ -121,24 +122,34 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _read_config_file(path: Path) -> configparser.ConfigParser:
-    if not path.exists():
-        raise ConfigError(f"Config file not found: {path}")
     parser = read_user_ini_with_defaults(
         path,
         logger=_LOGGER,
         scope_label=f"{path.name} settings",
     )
-    if not parser.sections() and not parser.defaults():
-        raise ConfigError(
-            f"Invalid {path.name}: missing INI sections. Add sections like [general] (config.ini), [telegram]/[cloudflare] (keys.ini), or [account_id] (accounts.ini)."
-        )
     return parser
 
 
+def _resolve_settings_path(base_dir: Path) -> Path:
+    settings_path = base_dir / SETTINGS_INI_NAME
+    if settings_path.exists():
+        return settings_path
+    return base_dir / "config.ini"
+
+
 def load_general_config(base_dir: Path = CONFIG_DIR) -> GeneralConfig:
-    parser = _read_config_file(base_dir / "config.ini")
+    parser = _read_config_file(_resolve_settings_path(base_dir))
+
     if "general" not in parser:
-        raise ConfigError("[general] section missing in config.ini")
+        return GeneralConfig(
+            check_interval=180,
+            max_email_mb=15,
+            max_attachment_mb=15,
+            max_zip_uncompressed_mb=80,
+            max_extracted_chars=50_000,
+            max_extracted_total_chars=120_000,
+            admin_chat_id="",
+        )
 
     section = parser["general"]
     try:
@@ -161,7 +172,16 @@ def load_general_config(base_dir: Path = CONFIG_DIR) -> GeneralConfig:
             admin_chat_id=section.get("admin_chat_id", fallback=""),
         )
     except ValueError as exc:  # invalid numbers
-        raise ConfigError(f"Invalid value in config.ini: {exc}") from exc
+        _LOGGER.warning("Invalid [general] values, using defaults: %s", exc)
+        return GeneralConfig(
+            check_interval=180,
+            max_email_mb=15,
+            max_attachment_mb=15,
+            max_zip_uncompressed_mb=80,
+            max_extracted_chars=50_000,
+            max_extracted_total_chars=120_000,
+            admin_chat_id="",
+        )
 
 
 def load_accounts_config(base_dir: Path = CONFIG_DIR) -> List[AccountConfig]:
@@ -169,6 +189,8 @@ def load_accounts_config(base_dir: Path = CONFIG_DIR) -> List[AccountConfig]:
     accounts: List[AccountConfig] = []
     invalid_ids: list[str] = []
     for section_name in parser.sections():
+        if section_name in {"telegram", "cloudflare", "gigachat", "llm"}:
+            continue
         if not ACCOUNT_ID_PATTERN.fullmatch(section_name):
             invalid_ids.append(section_name)
             continue
@@ -186,16 +208,16 @@ def load_accounts_config(base_dir: Path = CONFIG_DIR) -> List[AccountConfig]:
                 telegram_chat_id=section.get("telegram_chat_id", fallback=""),
             )
         except KeyError as exc:
-            raise ConfigError(f"Missing required field {exc!s} in accounts.ini:{section_name}") from exc
+            _LOGGER.warning("Skipping account [%s]: missing required field %s", section_name, exc)
+            continue
         except ValueError as exc:
-            raise ConfigError(f"Invalid numeric field in accounts.ini:{section_name}: {exc}") from exc
+            _LOGGER.warning("Skipping account [%s]: invalid field (%s)", section_name, exc)
+            continue
         accounts.append(account)
 
     if invalid_ids:
-        raise InvalidAccountIdError(invalid_ids)
+        _LOGGER.warning("Ignoring invalid account_id(s): %s", ", ".join(invalid_ids))
 
-    if not accounts:
-        raise ConfigError("No accounts defined in accounts.ini")
     return accounts
 
 
@@ -261,24 +283,22 @@ def get_account_scope(
 
 
 def load_keys_config(base_dir: Path = CONFIG_DIR) -> KeysConfig:
-    parser = _read_config_file(base_dir / "keys.ini")
-    if "telegram" not in parser or "cloudflare" not in parser:
-        raise ConfigError("keys.ini must contain [telegram] and [cloudflare] sections")
+    accounts_parser = _read_config_file(base_dir / "accounts.ini")
+    parser = accounts_parser if any(
+        section in accounts_parser for section in ("telegram", "cloudflare")
+    ) else _read_config_file(base_dir / "keys.ini")
 
-    telegram = parser["telegram"]
-    cloudflare = parser["cloudflare"]
-    try:
-        return KeysConfig(
-            telegram_bot_token=telegram["bot_token"],
-            cf_account_id=cloudflare["account_id"],
-            cf_api_token=cloudflare["api_token"],
-        )
-    except KeyError as exc:
-        raise ConfigError(f"Missing key in keys.ini: {exc!s}") from exc
+    telegram = parser["telegram"] if "telegram" in parser else {}
+    cloudflare = parser["cloudflare"] if "cloudflare" in parser else {}
+    return KeysConfig(
+        telegram_bot_token=str(telegram.get("bot_token", "")),
+        cf_account_id=str(cloudflare.get("account_id", "")),
+        cf_api_token=str(cloudflare.get("api_token", "")),
+    )
 
 
 def load_storage_config(base_dir: Path = CONFIG_DIR) -> StorageConfig:
-    parser = _read_config_file(base_dir / "config.ini")
+    parser = _read_config_file(_resolve_settings_path(base_dir))
     default_path = Path(__file__).resolve().parents[1] / "data" / "mailbot.sqlite"
     db_path_raw = parser.get("storage", "db_path", fallback=str(default_path))
     db_path = Path(db_path_raw)
@@ -289,7 +309,7 @@ def load_storage_config(base_dir: Path = CONFIG_DIR) -> StorageConfig:
 
 
 def load_ingest_config(base_dir: Path = CONFIG_DIR) -> IngestConfig:
-    parser = _read_config_file(base_dir / "config.ini")
+    parser = _read_config_file(_resolve_settings_path(base_dir))
     if "ingest" not in parser:
         return IngestConfig(allow_prestart_emails=False)
     section = parser["ingest"]
@@ -301,11 +321,12 @@ def load_ingest_config(base_dir: Path = CONFIG_DIR) -> IngestConfig:
             )
         )
     except ValueError as exc:
-        raise ConfigError(f"Invalid value in config.ini [ingest]: {exc}") from exc
+        _LOGGER.warning("Invalid [ingest] config, using defaults: %s", exc)
+        return IngestConfig(allow_prestart_emails=False)
 
 
 def load_maintenance_config(base_dir: Path = CONFIG_DIR) -> MaintenanceConfig:
-    parser = _read_config_file(base_dir / "config.ini")
+    parser = _read_config_file(_resolve_settings_path(base_dir))
     if "maintenance" not in parser:
         return MaintenanceConfig(maintenance_mode=False)
     section = parser["maintenance"]
@@ -317,7 +338,8 @@ def load_maintenance_config(base_dir: Path = CONFIG_DIR) -> MaintenanceConfig:
             )
         )
     except ValueError as exc:
-        raise ConfigError(f"Invalid value in config.ini [maintenance]: {exc}") from exc
+        _LOGGER.warning("Invalid [maintenance] config, using defaults: %s", exc)
+        return MaintenanceConfig(maintenance_mode=False)
 
 
 def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:

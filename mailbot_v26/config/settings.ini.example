@@ -1,0 +1,12 @@
+[general]
+check_interval = 120  ; seconds between IMAP polling cycles
+max_email_mb = 15
+max_attachment_mb = 15
+admin_chat_id =
+
+[storage]
+db_path = data/mailbot.sqlite
+
+[features]
+enable_daily_digest = true
+enable_weekly_digest = false

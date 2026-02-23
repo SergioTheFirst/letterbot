@@ -1,15 +1,22 @@
-[mos_ru]
-enabled = true
-host = pochta.mos.ru
+[example_account]
+; For Windows login use domain\user (example: HQ\User)
+login = user@example.com
+password = CHANGE_ME
+host = imap.example.com
 port = 993
 use_ssl = true
+telegram_chat_id = CHANGE_ME
 
-login = 
-password = 
+[telegram]
+bot_token = CHANGE_ME
 
-# Куда слать уведомления по этому ящику (можно пустым, если общий admin_chat_id в config.ini)
-telegram_chat_id 
+[cloudflare]
+account_id = CHANGE_ME
+api_token = CHANGE_ME
 
-# Опционально (можно пустыми)
-username =
-name =
+[gigachat]
+api_key = CHANGE_ME
+
+[llm]
+primary = cloudflare
+fallback = cloudflare

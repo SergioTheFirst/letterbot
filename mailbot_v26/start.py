@@ -32,7 +32,7 @@ from mailbot_v26.bot_core.pipeline import (
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.dist_self_check import validate_dist_runtime
 from mailbot_v26.bot_core.storage import Storage
-from mailbot_v26.config_loader import AccountConfig, BotConfig, ConfigError as IniConfigError, load_config as load_ini_config
+from mailbot_v26.config_loader import AccountConfig, BotConfig, load_config as load_ini_config
 from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.account_identity import logins_match
 from mailbot_v26.config_yaml import (
@@ -189,22 +189,20 @@ def load_config(config_dir: Path | None) -> tuple[Path | None, dict[str, object]
 
     logger.warning("config.yaml missing; using deterministic defaults for YAML-only features")
     print("[WARN] config.yaml not found. YAML-only gates will use deterministic defaults.")
-    config = _load_ini_config_or_exit(paths.config_dir)
+    config = _load_ini_config_or_defaults(paths.config_dir)
     return None, raw_config, config
 
 
-def _load_ini_config_or_exit(config_dir: Path) -> BotConfig:
+def _load_ini_config_or_defaults(config_dir: Path) -> BotConfig:
     try:
-        return load_ini_config(config_dir)
-    except IniConfigError as exc:
-        message = (
-            f"INI configuration invalid: {exc}. Minimal fix: validate mailbot_v26/config/config.ini, "
-            "mailbot_v26/config/accounts.ini, and mailbot_v26/config/keys.ini then run "
-            "python -m mailbot_v26 validate-config"
-        )
-        logger.error("config_ini_invalid %s", message)
-        print(f"[ERROR] {message}")
-        sys.exit(1)
+        config = load_ini_config(config_dir)
+    except Exception as exc:
+        logger.warning("config_ini_load_failed %s", exc)
+        print("[WARN] Failed to load INI config; using deterministic defaults where possible.")
+        config = load_ini_config(Path(__file__).resolve().parent / "config")
+    if (config_dir / "settings.ini").exists() and (config_dir / "accounts.ini").exists():
+        print("Using new 2-file config mode")
+    return config
 
 
 def _load_yaml_config_or_defaults(config_path: Path, config_dir: Path) -> tuple[dict[str, object], BotConfig]:
@@ -216,7 +214,7 @@ def _load_yaml_config_or_defaults(config_path: Path, config_dir: Path) -> tuple[
         if raw_detail:
             logger.debug("config_yaml_parse_raw %s", raw_detail)
         print(f"[WARN] {exc}. Falling back to INI configuration.")
-        return {}, _load_ini_config_or_exit(config_dir)
+        return {}, _load_ini_config_or_defaults(config_dir)
 
     ok, error = validate_yaml_config(raw_config)
     if not ok:
@@ -226,7 +224,7 @@ def _load_yaml_config_or_defaults(config_path: Path, config_dir: Path) -> tuple[
         if message == SCHEMA_NEWER_MESSAGE and bool(getattr(sys, "frozen", False)):
             print("[WARN] Обновление: распакуйте новый ZIP в новую папку.")
             print("[WARN] Обновление: скопируйте старый config.yaml и запустите run.bat.")
-        return raw_config, _load_ini_config_or_exit(config_dir)
+        return raw_config, _load_ini_config_or_defaults(config_dir)
     config = build_bot_config(raw_config, repo_root=REPO_ROOT)
     return raw_config, config
 
@@ -614,7 +612,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         if (
             isinstance(config_result, tuple)
             and len(config_result) == 3
-            and isinstance(config_result[0], Path)
+            and (config_result[0] is None or isinstance(config_result[0], Path))
         ):
             config_path, raw_config, config = config_result
         else:

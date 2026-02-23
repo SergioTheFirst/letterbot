@@ -64,13 +64,13 @@ REQUIRED_IMPORTS = [
     "nltk",
     "langdetect",
     "flask",
-    "ldap",
-]
+ ]
 
 OPTIONAL_IMPORTS = [
     "numpy",
     "pandas",
     "xlrd",
+    "ldap",
 ]
 
 DEPENDENCY_IMPORTS = REQUIRED_IMPORTS + OPTIONAL_IMPORTS
@@ -82,7 +82,7 @@ REQUIRED_TABLES = {
     "commitments",
 }
 
-CRITICAL_COMPONENTS = {"SQLite", "Telegram", "IMAP"}
+CRITICAL_COMPONENTS = {"SQLite"}
 
 _STATUS_LABELS_RU = {
     "OK": "ОК",
@@ -189,14 +189,16 @@ def has_critical_issues(report: DoctorReport) -> bool:
     return False
 
 
-def report_exit_code(report: DoctorReport) -> int:
+def report_exit_code(report: DoctorReport, *, strict: bool = False) -> int:
+    if not strict:
+        return 0
     return 2 if has_critical_issues(report) else 0
 
 
 def _check_python() -> DoctorEntry:
     version = sys.version_info
     ok = version >= (3, 10)
-    status = "OK" if ok else "FAIL"
+    status = "OK" if ok else "WARN"
     details = f"{version.major}.{version.minor}.{version.micro}"
     if not ok:
         details = f"{details} (требуется >=3.10)"
@@ -486,7 +488,7 @@ def _check_sqlite(db_path: object) -> DoctorEntry:
 def _check_telegram(bot_token: object) -> DoctorEntry:
     token = str(bot_token or "")
     ok, details = ping_telegram(token)
-    status = "OK" if ok else "FAIL"
+    status = "OK" if ok else "WARN"
     return DoctorEntry("Telegram", status, details)
 
 
@@ -496,7 +498,7 @@ def _check_llm(base_dir: Path) -> list[DoctorEntry]:
         config = llm_router._load_llm_config(base_dir)
         router = llm_router.LLMRouter(config)
     except Exception as exc:
-        return [DoctorEntry("LLM", "FAIL", f"ошибка конфигурации: {exc}")]
+        return [DoctorEntry("LLM", "WARN", f"ошибка конфигурации: {exc}")]
 
     entries.append(_check_provider(router, "gigachat", config.gigachat_enabled, config.gigachat_api_key))
     entries.append(
@@ -520,18 +522,18 @@ def _check_provider(
     if not enabled_flag and not has_credentials:
         return DoctorEntry(name.capitalize(), "WARN", "отключен")
     if not has_credentials:
-        return DoctorEntry(name.capitalize(), "FAIL", "нет учётных данных")
+        return DoctorEntry(name.capitalize(), "WARN", "нет учётных данных")
     if not provider:
-        return DoctorEntry(name.capitalize(), "FAIL", "провайдер недоступен")
+        return DoctorEntry(name.capitalize(), "WARN", "провайдер недоступен")
     ok = provider.healthcheck()
-    status = "OK" if ok else "FAIL"
+    status = "OK" if ok else "WARN"
     details = "активен" if ok else "проверка не пройдена"
     return DoctorEntry(name.capitalize(), status, details)
 
 
 def _check_imap(accounts: object, *, timeout_sec: float = 10.0) -> list[DoctorEntry]:
     if not accounts:
-        return [DoctorEntry("IMAP", "FAIL", "нет настроенных аккаунтов")]
+        return [DoctorEntry("IMAP", "WARN", "нет настроенных аккаунтов")]
 
     results = check_mail_accounts(accounts, timeout_sec=timeout_sec)
 
@@ -539,10 +541,7 @@ def _check_imap(accounts: object, *, timeout_sec: float = 10.0) -> list[DoctorEn
     if not failures:
         return [DoctorEntry("IMAP", "OK", f"{len(results)} аккаунтов в порядке")]
 
-    if len(failures) == len(results):
-        status = "FAIL"
-    else:
-        status = "WARN"
+    status = "WARN"
 
     details = "; ".join(
         f"{result.account_id}: {result.error or 'ошибка'}" for result in failures

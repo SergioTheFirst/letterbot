@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-23: startup/doctor/config hardening v2: warning-first doctor by default with --strict gating, non-blocking launcher checks, 2-file config mode (`settings.ini` + `accounts.ini`) with legacy fallback reads, and migration helper with legacy backups.
 - 2026-02-23: hardened YAML startup/doctor UX for Windows backslash parse errors with actionable guidance, added shared login normalization (strip+casefold+slash normalization for domain\user) across account lookups, and added regression tests for parse hint/single-quote success/case-insensitive domain login matching.
 - 2026-02-23: unified config path resolution via `config/paths.py` (root `config.yaml` -> `mailbot_v26/config/config.yaml`), hardened INI readers for legacy no-section parsing + parse-error handling, removed startup YAML/example-file hard dependency, made pipeline processor import config-IO lazy, aligned batch entrypoint to `run_mailbot.bat`, and added regression tests for no import-time INI reads + malformed INI warning behavior.
 - 2026-02-23: standardized Windows one-click chain (start_mailbot.bat -> run_mailbot.bat -> python -m mailbot_v26.start), added explicit required INI file checks with init-config hint, added start.py CLI (--help/--config-dir/--max-cycles), and added regression tests for no import-time config reads plus doctor/start behavior on missing/invalid INI.
@@ -81,9 +82,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Windows config.yaml backslash parse diagnostics and case-insensitive domain\username matching are implemented and covered by regression tests.
+- 2-file config migration and warning-first startup path are implemented; regression tests cover malformed config fallback, strict/default doctor exits, launcher behavior, and import-time config safety.
 Next:
-- Monitor remaining config.yaml consumers for consistent user-facing parse guidance and keep Windows hints aligned across tools.
+- Align docs/examples fully to `settings.ini` + `accounts.ini` primary flow and reduce residual mentions of `keys.ini`/`config.ini` to legacy-only notes.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

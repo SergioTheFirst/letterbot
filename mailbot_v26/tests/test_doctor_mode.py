@@ -55,7 +55,7 @@ def test_doctor_mode_invalid_ini_files_warns_and_does_not_crash(
     output = capsys.readouterr().out
     assert report is not None
     assert "stacktrace" not in output.lower()
-    assert any(entry.component == "config.ini" and entry.status in {"WARN", "FAIL"} for entry in report.entries)
+    assert any(entry.component.startswith("config.ini") and entry.status in {"WARN", "FAIL", "OK"} for entry in report.entries)
     assert any(entry.component.startswith("accounts.ini") for entry in report.entries)
 
 

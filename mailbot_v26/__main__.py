@@ -17,12 +17,23 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print LAN-friendly Web UI URL based on config.yaml and exit.",
     )
+    doctor_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Return non-zero exit code when doctor finds issues.",
+    )
     subparsers.add_parser("init-config", help="Create configuration templates.")
+    subparsers.add_parser("migrate-config", help="Migrate legacy config files to settings.ini/accounts.ini.")
     validate_parser = subparsers.add_parser("validate-config", help="Validate configuration files.")
     validate_parser.add_argument(
         "--compat",
         action="store_true",
         help="Print compact config schema compatibility report.",
+    )
+    validate_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Return non-zero exit code on validation warnings/errors.",
     )
     subparsers.add_parser("backup", help="Create a data backup archive.")
 
@@ -60,7 +71,7 @@ def _run() -> None:
             if args.print_lan_url:
                 sys.exit(print_lan_url())
             report = run_doctor()
-            sys.exit(report_exit_code(report))
+            sys.exit(report_exit_code(report, strict=bool(args.strict)))
 
         if args.command == "init-config":
             from mailbot_v26.tools.config_bootstrap import run_init_config
@@ -68,11 +79,17 @@ def _run() -> None:
             run_init_config()
             return
 
+        if args.command == "migrate-config":
+            from mailbot_v26.tools.config_bootstrap import run_migrate_config
+
+            run_migrate_config()
+            return
+
         if args.command == "validate-config":
             require_runtime_for("validate_config")
             from mailbot_v26.tools.config_bootstrap import run_validate_config
 
-            sys.exit(run_validate_config(compat=bool(args.compat)))
+            sys.exit(run_validate_config(compat=bool(args.compat), strict=bool(args.strict)))
 
         if args.command == "backup":
             from mailbot_v26.tools.backup import run_backup
