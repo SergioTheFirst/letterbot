@@ -88,7 +88,7 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Import chain hardened; CI compile checks enforced; full pytest suite green (763 passed).
+- Import chain hardened; compileall added to CI; 3 startup blockers resolved.
 Next:
 - Verify Windows one-folder build (build_windows_onefolder.bat) still produces clean artifact after import fixes.
 - Finish docs/template cleanup to present `settings.ini` + `accounts.ini` as the only supported setup path and move legacy `config.ini`/`keys.ini`/`config.yaml` guidance to explicit troubleshooting notes.
