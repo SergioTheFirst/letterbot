@@ -98,3 +98,14 @@ def test_doctor_mode_reports_and_sends(monkeypatch, tmp_path, capsys):
     assert "ОТЧЁТ ДОКТОРА LETTERBOT" in output
     assert report.telegram_sent is True
     assert any(entry.component == "SQLite" for entry in report.entries)
+
+
+
+def test_doctor_yaml_path_does_not_use_repo_root_implicitly(tmp_path):
+    config_dir = tmp_path / "mailbot_v26" / "config"
+    config_dir.mkdir(parents=True)
+    (tmp_path / "config.yaml").write_text("root: true", encoding="utf-8")
+
+    resolved = doctor._resolve_yaml_config_path(config_dir)
+
+    assert resolved is None

@@ -25,17 +25,16 @@ def test_doctor_mode_missing_yaml_and_ini_warns_and_does_not_crash(
 
     output = capsys.readouterr().out
     assert report is not None
-    assert "copy config.ini.example config.ini" in output
+    assert "Optional legacy config.yaml not found" in output
     assert any(entry.component == "config.yaml" and entry.status == "WARN" for entry in report.entries)
-    assert any(entry.component == "config.ini" and entry.status == "WARN" for entry in report.entries)
-    assert "config.ini missing" in caplog.text
-
+    assert any(entry.component == "config.ini (general)" and entry.status in {"OK", "FAIL"} for entry in report.entries)
+    
 def test_doctor_mode_invalid_ini_files_warns_and_does_not_crash(
     monkeypatch,
     tmp_path,
     capsys,
 ) -> None:
-    (tmp_path / "config.ini").write_text("broken=true\n", encoding="utf-8")
+    (tmp_path / "settings.ini").write_text("broken=true\n", encoding="utf-8")
     (tmp_path / "accounts.ini").write_text("broken=true\n", encoding="utf-8")
     (tmp_path / "keys.ini").write_text("broken=true\n", encoding="utf-8")
 

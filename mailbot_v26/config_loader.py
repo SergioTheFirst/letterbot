@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.account_identity import normalize_login
 
 CONFIG_DIR = Path(__file__).resolve().parent / "config"
@@ -131,10 +132,11 @@ def _read_config_file(path: Path) -> configparser.ConfigParser:
 
 
 def _resolve_settings_path(base_dir: Path) -> Path:
-    settings_path = base_dir / SETTINGS_INI_NAME
+    resolved = resolve_config_paths(base_dir)
+    settings_path = resolved.settings_path
     if settings_path.exists():
         return settings_path
-    return base_dir / "config.ini"
+    return resolved.legacy_ini_path
 
 
 def load_general_config(base_dir: Path = CONFIG_DIR) -> GeneralConfig:
@@ -284,9 +286,12 @@ def get_account_scope(
 
 def load_keys_config(base_dir: Path = CONFIG_DIR) -> KeysConfig:
     accounts_parser = _read_config_file(base_dir / "accounts.ini")
-    parser = accounts_parser if any(
-        section in accounts_parser for section in ("telegram", "cloudflare")
-    ) else _read_config_file(base_dir / "keys.ini")
+    parser = accounts_parser
+    if not any(section in accounts_parser for section in ("telegram", "cloudflare")):
+        keys_path = base_dir / "keys.ini"
+        if keys_path.exists():
+            _LOGGER.info("keys.ini legacy fallback is used")
+            parser = _read_config_file(keys_path)
 
     telegram = parser["telegram"] if "telegram" in parser else {}
     cloudflare = parser["cloudflare"] if "cloudflare" in parser else {}

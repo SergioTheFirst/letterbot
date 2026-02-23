@@ -31,17 +31,17 @@ if not exist "%ACCOUNTS_FILE%" (
 )
 
 echo Running doctor checks ^(warning-first^)...
-"%VENV_PY%" -m mailbot_v26 doctor
+"%VENV_PY%" -m mailbot_v26 doctor --config-dir "%CONFIG_DIR%"
 if %ERRORLEVEL% NEQ 0 (
     echo [WARN] Doctor found issues. Startup continues in non-strict mode.
 )
 
 echo Running config validation ^(warning-first^)...
-"%VENV_PY%" -m mailbot_v26 validate-config
+"%VENV_PY%" -m mailbot_v26 validate-config --config-dir "%CONFIG_DIR%"
 if %ERRORLEVEL% NEQ 0 (
     echo [WARN] validate-config reported warnings. Startup continues.
 )
 
 echo Starting Letterbot...
-"%VENV_PY%" -m mailbot_v26.start
+"%VENV_PY%" -m mailbot_v26.start --config-dir "%CONFIG_DIR%"
 exit /b %ERRORLEVEL%

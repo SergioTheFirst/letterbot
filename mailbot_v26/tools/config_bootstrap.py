@@ -219,8 +219,6 @@ def init_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]]:
     targets = {
         base_dir / "settings.ini": SETTINGS_TEMPLATE,
         base_dir / "accounts.ini": ACCOUNTS_TEMPLATE,
-        base_dir / "config.ini": SETTINGS_TEMPLATE,
-        base_dir / "keys.ini": "[telegram]\nbot_token = CHANGE_ME\n\n[cloudflare]\naccount_id = CHANGE_ME\napi_token = CHANGE_ME\n",
     }
 
     for path, content in targets.items():
@@ -255,7 +253,7 @@ def migrate_two_file_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]
     accounts_path = base_dir / "accounts.ini"
     legacy_settings = base_dir / "config.ini"
     legacy_keys = base_dir / "keys.ini"
-    legacy_yaml = base_dir.parents[1] / "config.yaml" if len(base_dir.parents) > 1 else base_dir / "config.yaml"
+    legacy_yaml = base_dir / "config.yaml"
 
     if not settings_path.exists():
         if legacy_settings.exists():
@@ -310,20 +308,18 @@ def run_migrate_config(base_dir: Path = CONFIG_DIR) -> None:
 def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
     errors: list[str] = []
 
-    config_path = base_dir / "config.ini"
+    settings_path = base_dir / "settings.ini"
+    legacy_settings_path = base_dir / "config.ini"
     accounts_path = base_dir / "accounts.ini"
-    keys_path = base_dir / "keys.ini"
 
     if not base_dir.exists():
         errors.append(f"Config directory not found: {base_dir}")
         return False, errors
 
-    if not config_path.exists():
-        errors.append("Missing config.ini")
+    if not settings_path.exists() and not legacy_settings_path.exists():
+        errors.append("Missing settings.ini (or legacy config.ini)")
     if not accounts_path.exists():
         errors.append("Missing accounts.ini")
-    if not keys_path.exists():
-        errors.append("Missing keys.ini")
 
     if not accounts_path.exists():
         return False, errors
@@ -375,11 +371,8 @@ def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
     return not errors, errors
 
 
-def _resolve_yaml_config_path(base_dir: Path = CONFIG_DIR) -> Path:
-    resolved = resolve_config_paths(base_dir).yaml_path
-    if resolved is not None:
-        return resolved
-    return base_dir.parent / "config.yaml"
+def _resolve_yaml_config_path(base_dir: Path = CONFIG_DIR) -> Path | None:
+    return resolve_config_paths(base_dir).yaml_path
 
 
 def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False, strict: bool = False) -> int:
@@ -396,11 +389,14 @@ def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False, st
         return 1 if strict else 0
 
     config_path = _resolve_yaml_config_path(base_dir)
+    if config_path is None:
+        print("[INFO] Optional legacy config.yaml not found. Skipping compat report.")
+        return 0
     try:
         raw_config = load_yaml_config(config_path)
     except (FileNotFoundError, YamlConfigError, OSError) as exc:
-        print(f"[ERROR] {exc}")
-        return 2
+        print(f"[INFO] {exc}")
+        return 0
 
     schema_version = get_schema_version(raw_config)
     ok, error, hints = validate_yaml_config_with_hints(raw_config)

@@ -253,9 +253,6 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
     data["raw_config"] = raw_config
     data["bot_config"] = bot_config
 
-    if not (base_dir / "config.ini").exists():
-        entries.append(DoctorEntry("config.ini", "WARN", _config_template_hint(base_dir / "config.ini")))
-
     data["priority_v2_config"] = load_priority_v2_config(base_dir)
     data["vip_senders"] = load_vip_senders(base_dir)
 
@@ -268,10 +265,15 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
 
     try:
         keys = load_keys_config(base_dir)
-        entries.append(DoctorEntry("keys.ini", "OK", "загружен"))
+        status = "OK"
+        details = "загружен"
+        if not (base_dir / "keys.ini").exists():
+            status = "WARN"
+            details = "legacy keys.ini не используется (используем accounts.ini)"
+        entries.append(DoctorEntry("keys.ini", status, details))
         data["telegram_bot_token"] = keys.telegram_bot_token
     except ConfigError as exc:
-        entries.append(DoctorEntry("keys.ini", "FAIL", str(exc)))
+        entries.append(DoctorEntry("keys.ini", "WARN", str(exc)))
 
     try:
         storage = load_storage_config(base_dir)
@@ -421,22 +423,14 @@ def _yaml_template_hint(config_dir: Path | None) -> str:
     else:
         base_dir = config_dir or Path(__file__).resolve().parent
         config_path = base_dir / "config.yaml"
-    example_candidates = [
-        config_path.with_name("config.example.yaml"),
-        config_path.with_name("config.yaml.example"),
-    ]
-    example = next((item for item in example_candidates if item.exists()), example_candidates[0])
-    return (
-        f"Файл не найден: {config_path}. Используйте шаблон {example} "
-        f"и скопируйте: copy {example.name} {config_path.name}"
-    )
+    return f"Optional legacy config.yaml not found: {config_path}"
 
 
 def _load_doctor_bot_config(config_dir: Path | None) -> tuple[dict[str, object], BotConfig, list[str]]:
     config_path = _resolve_yaml_config_path(config_dir)
     if config_path is None:
         message = _yaml_template_hint(config_dir)
-        logger.warning(message)
+        logger.info(message)
         return {}, _build_default_bot_config(), [message]
 
     try:
@@ -444,7 +438,7 @@ def _load_doctor_bot_config(config_dir: Path | None) -> tuple[dict[str, object],
     except YamlConfigError as exc:
         message = str(exc)
         raw_detail = getattr(exc, "raw_detail", None)
-        logger.warning(message)
+        logger.info(message)
         if raw_detail:
             logger.debug("doctor_config_yaml_parse_raw %s", raw_detail)
         return {}, _build_default_bot_config(), [message]
