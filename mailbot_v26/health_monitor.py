@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Deque, Dict
 
-from state_manager import AccountState, StateManager
+from mailbot_v26.state_manager import AccountState, StateManager
 
 
 logger = logging.getLogger(__name__)
