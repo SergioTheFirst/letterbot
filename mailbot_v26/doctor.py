@@ -441,7 +441,10 @@ def _load_doctor_bot_config(config_dir: Path | None) -> tuple[dict[str, object],
         raw = load_yaml_config(config_path)
     except YamlConfigError as exc:
         message = str(exc)
+        raw_detail = getattr(exc, "raw_detail", None)
         logger.warning(message)
+        if raw_detail:
+            logger.debug("doctor_config_yaml_parse_raw %s", raw_detail)
         return {}, _build_default_bot_config(), [message]
 
     ok, error = validate_yaml_config(raw)

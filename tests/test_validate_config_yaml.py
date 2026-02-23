@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("yaml")
 
-from mailbot_v26.config_yaml import resolve_support_enabled, validate_config
+from mailbot_v26.config_yaml import ConfigError, load_config, resolve_support_enabled, validate_config
 
 
 def _base_config() -> dict:
@@ -250,3 +250,25 @@ def test_resolve_support_enabled_support_disables_legacy_flag() -> None:
     config["support"] = {"enabled": False}
 
     assert resolve_support_enabled(config) is False
+
+
+def test_load_config_windows_double_quoted_username_shows_actionable_hint(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("username: \"HQ\\MedvedevSS\"\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(config_path)
+
+    message = str(exc_info.value)
+    assert "Use single quotes for Windows usernames/paths" in message
+    assert "escape backslashes as \\" in message
+    assert "unknown escape" not in message.lower()
+
+
+def test_load_config_windows_single_quoted_username_parses(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("username: 'HQ\\MedvedevSS'\n", encoding="utf-8")
+
+    payload = load_config(config_path)
+
+    assert payload["username"] == r"HQ\MedvedevSS"

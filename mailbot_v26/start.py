@@ -34,6 +34,7 @@ from mailbot_v26.dist_self_check import validate_dist_runtime
 from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.config_loader import AccountConfig, BotConfig, ConfigError as IniConfigError, load_config as load_ini_config
 from mailbot_v26.config.paths import resolve_config_paths
+from mailbot_v26.account_identity import logins_match
 from mailbot_v26.config_yaml import (
     ConfigError as YamlConfigError,
     SCHEMA_NEWER_MESSAGE,
@@ -103,7 +104,7 @@ digest_logger = get_logger("mailbot")
 
 def _get_account_by_login(config: BotConfig, login: str) -> Optional["AccountConfig"]:
     for acc in config.accounts:
-        if acc.login == login:
+        if logins_match(acc.login, login):
             return acc
     return None
 
@@ -158,7 +159,10 @@ def _load_yaml_config_or_exit(config_path: Path) -> tuple[dict[str, object], Bot
         sys.exit(1)
     except YamlConfigError as exc:
         message = str(exc)
+        raw_detail = getattr(exc, "raw_detail", None)
         logger.error("config_invalid %s", message)
+        if raw_detail:
+            logger.debug("config_yaml_parse_raw %s", raw_detail)
         print(f"[ERROR] {message}")
         sys.exit(1)
 
@@ -208,6 +212,9 @@ def _load_yaml_config_or_defaults(config_path: Path, config_dir: Path) -> tuple[
         raw_config = load_yaml_config(config_path)
     except (FileNotFoundError, YamlConfigError) as exc:
         logger.warning("config_yaml_invalid_or_missing %s", exc)
+        raw_detail = getattr(exc, "raw_detail", None)
+        if raw_detail:
+            logger.debug("config_yaml_parse_raw %s", raw_detail)
         print(f"[WARN] {exc}. Falling back to INI configuration.")
         return {}, _load_ini_config_or_exit(config_dir)
 

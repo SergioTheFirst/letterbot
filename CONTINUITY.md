@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-23: hardened YAML startup/doctor UX for Windows backslash parse errors with actionable guidance, added shared login normalization (strip+casefold+slash normalization for domain\user) across account lookups, and added regression tests for parse hint/single-quote success/case-insensitive domain login matching.
 - 2026-02-23: unified config path resolution via `config/paths.py` (root `config.yaml` -> `mailbot_v26/config/config.yaml`), hardened INI readers for legacy no-section parsing + parse-error handling, removed startup YAML/example-file hard dependency, made pipeline processor import config-IO lazy, aligned batch entrypoint to `run_mailbot.bat`, and added regression tests for no import-time INI reads + malformed INI warning behavior.
 - 2026-02-23: standardized Windows one-click chain (start_mailbot.bat -> run_mailbot.bat -> python -m mailbot_v26.start), added explicit required INI file checks with init-config hint, added start.py CLI (--help/--config-dir/--max-cycles), and added regression tests for no import-time config reads plus doctor/start behavior on missing/invalid INI.
 - 2026-02-23: removed import-time config.ini reads from pipeline processor via lazy cached getters; auto-priority gate INI loader now supports guarded parse + legacy no-section mode + inline comments and deterministic defaults with warnings; added regression tests for malformed/legacy configs and processor import no-config-read; docs updated with Windows copy commands and added config.yaml.example.
@@ -80,12 +81,14 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- One-click Windows startup chain and config-failure UX hardening are complete with required verification commands executed.
+- Windows config.yaml backslash parse diagnostics and case-insensitive domain\username matching are implemented and covered by regression tests.
 Next:
-- Monitor downstream docs/dist wrappers for drift from the standardized startup chain and keep error hints aligned.
+- Monitor remaining config.yaml consumers for consistent user-facing parse guidance and keep Windows hints aligned across tools.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/account_identity.py
+- mailbot_v26/tests/test_account_identity.py
 - start_mailbot.bat
 - update_and_run.bat
 - mailbot_v26/tests/test_start_config_failures.py

@@ -57,3 +57,13 @@ def test_doctor_mode_invalid_ini_files_warns_and_does_not_crash(
     assert "stacktrace" not in output.lower()
     assert any(entry.component == "config.ini" and entry.status in {"WARN", "FAIL"} for entry in report.entries)
     assert any(entry.component.startswith("accounts.ini") for entry in report.entries)
+
+
+def test_doctor_yaml_windows_backslash_error_reports_hint(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("username: \"HQ\\MedvedevSS\"\n", encoding="utf-8")
+
+    _raw, _config, errors = doctor._load_doctor_bot_config(tmp_path)
+
+    assert errors
+    assert "Use single quotes for Windows usernames/paths" in errors[0]
