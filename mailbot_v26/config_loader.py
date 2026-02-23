@@ -133,6 +133,8 @@ def _read_config_file(path: Path) -> configparser.ConfigParser:
 
 def _resolve_settings_path(base_dir: Path) -> Path:
     resolved = resolve_config_paths(base_dir)
+    if resolved.two_file_mode:
+        return resolved.settings_path
     settings_path = resolved.settings_path
     if settings_path.exists():
         return settings_path
@@ -144,7 +146,7 @@ def load_general_config(base_dir: Path = CONFIG_DIR) -> GeneralConfig:
 
     if "general" not in parser:
         return GeneralConfig(
-            check_interval=180,
+            check_interval=120,
             max_email_mb=15,
             max_attachment_mb=15,
             max_zip_uncompressed_mb=80,
@@ -156,7 +158,7 @@ def load_general_config(base_dir: Path = CONFIG_DIR) -> GeneralConfig:
     section = parser["general"]
     try:
         return GeneralConfig(
-            check_interval=section.getint("check_interval", fallback=180),
+            check_interval=section.getint("check_interval", fallback=120),
             max_email_mb=section.getint("max_email_mb", fallback=15),
             max_attachment_mb=section.getint("max_attachment_mb", fallback=15),
             max_zip_uncompressed_mb=section.getint(
@@ -176,7 +178,7 @@ def load_general_config(base_dir: Path = CONFIG_DIR) -> GeneralConfig:
     except ValueError as exc:  # invalid numbers
         _LOGGER.warning("Invalid [general] values, using defaults: %s", exc)
         return GeneralConfig(
-            check_interval=180,
+            check_interval=120,
             max_email_mb=15,
             max_attachment_mb=15,
             max_zip_uncompressed_mb=80,
@@ -285,10 +287,11 @@ def get_account_scope(
 
 
 def load_keys_config(base_dir: Path = CONFIG_DIR) -> KeysConfig:
-    accounts_parser = _read_config_file(base_dir / "accounts.ini")
+    resolved = resolve_config_paths(base_dir)
+    accounts_parser = _read_config_file(resolved.accounts_path)
     parser = accounts_parser
-    if not any(section in accounts_parser for section in ("telegram", "cloudflare")):
-        keys_path = base_dir / "keys.ini"
+    if not resolved.two_file_mode and not any(section in accounts_parser for section in ("telegram", "cloudflare")):
+        keys_path = resolved.keys_path
         if keys_path.exists():
             _LOGGER.info("keys.ini legacy fallback is used")
             parser = _read_config_file(keys_path)

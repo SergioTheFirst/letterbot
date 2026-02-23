@@ -8,7 +8,6 @@ set "REPO_ROOT=%CD%"
 set "CONFIG_DIR=%REPO_ROOT%\mailbot_v26\config"
 set "SETTINGS_FILE=%CONFIG_DIR%\settings.ini"
 set "ACCOUNTS_FILE=%CONFIG_DIR%\accounts.ini"
-set "YAML_FILE=%REPO_ROOT%\config.yaml"
 
 set "VENV_PY=%REPO_ROOT%\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
@@ -31,7 +30,7 @@ if not exist "%ACCOUNTS_FILE%" (
 )
 
 echo Running doctor checks ^(warning-first^)...
-"%VENV_PY%" -m mailbot_v26 doctor --config-dir "%CONFIG_DIR%"
+"%VENV_PY%" -m mailbot_v26.doctor --config-dir "mailbot_v26\config"
 if %ERRORLEVEL% NEQ 0 (
     echo [WARN] Doctor found issues. Startup continues in non-strict mode.
 )
@@ -43,5 +42,5 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo Starting Letterbot...
-"%VENV_PY%" -m mailbot_v26.start --config-dir "%CONFIG_DIR%"
+"%VENV_PY%" -m mailbot_v26.start --config-dir "mailbot_v26\config"
 exit /b %ERRORLEVEL%

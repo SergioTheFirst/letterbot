@@ -7,9 +7,12 @@ from pathlib import Path
 @dataclass(frozen=True, slots=True)
 class ConfigPaths:
     config_dir: Path
+    accounts_path: Path
     settings_path: Path
     legacy_ini_path: Path
+    keys_path: Path
     yaml_path: Path | None
+    two_file_mode: bool
 
 
 def resolve_config_paths(config_dir: Path | None = None) -> ConfigPaths:
@@ -28,11 +31,15 @@ def resolve_config_paths(config_dir: Path | None = None) -> ConfigPaths:
 
     yaml_path = next((path for path in yaml_candidates if path.exists()), None)
 
+    accounts_path = selected_dir / "accounts.ini"
     return ConfigPaths(
         config_dir=selected_dir,
+        accounts_path=accounts_path,
         settings_path=selected_dir / "settings.ini",
         legacy_ini_path=selected_dir / "config.ini",
+        keys_path=selected_dir / "keys.ini",
         yaml_path=yaml_path,
+        two_file_mode=accounts_path.exists(),
     )
 
 

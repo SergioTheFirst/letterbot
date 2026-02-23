@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-23: strict 2-file mode hardening: config-root resolution is config-dir-first, 2-file mode auto-activates when accounts.ini exists, startup/doctor skip legacy YAML/keys warnings in 2-file mode, LLM loader avoids YAML in 2-file mode and degrades safely on missing config, digest flags support settings.ini aliases (`daily_digest_enabled`/`weekly_digest_enabled`), and Windows launcher runs `python -m mailbot_v26.doctor --config-dir mailbot_v26\config`.
 - 2026-02-23: unified config-dir-first startup/doctor flow: default `mailbot_v26/config`, no implicit repo-root `config.yaml` reads, 2-file primary mode (`settings.ini` + `accounts.ini`) with optional legacy fallbacks (`config.ini`/`keys.ini`), optional `config.yaml` info-only handling, LLM loader `dict`/`ConfigParser` int-read hardening, launcher `--config-dir` wiring, and regression coverage for no-root-reads + degraded Telegram mode.
 - 2026-02-23: startup/doctor/config hardening v2: warning-first doctor by default with --strict gating, non-blocking launcher checks, 2-file config mode (`settings.ini` + `accounts.ini`) with legacy fallback reads, and migration helper with legacy backups.
 - 2026-02-23: hardened YAML startup/doctor UX for Windows backslash parse errors with actionable guidance, added shared login normalization (strip+casefold+slash normalization for domain\user) across account lookups, and added regression tests for parse hint/single-quote success/case-insensitive domain login matching.
@@ -83,9 +84,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Config loading is config-dir-first with optional YAML and legacy INI fallback only inside config-dir; launcher commands pass explicit --config-dir and regression tests cover no-root-read + degraded Telegram behavior.
+- 2-file mode behavior is enforced across startup/doctor/LLM/flags with explicit config-dir launch wiring; targeted regressions added for legacy warning suppression and digest flag aliases in settings.ini.
 Next:
-- Finish docs/template cleanup to present `settings.ini` + `accounts.ini` as the only supported setup path and move `config.ini`/`keys.ini`/`config.yaml` guidance to explicit legacy troubleshooting notes.
+- Finish docs/template cleanup to present `settings.ini` + `accounts.ini` as the only supported setup path and move legacy `config.ini`/`keys.ini`/`config.yaml` guidance to explicit troubleshooting notes.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

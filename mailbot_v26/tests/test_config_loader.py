@@ -4,9 +4,7 @@ import pytest
 
 from mailbot_v26.config_loader import (
     BotConfig,
-    ConfigError,
-    InvalidAccountIdError,
-    load_accounts_config,
+            load_accounts_config,
     load_config,
     load_general_config,
     load_keys_config,
@@ -22,7 +20,7 @@ def write_file(tmpdir: Path, name: str, content: str) -> None:
 def build_sample_config(tmpdir: Path) -> None:
     write_file(
         tmpdir,
-        "config.ini",
+        "settings.ini",
         """[general]
 check_interval = 400
 max_email_mb = 25
@@ -46,12 +44,8 @@ host = imap.example.com
 port = 993
 use_ssl = true
 telegram_chat_id = 222
-""",
-    )
-    write_file(
-        tmpdir,
-        "keys.ini",
-        """[telegram]
+
+[telegram]
 bot_token = token
 
 [cloudflare]
@@ -74,18 +68,17 @@ def test_load_full_config(tmp_path: Path) -> None:
     assert cfg.storage.db_path == storage_cfg.db_path
 
 
-def test_missing_files_raise() -> None:
-    with pytest.raises(ConfigError):
-        load_general_config(Path("/nonexistent"))
+def test_missing_files_use_deterministic_defaults() -> None:
+    general = load_general_config(Path("/nonexistent"))
+    assert general.check_interval == 120
 
 
-def test_accounts_missing_section(tmp_path: Path) -> None:
+def test_accounts_missing_section_returns_empty_list(tmp_path: Path) -> None:
     write_file(tmp_path, "accounts.ini", "")
-    with pytest.raises(ConfigError):
-        load_accounts_config(tmp_path)
+    assert load_accounts_config(tmp_path) == []
 
 
-def test_accounts_invalid_section_name(tmp_path: Path) -> None:
+def test_accounts_invalid_section_name_is_ignored(tmp_path: Path) -> None:
     write_file(
         tmp_path,
         "accounts.ini",
@@ -96,10 +89,16 @@ host = imap.example.com
 port = 993
 use_ssl = true
 telegram_chat_id = 222
+
+[telegram]
+bot_token = token
+
+[cloudflare]
+account_id = acc
+api_token = key
 """,
     )
-    with pytest.raises(InvalidAccountIdError):
-        load_accounts_config(tmp_path)
+    assert load_accounts_config(tmp_path) == []
 
 
 def test_general_default_interval(tmp_path: Path) -> None:
@@ -112,7 +111,7 @@ admin_chat_id = 1
 """,
     )
     general = load_general_config(tmp_path)
-    assert general.check_interval == 180
+    assert general.check_interval == 120
     assert general.max_email_mb == 15
 
 
@@ -121,11 +120,11 @@ def test_general_interval_explicit_value(tmp_path: Path) -> None:
         tmp_path,
         "config.ini",
         """[general]
-check_interval = 180
+check_interval = 120
 max_attachment_mb = 10
 admin_chat_id = 1
 """,
     )
     general = load_general_config(tmp_path)
-    assert general.check_interval == 180
+    assert general.check_interval == 120
     assert general.max_zip_uncompressed_mb == 80

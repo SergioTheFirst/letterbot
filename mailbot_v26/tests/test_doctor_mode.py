@@ -27,7 +27,7 @@ def test_doctor_mode_missing_yaml_and_ini_warns_and_does_not_crash(
     assert report is not None
     assert "Optional legacy config.yaml not found" in output
     assert any(entry.component == "config.yaml" and entry.status == "WARN" for entry in report.entries)
-    assert any(entry.component == "config.ini (general)" and entry.status in {"OK", "FAIL"} for entry in report.entries)
+    assert any(entry.component == "settings.ini (general)" and entry.status in {"OK", "FAIL"} for entry in report.entries)
     
 def test_doctor_mode_invalid_ini_files_warns_and_does_not_crash(
     monkeypatch,
@@ -54,7 +54,7 @@ def test_doctor_mode_invalid_ini_files_warns_and_does_not_crash(
     output = capsys.readouterr().out
     assert report is not None
     assert "stacktrace" not in output.lower()
-    assert any(entry.component.startswith("config.ini") and entry.status in {"WARN", "FAIL", "OK"} for entry in report.entries)
+    assert any(entry.component.startswith("settings.ini") and entry.status in {"WARN", "FAIL", "OK"} for entry in report.entries)
     assert any(entry.component.startswith("accounts.ini") for entry in report.entries)
 
 
@@ -66,3 +66,30 @@ def test_doctor_yaml_windows_backslash_error_reports_hint(tmp_path) -> None:
 
     assert errors
     assert "Use single quotes for Windows usernames/paths" in errors[0]
+
+
+def test_doctor_two_file_mode_skips_legacy_yaml_and_keys_warnings(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval=120\n", encoding="utf-8")
+    (tmp_path / "accounts.ini").write_text(
+        "[acc]\nlogin=user@example.com\npassword=p\nhost=imap.example.com\ntelegram_chat_id=1\n\n"
+        "[telegram]\nbot_token=t\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(doctor, "require_runtime_for", lambda _mode: None)
+    monkeypatch.setattr(doctor, "_check_dependencies", lambda: doctor.DoctorEntry("Dependencies", "OK", "stub"))
+    monkeypatch.setattr(doctor, "_check_llm", lambda _base_dir: [doctor.DoctorEntry("LLM", "OK", "stub")])
+    monkeypatch.setattr(doctor, "_check_imap", lambda _accounts: [doctor.DoctorEntry("IMAP", "OK", "stub")])
+    monkeypatch.setattr(doctor, "ping_telegram", lambda _token: (True, "ok"))
+    monkeypatch.setattr(doctor, "send_telegram", lambda _payload: DeliveryResult(delivered=True, retryable=False, error=None))
+
+    report = doctor.run_doctor(config_dir=tmp_path)
+
+    output = capsys.readouterr().out
+    assert "Optional legacy config.yaml" not in output
+    assert all(entry.component != "config.yaml" for entry in report.entries)
+    assert all(entry.component != "keys.ini" for entry in report.entries)

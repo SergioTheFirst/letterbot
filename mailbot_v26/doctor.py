@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import configparser
 import importlib
 import ipaddress
@@ -244,36 +245,42 @@ def _check_dependencies() -> DoctorEntry:
 def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, object]]:
     entries: list[DoctorEntry] = []
     data: dict[str, object] = {"accounts": [], "account_configs": []}
+    resolved = resolve_config_paths(base_dir)
 
     raw_config, bot_config, yaml_errors = _load_doctor_bot_config(base_dir)
-    if yaml_errors:
-        entries.append(DoctorEntry("config.yaml", "WARN", "; ".join(yaml_errors)))
-    else:
-        entries.append(DoctorEntry("config.yaml", "OK", "загружен"))
+    if not resolved.two_file_mode:
+        if yaml_errors:
+            entries.append(DoctorEntry("config.yaml", "WARN", "; ".join(yaml_errors)))
+        else:
+            entries.append(DoctorEntry("config.yaml", "OK", "загружен"))
     data["raw_config"] = raw_config
     data["bot_config"] = bot_config
 
-    data["priority_v2_config"] = load_priority_v2_config(base_dir)
-    data["vip_senders"] = load_vip_senders(base_dir)
+    if not resolved.two_file_mode:
+        data["priority_v2_config"] = load_priority_v2_config(base_dir)
+        data["vip_senders"] = load_vip_senders(base_dir)
 
     try:
         general = load_general_config(base_dir)
-        entries.append(DoctorEntry("config.ini (general)", "OK", "загружен"))
+        entries.append(DoctorEntry("settings.ini (general)", "OK", "загружен"))
         data["admin_chat_id"] = general.admin_chat_id
     except ConfigError as exc:
-        entries.append(DoctorEntry("config.ini", "FAIL", str(exc)))
+        entries.append(DoctorEntry("settings.ini", "FAIL", str(exc)))
 
     try:
         keys = load_keys_config(base_dir)
-        status = "OK"
-        details = "загружен"
-        if not (base_dir / "keys.ini").exists():
-            status = "WARN"
-            details = "legacy keys.ini не используется (используем accounts.ini)"
-        entries.append(DoctorEntry("keys.ini", status, details))
+        if resolved.two_file_mode:
+            entries.append(DoctorEntry("accounts.ini (secrets)", "OK", "загружен"))
+        else:
+            status = "OK"
+            details = "загружен"
+            if not resolved.keys_path.exists():
+                status = "WARN"
+                details = "legacy keys.ini не найден"
+            entries.append(DoctorEntry("keys.ini", status, details))
         data["telegram_bot_token"] = keys.telegram_bot_token
     except ConfigError as exc:
-        entries.append(DoctorEntry("keys.ini", "WARN", str(exc)))
+        entries.append(DoctorEntry("accounts.ini/keys.ini", "WARN", str(exc)))
 
     try:
         storage = load_storage_config(base_dir)
@@ -427,6 +434,10 @@ def _yaml_template_hint(config_dir: Path | None) -> str:
 
 
 def _load_doctor_bot_config(config_dir: Path | None) -> tuple[dict[str, object], BotConfig, list[str]]:
+    resolved = resolve_config_paths(config_dir)
+    if resolved.two_file_mode:
+        return {}, _build_default_bot_config(), []
+
     config_path = _resolve_yaml_config_path(config_dir)
     if config_path is None:
         message = _yaml_template_hint(config_dir)
@@ -480,7 +491,9 @@ def _check_sqlite(db_path: object) -> DoctorEntry:
 
 
 def _check_telegram(bot_token: object) -> DoctorEntry:
-    token = str(bot_token or "")
+    token = str(bot_token or "").strip()
+    if not token:
+        return DoctorEntry("Telegram", "WARN", "bot token не задан; отправка пропущена")
     ok, details = ping_telegram(token)
     status = "OK" if ok else "WARN"
     return DoctorEntry("Telegram", status, details)
@@ -578,12 +591,19 @@ def _send_report_to_telegram(
         return False, str(exc)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="python -m mailbot_v26.doctor")
+    parser.add_argument("--config-dir", default="mailbot_v26/config")
+    parser.add_argument("--strict", action="store_true")
+    args = parser.parse_args(argv)
+
     try:
-        run_doctor()
+        report = run_doctor(config_dir=Path(args.config_dir))
     except DependencyError as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(2)
+
+    sys.exit(report_exit_code(report, strict=bool(args.strict)))
 
 
 __all__ = [

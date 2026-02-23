@@ -167,9 +167,13 @@ def _load_yaml_config_or_exit(config_path: Path) -> tuple[dict[str, object], Bot
 
 def load_config(config_dir: Path | None) -> tuple[Path | None, dict[str, object], BotConfig]:
     paths = resolve_config_paths(config_dir)
-    config_path = paths.yaml_path
     raw_config: dict[str, object] = {}
 
+    if paths.two_file_mode:
+        config = _load_ini_config_or_defaults(paths.config_dir)
+        return None, raw_config, config
+
+    config_path = paths.yaml_path
     if config_path is not None:
         raw_config, config = _load_yaml_config_or_defaults(config_path, paths.config_dir)
         return config_path, raw_config, config
@@ -186,7 +190,14 @@ def _load_ini_config_or_defaults(config_dir: Path) -> BotConfig:
     except Exception as exc:
         logger.warning("config_ini_load_failed %s", exc)
         print("[WARN] Failed to load INI config; using deterministic defaults where possible.")
-        config = load_ini_config(Path(__file__).resolve().parent / "config")
+        config = BotConfig(
+            general=load_general_config(config_dir),
+            ingest=load_ingest_config(config_dir),
+            maintenance=load_maintenance_config(config_dir),
+            accounts=load_accounts_config(config_dir),
+            keys=load_keys_config(config_dir),
+            storage=load_storage_config(config_dir),
+        )
     if (config_dir / "settings.ini").exists() and (config_dir / "accounts.ini").exists():
         print("Using new 2-file config mode")
     return config
@@ -716,38 +727,42 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                     now_mono = time.monotonic()
                     if now_mono - last_reload_at >= reload_interval:
                         last_reload_at = now_mono
-                        try:
-                            if config_path is None:
-                                raise FileNotFoundError("config.yaml not configured")
-                            reloaded_raw = load_yaml_config(config_path)
-                        except (FileNotFoundError, YamlConfigError) as exc:
-                            logger.error("config_reload_failed error=%s", exc)
+                        if config_path is None:
+                            pass
                         else:
-                            ok, error = validate_yaml_config(reloaded_raw)
-                            if ok:
-                                updated_config = build_bot_config(
-                                    reloaded_raw,
-                                    repo_root=REPO_ROOT,
-                                )
-                                config = updated_config
-                                raw_config = reloaded_raw
-                                polling_interval, reload_interval = get_polling_intervals(
-                                    raw_config
-                                )
-                                processor.config = config
-                                configure_pipeline(config, processor)
-                                accounts_to_poll = list(config.accounts)
-                                for account in config.accounts:
-                                    runtime_health.register_account(account)
-                                inbound_client, inbound_processor, allowed_chat_ids = _build_inbound_stack(
-                                    config
-                                )
-                                logger.info(
-                                    "config_reloaded accounts=%s",
-                                    len(config.accounts),
-                                )
+                            try:
+                                reloaded_raw = load_yaml_config(config_path)
+                            except YamlConfigError as exc:
+                                logger.error("config_reload_failed error=%s", exc)
+                                reloaded_raw = None
+                            if reloaded_raw is None:
+                                pass
                             else:
-                                logger.error("config_reload_invalid error=%s", error)
+                                ok, error = validate_yaml_config(reloaded_raw)
+                                if ok:
+                                    updated_config = build_bot_config(
+                                        reloaded_raw,
+                                        repo_root=REPO_ROOT,
+                                    )
+                                    config = updated_config
+                                    raw_config = reloaded_raw
+                                    polling_interval, reload_interval = get_polling_intervals(
+                                        raw_config
+                                    )
+                                    processor.config = config
+                                    configure_pipeline(config, processor)
+                                    accounts_to_poll = list(config.accounts)
+                                    for account in config.accounts:
+                                        runtime_health.register_account(account)
+                                    inbound_client, inbound_processor, allowed_chat_ids = _build_inbound_stack(
+                                        config
+                                    )
+                                    logger.info(
+                                        "config_reloaded accounts=%s",
+                                        len(config.accounts),
+                                    )
+                                else:
+                                    logger.error("config_reload_invalid error=%s", error)
 
                     try:
                         run_inbound_polling(

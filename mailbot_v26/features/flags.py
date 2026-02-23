@@ -1,8 +1,8 @@
 """Feature flag definitions for MailBot.
 
-Flags are loaded from ``config/config.ini`` when available. Missing files,
-sections, or invalid values silently fall back to ``False`` to guarantee that
-introducing new flags never alters runtime behavior unexpectedly.
+Flags are loaded from ``settings.ini`` in 2-file mode and may fall back to
+legacy ``config.ini`` when running legacy config layouts. Missing files,
+sections, or invalid values silently fall back to deterministic defaults.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from mailbot_v26.config.paths import resolve_config_paths
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,7 +70,10 @@ class FeatureFlags:
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
         config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
-        config_path = config_dir / "config.ini"
+        resolved = resolve_config_paths(config_dir)
+        config_path = resolved.settings_path
+        if not resolved.two_file_mode and not config_path.exists():
+            config_path = resolved.legacy_ini_path
 
         parser = read_user_ini_with_defaults(
             config_path,
@@ -84,8 +88,12 @@ class FeatureFlags:
         self.ENABLE_CRM_DIAGNOSTICS = self._get_flag(parser, "enable_crm_diagnostics")
         self.ENABLE_PREVIEW_ACTIONS = self._get_flag(parser, "enable_preview_actions")
         self.ENABLE_COMMITMENT_TRACKER = self._get_flag(parser, "enable_commitment_tracker")
-        self.ENABLE_DAILY_DIGEST = self._get_flag(parser, "enable_daily_digest")
-        self.ENABLE_WEEKLY_DIGEST = self._get_flag(parser, "enable_weekly_digest")
+        self.ENABLE_DAILY_DIGEST = self._get_flag_alias(
+            parser, "enable_daily_digest", aliases=("daily_digest_enabled",)
+        )
+        self.ENABLE_WEEKLY_DIGEST = self._get_flag_alias(
+            parser, "enable_weekly_digest", aliases=("weekly_digest_enabled",)
+        )
         self.ENABLE_WEEKLY_ACCURACY_REPORT = self._get_flag(
             parser, "enable_weekly_accuracy_report"
         )
@@ -166,6 +174,21 @@ class FeatureFlags:
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_action_confidence_threshold", default=0.75
         )
+
+
+    @staticmethod
+    def _get_flag_alias(
+        parser: configparser.ConfigParser,
+        option: str,
+        *,
+        aliases: tuple[str, ...] = (),
+    ) -> bool:
+        if parser.has_option("features", option):
+            return FeatureFlags._get_flag(parser, option)
+        for alias in aliases:
+            if parser.has_option("features", alias):
+                return FeatureFlags._get_flag(parser, alias)
+        return False
 
     @staticmethod
     def _get_flag(parser: configparser.ConfigParser, option: str) -> bool:
