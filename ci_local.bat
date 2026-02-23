@@ -20,9 +20,14 @@ echo [B] Installing build requirements...
 "%VENV_PY%" -m pip install -r requirements-build.txt || set "CI_FAILED=1"
 if "%CI_FAILED%"=="1" goto :ci_failed
 
-echo [C] Compiling Python sources...
-"%VENV_PY%" -m compileall mailbot_v26 || set "CI_FAILED=1"
-if "%CI_FAILED%"=="1" goto :ci_failed
+:: Compile-time import check — catches bare-import bugs like health_monitor/intelligence
+echo [CI] Compiling mailbot_v26...
+"%VENV_PY%" -m compileall mailbot_v26 -q
+if %ERRORLEVEL% neq 0 (
+    echo [FAIL] Compile errors found. Fix before running tests.
+    exit /b 1
+)
+echo [OK] Compile check passed.
 
 echo [D] Running tests...
 "%VENV_PY%" -m pytest -q || set "CI_FAILED=1"

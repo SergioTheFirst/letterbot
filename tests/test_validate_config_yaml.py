@@ -272,3 +272,70 @@ def test_load_config_windows_single_quoted_username_parses(tmp_path) -> None:
     payload = load_config(config_path)
 
     assert payload["username"] == r"HQ\MedvedevSS"
+
+
+def test_web_ui_disabled_requires_no_bind_or_port(tmp_path) -> None:
+    """Regression: web_ui: {enabled: false} must pass validation without bind/port.
+    This is the exact config a first-time user writes. Must not block startup.
+    """
+    import yaml
+    from mailbot_v26.config_yaml import load_config, validate_config
+
+    cfg = {
+        "schema_version": 1,
+        "telegram": {"bot_token": "123:tok", "chat_id": "12345"},
+        "llm": {
+            "provider": "cloudflare",
+            "cloudflare": {"api_token": "tok", "account_id": "acc"},
+            "gigachat": {"api_token": ""},
+        },
+        "accounts": [{
+            "name": "Test",
+            "email": "x@y.com",
+            "imap_host": "imap.y.com",
+            "imap_port": 993,
+            "username": "x@y.com",
+            "password": "pass",
+            "enabled": True,
+        }],
+        "polling": {"interval_seconds": 60, "reload_config_seconds": 300},
+        "web_ui": {"enabled": False},  # No bind, no port — must be valid
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+    raw = load_config(config_path)
+    ok, err = validate_config(raw)
+
+    assert ok is True, f"Expected valid config, got error: {err}"
+
+
+def test_web_ui_enabled_still_requires_bind_and_port(tmp_path) -> None:
+    """web_ui: {enabled: true} without bind/password must still fail validation."""
+    import yaml
+    from mailbot_v26.config_yaml import load_config, validate_config
+
+    cfg = {
+        "schema_version": 1,
+        "telegram": {"bot_token": "123:tok", "chat_id": "12345"},
+        "llm": {
+            "provider": "cloudflare",
+            "cloudflare": {"api_token": "tok", "account_id": "acc"},
+            "gigachat": {"api_token": ""},
+        },
+        "accounts": [{
+            "name": "Test", "email": "x@y.com",
+            "imap_host": "imap.y.com", "imap_port": 993,
+            "username": "x@y.com", "password": "pass", "enabled": True,
+        }],
+        "polling": {"interval_seconds": 60, "reload_config_seconds": 300},
+        "web_ui": {"enabled": True},  # Missing bind/port/password — must fail
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+    raw = load_config(config_path)
+    ok, err = validate_config(raw)
+
+    assert ok is False
+    assert err is not None

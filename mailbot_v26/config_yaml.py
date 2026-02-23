@@ -225,11 +225,11 @@ def validate_config(cfg: dict[str, Any]) -> Tuple[bool, str]:
             enabled = web_ui.get("enabled")
             if not isinstance(enabled, bool):
                 return False, "Ошибка в config.yaml: web_ui.enabled должен быть true/false"
-            bind = web_ui.get("bind", "")
-            if not isinstance(bind, str) or not bind.strip():
+            bind = web_ui.get("bind", "127.0.0.1")
+            if bind is not None and (not isinstance(bind, str) or not bind.strip()):
                 return False, "Ошибка в config.yaml: web_ui.bind должен быть строкой"
-            port = web_ui.get("port")
-            if not _is_port(port):
+            port = web_ui.get("port", 8787)
+            if port is not None and not _is_port(port):
                 return False, "Ошибка в config.yaml: web_ui.port должен быть числом 1..65535"
             password = web_ui.get("password", "")
             if enabled and not _is_non_empty_str(password):
