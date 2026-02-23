@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import configparser
 import io
 import tempfile
 import zipfile
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 from mailbot_v26.config_loader import ConfigError, load_storage_config
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 
 DEFAULT_RETENTION = 14
 
@@ -54,8 +54,7 @@ def _should_mask(option: str) -> bool:
 
 
 def _mask_config(path: Path) -> str:
-    parser = configparser.ConfigParser()
-    parser.read(path, encoding="utf-8")
+    parser = read_user_ini_with_defaults(path, scope_label="backup config")
     for section in parser.sections():
         for option in parser.options(section):
             if _should_mask(option):

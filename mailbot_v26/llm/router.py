@@ -17,6 +17,8 @@ from mailbot_v26.llm.providers import (
 )
 from mailbot_v26.llm.runtime_flags import DEFAULT_RUNTIME_FLAGS_PATH, RuntimeFlagStore
 from mailbot_v26.config_yaml import ConfigError as YamlConfigError
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.config_yaml import load_config as load_yaml_config
 from mailbot_v26.config_yaml import validate_config as validate_yaml_config
 
@@ -277,14 +279,19 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
     if yaml_config:
         return yaml_config
 
-    config_path = base_dir / "config.ini"
-    keys_path = base_dir / "keys.ini"
-    parser = configparser.ConfigParser()
-    keys = configparser.ConfigParser()
-    if config_path.exists():
-        parser.read(config_path, encoding="utf-8")
-    if keys_path.exists():
-        keys.read(keys_path, encoding="utf-8")
+    resolved = resolve_config_paths(base_dir)
+    config_path = resolved.ini_path
+    keys_path = resolved.config_dir / "keys.ini"
+    parser = read_user_ini_with_defaults(
+        config_path,
+        logger=logger,
+        scope_label="LLM config",
+    )
+    keys = read_user_ini_with_defaults(
+        keys_path,
+        logger=logger,
+        scope_label="LLM keys",
+    )
 
     llm_section = parser["llm"] if "llm" in parser else {}
     gigachat_section = parser["gigachat"] if "gigachat" in parser else {}
@@ -321,12 +328,7 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
 
 
 def _load_yaml_config(base_dir: Path) -> LLMRouterConfig | None:
-    candidates = [
-        base_dir / "config.yaml",
-        base_dir.parent / "config.yaml",
-        base_dir.parent.parent / "config.yaml",
-    ]
-    config_path = next((path for path in candidates if path.exists()), None)
+    config_path = resolve_config_paths(base_dir).yaml_path
     if not config_path:
         return None
     try:

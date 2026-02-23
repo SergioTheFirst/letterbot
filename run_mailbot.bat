@@ -23,29 +23,14 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-set "CONFIG_FILE=%~dp0config.yaml"
-set "CONFIG_EXAMPLE=%~dp0config.example.yaml"
-if not exist "%CONFIG_FILE%" (
-    if exist "%CONFIG_EXAMPLE%" (
-        copy /Y "%CONFIG_EXAMPLE%" "%CONFIG_FILE%" >nul
-        echo =============================================
-        echo   CONFIGURATION REQUIRED
-        echo   Откройте config.yaml и заполните значения в кавычках.
-        echo =============================================
-        notepad "%CONFIG_FILE%"
-    ) else (
-        echo ERROR: config.example.yaml not found in repo root.
-    )
-    exit /b 1
-)
-
-echo Running health checks...
-"%VENV_PY%" -m mailbot_v26 doctor
+echo Running doctor checks...
+"%VENV_PY%" -m mailbot_v26.doctor
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: doctor checks failed.
     exit /b 1
 )
 
+echo Running config validation...
 "%VENV_PY%" -m mailbot_v26 validate-config
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: config validation failed.

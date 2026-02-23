@@ -1,6 +1,8 @@
 # Running Letterbot (one-click)
 
 1. Double-click `run_mailbot.bat` in the repository root.
+2. Optional manual checks: `python -m mailbot_v26.doctor` then `python -m mailbot_v26 validate-config`.
+3. Manual startup (if needed): `python -m mailbot_v26.start`.
 
 ## Troubleshooting
 - **Port in use**: stop the process using the port and retry.

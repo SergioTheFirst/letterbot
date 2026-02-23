@@ -4,6 +4,8 @@ import configparser
 from pathlib import Path
 
 from mailbot_v26.config_loader import ACCOUNT_ID_PATTERN, CONFIG_DIR
+from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.config_yaml import (
     SUPPORTED_SCHEMA_VERSION,
     ConfigError as YamlConfigError,
@@ -257,8 +259,10 @@ def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
     if not accounts_path.exists():
         return False, errors
 
-    parser = configparser.ConfigParser()
-    parser.read(accounts_path, encoding="utf-8")
+    parser = read_user_ini_with_defaults(
+        accounts_path,
+        scope_label="validate-config accounts.ini",
+    )
 
     if not parser.sections():
         errors.append("accounts.ini has no account sections")
@@ -303,14 +307,10 @@ def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
 
 
 def _resolve_yaml_config_path(base_dir: Path = CONFIG_DIR) -> Path:
-    candidates = [
-        base_dir / "config.yaml",
-        base_dir.parent / "config.yaml",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
+    resolved = resolve_config_paths(base_dir).yaml_path
+    if resolved is not None:
+        return resolved
+    return base_dir.parent / "config.yaml"
 
 
 def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False) -> int:

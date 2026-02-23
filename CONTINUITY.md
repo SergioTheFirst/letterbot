@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-23: unified config path resolution via `config/paths.py` (root `config.yaml` -> `mailbot_v26/config/config.yaml`), hardened INI readers for legacy no-section parsing + parse-error handling, removed startup YAML/example-file hard dependency, made pipeline processor import config-IO lazy, aligned batch entrypoint to `run_mailbot.bat`, and added regression tests for no import-time INI reads + malformed INI warning behavior.
 - 2026-02-23: removed import-time config.ini reads from pipeline processor via lazy cached getters; auto-priority gate INI loader now supports guarded parse + legacy no-section mode + inline comments and deterministic defaults with warnings; added regression tests for malformed/legacy configs and processor import no-config-read; docs updated with Windows copy commands and added config.yaml.example.
 - 2026-02-21: reformatted `config.ini.example` with Quick start + advanced headers, moved INI support toggle to `[support].enabled` (with legacy fallback), unified YAML/runtime support gating precedence (`support.enabled` > `features.donate_enabled`) for web + digest, updated docs, and added precedence regression tests.
 - 2026-02-21: added shared guarded INI reader (`config/ini_utils.py`), refactored user INI loaders to deterministic fallback + one-time actionable warning, fixed `auto_priority_gate` import crash path, replaced `config.ini.example` with valid sectioned template, and added malformed/missing config.ini processor-import regression tests.
@@ -78,9 +79,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Support toggle precedence rollout complete across INI/YAML runtime paths; targeted regression suite green.
+- Startup/config hardening for clean Windows launch is complete; required startup + full pytest validation executed.
 Next:
-- Run broader full-suite regression when packaging changes are queued.
+- Monitor packaging/dist scripts for any remaining references to YAML example bootstrap and keep startup messaging consistent.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
