@@ -14,16 +14,16 @@
 
 
 ## LAN mode (safe)
-```yaml
-web_ui:
-  enabled: true
-  bind: "0.0.0.0"
-  port: 8787
-  allow_lan: true
-  allow_cidrs: ["192.168.0.0/16"]
-  password: "use-10-plus-chars-here"
-  prod_server: true
-  require_strong_password_on_lan: true
+```ini
+[web_ui]
+enabled = true
+bind = 0.0.0.0
+port = 8787
+allow_lan = true
+allow_cidrs = 192.168.0.0/16
+password = use-10-plus-chars-here
+prod_server = true
+require_strong_password_on_lan = true
 ```
 
 Сузьте `allow_cidrs` до вашей подсети, если знаете точный диапазон (например `192.168.1.0/24`).

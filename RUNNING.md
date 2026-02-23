@@ -7,7 +7,7 @@
 ## Troubleshooting
 - **Port in use**: stop the process using the port and retry.
 - **DB locked**: close any other Letterbot processes that might be using `data/mailbot.sqlite`.
-- **Wrong password**: update `web_ui.password` in `config.yaml` and restart.
+- **Wrong password**: Update `web_ui.password` in `settings.ini` (section `[web_ui]`) and restart.
 
 ## Проверка перед релизом
 - Двойной клик `ci_local.bat`.
@@ -16,12 +16,12 @@
 
 
 ## LAN mode (safe)
-```yaml
-web_ui:
-  bind: "0.0.0.0"
-  allow_lan: true
-  allow_cidrs: ["192.168.0.0/16"]
-  prod_server: true
+```ini
+[web_ui]
+bind = 0.0.0.0
+allow_lan = true
+allow_cidrs = 192.168.0.0/16
+prod_server = true
 ```
 
 - Narrow `allow_cidrs` to your home subnet when possible.
@@ -36,12 +36,12 @@ web_ui:
 
 ## Support
 - Включите поддержку через `support.enabled: true` (приоритет над legacy `features.donate_enabled`).
-- Настройте `support.methods` в `config.yaml` (карта/СБП/ЮMoney).
+- Configure support methods in `settings.ini` (section `[support]`) or Web UI `/support`.
 - После логина откройте `http://127.0.0.1:8787/support` (или ваш порт Web UI).
 - Опциональный P.S. в TG дайджесте включается через `support.telegram` и ограничен `frequency_days`.
 
 ## Upgrading
 - Follow `docs/UPGRADE.md` for the safe new-folder upgrade flow. Review `CHANGELOG.md` before each upgrade.
-- Keep your old `config.yaml` and copy it into the new folder.
-- Run `python -m mailbot_v26 validate-config --compat` before normal start.
+- Keep your old `settings.ini` and `accounts.ini` and copy them into the new folder.
+- Run `python -m mailbot_v26 validate-config` before normal start.
 
