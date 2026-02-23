@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 import time
+from functools import lru_cache
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -16,6 +17,7 @@ from typing import Any, Callable, Optional
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.budgets.consumer import BudgetConsumer
 from mailbot_v26.budgets.gate import BudgetGate
+from mailbot_v26.budgets.gate import BudgetGateConfig
 from mailbot_v26.budgets.importance import (
     heuristic_importance,
     is_top_percentile,
@@ -39,8 +41,9 @@ from mailbot_v26.config.flow_protection import (
     FlowProtectionConfig,
     load_flow_protection_config,
 )
-from mailbot_v26.config.llm_queue import load_llm_queue_config
+from mailbot_v26.config.llm_queue import LLMQueueConfig, load_llm_queue_config
 from mailbot_v26.config.premium_clarity import load_premium_clarity_config
+from mailbot_v26.config.premium_clarity import PremiumClarityConfig
 from mailbot_v26.config_loader import get_account_scope, resolve_account_scope
 from mailbot_v26.facts.fact_extractor import FactExtractor
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
@@ -50,6 +53,8 @@ from mailbot_v26.config.auto_priority_gate import (
     AutoPriorityGateConfig,
     load_auto_priority_gate_config,
 )
+from mailbot_v26.config.budget_policy import BudgetUsageConfig
+from mailbot_v26.config.deadlock_policy import DeadlockPolicyConfig
 from mailbot_v26.insights.auto_priority_quality_gate import (
     AutoPriorityGateStateStore,
     AutoPriorityQualityGate,
@@ -120,8 +125,10 @@ from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
 from mailbot_v26.priority.priority_engine_v2 import (
     PriorityBreakdownItem,
+    PriorityV2Config,
     PriorityEngineV2,
     PriorityResultV2,
+    VipSenderMatcher,
 )
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.clean_email import clean_email_body
@@ -172,18 +179,22 @@ event_emitter = EventEmitter(DB_PATH)
 contract_event_emitter = ContractEventEmitter(DB_PATH)
 decision_trace_emitter = get_default_decision_trace_emitter()
 shadow_priority_engine = ShadowPriorityEngine(analytics)
-priority_engine_v2 = PriorityEngineV2(analytics)
+priority_engine_v2 = PriorityEngineV2(
+    analytics,
+    config=PriorityV2Config(),
+    vip_senders=VipSenderMatcher(),
+)
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
 _UI_LOCALE = DEFAULT_LOCALE
 auto_priority_gates = AutoPriorityGates(analytics)
 auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
-auto_priority_gate_config = load_auto_priority_gate_config()
-deadlock_policy = load_deadlock_policy_config()
-premium_clarity_config = load_premium_clarity_config()
-budget_gate_config = load_budget_gate_config()
-budget_usage_config = load_budget_usage_config()
-llm_queue_config = load_llm_queue_config()
+auto_priority_gate_config: AutoPriorityGateConfig | None = None
+deadlock_policy: DeadlockPolicyConfig | None = None
+premium_clarity_config: PremiumClarityConfig | None = None
+budget_gate_config: BudgetGateConfig | None = None
+budget_usage_config: BudgetUsageConfig | None = None
+llm_queue_config: LLMQueueConfig | None = None
 auto_priority_gate_state_store = AutoPriorityGateStateStore(knowledge_db)
 auto_priority_quality_gate = AutoPriorityQualityGate(
     analytics=analytics,
@@ -218,11 +229,86 @@ auto_action_engine = AutoActionEngine(
 system_orchestrator = SystemOrchestrator()
 notification_alert_store = NotificationAlertStore(DB_PATH)
 MAX_TELEGRAM_WAIT_SECONDS = 180
-budget_gate = BudgetGate(DB_PATH, budget_gate_config, emitter=contract_event_emitter)
+budget_gate = BudgetGate(DB_PATH, BudgetGateConfig(), emitter=contract_event_emitter)
 budget_consumer = BudgetConsumer(budget_gate)
-llm_request_queue = LLMRequestQueue(max_size=llm_queue_config.llm_request_queue_size)
+llm_request_queue: LLMRequestQueue | None = None
 llm_worker: Optional[BackgroundLLMWorker] = None
 _ORIGINAL_RUN_LLM_STAGE = run_llm_stage
+
+
+@lru_cache(maxsize=1)
+def _load_auto_priority_gate_config_cached() -> AutoPriorityGateConfig:
+    return load_auto_priority_gate_config()
+
+
+def get_auto_priority_gate_config() -> AutoPriorityGateConfig:
+    if auto_priority_gate_config is not None:
+        return auto_priority_gate_config
+    return _load_auto_priority_gate_config_cached()
+
+
+@lru_cache(maxsize=1)
+def _load_deadlock_policy_cached() -> DeadlockPolicyConfig:
+    return load_deadlock_policy_config()
+
+
+def get_deadlock_policy_config() -> DeadlockPolicyConfig:
+    if deadlock_policy is not None:
+        return deadlock_policy
+    return _load_deadlock_policy_cached()
+
+
+@lru_cache(maxsize=1)
+def _load_premium_clarity_config_cached() -> PremiumClarityConfig:
+    return load_premium_clarity_config()
+
+
+def get_premium_clarity_config() -> PremiumClarityConfig:
+    if premium_clarity_config is not None:
+        return premium_clarity_config
+    return _load_premium_clarity_config_cached()
+
+
+@lru_cache(maxsize=1)
+def _load_budget_gate_config_cached() -> BudgetGateConfig:
+    return load_budget_gate_config()
+
+
+def get_budget_gate_config() -> BudgetGateConfig:
+    if budget_gate_config is not None:
+        return budget_gate_config
+    return _load_budget_gate_config_cached()
+
+
+@lru_cache(maxsize=1)
+def _load_budget_usage_config_cached() -> BudgetUsageConfig:
+    return load_budget_usage_config()
+
+
+def get_budget_usage_config() -> BudgetUsageConfig:
+    if budget_usage_config is not None:
+        return budget_usage_config
+    return _load_budget_usage_config_cached()
+
+
+@lru_cache(maxsize=1)
+def _load_llm_queue_config_cached() -> LLMQueueConfig:
+    return load_llm_queue_config()
+
+
+def get_llm_queue_config() -> LLMQueueConfig:
+    if llm_queue_config is not None:
+        return llm_queue_config
+    return _load_llm_queue_config_cached()
+
+
+def get_llm_request_queue() -> LLMRequestQueue:
+    global llm_request_queue
+    if llm_request_queue is None:
+        llm_request_queue = LLMRequestQueue(
+            max_size=get_llm_queue_config().llm_request_queue_size
+        )
+    return llm_request_queue
 
 
 @dataclass(frozen=True, slots=True)
@@ -527,7 +613,7 @@ def _evaluate_policy(
     )
     gate_result = None
     auto_priority_gate_enabled = bool(
-        getattr(auto_priority_gate_config, "enabled", False)
+        getattr(get_auto_priority_gate_config(), "enabled", False)
     )
     quality_metrics_enabled = bool(
         getattr(feature_flags, "ENABLE_QUALITY_METRICS", False)
@@ -541,10 +627,10 @@ def _evaluate_policy(
         try:
             gate_result = auto_priority_quality_gate.evaluate(
                 engine=engine_label,
-                window_days=auto_priority_gate_config.window_days,
-                min_samples=auto_priority_gate_config.min_samples,
-                max_correction_rate=auto_priority_gate_config.max_correction_rate,
-                cooldown_hours=auto_priority_gate_config.cooldown_hours,
+                window_days=get_auto_priority_gate_config().window_days,
+                min_samples=get_auto_priority_gate_config().min_samples,
+                max_correction_rate=get_auto_priority_gate_config().max_correction_rate,
+                cooldown_hours=get_auto_priority_gate_config().cooldown_hours,
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("auto_priority_quality_gate_failed", error=str(exc))
@@ -750,6 +836,19 @@ class MessageProcessor:
     def __init__(self, config: Any, state: Any) -> None:
         self.config = config
         self.state = state
+        get_auto_priority_gate_config()
+        get_deadlock_policy_config()
+        get_premium_clarity_config()
+        loaded_budget_gate_config = get_budget_gate_config()
+        get_budget_usage_config()
+        get_llm_queue_config()
+        global budget_gate, budget_consumer
+        budget_gate = BudgetGate(
+            DB_PATH,
+            loaded_budget_gate_config,
+            emitter=contract_event_emitter,
+        )
+        budget_consumer = BudgetConsumer(budget_gate)
 
     def process(self, account_login: str, message: InboundMessage) -> str:
         """Lightweight placeholder processor to keep imports stable."""
@@ -2409,9 +2508,9 @@ def _ensure_llm_worker() -> BackgroundLLMWorker:
     global llm_worker
     if llm_worker is None:
         llm_worker = BackgroundLLMWorker(
-            llm_request_queue,
+            get_llm_request_queue(),
             _process_llm_queue_request,
-            poll_timeout_sec=llm_queue_config.llm_request_queue_timeout_sec,
+            poll_timeout_sec=get_llm_queue_config().llm_request_queue_timeout_sec,
         )
     llm_worker.start()
     return llm_worker
@@ -3070,7 +3169,7 @@ def _record_analytics(
                     event_emitter=contract_event_emitter,
                     account_email=account_email,
                     thread_key=thread_key,
-                    policy=deadlock_policy,
+                    policy=get_deadlock_policy_config(),
                     now_ts=received_at.timestamp(),
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
@@ -3798,8 +3897,8 @@ def process_message(
                 db_path=DB_PATH,
                 account_email=account_email,
                 current_score=importance.score,
-                percentile_threshold=budget_usage_config.llm_percentile_threshold,
-                window_days=budget_usage_config.window_days,
+                percentile_threshold=get_budget_usage_config().llm_percentile_threshold,
+                window_days=get_budget_usage_config().window_days,
                 anchor_ts_utc=anchor_received_at.timestamp() if anchor_received_at else None,
                 received_at=anchor_received_at,
             )
@@ -3867,8 +3966,8 @@ def process_message(
             },
             model_fingerprint=compute_model_fingerprint(
                 {
-                    "usage_config": budget_usage_config,
-                    "gate_config": budget_gate_config,
+                    "usage_config": get_budget_usage_config(),
+                    "gate_config": get_budget_gate_config(),
                 }
             ),
             explain_codes=attention_signals_fired,
@@ -3934,8 +4033,8 @@ def process_message(
         llm_result = None
         input_chars = _estimate_input_chars(llm_body_text, attachments, subject)
         llm_queue_path_enabled = (
-            llm_queue_config.llm_request_queue_enabled
-            and llm_queue_config.max_concurrent_llm_calls == 1
+            get_llm_queue_config().llm_request_queue_enabled
+            and get_llm_queue_config().max_concurrent_llm_calls == 1
             and run_llm_stage is _ORIGINAL_RUN_LLM_STAGE
         )
         llm_was_queued = False
@@ -3953,7 +4052,7 @@ def process_message(
                     received_at=received_at,
                     input_chars=input_chars,
                 )
-                queued = llm_request_queue.enqueue(request, timeout_sec=0.5)
+                queued = get_llm_request_queue().enqueue(request, timeout_sec=0.5)
                 llm_was_queued = queued
                 if not queued:
                     logger.info("llm_queue_full", email_id=message_id)
@@ -4034,7 +4133,7 @@ def process_message(
             },
             model_fingerprint=compute_model_fingerprint(
                 {
-                    "llm_queue_config": llm_queue_config,
+                    "llm_queue_config": get_llm_queue_config(),
                 }
             ),
             explain_codes=llm_gate_signals_fired,
@@ -4529,12 +4628,12 @@ def process_message(
                     extracted_text_len=render_result.extracted_text_len,
                     confidence_percent=confidence_percent,
                     confidence_available=confidence_available,
-                    confidence_dots_mode=premium_clarity_config.confidence_dots_mode,
+                    confidence_dots_mode=get_premium_clarity_config().confidence_dots_mode,
                     confidence_dots_threshold=(
-                        premium_clarity_config.confidence_dots_threshold
+                        get_premium_clarity_config().confidence_dots_threshold
                     ),
                     confidence_dots_scale=(
-                        premium_clarity_config.confidence_dots_scale
+                        get_premium_clarity_config().confidence_dots_scale
                     ),
                     extraction_failed=extraction_failed,
                 ),
@@ -4584,7 +4683,7 @@ def process_message(
             extraction_failed=extraction_failed,
             confidence_available=confidence_score is not None,
             confidence_percent=confidence_percent,
-            confidence_dots_threshold=premium_clarity_config.confidence_dots_threshold,
+            confidence_dots_threshold=get_premium_clarity_config().confidence_dots_threshold,
         )
         shown_fact_items: list[_FactItem] = []
         if render_result.premium_clarity_enabled:
