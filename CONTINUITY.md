@@ -17,6 +17,8 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-24: audited optional deps (langdetect/nltk/pyttsx3) for module-level import safety; no bare module-level imports found outside tests, so no guards/tests were required.
+- 2026-02-24: confirmed dist_self_check behavior post-audit; dev-mode runtime check returns OK and does not surface optional-import errors.
 - 2026-02-24: restored full-suite stability after import/web_ui fix: validate-config CLI now exits non-zero on warnings by default, compat report runs without requiring on-disk config.yaml and returns non-zero on schema failure, doctor uses legacy keys.ini token fallback in two-file mode diagnostics only, feature flags fall back to legacy config.ini when settings.ini is absent.
 - 2026-02-24: fixed bare package imports in health_monitor.py and intelligence/__init__.py (ModuleNotFoundError on import; added regression tests in test_import_smoke.py).
 - 2026-02-24: fixed config_yaml.py web_ui validator requiring bind/port when enabled=false; first-time minimal config now passes validation (regression tests added to test_validate_config_yaml.py).
@@ -88,10 +90,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Import chain hardened; compileall added to CI; 3 startup blockers resolved.
+- Optional deps audited (langdetect/nltk/pyttsx3): no unsafe module-level imports found; dist contract runtime check verified; full suite status unchanged/green (latest baseline).
 Next:
-- Verify Windows one-folder build (build_windows_onefolder.bat) still produces clean artifact after import fixes.
-- Finish docs/template cleanup to present `settings.ini` + `accounts.ini` as the only supported setup path and move legacy `config.ini`/`keys.ini`/`config.yaml` guidance to explicit troubleshooting notes.
+- Document the two-file config mode (`settings.ini` + `accounts.ini`) as the only supported setup path; move legacy `config.ini`/`keys.ini`/`config.yaml` guidance to explicit TROUBLESHOOTING notes.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
