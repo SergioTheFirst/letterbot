@@ -275,13 +275,20 @@ class LLMRouter:
 
 
 def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
-    yaml_config = _load_yaml_config(base_dir)
-    if yaml_config:
-        return yaml_config
-
     resolved = resolve_config_paths(base_dir)
-    config_path = resolved.settings_path if resolved.settings_path.exists() else resolved.legacy_ini_path
-    keys_path = resolved.config_dir / "keys.ini"
+    if not resolved.two_file_mode:
+        try:
+            yaml_config = _load_yaml_config(base_dir)
+        except ValueError as exc:
+            logger.warning("llm_yaml_config_invalid %s", exc)
+            yaml_config = None
+        if yaml_config:
+            return yaml_config
+
+    config_path = resolved.settings_path
+    if not resolved.two_file_mode and not config_path.exists():
+        config_path = resolved.legacy_ini_path
+    keys_path = resolved.keys_path
     parser = read_user_ini_with_defaults(
         config_path,
         logger=logger,
@@ -293,11 +300,11 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         scope_label="LLM keys",
     )
 
-    llm_section = parser["llm"] if "llm" in parser else {}
-    gigachat_section = parser["gigachat"] if "gigachat" in parser else {}
-    cloudflare_section = parser["cloudflare"] if "cloudflare" in parser else {}
-    safety_section = parser["llm_safety"] if "llm_safety" in parser else None
-    keys_cloudflare = keys["cloudflare"] if "cloudflare" in keys else {}
+    llm_section = parser["llm"] if "llm" in parser else parser["DEFAULT"]
+    gigachat_section = parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
+    cloudflare_section = parser["cloudflare"] if "cloudflare" in parser else parser["DEFAULT"]
+    safety_section = parser["llm_safety"] if "llm_safety" in parser else parser["DEFAULT"]
+    keys_cloudflare = keys["cloudflare"] if "cloudflare" in keys else keys["DEFAULT"]
 
     return LLMRouterConfig(
         primary=llm_section.get("primary", "cloudflare"),
@@ -386,6 +393,8 @@ def _get_int(section: Any, key: str, default: int) -> int:
 
 
 def _get_bool(section: Any, key: str, default: bool) -> bool:
+    if section is None:
+        return default
     raw = section.get(key, None)
     if raw is None:
         return default

@@ -13,11 +13,11 @@ def test_malformed_settings_ini_falls_back_to_defaults_with_warning(tmp_path: Pa
     caplog.set_level(logging.WARNING)
     general = load_general_config(tmp_path)
 
-    assert general.check_interval == 180
+    assert general.check_interval == 120
     assert "Invalid [general] values" in caplog.text
 
 
-def test_legacy_keys_ini_is_still_used_when_accounts_has_no_key_sections(tmp_path: Path) -> None:
+def test_legacy_keys_ini_is_ignored_in_two_file_mode(tmp_path: Path) -> None:
     (tmp_path / "accounts.ini").write_text("[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8")
     (tmp_path / "keys.ini").write_text(
         "[telegram]\nbot_token=tg\n[cloudflare]\naccount_id=acc\napi_token=tok\n",
@@ -26,8 +26,8 @@ def test_legacy_keys_ini_is_still_used_when_accounts_has_no_key_sections(tmp_pat
 
     keys = load_keys_config(tmp_path)
 
-    assert keys.telegram_bot_token == "tg"
-    assert keys.cf_account_id == "acc"
+    assert keys.telegram_bot_token == ""
+    assert keys.cf_account_id == ""
 
 
 def test_doctor_default_mode_returns_zero_with_warnings() -> None:

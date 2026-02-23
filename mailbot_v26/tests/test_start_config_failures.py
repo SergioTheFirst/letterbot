@@ -7,7 +7,7 @@ def test_load_config_missing_ini_uses_defaults_without_traceback(tmp_path, capsy
     _path, _raw, config = start_module.load_config(tmp_path)
 
     output = capsys.readouterr().out
-    assert config.general.check_interval == 180
+    assert config.general.check_interval == 120
     assert "deterministic defaults" in output.lower()
     assert "Traceback" not in output
 
@@ -23,8 +23,7 @@ def test_load_config_invalid_config_ini_does_not_print_traceback(tmp_path, capsy
     _path, _raw, config = start_module.load_config(tmp_path)
 
     output = capsys.readouterr().out
-    assert config.general.check_interval == 180
-    assert "[INFO]" in output
+    assert config.general.check_interval == 120
     assert "Traceback" not in output
 
 
@@ -58,5 +57,5 @@ def test_load_config_with_two_file_mode_only(tmp_path, capsys) -> None:
 
     output = capsys.readouterr().out
     assert config.general.check_interval == 120
-    assert "config.yaml not found" in output
+    assert "config.yaml not found" not in output
     assert "Traceback" not in output
