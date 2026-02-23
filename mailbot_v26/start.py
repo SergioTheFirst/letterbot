@@ -136,19 +136,6 @@ def _prefix_account_text(text: str, account: AccountConfig) -> str:
     return f"[{label}] {text}"
 
 
-def _resolve_config_path(config_path: Path | None) -> Path:
-    if config_path is not None:
-        return config_path
-    candidates = [
-        CURRENT_DIR / "config.yaml",
-        CURRENT_DIR.parent / "config.yaml",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
-
-
 def _load_yaml_config_or_exit(config_path: Path) -> tuple[dict[str, object], BotConfig]:
     try:
         raw_config = load_yaml_config(config_path)
@@ -188,7 +175,7 @@ def load_config(config_dir: Path | None) -> tuple[Path | None, dict[str, object]
         return config_path, raw_config, config
 
     logger.warning("config.yaml missing; using deterministic defaults for YAML-only features")
-    print("[WARN] config.yaml not found. YAML-only gates will use deterministic defaults.")
+    print("[INFO] config.yaml not found. YAML-only gates use deterministic defaults.")
     config = _load_ini_config_or_defaults(paths.config_dir)
     return None, raw_config, config
 
@@ -213,14 +200,14 @@ def _load_yaml_config_or_defaults(config_path: Path, config_dir: Path) -> tuple[
         raw_detail = getattr(exc, "raw_detail", None)
         if raw_detail:
             logger.debug("config_yaml_parse_raw %s", raw_detail)
-        print(f"[WARN] {exc}. Falling back to INI configuration.")
+        print(f"[INFO] {exc}. Falling back to INI configuration.")
         return {}, _load_ini_config_or_defaults(config_dir)
 
     ok, error = validate_yaml_config(raw_config)
     if not ok:
         message = error or "Invalid config.yaml"
         logger.warning("config_invalid %s", message)
-        print(f"[WARN] {message}. Falling back to INI configuration.")
+        print(f"[INFO] {message}. Falling back to INI configuration.")
         if message == SCHEMA_NEWER_MESSAGE and bool(getattr(sys, "frozen", False)):
             print("[WARN] Обновление: распакуйте новый ZIP в новую папку.")
             print("[WARN] Обновление: скопируйте старый config.yaml и запустите run.bat.")
@@ -731,7 +718,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                         last_reload_at = now_mono
                         try:
                             if config_path is None:
-                                raise FileNotFoundError("config.yaml not resolved")
+                                raise FileNotFoundError("config.yaml not configured")
                             reloaded_raw = load_yaml_config(config_path)
                         except (FileNotFoundError, YamlConfigError) as exc:
                             logger.error("config_reload_failed error=%s", exc)

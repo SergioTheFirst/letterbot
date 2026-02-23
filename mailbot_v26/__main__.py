@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.version import __version__
@@ -22,8 +23,15 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return non-zero exit code when doctor finds issues.",
     )
-    subparsers.add_parser("init-config", help="Create configuration templates.")
-    subparsers.add_parser("migrate-config", help="Migrate legacy config files to settings.ini/accounts.ini.")
+    doctor_parser.add_argument(
+        "--config-dir",
+        default="mailbot_v26/config",
+        help="Config directory (default: mailbot_v26/config).",
+    )
+    init_parser = subparsers.add_parser("init-config", help="Create configuration templates.")
+    init_parser.add_argument("--config-dir", default="mailbot_v26/config", help="Config directory (default: mailbot_v26/config).")
+    migrate_parser = subparsers.add_parser("migrate-config", help="Migrate legacy config files to settings.ini/accounts.ini.")
+    migrate_parser.add_argument("--config-dir", default="mailbot_v26/config", help="Config directory (default: mailbot_v26/config).")
     validate_parser = subparsers.add_parser("validate-config", help="Validate configuration files.")
     validate_parser.add_argument(
         "--compat",
@@ -34,6 +42,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--strict",
         action="store_true",
         help="Return non-zero exit code on validation warnings/errors.",
+    )
+    validate_parser.add_argument(
+        "--config-dir",
+        default="mailbot_v26/config",
+        help="Config directory (default: mailbot_v26/config).",
     )
     subparsers.add_parser("backup", help="Create a data backup archive.")
 
@@ -69,27 +82,27 @@ def _run() -> None:
             from mailbot_v26.doctor import print_lan_url, report_exit_code, run_doctor
 
             if args.print_lan_url:
-                sys.exit(print_lan_url())
-            report = run_doctor()
+                sys.exit(print_lan_url(config_dir=Path(args.config_dir)))
+            report = run_doctor(config_dir=Path(args.config_dir))
             sys.exit(report_exit_code(report, strict=bool(args.strict)))
 
         if args.command == "init-config":
             from mailbot_v26.tools.config_bootstrap import run_init_config
 
-            run_init_config()
+            run_init_config(Path(args.config_dir))
             return
 
         if args.command == "migrate-config":
             from mailbot_v26.tools.config_bootstrap import run_migrate_config
 
-            run_migrate_config()
+            run_migrate_config(Path(args.config_dir))
             return
 
         if args.command == "validate-config":
             require_runtime_for("validate_config")
             from mailbot_v26.tools.config_bootstrap import run_validate_config
 
-            sys.exit(run_validate_config(compat=bool(args.compat), strict=bool(args.strict)))
+            sys.exit(run_validate_config(Path(args.config_dir), compat=bool(args.compat), strict=bool(args.strict)))
 
         if args.command == "backup":
             from mailbot_v26.tools.backup import run_backup

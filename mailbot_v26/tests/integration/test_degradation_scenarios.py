@@ -525,3 +525,31 @@ def test_imap_account_recovery_after_backoff(tmp_path) -> None:
     assert state.consecutive_failures == 0
     assert state.next_retry_at_utc is None
     assert len(alerts) == 1
+
+
+
+def test_telegram_unavailable_enters_degraded_mode(monkeypatch, caplog) -> None:
+    system_health.reset()
+    _patch_processor_basics(monkeypatch, llm_result=_llm_result(provider="cloudflare"))
+    monkeypatch.setattr(
+        processor,
+        "enqueue_tg",
+        lambda **_kwargs: DeliveryResult(delivered=False, retryable=True, error="network down"),
+    )
+
+    with caplog.at_level(logging.INFO):
+        try:
+            process_message(
+                account_email="account@example.com",
+                message_id=99,
+                from_email="sender@example.com",
+                subject="Subject",
+                received_at=datetime(2024, 1, 1, 12, 0),
+                body_text="Body",
+                attachments=[],
+                telegram_chat_id="chat",
+            )
+        except RuntimeError:
+            pass
+
+    assert system_health.mode == OperationalMode.DEGRADED_NO_TELEGRAM

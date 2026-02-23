@@ -280,7 +280,7 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         return yaml_config
 
     resolved = resolve_config_paths(base_dir)
-    config_path = resolved.ini_path
+    config_path = resolved.settings_path if resolved.settings_path.exists() else resolved.legacy_ini_path
     keys_path = resolved.config_dir / "keys.ini"
     parser = read_user_ini_with_defaults(
         config_path,
@@ -296,7 +296,7 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
     llm_section = parser["llm"] if "llm" in parser else {}
     gigachat_section = parser["gigachat"] if "gigachat" in parser else {}
     cloudflare_section = parser["cloudflare"] if "cloudflare" in parser else {}
-    safety_section = parser["llm_safety"] if "llm_safety" in parser else {}
+    safety_section = parser["llm_safety"] if "llm_safety" in parser else None
     keys_cloudflare = keys["cloudflare"] if "cloudflare" in keys else {}
 
     return LLMRouterConfig(
@@ -315,15 +315,9 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         ),
         cloudflare_model=cloudflare_section.get("model", DEFAULT_CLOUDFLARE_MODEL),
         runtime_flags_path=Path(__file__).resolve().parents[1] / "runtime_flags.json",
-        gigachat_max_consecutive_errors=safety_section.getint(
-            "gigachat_max_consecutive_errors", fallback=3
-        ),
-        gigachat_max_latency_sec=safety_section.getint(
-            "gigachat_max_latency_sec", fallback=10
-        ),
-        gigachat_cooldown_sec=safety_section.getint(
-            "gigachat_cooldown_sec", fallback=600
-        ),
+        gigachat_max_consecutive_errors=_get_int(safety_section, "gigachat_max_consecutive_errors", 3),
+        gigachat_max_latency_sec=_get_int(safety_section, "gigachat_max_latency_sec", 10),
+        gigachat_cooldown_sec=_get_int(safety_section, "gigachat_cooldown_sec", 600),
     )
 
 
@@ -372,6 +366,23 @@ def _load_yaml_config(base_dir: Path) -> LLMRouterConfig | None:
         cloudflare_model=cloudflare_model,
         runtime_flags_path=Path(__file__).resolve().parents[1] / "runtime_flags.json",
     )
+
+
+def _get_int(section: Any, key: str, default: int) -> int:
+    if section is None:
+        return default
+    if hasattr(section, "getint"):
+        try:
+            return int(section.getint(key, fallback=default))
+        except Exception:
+            return default
+    raw = section.get(key, None)
+    if raw is None:
+        return default
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
 
 
 def _get_bool(section: Any, key: str, default: bool) -> bool:

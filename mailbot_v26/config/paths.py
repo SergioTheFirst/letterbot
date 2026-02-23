@@ -7,7 +7,8 @@ from pathlib import Path
 @dataclass(frozen=True, slots=True)
 class ConfigPaths:
     config_dir: Path
-    ini_path: Path
+    settings_path: Path
+    legacy_ini_path: Path
     yaml_path: Path | None
 
 
@@ -21,16 +22,16 @@ def resolve_config_paths(config_dir: Path | None = None) -> ConfigPaths:
         yaml_candidates = [selected_dir]
         selected_dir = selected_dir.parent
     else:
-        yaml_candidates = [
-            root_dir / "config.yaml",
-            selected_dir / "config.yaml",
-        ]
+        # Never read config.yaml from repo root implicitly.
+        # Root YAML is only allowed when passed explicitly as --config-dir <path-to-yaml>.
+        yaml_candidates = [selected_dir / "config.yaml"]
 
     yaml_path = next((path for path in yaml_candidates if path.exists()), None)
 
     return ConfigPaths(
         config_dir=selected_dir,
-        ini_path=selected_dir / "config.ini",
+        settings_path=selected_dir / "settings.ini",
+        legacy_ini_path=selected_dir / "config.ini",
         yaml_path=yaml_path,
     )
 
