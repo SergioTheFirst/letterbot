@@ -17,7 +17,9 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
-- 2026-02-24: converted LAN config examples in RUNNING.md and docs/WINDOWS_QUICKSTART.md from YAML snippets to INI snippets (`[web_ui]`) to match two-file primary setup.
+- 2026-02-24: added onboarding gate to run_mailbot.bat — detects CHANGE_ME in
+  accounts.ini after init-config, opens Notepad with instructions, exits cleanly;
+  contract test added to lock init_config ↔ bat interface.
 - 2026-02-24: corrected TROUBLESHOOTING_WINDOWS.md items 2-3 to two-file mode examples/validation (`settings.ini` + `accounts.ini`) and removed YAML-primary wording.
 - 2026-02-24: consolidated setup docs to two-file mode (settings.ini + accounts.ini)
   as the only primary path; legacy config.ini/keys.ini/config.yaml guidance moved to
@@ -95,10 +97,12 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Docs consolidated: two-file mode is the only primary setup path in all user-facing docs.
+- Onboarding gate active: first-run users get guided setup instead of crash wall.
+  Full suite green (763+ passed).
 Next:
-- v28: promote shadow behavior engines (deadlock_detector, silence_detector, trust_score)
-  to real pipeline influence behind feature flags; one flag per engine, one PR per flag.
+- Conduct first-user JTBD test: install Letterbot on 3 real machines outside dev
+  environment, observe where users get stuck, collect friction points.
+- After JTBD: v28 shadow engine promotion (deadlock_detector → real pipeline).
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
