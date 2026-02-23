@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-23: removed import-time config.ini reads from pipeline processor via lazy cached getters; auto-priority gate INI loader now supports guarded parse + legacy no-section mode + inline comments and deterministic defaults with warnings; added regression tests for malformed/legacy configs and processor import no-config-read; docs updated with Windows copy commands and added config.yaml.example.
 - 2026-02-21: reformatted `config.ini.example` with Quick start + advanced headers, moved INI support toggle to `[support].enabled` (with legacy fallback), unified YAML/runtime support gating precedence (`support.enabled` > `features.donate_enabled`) for web + digest, updated docs, and added precedence regression tests.
 - 2026-02-21: added shared guarded INI reader (`config/ini_utils.py`), refactored user INI loaders to deterministic fallback + one-time actionable warning, fixed `auto_priority_gate` import crash path, replaced `config.ini.example` with valid sectioned template, and added malformed/missing config.ini processor-import regression tests.
 - 2026-02-21: added compact INI UX flow (new config.ini.compact.example + deterministic generator), INI support alias (`features.support`) with precedence over `features.donate_enabled`, and doctor hint with Windows copy command to compact template; tests added.

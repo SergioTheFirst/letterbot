@@ -1,8 +1,11 @@
 1) Распакуйте архив Letterbot в любую папку.
-2) Дважды кликните run.bat.
-3) Если config.yaml отсутствует, он создастся из config.example.yaml и откроется в Блокноте.
-4) Заполните значения в кавычках (null без кавычек), сохраните и закройте файл.
-5) Снова запустите run.bat.
+2) Дважды кликните `run.bat`.
+3) Скопируйте шаблоны командой:
+   - `copy mailbot_v26\config\config.ini.example mailbot_v26\config\config.ini`
+   - `copy config.yaml.example config.yaml`
+4) Если `config.yaml` отсутствует, он создастся из `config.yaml.example` и откроется в Блокноте.
+5) Заполните значения в кавычках (`null` без кавычек), сохраните и закройте файл.
+6) Снова запустите `run.bat`.
 
 Для запуска из исходников репозитория используйте install_and_run.bat, затем run_mailbot.bat.
 

@@ -1,0 +1,79 @@
+# ======================================
+# MailBot — основной файл настроек
+# ======================================
+# Сохраните этот файл как config.yaml:
+# - рядом с mailbot_v26/start.py (mailbot_v26/config.yaml), или
+# - в корне репозитория (config.yaml).
+# Правило: ВСЕ ключи/токены/пароли пишите В КАВЫЧКАХ.
+# Исключение: null пишется БЕЗ кавычек.
+# ======================================
+
+schema_version: 1
+
+telegram:
+  bot_token: "PASTE_YOUR_TELEGRAM_BOT_TOKEN_HERE"   # пример: "123456789:AAAbbbCCCdddEEE"
+  chat_id: "PASTE_YOUR_TELEGRAM_CHAT_ID_HERE"       # пример: "123456789"
+
+llm:
+  provider: "cloudflare"  # пример: "cloudflare" (или "gigachat")
+
+  cloudflare:
+    api_token: "PASTE_CLOUDFLARE_API_TOKEN_HERE"    # пример: "cf_xxxxxxxxxxxxxxxxx"
+    account_id: "PASTE_CLOUDFLARE_ACCOUNT_ID_HERE"  # пример: "a1b2c3d4e5"
+    # model: null → дефолт API (пример: "llama-3.2-70b")
+    model: null                                       # пример: null
+
+  gigachat:
+    api_token: "PASTE_GIGACHAT_API_TOKEN_HERE"      # пример: "giga_xxxxxxxxxxxxxxxxx"
+    # model: null → дефолт API (пример: "GigaChat-Max")
+    model: null                                       # пример: null
+
+accounts:
+  - name: "Work Gmail"                               # пример: "Work Gmail"
+    email: "work@gmail.com"                          # пример: "work@gmail.com"
+    imap_host: "imap.gmail.com"                      # пример: "imap.gmail.com"
+    imap_port: 993                                   # обычно 993
+    username: "work@gmail.com"                       # обычно совпадает с email
+    password: "PASTE_APP_PASSWORD_HERE"              # пример: "abcd efgh ijkl mnop"
+    enabled: true                                    # пример: true
+
+polling:
+  interval_seconds: 60        # пример: 60 (как часто проверять почту)
+  reload_config_seconds: 60   # пример: 60 (как часто перечитывать config.yaml без перезапуска)
+
+web_ui:
+  enabled: true
+  bind: "127.0.0.1"         # по умолчанию только локально
+  port: 8787                # пример
+  password: "CHANGE_ME"     # пароль в ОТКРЫТОМ ВИДЕ (как просил пользователь)
+  api_token: "CHANGE_ME"    # опционально для API-запросов (если используется)
+  allow_lan: false          # чтобы случайно не открыть наружу
+  allow_cidrs:              # если allow_lan=true, ограничить кто может заходить
+    - "192.168.0.0/16"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+  prod_server: false        # true -> запуск через waitress (для LAN/prod)
+  require_strong_password_on_lan: true  # LAN требует пароль >=10 символов и не дефолтный
+
+support:
+  enabled: true  # пользовательский переключатель поддержки (приоритет выше legacy features.donate_enabled)
+  ui:
+    show_in_nav: true
+  methods:
+    - type: "sbp"
+      label: "СБП (QR / перевод по телефону)"
+      details: "Перевод по номеру телефона, банк: Сбер"
+      phone: "+7XXXXXXXXXX"
+      qr_image: "assets/sbp_qr.png"
+    - type: "card"
+      label: "Карта Сбер"
+      number: "2202 20XX XXXX XXXX"
+    - type: "yoomoney"
+      label: "ЮMoney"
+      url: "https://yoomoney.ru/to/4100XXXXXXXXXXX"
+  telegram:
+    enabled: true
+    frequency_days: 30
+    text: "MailBot бесплатный. Поддержать разработку: карта/СБП/ЮMoney — подробнее в /support"
+  # СБП статический QR не содержит сумму: пользователь вводит сумму сам (docs: https://www.nspk.ru/sbp/).
+  # ЮMoney: ссылка для быстрого пополнения позволяет перевод с карты/кошелька (docs: https://yoomoney.ru/page?id=536372).
