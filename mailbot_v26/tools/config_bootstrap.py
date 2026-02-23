@@ -15,7 +15,7 @@ from mailbot_v26.config_yaml import (
 )
 
 
-CONFIG_TEMPLATE = """[general]
+SETTINGS_TEMPLATE = """[general]
 check_interval = 120
 max_email_mb = 15
 max_attachment_mb = 15
@@ -172,21 +172,27 @@ min_trend_samples = 2
 
 ACCOUNTS_TEMPLATE = """[example_account]
 ; account_id rules: lowercase, [a-z0-9_], no spaces.
-; Duplicate this section per mailbox, change the section name.
+; For Windows login use domain\\user (example: HQ\\User).
 login = user@example.com
 password = CHANGE_ME
 host = imap.example.com
 port = 993
 use_ssl = true
 telegram_chat_id = CHANGE_ME
-"""
 
-KEYS_TEMPLATE = """[telegram]
+[telegram]
 bot_token = CHANGE_ME
 
 [cloudflare]
 account_id = CHANGE_ME
 api_token = CHANGE_ME
+
+[gigachat]
+api_key = CHANGE_ME
+
+[llm]
+primary = cloudflare
+fallback = cloudflare
 """
 
 
@@ -211,9 +217,10 @@ def init_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]]:
     examples: list[Path] = []
 
     targets = {
-        base_dir / "config.ini": CONFIG_TEMPLATE,
+        base_dir / "settings.ini": SETTINGS_TEMPLATE,
         base_dir / "accounts.ini": ACCOUNTS_TEMPLATE,
-        base_dir / "keys.ini": KEYS_TEMPLATE,
+        base_dir / "config.ini": SETTINGS_TEMPLATE,
+        base_dir / "keys.ini": "[telegram]\nbot_token = CHANGE_ME\n\n[cloudflare]\naccount_id = CHANGE_ME\napi_token = CHANGE_ME\n",
     }
 
     for path, content in targets.items():
@@ -237,6 +244,68 @@ def run_init_config(base_dir: Path = CONFIG_DIR) -> None:
     for path in examples:
         print(f"EXAMPLE: {path}")
 
+
+
+def migrate_two_file_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]]:
+    base_dir.mkdir(parents=True, exist_ok=True)
+    backups: list[Path] = []
+    created: list[Path] = []
+
+    settings_path = base_dir / "settings.ini"
+    accounts_path = base_dir / "accounts.ini"
+    legacy_settings = base_dir / "config.ini"
+    legacy_keys = base_dir / "keys.ini"
+    legacy_yaml = base_dir.parents[1] / "config.yaml" if len(base_dir.parents) > 1 else base_dir / "config.yaml"
+
+    if not settings_path.exists():
+        if legacy_settings.exists():
+            settings_path.write_text(legacy_settings.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            settings_path.write_text(SETTINGS_TEMPLATE, encoding="utf-8")
+        created.append(settings_path)
+
+    if not accounts_path.exists():
+        accounts_path.write_text(ACCOUNTS_TEMPLATE, encoding="utf-8")
+        created.append(accounts_path)
+
+    if legacy_settings.exists():
+        backup = legacy_settings.with_suffix(".ini.bak")
+        if not backup.exists():
+            backup.write_text(legacy_settings.read_text(encoding="utf-8"), encoding="utf-8")
+            backups.append(backup)
+
+
+    if legacy_yaml.exists():
+        backup = legacy_yaml.with_suffix(".yaml.bak")
+        if not backup.exists():
+            backup.write_text(legacy_yaml.read_text(encoding="utf-8"), encoding="utf-8")
+            backups.append(backup)
+
+    if legacy_keys.exists():
+        parser = configparser.ConfigParser()
+        parser.read(accounts_path, encoding="utf-8")
+        legacy = configparser.ConfigParser()
+        legacy.read(legacy_keys, encoding="utf-8")
+        for section in ("telegram", "cloudflare"):
+            if section in legacy and section not in parser:
+                parser[section] = dict(legacy[section])
+        with accounts_path.open("w", encoding="utf-8") as fh:
+            parser.write(fh)
+        backup = legacy_keys.with_suffix(".ini.bak")
+        if not backup.exists():
+            backup.write_text(legacy_keys.read_text(encoding="utf-8"), encoding="utf-8")
+            backups.append(backup)
+
+    return {"created": created, "backups": backups}
+
+
+def run_migrate_config(base_dir: Path = CONFIG_DIR) -> None:
+    result = migrate_two_file_config(base_dir)
+    print("Using new 2-file config mode")
+    for path in result["created"]:
+        print(f"CREATED: {path}")
+    for path in result["backups"]:
+        print(f"BACKUP: {path}")
 
 def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
     errors: list[str] = []
@@ -313,7 +382,7 @@ def _resolve_yaml_config_path(base_dir: Path = CONFIG_DIR) -> Path:
     return base_dir.parent / "config.yaml"
 
 
-def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False) -> int:
+def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False, strict: bool = False) -> int:
     if not compat:
         ok, errors = validate_config(base_dir)
         print("validate-config: configuration report")
@@ -321,10 +390,10 @@ def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False) ->
             print("STATUS: OK")
             return 0
 
-        print("STATUS: FAIL")
+        print("STATUS: WARN")
         for error in errors:
-            print(f"ERROR: {error}")
-        return 1
+            print(f"WARN: {error}")
+        return 1 if strict else 0
 
     config_path = _resolve_yaml_config_path(base_dir)
     try:
@@ -344,4 +413,6 @@ def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False) ->
     for hint in hints:
         print(f"Hint: {hint}")
 
-    return 0 if ok else 2
+    if ok:
+        return 0
+    return 2 if strict else 0

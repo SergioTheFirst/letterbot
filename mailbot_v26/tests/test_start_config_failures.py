@@ -1,51 +1,30 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import mailbot_v26.start as start_module
 
 
-def test_start_cli_missing_required_ini_exits_with_clear_message(
-    monkeypatch,
-    tmp_path,
-    capsys,
-) -> None:
-    monkeypatch.setattr(start_module, "require_runtime_for", lambda _mode: None)
-    monkeypatch.setattr(start_module, "validate_dist_runtime", lambda **_kwargs: (True, ""))
-    monkeypatch.setattr(start_module, "_check_build_integrity", lambda: None)
-    monkeypatch.setattr(start_module.processor_module, "system_snapshotter", SimpleNamespace(log_startup=lambda: None))
-
-    exit_code = start_module.main_cli(["--config-dir", str(tmp_path), "--max-cycles", "1"])
+def test_load_config_missing_ini_uses_defaults_without_traceback(tmp_path, capsys) -> None:
+    _path, _raw, config = start_module.load_config(tmp_path)
 
     output = capsys.readouterr().out
-    assert exit_code == 1
-    assert "INI configuration invalid" in output
-    assert "mailbot_v26/config/config.ini" in output
+    assert config.general.check_interval == 180
+    assert "use deterministic defaults" in output.lower()
+    assert "Traceback" not in output
 
 
-def test_start_cli_invalid_config_ini_exits_without_traceback(
-    monkeypatch,
-    tmp_path,
-    capsys,
-) -> None:
-    config_dir = tmp_path
-    (config_dir / "config.ini").write_text("broken=1\n", encoding="utf-8")
-    (config_dir / "accounts.ini").write_text("[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8")
-    (config_dir / "keys.ini").write_text(
+def test_load_config_invalid_config_ini_does_not_print_traceback(tmp_path, capsys) -> None:
+    (tmp_path / "config.ini").write_text("broken=1\n", encoding="utf-8")
+    (tmp_path / "accounts.ini").write_text("[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8")
+    (tmp_path / "keys.ini").write_text(
         "[telegram]\nbot_token=t\n[cloudflare]\naccount_id=a\napi_token=k\n",
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(start_module, "require_runtime_for", lambda _mode: None)
-    monkeypatch.setattr(start_module, "validate_dist_runtime", lambda **_kwargs: (True, ""))
-    monkeypatch.setattr(start_module, "_check_build_integrity", lambda: None)
-    monkeypatch.setattr(start_module.processor_module, "system_snapshotter", SimpleNamespace(log_startup=lambda: None))
-
-    exit_code = start_module.main_cli(["--config-dir", str(config_dir), "--max-cycles", "1"])
+    _path, _raw, config = start_module.load_config(tmp_path)
 
     output = capsys.readouterr().out
-    assert exit_code == 1
-    assert "INI configuration invalid" in output
+    assert config.general.check_interval == 180
+    assert "[WARN]" in output
     assert "Traceback" not in output
 
 
@@ -55,7 +34,7 @@ def test_start_yaml_windows_backslash_error_shows_actionable_hint_and_no_traceba
 ) -> None:
     config_dir = tmp_path
     config_path = config_dir / "config.yaml"
-    config_path.write_text("username: \"HQ\\MedvedevSS\"\n", encoding="utf-8")
+    config_path.write_text('username: "HQ\\MedvedevSS"\n', encoding="utf-8")
     (config_dir / "config.ini").write_text("[general]\n", encoding="utf-8")
     (config_dir / "accounts.ini").write_text("[acc]\nlogin=user@example.com\npassword=p\nhost=h\n", encoding="utf-8")
     (config_dir / "keys.ini").write_text(

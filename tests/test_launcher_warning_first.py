@@ -1,0 +1,13 @@
+from pathlib import Path
+
+
+def test_run_mailbot_bat_does_not_block_on_doctor_warning() -> None:
+    content = Path("run_mailbot.bat").read_text(encoding="utf-8")
+    assert "doctor checks ^(warning-first^)" in content
+    assert "Doctor found issues. Startup continues" in content
+    assert "exit /b 1" not in content.split("Running doctor checks", 1)[1].split("Running config validation", 1)[0]
+
+
+def test_install_and_run_calls_migrate_config() -> None:
+    content = Path("install_and_run.bat").read_text(encoding="utf-8")
+    assert "-m mailbot_v26 migrate-config" in content

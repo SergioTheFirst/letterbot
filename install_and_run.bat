@@ -15,11 +15,6 @@ if not exist "%~dp0.venv\Scripts\python.exe" (
 )
 
 set "VENV_PY=%~dp0.venv\Scripts\python.exe"
-if not exist "%VENV_PY%" (
-    echo [ERROR] .venv is missing. Run install_and_run.bat again.
-    exit /b 1
-)
-
 echo [2/3] Installing dependencies...
 "%VENV_PY%" -m pip install -r "%~dp0requirements.txt"
 if %ERRORLEVEL% NEQ 0 (
@@ -27,6 +22,7 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-echo [3/3] Starting Letterbot via run_mailbot.bat...
+echo [3/3] Migrating to 2-file config mode and starting...
+"%VENV_PY%" -m mailbot_v26 migrate-config
 call "%~dp0run_mailbot.bat"
 exit /b %ERRORLEVEL%

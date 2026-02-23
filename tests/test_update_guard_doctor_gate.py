@@ -13,4 +13,4 @@ def test_update_guard_doctor_gate() -> None:
         telegram_sent=False,
         telegram_error=None,
     )
-    assert report_exit_code(report) != 0
+    assert report_exit_code(report, strict=True) != 0
