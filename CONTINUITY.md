@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-24: fixed Windows 2-file launcher readiness flow: run_mailbot.bat now uses python `config-ready` (no global CHANGE_ME grep), re-checks after Notepad, exits 2 when config not ready; validate_config now validates IMAP/system sections separately; update_and_run.bat handles exit code 2 honestly; regression tests added.
 - 2026-02-24: added onboarding gate to run_mailbot.bat — detects CHANGE_ME in
   accounts.ini after init-config, opens Notepad with instructions, exits cleanly;
   contract test added to lock init_config ↔ bat interface.
@@ -97,15 +98,16 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Onboarding gate active: first-run users get guided setup instead of crash wall.
-  Full suite green (763+ passed).
+- Windows launcher readiness uses parser-based config-ready checks with Notepad recheck and explicit exit code 2 for not-ready config.
+- Validation distinguishes IMAP vs system sections in accounts.ini; optional sections are warning-only for startup readiness.
 Next:
-- Conduct first-user JTBD test: install Letterbot on 3 real machines outside dev
-  environment, observe where users get stuck, collect friction points.
-- After JTBD: v28 shadow engine promotion (deadlock_detector → real pipeline).
+- Run Windows smoke checks for update_and_run.bat + run_mailbot.bat on a real host (Notepad reopen flow + exit code handling).
+- Continue planned JTBD installs on 3 real machines and collect onboarding friction points.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/tests/test_config_bootstrap.py
+- tests/test_launcher_warning_first.py
 - mailbot_v26/account_identity.py
 - mailbot_v26/tests/test_account_identity.py
 - start_mailbot.bat

@@ -48,6 +48,20 @@ def _build_parser() -> argparse.ArgumentParser:
         default="mailbot_v26/config",
         help="Config directory (default: mailbot_v26/config).",
     )
+    ready_parser = subparsers.add_parser(
+        "config-ready",
+        help="Check minimal readiness for 2-file mode startup.",
+    )
+    ready_parser.add_argument(
+        "--config-dir",
+        default="mailbot_v26/config",
+        help="Config directory (default: mailbot_v26/config).",
+    )
+    ready_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print readiness report.",
+    )
     subparsers.add_parser("backup", help="Create a data backup archive.")
 
     restore_parser = subparsers.add_parser("restore", help="Restore data from a backup archive.")
@@ -103,6 +117,11 @@ def _run() -> None:
             from mailbot_v26.tools.config_bootstrap import run_validate_config
 
             sys.exit(run_validate_config(Path(args.config_dir), compat=bool(args.compat), strict=True))
+
+        if args.command == "config-ready":
+            from mailbot_v26.tools.config_bootstrap import run_config_ready
+
+            sys.exit(run_config_ready(Path(args.config_dir), verbose=bool(args.verbose)))
 
         if args.command == "backup":
             from mailbot_v26.tools.backup import run_backup
