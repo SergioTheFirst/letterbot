@@ -8,6 +8,21 @@ def test_run_mailbot_bat_does_not_block_on_doctor_warning() -> None:
     assert "exit /b 1" not in content.split("Running doctor checks", 1)[1].split("Running config validation", 1)[0]
 
 
+def test_run_mailbot_bat_uses_python_readiness_check_and_recheck() -> None:
+    content = Path("run_mailbot.bat").read_text(encoding="utf-8")
+    assert "findstr /m \"CHANGE_ME\"" not in content
+    assert content.count("-m mailbot_v26 config-ready") >= 2
+    assert "start /wait notepad.exe" in content
+    assert "exit /b 2" in content
+
+
+def test_update_and_run_handles_config_not_ready_exit_code() -> None:
+    content = Path("update_and_run.bat").read_text(encoding="utf-8")
+    assert "set \"RUN_EXIT=%ERRORLEVEL%\"" in content
+    assert "did not start: configuration is not ready" in content
+    assert "exit /b %RUN_EXIT%" in content
+
+
 def test_install_and_run_calls_migrate_config() -> None:
     content = Path("install_and_run.bat").read_text(encoding="utf-8")
     assert "-m mailbot_v26 migrate-config" in content

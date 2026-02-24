@@ -49,11 +49,14 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo Starting Letterbot via run_mailbot.bat...
 call "%REPO_ROOT%run_mailbot.bat"
-if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Letterbot terminated with errors.
-) else (
+set "RUN_EXIT=%ERRORLEVEL%"
+if "%RUN_EXIT%"=="0" (
     echo Letterbot finished.
+) else if "%RUN_EXIT%"=="2" (
+    echo [WARN] Letterbot did not start: configuration is not ready.
+) else (
+    echo [ERROR] Letterbot terminated with errors.
 )
 
 pause
-exit /b %ERRORLEVEL%
+exit /b %RUN_EXIT%

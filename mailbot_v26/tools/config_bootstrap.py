@@ -15,6 +15,9 @@ from mailbot_v26.config_yaml import (
 )
 
 
+SYSTEM_SECTIONS = {"telegram", "cloudflare", "gigachat", "llm"}
+
+
 SETTINGS_TEMPLATE = """[general]
 check_interval = 120
 max_email_mb = 15
@@ -172,7 +175,7 @@ min_trend_samples = 2
 
 ACCOUNTS_TEMPLATE = """[example_account]
 ; account_id rules: lowercase, [a-z0-9_], no spaces.
-; For Windows login use domain\\user (example: HQ\\User).
+; For Windows login use domain\\user without quotes (example: HQ\\MedvedevSS).
 login = user@example.com
 password = CHANGE_ME
 host = imap.example.com
@@ -305,24 +308,110 @@ def run_migrate_config(base_dir: Path = CONFIG_DIR) -> None:
     for path in result["backups"]:
         print(f"BACKUP: {path}")
 
+
+def _is_placeholder(value: str) -> bool:
+    token = value.strip()
+    return not token or token == "CHANGE_ME"
+
+
+def _is_imap_section(section_name: str) -> bool:
+    return section_name.lower() not in SYSTEM_SECTIONS
+
+
+def check_config_ready(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str], list[str]]:
+    critical: list[str] = []
+    warnings: list[str] = []
+
+    accounts_path = base_dir / "accounts.ini"
+    if not accounts_path.exists():
+        critical.append("Missing accounts.ini")
+        return False, critical, warnings
+
+    parser = read_user_ini_with_defaults(
+        accounts_path,
+        scope_label="config-ready accounts.ini",
+    )
+    if not parser.sections():
+        critical.append("accounts.ini has no sections")
+        return False, critical, warnings
+
+    has_valid_imap_account = False
+    for section_name in parser.sections():
+        if not _is_imap_section(section_name):
+            continue
+
+        if not ACCOUNT_ID_PATTERN.fullmatch(section_name):
+            critical.append(
+                f"Invalid IMAP account section '{section_name}': use lowercase [a-z0-9_], no spaces"
+            )
+            continue
+
+        section = parser[section_name]
+        missing = [
+            key
+            for key in ("login", "password", "host", "port", "use_ssl")
+            if _is_placeholder(section.get(key, ""))
+        ]
+        if missing:
+            critical.append(f"[{section_name}] missing required fields: {', '.join(missing)}")
+            continue
+
+        try:
+            port = section.getint("port")
+            if not (1 <= port <= 65535):
+                critical.append(f"[{section_name}] port must be between 1 and 65535")
+                continue
+        except ValueError:
+            critical.append(f"[{section_name}] port must be an integer")
+            continue
+
+        try:
+            section.getboolean("use_ssl")
+        except ValueError:
+            critical.append(f"[{section_name}] use_ssl must be true/false")
+            continue
+
+        has_valid_imap_account = True
+
+    if not has_valid_imap_account:
+        critical.append("No ready IMAP account found in accounts.ini")
+
+    telegram_section = parser["telegram"] if parser.has_section("telegram") else None
+    if telegram_section is None or _is_placeholder(telegram_section.get("bot_token", "")):
+        warnings.append("[telegram] bot_token is not configured (Telegram delivery may be disabled)")
+
+    return not critical, critical, warnings
+
+
+def run_config_ready(base_dir: Path = CONFIG_DIR, *, verbose: bool = False) -> int:
+    ready, critical, warnings = check_config_ready(base_dir)
+    if verbose:
+        print("config-ready: readiness report")
+        print(f"STATUS: {'OK' if ready else 'NOT_READY'}")
+        for item in critical:
+            print(f"CRITICAL: {item}")
+        for item in warnings:
+            print(f"WARN: {item}")
+    return 0 if ready else 2
+
 def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
-    errors: list[str] = []
+    issues: list[str] = []
 
     settings_path = base_dir / "settings.ini"
     legacy_settings_path = base_dir / "config.ini"
     accounts_path = base_dir / "accounts.ini"
 
     if not base_dir.exists():
-        errors.append(f"Config directory not found: {base_dir}")
-        return False, errors
+        issues.append(f"Config directory not found: {base_dir}")
+        return False, issues
 
     if not settings_path.exists() and not legacy_settings_path.exists():
-        errors.append("Missing settings.ini (or legacy config.ini)")
+        issues.append("Missing settings.ini (or legacy config.ini)")
     if not accounts_path.exists():
-        errors.append("Missing accounts.ini")
+        issues.append("Missing accounts.ini")
 
     if not accounts_path.exists():
-        return False, errors
+        return False, issues
 
     parser = read_user_ini_with_defaults(
         accounts_path,
@@ -330,45 +419,84 @@ def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
     )
 
     if not parser.sections():
-        errors.append("accounts.ini has no account sections")
-        return False, errors
+        issues.append("accounts.ini has no account sections")
+        return False, issues
+
+    has_imap_section = False
 
     for section_name in parser.sections():
+        section = parser[section_name]
+        lowered = section_name.lower()
+
+        if lowered == "telegram":
+            if _is_placeholder(section.get("bot_token", "")):
+                issues.append("[telegram] bot_token is not configured")
+            continue
+
+        if lowered == "cloudflare":
+            if _is_placeholder(section.get("account_id", "")):
+                issues.append("[cloudflare] account_id is not configured")
+            if _is_placeholder(section.get("api_token", "")):
+                issues.append("[cloudflare] api_token is not configured")
+            continue
+
+        if lowered == "gigachat":
+            if _is_placeholder(section.get("api_key", "")):
+                issues.append("[gigachat] api_key is not configured")
+            continue
+
+        if lowered == "llm":
+            if _is_placeholder(section.get("primary", "")):
+                issues.append("[llm] primary is not configured")
+            if _is_placeholder(section.get("fallback", "")):
+                issues.append("[llm] fallback is not configured")
+            continue
+
+        has_imap_section = True
         if not ACCOUNT_ID_PATTERN.fullmatch(section_name):
-            errors.append(
+            issues.append(
                 f"Invalid account_id '{section_name}': use lowercase [a-z0-9_], no spaces"
             )
             continue
 
-        section = parser[section_name]
-
         host = section.get("host", "").strip()
         if not host:
-            errors.append(f"[{section_name}] host is required")
+            issues.append(f"[{section_name}] host is required")
+
+        login = section.get("login", "").strip()
+        if not login:
+            issues.append(f"[{section_name}] login is required")
+
+        password = section.get("password", "").strip()
+        if not password:
+            issues.append(f"[{section_name}] password is required")
 
         if "port" not in section:
-            errors.append(f"[{section_name}] port is required")
+            issues.append(f"[{section_name}] port is required")
         else:
             try:
                 port = section.getint("port")
                 if not (1 <= port <= 65535):
-                    errors.append(f"[{section_name}] port must be between 1 and 65535")
+                    issues.append(f"[{section_name}] port must be between 1 and 65535")
             except ValueError:
-                errors.append(f"[{section_name}] port must be an integer")
+                issues.append(f"[{section_name}] port must be an integer")
 
         if "use_ssl" not in section:
-            errors.append(f"[{section_name}] use_ssl is required (true/false)")
+            issues.append(f"[{section_name}] use_ssl is required (true/false)")
         else:
             try:
                 section.getboolean("use_ssl")
             except ValueError:
-                errors.append(f"[{section_name}] use_ssl must be true/false")
+                issues.append(f"[{section_name}] use_ssl must be true/false")
 
         telegram_chat_id = section.get("telegram_chat_id", "").strip()
         if not telegram_chat_id:
-            errors.append(f"[{section_name}] telegram_chat_id is required")
+            issues.append(f"[{section_name}] telegram_chat_id is recommended for Telegram delivery")
 
-    return not errors, errors
+    if not has_imap_section:
+        issues.append("accounts.ini has no IMAP account sections")
+
+    return not issues, issues
 
 
 def _resolve_yaml_config_path(base_dir: Path = CONFIG_DIR) -> Path | None:
