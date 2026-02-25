@@ -15,7 +15,7 @@
 3) Распакуйте архив и запустите run_dist.bat или MailBot.exe.
 
 ## Доступ по локальной сети
-1) Настройки web_ui задаются в settings.ini (секция [web_ui]).
+1) Настройки Web задаются в settings.ini (секция [web]).
 2) Перезапустите Letterbot.
 3) Убедитесь, что Windows Firewall разрешает входящие подключения на выбранный порт.
 
@@ -27,3 +27,11 @@
 Не открывайте `http://0.0.0.0:8787/` в браузере. Используйте `http://<IPv4_вашего_ПК>:8787/`.
 
 Если LAN-страница не открывается, добавьте входящее правило Firewall: `netsh advfirewall firewall add rule name="Letterbot Web UI 8787" protocol=TCP dir=in localport=8787 action=allow`
+
+
+Пример смены порта в settings.ini:
+```ini
+[web]
+host = 127.0.0.1
+port = 8790
+```

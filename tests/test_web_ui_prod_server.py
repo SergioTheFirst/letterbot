@@ -23,7 +23,7 @@ def test_web_ui_main_fails_cleanly_when_waitress_missing(monkeypatch: pytest.Mon
     monkeypatch.setattr(web_app, "require_runtime_for", lambda mode="runtime": (_ for _ in ()).throw(
         deps.DependencyError("Missing dependency: waitress. Install: python -m pip install waitress")
     ) if mode == "web_ui_prod" else None)
-    monkeypatch.setattr(web_app, "_resolve_yaml_config_path", lambda _path: Path("config.yaml"))
+    monkeypatch.setattr(web_app, "_resolve_yaml_config_path", lambda _path, _config_dir: Path("config.yaml"))
     monkeypatch.setattr(
         web_app,
         "_load_web_ui_settings",

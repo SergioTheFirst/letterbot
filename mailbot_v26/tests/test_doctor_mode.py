@@ -93,3 +93,28 @@ def test_doctor_two_file_mode_skips_legacy_yaml_and_keys_warnings(
     assert "Optional legacy config.yaml" not in output
     assert all(entry.component != "config.yaml" for entry in report.entries)
     assert all(entry.component != "keys.ini" for entry in report.entries)
+
+
+def test_doctor_reports_web_settings_and_warns_when_port_busy(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval=120\n[web]\nhost=127.0.0.1\nport=8787\n", encoding="utf-8")
+    (tmp_path / "accounts.ini").write_text(
+        "[acc]\nlogin=user@example.com\npassword=p\nhost=imap.example.com\ntelegram_chat_id=1\n\n"
+        "[telegram]\nbot_token=t\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(doctor, "require_runtime_for", lambda _mode: None)
+    monkeypatch.setattr(doctor, "_check_dependencies", lambda: doctor.DoctorEntry("Dependencies", "OK", "stub"))
+    monkeypatch.setattr(doctor, "_check_llm", lambda _base_dir: [doctor.DoctorEntry("LLM", "OK", "stub")])
+    monkeypatch.setattr(doctor, "_check_imap", lambda _accounts: [doctor.DoctorEntry("IMAP", "OK", "stub")])
+    monkeypatch.setattr(doctor, "_is_port_busy", lambda _host, _port: True)
+    monkeypatch.setattr(doctor, "ping_telegram", lambda _token: (True, "ok"))
+    monkeypatch.setattr(doctor, "send_telegram", lambda _payload: DeliveryResult(delivered=True, retryable=False, error=None))
+
+    report = doctor.run_doctor(config_dir=tmp_path)
+
+    assert any(entry.component == "web (settings.ini)" and "host=127.0.0.1; port=8787" in entry.details for entry in report.entries)
+    assert any(entry.component == "web port availability" and entry.status == "WARN" for entry in report.entries)

@@ -83,6 +83,14 @@ class MaintenanceConfig:
 
 
 @dataclass
+class WebConfig:
+    """Web UI bind settings."""
+
+    host: str
+    port: int
+
+
+@dataclass
 class BotConfig:
     """Aggregate configuration bundle."""
 
@@ -96,6 +104,7 @@ class BotConfig:
     maintenance: MaintenanceConfig = field(
         default_factory=lambda: MaintenanceConfig(maintenance_mode=False)
     )
+    web: WebConfig = field(default_factory=lambda: WebConfig(host="127.0.0.1", port=8787))
     llm_call: Optional[Callable[[str], str]] = None
 
 
@@ -350,6 +359,39 @@ def load_maintenance_config(base_dir: Path = CONFIG_DIR) -> MaintenanceConfig:
         return MaintenanceConfig(maintenance_mode=False)
 
 
+def load_web_config(base_dir: Path = CONFIG_DIR) -> WebConfig:
+    parser = _read_config_file(_resolve_settings_path(base_dir))
+
+    host = "127.0.0.1"
+    port = 8787
+
+    if "web" in parser:
+        section = parser["web"]
+        host = str(section.get("host", fallback=host)).strip() or host
+        try:
+            parsed_port = section.getint("port", fallback=port)
+            if 1 <= parsed_port <= 65535:
+                port = parsed_port
+            else:
+                _LOGGER.warning("Invalid [web] port out of range (%s), using default %s", parsed_port, port)
+        except ValueError as exc:
+            _LOGGER.warning("Invalid [web] port value, using default %s: %s", port, exc)
+    elif "web_ui" in parser:
+        # Legacy fallback for config.ini users.
+        section = parser["web_ui"]
+        host = str(section.get("bind", fallback=host)).strip() or host
+        try:
+            parsed_port = section.getint("port", fallback=port)
+            if 1 <= parsed_port <= 65535:
+                port = parsed_port
+            else:
+                _LOGGER.warning("Invalid [web_ui] port out of range (%s), using default %s", parsed_port, port)
+        except ValueError as exc:
+            _LOGGER.warning("Invalid [web_ui] port value, using default %s: %s", port, exc)
+
+    return WebConfig(host=host, port=port)
+
+
 def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
     """Load and validate all configuration files.
 
@@ -362,6 +404,7 @@ def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
     general = load_general_config(base_dir)
     ingest = load_ingest_config(base_dir)
     maintenance = load_maintenance_config(base_dir)
+    web = load_web_config(base_dir)
     accounts = load_accounts_config(base_dir)
     keys = load_keys_config(base_dir)
     storage = load_storage_config(base_dir)
@@ -369,6 +412,7 @@ def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
         general=general,
         ingest=ingest,
         maintenance=maintenance,
+        web=web,
         accounts=accounts,
         keys=keys,
         storage=storage,
@@ -383,6 +427,7 @@ __all__ = [
     "GeneralConfig",
     "IngestConfig",
     "MaintenanceConfig",
+    "WebConfig",
     "InvalidAccountIdError",
     "KeysConfig",
     "StorageConfig",
@@ -392,6 +437,7 @@ __all__ = [
     "load_general_config",
     "load_ingest_config",
     "load_maintenance_config",
+    "load_web_config",
     "load_keys_config",
     "load_storage_config",
     "resolve_account_scope",

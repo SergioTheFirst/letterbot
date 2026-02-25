@@ -34,6 +34,10 @@ maintenance_mode = 0
 [storage]
 db_path = data/mailbot.sqlite
 
+[web]
+host = 127.0.0.1
+port = 8787
+
 [llm]
 primary = cloudflare
 fallback = cloudflare

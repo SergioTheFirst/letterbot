@@ -6,6 +6,7 @@ import importlib
 import ipaddress
 import logging
 import os
+import socket
 import sqlite3
 import sys
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from mailbot_v26.config_loader import (
     load_general_config,
     load_keys_config,
     load_storage_config,
+    load_web_config,
 )
 from mailbot_v26.config_yaml import ConfigError as YamlConfigError
 from mailbot_v26.config_yaml import build_bot_config
@@ -121,22 +123,14 @@ def run_doctor(config_dir: Path | None = None) -> DoctorReport:
 
 
 def print_lan_url(config_dir: Path | None = None) -> int:
-    raw, _config, errors = _load_doctor_bot_config(config_dir)
-    if errors:
-        for error in errors:
-            print(error)
-        return 2
-    web_ui = raw.get("web_ui") if isinstance(raw.get("web_ui"), dict) else {}
-    enabled = bool(web_ui.get("enabled", False))
-    bind = str(web_ui.get("bind", "127.0.0.1")).strip() or "127.0.0.1"
-    port = int(web_ui.get("port", 8080))
-    if not enabled:
-        print("Web UI disabled in config. Enable web_ui.enabled=true.")
-        return 2
+    base_dir = config_dir or CONFIG_DIR
+    web = load_web_config(base_dir)
+    bind = web.host
+    port = web.port
 
     if _is_loopback_bind(bind):
         print(f"Local only: http://127.0.0.1:{port}/")
-        print("Not reachable from LAN. Set bind: '0.0.0.0' (or your LAN IP) to allow LAN access.")
+        print("Not reachable from LAN. Set [web] host = 0.0.0.0 (or your LAN IP) in settings.ini.")
         return 0
 
     if bind == "0.0.0.0":
@@ -299,6 +293,24 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
     except ConfigError as exc:
         entries.append(DoctorEntry("storage", "FAIL", str(exc)))
 
+    try:
+        web = load_web_config(base_dir)
+        data["web_host"] = web.host
+        data["web_port"] = web.port
+        entries.append(DoctorEntry("web (settings.ini)", "OK", f"host={web.host}; port={web.port}"))
+        if _is_port_busy(web.host, web.port):
+            entries.append(
+                DoctorEntry(
+                    "web port availability",
+                    "WARN",
+                    f"Порт {web.port} занят. Откройте mailbot_v26/config/settings.ini и измените [web] port = ...",
+                )
+            )
+        else:
+            entries.append(DoctorEntry("web port availability", "OK", "порт свободен"))
+    except ConfigError as exc:
+        entries.append(DoctorEntry("web (settings.ini)", "WARN", str(exc)))
+
     accounts_entry, accounts = _validate_accounts_ini(base_dir)
     entries.append(accounts_entry)
     data["accounts"] = accounts
@@ -412,6 +424,18 @@ def _resolve_report_chat_id(data: dict[str, object]) -> str | None:
         if chat_id:
             return chat_id
     return None
+
+
+def _is_port_busy(host: str, port: int) -> bool:
+    if not host:
+        host = "127.0.0.1"
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind((host, int(port)))
+        return False
+    except OSError:
+        return True
 
 
 def _resolve_yaml_config_path(config_dir: Path | None) -> Path | None:

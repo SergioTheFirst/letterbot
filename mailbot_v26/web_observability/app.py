@@ -50,7 +50,8 @@ except ModuleNotFoundError:
 
     USING_FLASK_STUB = True
 
-from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config
+from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config, load_web_config
+from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.config_yaml import (
     ConfigError as YamlConfigError,
@@ -1876,19 +1877,13 @@ def _is_loopback_bind(bind: str) -> bool:
         return False
 
 
-def _resolve_yaml_config_path(config_path: Path | None) -> Path:
+def _resolve_yaml_config_path(config_path: Path | None, config_dir: Path) -> Path:
     if config_path is not None:
         return config_path
-    base_dir = Path(__file__).resolve().parent.parent
-    candidates = [
-        base_dir / "config.yaml",
-        base_dir.parent / "config.yaml",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    expected = " or ".join(str(candidate) for candidate in candidates)
-    raise RuntimeError(f"config.yaml not found. Expected at {expected}.")
+    resolved = resolve_config_paths(config_dir)
+    if resolved.yaml_path is not None:
+        return resolved.yaml_path
+    raise RuntimeError(f"config.yaml not found in config dir: {resolved.config_dir}")
 
 
 def _scrub_pii_line(line: str) -> str:
@@ -4387,18 +4382,21 @@ def main() -> None:
     parser.add_argument("--db", type=Path, help="Path to SQLite database")
     parser.add_argument("--config", type=Path, default=CONFIG_DIR, help="Config directory")
     parser.add_argument("--config-yaml", type=Path, help="Path to config.yaml")
-    parser.add_argument("--bind", help="Bind address (default from config.yaml)")
-    parser.add_argument("--port", type=int, help="Port to listen on")
+    parser.add_argument("--bind", help="Bind address (default from settings.ini [web].host)")
+    parser.add_argument("--port", type=int, help="Port to listen on (default from settings.ini [web].port)")
     args = parser.parse_args()
 
-    config_path = _resolve_yaml_config_path(args.config_yaml)
+    config_dir = args.config if args.config else CONFIG_DIR
+    config_path = _resolve_yaml_config_path(args.config_yaml, config_dir)
     web_ui = _load_web_ui_settings(config_path)
     support_settings = _load_support_settings(config_path)
     if not web_ui.enabled:
         raise RuntimeError("web_ui.enabled=false: refusing to start Web UI")
 
-    bind_address = args.bind or web_ui.bind or "127.0.0.1"
-    port = args.port or web_ui.port or 8080
+    web_runtime = load_web_config(config_dir)
+
+    bind_address = args.bind or web_runtime.host or web_ui.bind or "127.0.0.1"
+    port = args.port or web_runtime.port or web_ui.port or 8787
     if not _is_loopback_bind(bind_address):
         if not web_ui.allow_lan:
             raise RuntimeError("web_ui.allow_lan=false: bind outside loopback refused")
@@ -4419,7 +4417,6 @@ def main() -> None:
     if web_ui.prod_server:
         require_runtime_for("web_ui_prod")
 
-    config_dir = args.config if args.config else CONFIG_DIR
     secret_key, attention_cost = _load_web_ui_secrets(config_dir)
     password = os.environ.get("WEB_PASSWORD") or web_ui.password
 
@@ -4450,19 +4447,26 @@ def main() -> None:
         web_ui_port=int(port),
         support_settings=support_settings,
     )
-    if web_ui.prod_server:
-        from waitress import serve
+    try:
+        if web_ui.prod_server:
+            from waitress import serve
 
-        serve(app, host=str(bind_address), port=int(port))
-        return
+            serve(app, host=str(bind_address), port=int(port))
+            return
 
-    app.run(
-        host=str(bind_address),
-        port=int(port),
-        debug=False,
-        use_reloader=False,
-        threaded=True,
-    )
+        app.run(
+            host=str(bind_address),
+            port=int(port),
+            debug=False,
+            use_reloader=False,
+            threaded=True,
+        )
+    except OSError as exc:
+        if "Address already in use" in str(exc):
+            print(
+                f"[ERROR] Порт {port} занят. Откройте mailbot_v26/config/settings.ini и измените [web] port = ..."
+            )
+        raise
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-25: added configurable web host/port via settings.ini [web] (2-file mode), wired web/runtime launcher defaults to settings.ini with legacy config.ini fallback, added non-fatal busy-port DEGRADED_NO_WEB stack behavior + actionable guidance, and doctor web host/port + port-availability WARN reporting with tests.
 - 2026-02-25: fixed 2-file LLM regression for startup-health compatibility: router keeps accounts.ini precedence, but silently uses legacy keys.ini secrets when accounts.ini lacks provider secrets; startup health + llm loader regression tests are green.
 - 2026-02-25: completed 2-file LLM source-of-truth tightening: in two-file mode llm primary/fallback mapping is read from accounts.ini, gigachat/cloudflare secrets are sourced from accounts.ini, and legacy keys.ini flow remains for legacy mode; regression tests added.
 - 2026-02-25: hardened 2-file startup UX: update_and_run.bat is fail-open for git/pip and treats config-not-ready as guided setup (exit 0), LLM router now reads Cloudflare credentials from accounts.ini in two-file mode without keys.ini warning noise; launcher/LLM regression tests updated.
@@ -101,12 +102,11 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- update_and_run.bat runs fail-open (best-effort git/pip) and does not treat setup-not-ready as crash.
-- In 2-file mode, LLM routing remains accounts.ini-first; secrets are accounts.ini-first with silent keys.ini compatibility fallback only when accounts.ini secret is absent.
-- In 2-file mode, LLM routing (primary/fallback) and secrets are sourced from accounts.ini; legacy keys.ini remains only for legacy mode.
+- 2-file mode supports web host/port in settings.ini [web]; stack launcher skips web with DEGRADED_NO_WEB when configured port is occupied.
+- Doctor reports configured web host/port and best-effort port occupancy as WARN (warning-first).
 Next:
-- Run Windows smoke checks for update_and_run.bat + run_mailbot.bat on a real host (Notepad reopen flow + exit code handling, verify setup returns code 0 and no 2-file LLM keys.ini noise).
-- Continue planned JTBD installs on 3 real machines and collect onboarding friction points.
+- Run Windows smoke checks for run_mailbot.bat/update_and_run.bat and verify "Starting web on http://host:port" reflects settings.ini [web].
+- Validate real-host behavior when web port is occupied (expect DEGRADED_NO_WEB + actionable hint, worker continues).
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

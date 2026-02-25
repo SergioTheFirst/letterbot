@@ -10,3 +10,7 @@ db_path = data/mailbot.sqlite
 [features]
 enable_daily_digest = true
 enable_weekly_digest = false
+
+[web]
+host = 127.0.0.1
+port = 8787
