@@ -294,11 +294,20 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         logger=logger,
         scope_label="LLM config",
     )
-    keys = read_user_ini_with_defaults(
-        keys_path,
-        logger=logger,
-        scope_label="LLM keys",
-    )
+    if resolved.two_file_mode:
+        # In 2-file mode all critical credentials live in accounts.ini.
+        # Avoid legacy keys.ini dependency/noise.
+        keys = read_user_ini_with_defaults(
+            resolved.accounts_path,
+            logger=logger,
+            scope_label="LLM credentials (accounts.ini)",
+        )
+    else:
+        keys = read_user_ini_with_defaults(
+            keys_path,
+            logger=logger,
+            scope_label="LLM keys",
+        )
 
     llm_section = parser["llm"] if "llm" in parser else parser["DEFAULT"]
     gigachat_section = parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
