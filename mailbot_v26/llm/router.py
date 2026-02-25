@@ -299,26 +299,53 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         logger=logger,
         scope_label="LLM credentials (accounts.ini)",
     )
-    if resolved.two_file_mode:
-        # 2-file mode source-of-truth: critical routing + secrets from accounts.ini.
-        llm_source = accounts_parser
-        creds_source = accounts_parser
-    else:
-        keys_path = resolved.keys_path
+    keys_parser = configparser.ConfigParser()
+    if resolved.keys_path.exists():
         keys_parser = read_user_ini_with_defaults(
-            keys_path,
+            resolved.keys_path,
             logger=logger,
             scope_label="LLM keys",
         )
-        llm_source = parser
-        creds_source = keys_parser
 
-    llm_section = llm_source["llm"] if "llm" in llm_source else parser["llm"] if "llm" in parser else parser["DEFAULT"]
+    if resolved.two_file_mode:
+        # 2-file mode source-of-truth: routing + secrets from accounts.ini.
+        # Compatibility: if a secret is still only in legacy keys.ini, consume it when present.
+        llm_section = (
+            accounts_parser["llm"]
+            if "llm" in accounts_parser
+            else parser["llm"]
+            if "llm" in parser
+            else parser["DEFAULT"]
+        )
+        cloudflare_creds_section = (
+            accounts_parser["cloudflare"]
+            if "cloudflare" in accounts_parser
+            else keys_parser["cloudflare"]
+            if "cloudflare" in keys_parser
+            else accounts_parser["DEFAULT"]
+        )
+        gigachat_creds_section = (
+            accounts_parser["gigachat"]
+            if "gigachat" in accounts_parser
+            else keys_parser["gigachat"]
+            if "gigachat" in keys_parser
+            else parser["gigachat"]
+            if "gigachat" in parser
+            else parser["DEFAULT"]
+        )
+    else:
+        llm_section = parser["llm"] if "llm" in parser else parser["DEFAULT"]
+        cloudflare_creds_section = (
+            keys_parser["cloudflare"]
+            if "cloudflare" in keys_parser
+            else keys_parser["DEFAULT"]
+        )
+        gigachat_creds_section = parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
+
     gigachat_section = parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
     gigachat_creds_section = accounts_parser["gigachat"] if "gigachat" in accounts_parser else gigachat_section
     cloudflare_section = parser["cloudflare"] if "cloudflare" in parser else parser["DEFAULT"]
     safety_section = parser["llm_safety"] if "llm_safety" in parser else parser["DEFAULT"]
-    keys_cloudflare = creds_source["cloudflare"] if "cloudflare" in creds_source else creds_source["DEFAULT"]
 
     return LLMRouterConfig(
         primary=llm_section.get("primary", "cloudflare"),
@@ -330,9 +357,9 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         ),
         gigachat_model=gigachat_section.get("model", "GigaChat"),
         cloudflare_enabled=_get_bool(cloudflare_section, "enabled", True),
-        cloudflare_account_id=keys_cloudflare.get("account_id", ""),
-        cloudflare_api_key=keys_cloudflare.get(
-            "api_key", keys_cloudflare.get("api_token", "")
+        cloudflare_account_id=cloudflare_creds_section.get("account_id", ""),
+        cloudflare_api_key=cloudflare_creds_section.get(
+            "api_key", cloudflare_creds_section.get("api_token", "")
         ),
         cloudflare_model=cloudflare_section.get("model", DEFAULT_CLOUDFLARE_MODEL),
         runtime_flags_path=Path(__file__).resolve().parents[1] / "runtime_flags.json",

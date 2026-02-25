@@ -82,3 +82,25 @@ def test_llm_loader_keeps_legacy_keys_ini_when_not_in_two_file_mode(tmp_path: Pa
     assert loaded.primary == "cloudflare"
     assert loaded.cloudflare_account_id == "legacy_acc"
     assert loaded.cloudflare_api_key == "legacy_token"
+
+
+def test_llm_loader_two_file_mode_uses_legacy_keys_if_accounts_missing_secret(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "settings.ini").write_text(
+        "[llm]\nprimary=cloudflare\nfallback=cloudflare\n",
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text(
+        "[llm]\nprimary=cloudflare\nfallback=cloudflare\n",
+        encoding="utf-8",
+    )
+    (config_dir / "keys.ini").write_text(
+        "[cloudflare]\naccount_id=legacy_acc\napi_token=legacy_token\n",
+        encoding="utf-8",
+    )
+
+    loaded = _load_llm_config(config_dir)
+
+    assert loaded.cloudflare_account_id == "legacy_acc"
+    assert loaded.cloudflare_api_key == "legacy_token"
