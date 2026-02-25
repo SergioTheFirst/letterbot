@@ -288,29 +288,43 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
     config_path = resolved.settings_path
     if not resolved.two_file_mode and not config_path.exists():
         config_path = resolved.legacy_ini_path
-    keys_path = resolved.keys_path
     parser = read_user_ini_with_defaults(
         config_path,
         logger=logger,
         scope_label="LLM config",
     )
-    keys = read_user_ini_with_defaults(
-        keys_path,
-        logger=logger,
-        scope_label="LLM keys",
-    )
 
-    llm_section = parser["llm"] if "llm" in parser else parser["DEFAULT"]
+    accounts_parser = read_user_ini_with_defaults(
+        resolved.accounts_path,
+        logger=logger,
+        scope_label="LLM credentials (accounts.ini)",
+    )
+    if resolved.two_file_mode:
+        # 2-file mode source-of-truth: critical routing + secrets from accounts.ini.
+        llm_source = accounts_parser
+        creds_source = accounts_parser
+    else:
+        keys_path = resolved.keys_path
+        keys_parser = read_user_ini_with_defaults(
+            keys_path,
+            logger=logger,
+            scope_label="LLM keys",
+        )
+        llm_source = parser
+        creds_source = keys_parser
+
+    llm_section = llm_source["llm"] if "llm" in llm_source else parser["llm"] if "llm" in parser else parser["DEFAULT"]
     gigachat_section = parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
+    gigachat_creds_section = accounts_parser["gigachat"] if "gigachat" in accounts_parser else gigachat_section
     cloudflare_section = parser["cloudflare"] if "cloudflare" in parser else parser["DEFAULT"]
     safety_section = parser["llm_safety"] if "llm_safety" in parser else parser["DEFAULT"]
-    keys_cloudflare = keys["cloudflare"] if "cloudflare" in keys else keys["DEFAULT"]
+    keys_cloudflare = creds_source["cloudflare"] if "cloudflare" in creds_source else creds_source["DEFAULT"]
 
     return LLMRouterConfig(
         primary=llm_section.get("primary", "cloudflare"),
         fallback=llm_section.get("fallback", "cloudflare"),
         gigachat_enabled=_get_bool(gigachat_section, "enabled", False),
-        gigachat_api_key=gigachat_section.get("api_key", ""),
+        gigachat_api_key=gigachat_creds_section.get("api_key", ""),
         gigachat_base_url=gigachat_section.get(
             "base_url", "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
         ),
