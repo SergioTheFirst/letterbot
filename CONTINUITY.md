@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-25: completed 2-file LLM source-of-truth tightening: in two-file mode llm primary/fallback mapping is read from accounts.ini, gigachat/cloudflare secrets are sourced from accounts.ini, and legacy keys.ini flow remains for legacy mode; regression tests added.
 - 2026-02-25: hardened 2-file startup UX: update_and_run.bat is fail-open for git/pip and treats config-not-ready as guided setup (exit 0), LLM router now reads Cloudflare credentials from accounts.ini in two-file mode without keys.ini warning noise; launcher/LLM regression tests updated.
 - 2026-02-24: fixed Windows 2-file launcher readiness flow: run_mailbot.bat now uses python `config-ready` (no global CHANGE_ME grep), re-checks after Notepad, exits 2 when config not ready; validate_config now validates IMAP/system sections separately; update_and_run.bat handles exit code 2 honestly; regression tests added.
 - 2026-02-24: added onboarding gate to run_mailbot.bat — detects CHANGE_ME in
@@ -100,9 +101,9 @@ Done:
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
 - update_and_run.bat runs fail-open (best-effort git/pip) and does not treat setup-not-ready as crash.
-- In 2-file mode, LLM credentials are sourced from accounts.ini; missing keys.ini no longer produces startup warning noise for router loading.
+- In 2-file mode, LLM routing (primary/fallback) and secrets are sourced from accounts.ini; legacy keys.ini remains only for legacy mode.
 Next:
-- Run Windows smoke checks for update_and_run.bat + run_mailbot.bat on a real host (Notepad reopen flow + exit code handling, verify setup returns code 0).
+- Run Windows smoke checks for update_and_run.bat + run_mailbot.bat on a real host (Notepad reopen flow + exit code handling, verify setup returns code 0 and no 2-file LLM keys.ini noise).
 - Continue planned JTBD installs on 3 real machines and collect onboarding friction points.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
