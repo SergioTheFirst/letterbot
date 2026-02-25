@@ -19,10 +19,18 @@ def test_run_mailbot_bat_uses_python_readiness_check_and_recheck() -> None:
 def test_update_and_run_handles_config_not_ready_exit_code() -> None:
     content = Path("update_and_run.bat").read_text(encoding="utf-8")
     assert "set \"RUN_EXIT=%ERRORLEVEL%\"" in content
-    assert "did not start: configuration is not ready" in content
+    assert "setup is incomplete" in content
+    assert "set \"RUN_EXIT=0\"" in content
     assert "exit /b %RUN_EXIT%" in content
 
 
 def test_install_and_run_calls_migrate_config() -> None:
     content = Path("install_and_run.bat").read_text(encoding="utf-8")
     assert "-m mailbot_v26 migrate-config" in content
+
+
+def test_update_and_run_is_fail_open_for_git_and_pip() -> None:
+    content = Path("update_and_run.bat").read_text(encoding="utf-8")
+    assert "Git is not available in PATH. Continuing without update." in content
+    assert "Git pull failed" in content
+    assert "Dependency installation failed. Continuing" in content
