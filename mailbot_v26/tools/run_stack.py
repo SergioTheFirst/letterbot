@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -12,12 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
-from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config
-from mailbot_v26.config_yaml import (
-    ConfigError as YamlConfigError,
-    load_config as load_yaml_config,
-    validate_config as validate_yaml_config,
-)
+from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config, load_web_config
 
 
 @dataclass(frozen=True)
@@ -249,35 +245,20 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_yaml_config_path() -> Path | None:
-    current_dir = Path(__file__).resolve().parent.parent
-    candidates = [
-        current_dir / "config.yaml",
-        current_dir.parent / "config.yaml",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return None
+def _load_web_ui_defaults(config_dir: Path | None) -> tuple[str, int]:
+    resolved = _resolve_config_dir(config_dir)
+    web = load_web_config(resolved)
+    return web.host, web.port
 
 
-def _load_web_ui_defaults() -> tuple[str | None, int | None]:
-    config_path = _resolve_yaml_config_path()
-    if not config_path:
-        return None, None
+def _is_port_busy(host: str, port: int) -> bool:
     try:
-        raw = load_yaml_config(config_path)
-    except (FileNotFoundError, YamlConfigError):
-        return None, None
-    ok, _error = validate_yaml_config(raw)
-    if not ok:
-        return None, None
-    web_ui = raw.get("web_ui")
-    if not isinstance(web_ui, dict):
-        return None, None
-    bind = web_ui.get("bind")
-    port = web_ui.get("port")
-    return (str(bind).strip() if bind else None), (int(port) if port is not None else None)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind((host, int(port)))
+        return False
+    except OSError:
+        return True
 
 
 def main() -> int:
@@ -287,7 +268,7 @@ def main() -> int:
     bind = args.bind
     port = args.port
     if bind is None or port is None:
-        default_bind, default_port = _load_web_ui_defaults()
+        default_bind, default_port = _load_web_ui_defaults(args.config_dir)
         bind = bind or default_bind
         port = port if port is not None else default_port
 
@@ -304,7 +285,7 @@ def main() -> int:
                     config_dir=dry_config_dir,
                     db_path=dry_db_path,
                     bind=bind or "127.0.0.1",
-                    port=port or 8111,
+                    port=port or 8787,
                 )
             ]
         elif args.mode == "doctor":
@@ -317,23 +298,33 @@ def main() -> int:
                     config_dir=dry_config_dir,
                     db_path=dry_db_path,
                     bind=bind or "127.0.0.1",
-                    port=port or 8111,
+                    port=port or 8787,
                 ),
             ]
         for command in commands:
             print(f"{command.name}: {_format_command(command.args)}")
         return 0
 
+    effective_bind = bind or "127.0.0.1"
+    effective_port = port or 8787
+
     commands = build_commands(
         python_exe=python_exe,
         mode=args.mode,
         config_dir=args.config_dir,
         db_path=args.db_path,
-        bind=bind or "127.0.0.1",
-        port=port or 8111,
+        bind=effective_bind,
+        port=effective_port,
     )
 
-    web_url = f"http://{bind or '127.0.0.1'}:{port or 8111}/login"
+    if args.mode == "all" and _is_port_busy(effective_bind, effective_port):
+        print(
+            f"[WARN] DEGRADED_NO_WEB: Порт {effective_port} занят. "
+            "Откройте mailbot_v26/config/settings.ini и измените [web] port = ..."
+        )
+        commands = [command for command in commands if command.name != "web"]
+
+    web_url = f"http://{effective_bind}:{effective_port}/login"
     open_browser = (args.mode in {"all", "web"}) and not args.no_browser
     return _run_processes(
         commands,

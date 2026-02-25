@@ -9,6 +9,7 @@ from mailbot_v26.config_loader import (
     load_general_config,
     load_keys_config,
     load_storage_config,
+    load_web_config,
 )
 
 
@@ -128,3 +129,28 @@ admin_chat_id = 1
     general = load_general_config(tmp_path)
     assert general.check_interval == 120
     assert general.max_zip_uncompressed_mb == 80
+
+
+def test_web_settings_loads_from_settings_ini(tmp_path: Path) -> None:
+    write_file(
+        tmp_path,
+        "settings.ini",
+        """[web]
+host = 0.0.0.0
+port = 9999
+""",
+    )
+    write_file(
+        tmp_path,
+        "accounts.ini",
+        """[acc]
+login = u@example.com
+password = p
+host = imap.example.com
+""",
+    )
+
+    web = load_web_config(tmp_path)
+
+    assert web.host == "0.0.0.0"
+    assert web.port == 9999
