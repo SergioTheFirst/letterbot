@@ -42,10 +42,19 @@ class Storage:
                     error_last TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    telegram_delivered_at TEXT,
                     UNIQUE(account_email, uid)
                 );
                 """
             )
+            email_columns = {
+                str(row[1])
+                for row in self.conn.execute("PRAGMA table_info(emails);").fetchall()
+            }
+            if "telegram_delivered_at" not in email_columns:
+                self.conn.execute(
+                    "ALTER TABLE emails ADD COLUMN telegram_delivered_at TEXT;"
+                )
             self.conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_emails_status
@@ -147,6 +156,34 @@ class Storage:
                 ) VALUES (?, ?, 0, ?, NULL, ?, ?);
                 """,
                 (email_id, stage, not_before, now, now),
+            )
+
+    def find_email_id(self, account_email: str, uid: int) -> int | None:
+        row = self.conn.execute(
+            "SELECT id FROM emails WHERE account_email = ? AND uid = ?;",
+            (account_email, uid),
+        ).fetchone()
+        if not row:
+            return None
+        return int(row[0])
+
+    def is_telegram_delivered(self, email_id: int) -> bool:
+        row = self.conn.execute(
+            "SELECT telegram_delivered_at FROM emails WHERE id = ?;",
+            (email_id,),
+        ).fetchone()
+        return bool(row and row[0])
+
+    def mark_telegram_delivered(self, email_id: int, delivered_at: str | None = None) -> None:
+        ts = delivered_at or self._now()
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE emails
+                SET telegram_delivered_at = ?, updated_at = ?
+                WHERE id = ?;
+                """,
+                (ts, self._now(), email_id),
             )
 
     def claim_next(self, stages: List[str]) -> Dict[str, Any] | None:

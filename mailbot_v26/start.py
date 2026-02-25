@@ -393,6 +393,57 @@ def _emit_contract_event(
         )
 
 
+def _persist_inbound_and_enqueue_parse(
+    *,
+    storage: Storage,
+    account_email: str,
+    uid: int,
+    message_id: str | None,
+    from_email: str | None,
+    from_name: str | None,
+    subject: str | None,
+    received_at: str | None,
+    attachments_count: int,
+    raw_email: bytes,
+    inbound: InboundMessage,
+) -> tuple[int, bool]:
+    find_email_id = getattr(storage, "find_email_id", None)
+    existing_email_id = (
+        find_email_id(account_email, uid)
+        if callable(find_email_id)
+        else None
+    )
+    email_id = storage.upsert_email(
+        account_email=account_email,
+        uid=uid,
+        message_id=message_id,
+        from_email=from_email,
+        from_name=from_name,
+        subject=subject,
+        received_at=received_at,
+        attachments_count=attachments_count,
+    )
+    if existing_email_id is not None:
+        logger.info(
+            "duplicate_ingest_skipped account_email=%s uid=%s email_id=%s",
+            account_email,
+            uid,
+            email_id,
+        )
+        return email_id, False
+
+    ctx = PipelineContext(
+        email_id=email_id,
+        account_email=account_email,
+        uid=uid,
+    )
+    PIPELINE_CACHE[email_id] = ctx
+    remember_raw_email(email_id, raw_email)
+    store_inbound(email_id, inbound)
+    storage.enqueue_stage(email_id, "PARSE")
+    return email_id, True
+
+
 def _process_queue(
     storage: Storage,
     config: BotConfig,
@@ -450,8 +501,17 @@ def _process_queue(
                 storage.mark_done(queue_id)
                 storage.enqueue_stage(email_id, "TG")
             elif stage == "TG":
+                if storage.is_telegram_delivered(email_id):
+                    storage.mark_done(queue_id)
+                    logger.info(
+                        "telegram_duplicate_skipped email_id=%s queue_id=%s",
+                        email_id,
+                        queue_id,
+                    )
+                    continue
                 result = stage_tg(ctx)
                 if result.delivered:
+                    storage.mark_telegram_delivered(email_id)
                     storage.mark_done(queue_id)
                     event_emitter.emit(
                         type="telegram_delivery_succeeded",
@@ -846,7 +906,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                     attachments_count = len(inbound.attachments or [])
 
                                     if storage:
-                                        email_id = storage.upsert_email(
+                                        email_id, enqueued = _persist_inbound_and_enqueue_parse(
+                                            storage=storage,
                                             account_email=account.login,
                                             uid=uid,
                                             message_id=message_id,
@@ -855,17 +916,13 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                             subject=inbound.subject,
                                             received_at=received_at or None,
                                             attachments_count=attachments_count,
+                                            raw_email=raw,
+                                            inbound=inbound,
                                         )
-                                        ctx = PipelineContext(
-                                            email_id=email_id,
-                                            account_email=account.login,
-                                            uid=uid,
-                                        )
-                                        PIPELINE_CACHE[email_id] = ctx
-                                        remember_raw_email(email_id, raw)
-                                        store_inbound(email_id, inbound)
-                                        storage.enqueue_stage(email_id, "PARSE")
-                                        print(f"      │  Enqueued PARSE for email_id={email_id}")
+                                        if enqueued:
+                                            print(f"      │  Enqueued PARSE for email_id={email_id}")
+                                        else:
+                                            print(f"      │  Duplicate ingest skipped for email_id={email_id}")
                                     else:
                                         final_text = processor.process(login, inbound)
                                         if final_text and final_text.strip():
