@@ -343,6 +343,7 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         gigachat_creds_section = parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
 
     gigachat_section = parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
+    gigachat_creds_section = accounts_parser["gigachat"] if "gigachat" in accounts_parser else gigachat_section
     cloudflare_section = parser["cloudflare"] if "cloudflare" in parser else parser["DEFAULT"]
     safety_section = parser["llm_safety"] if "llm_safety" in parser else parser["DEFAULT"]
 

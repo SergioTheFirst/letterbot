@@ -103,6 +103,7 @@ Done:
 Now:
 - update_and_run.bat runs fail-open (best-effort git/pip) and does not treat setup-not-ready as crash.
 - In 2-file mode, LLM routing remains accounts.ini-first; secrets are accounts.ini-first with silent keys.ini compatibility fallback only when accounts.ini secret is absent.
+- In 2-file mode, LLM routing (primary/fallback) and secrets are sourced from accounts.ini; legacy keys.ini remains only for legacy mode.
 Next:
 - Run Windows smoke checks for update_and_run.bat + run_mailbot.bat on a real host (Notepad reopen flow + exit code handling, verify setup returns code 0 and no 2-file LLM keys.ini noise).
 - Continue planned JTBD installs on 3 real machines and collect onboarding friction points.
