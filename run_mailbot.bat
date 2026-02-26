@@ -1,5 +1,5 @@
 @echo off
-setlocal enableextensions
+setlocal enableextensions enabledelayedexpansion
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 
@@ -53,7 +53,7 @@ if %ERRORLEVEL% EQU 2 (
     set /a CONFIG_READY_ATTEMPTS=0
     :CONFIG_READY_LOOP
     set /a CONFIG_READY_ATTEMPTS+=1
-    if %CONFIG_READY_ATTEMPTS% GTR 20 (
+    if !CONFIG_READY_ATTEMPTS! GTR 20 (
         echo [ERROR] Конфигурация всё ещё не готова после 20 попыток. Бот не запущен.
         exit /b 2
     )
@@ -61,7 +61,7 @@ if %ERRORLEVEL% EQU 2 (
 
     "%VENV_PY%" -m mailbot_v26 config-ready --config-dir "%CONFIG_DIR%" --verbose
     if %ERRORLEVEL% EQU 2 (
-        echo [WARN] Попытка %CONFIG_READY_ATTEMPTS% из 20: обязательные поля ещё не заполнены.
+        echo [WARN] Попытка !CONFIG_READY_ATTEMPTS! из 20: обязательные поля ещё не заполнены.
         goto :CONFIG_READY_LOOP
     )
 )

@@ -303,7 +303,7 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
                 DoctorEntry(
                     "web port availability",
                     "WARN",
-                    f"Порт {web.port} занят. Откройте mailbot_v26/config/settings.ini и измените [web] port = ...",
+                    f"Порт {web.port} занят. Откройте {base_dir / 'settings.ini'} и измените [web] port = ...",
                 )
             )
         else:

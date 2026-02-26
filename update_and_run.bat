@@ -19,8 +19,7 @@ if %ERRORLEVEL% NEQ 0 (
     echo [WARN] Git is not available in PATH. Continuing without update.
 ) else (
     echo Checking working tree cleanliness...
-    git diff --quiet --ignore-submodules HEAD --
-    if %ERRORLEVEL% NEQ 0 (
+    for /f %%I in ('git status --porcelain') do (
         echo [WARN] Рабочее дерево не чистое. Обновление отменено, чтобы не потерять изменения.
         echo [WARN] Закоммитьте/сохраните изменения и запустите скрипт снова.
         exit /b 1
