@@ -154,3 +154,27 @@ host = imap.example.com
 
     assert web.host == "0.0.0.0"
     assert web.port == 9999
+
+
+def test_web_settings_default_host_and_port(tmp_path: Path) -> None:
+    write_file(
+        tmp_path,
+        "settings.ini",
+        """[general]
+check_interval = 120
+""",
+    )
+    write_file(
+        tmp_path,
+        "accounts.ini",
+        """[acc]
+login = u@example.com
+password = p
+host = imap.example.com
+""",
+    )
+
+    web = load_web_config(tmp_path)
+
+    assert web.host == "127.0.0.1"
+    assert web.port == 8787
