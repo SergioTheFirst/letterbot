@@ -36,6 +36,7 @@ _CONTEXT_KEYWORDS = (
     "просроч",
     "задерж",
 )
+_SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -178,6 +179,36 @@ def dedup_rendered_lines(lines: Iterable[str]) -> list[str]:
 
 def dedup_rendered_text(text: str) -> str:
     return "\n".join(dedup_rendered_lines(text.splitlines()))
+
+
+def _normalize_subject_compare(text: str | None) -> str:
+    working = (text or "").strip()
+    if not working:
+        return ""
+    working = working.replace("\\", "/")
+    working = re.sub(r"\s+", " ", working)
+    while True:
+        stripped = _SUBJECT_PREFIX_RE.sub("", working).strip()
+        if stripped == working:
+            break
+        working = stripped
+    return working.casefold()
+
+
+def _maybe_drop_duplicate_subject_line(
+    header_subject: str,
+    body_lines: list[str],
+) -> list[str]:
+    if not body_lines:
+        return body_lines
+    first_line = (body_lines[0] or "").strip()
+    if not first_line:
+        return body_lines
+    normalized_subject = _normalize_subject_compare(header_subject)
+    normalized_first = _normalize_subject_compare(first_line)
+    if normalized_subject and normalized_subject == normalized_first:
+        return body_lines[1:]
+    return body_lines
 
 
 def apply_semantic_gates(
@@ -405,10 +436,11 @@ def build_telegram_text(
     action_line: str,
     attachments: list[dict[str, Any]],
 ) -> str:
+    body_lines = _maybe_drop_duplicate_subject_line(subject, [format_main_action(action_line)])
     lines = [
         format_priority_line(priority, from_email),
         format_subject(subject),
-        format_main_action(action_line),
+        *body_lines,
     ]
     attachments_block = format_attachments_block(attachments)
     if attachments_block:
