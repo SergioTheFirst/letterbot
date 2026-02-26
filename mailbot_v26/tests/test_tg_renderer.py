@@ -120,3 +120,51 @@ def test_insights_commitments_internal_duplicates_removed() -> None:
 
     assert fields.insights == ("Риск задержки высокий.",)
     assert fields.commitments == ("Обещал отправить договор завтра.",)
+
+
+def test_tg_render_drops_duplicate_subject_in_body_first_line() -> None:
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="  Счёт   на оплату  ",
+        action_line="счёт на   оплату",
+        attachments=[],
+    )
+
+    assert rendered.count("Счёт") == 1
+
+
+def test_tg_render_keeps_non_duplicate_body_first_line() -> None:
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Счёт",
+        action_line="Оплатить цены",
+        attachments=[],
+    )
+
+    assert "<b><i>Оплатить цены</i></b>" in rendered
+
+
+def test_tg_render_drops_subject_duplicate_with_fw_re_prefix() -> None:
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="FW: Счет",
+        action_line="Re: счет",
+        attachments=[],
+    )
+
+    assert rendered.count("Счет") == 1
+
+
+def test_tg_render_empty_subject_is_stable() -> None:
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="",
+        action_line="",
+        attachments=[],
+    )
+
+    assert "<b>(без темы)</b>" in rendered

@@ -1908,7 +1908,13 @@ def _build_telegram_text(
     safe_subject = escape_tg_html(subject or "(без темы)")
     safe_action = escape_tg_html(_resolve_action_line(fields.action_line))
     safe_summary = escape_tg_html(fields.summary or "")
-    lines = [f"{priority} от {safe_sender} — {safe_subject}", safe_action]
+    body_lines = tg_renderer._maybe_drop_duplicate_subject_line(
+        subject,
+        [fields.action_line],
+    )
+    lines = [f"{priority} от {safe_sender} — {safe_subject}"]
+    if body_lines:
+        lines.append(escape_tg_html(body_lines[0]))
     if safe_summary:
         lines.append(safe_summary)
     if attachment_summary is None and attachments:

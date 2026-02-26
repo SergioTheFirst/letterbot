@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-26: Telegram renderer now removes duplicate first body line when it matches header subject after normalization (trim/space-collapse/casefold/FW-RE chain stripping, including Cyrillic-safe compare); added renderer+processor regression tests for duplicate/non-duplicate/FW-RE/empty-subject cases.
 - 2026-02-26: fixed Windows launcher pipe-parsing crash by removing `delims=|`/f-string pipe output from run_mailbot.bat, switched install_and_run.bat and update_and_run.bat to direct `mailbot_v26.doctor` + `mailbot_v26.start` invocations with explicit config-dir paths, updated settings.ini.example [web] inline docs, and added launcher/config regression tests.
 - 2026-02-26: follow-up hardening after review: fixed batch retry counter expansion in run_mailbot.bat (enabled delayed expansion + !CONFIG_READY_ATTEMPTS!), tightened update_and_run.bat clean-tree check to include untracked files via git status --porcelain, and made doctor web busy-port guidance point to the active config-dir settings.ini path; regression tests updated and full pytest green.
 - 2026-02-26: Windows first-run launcher loop hardened: run_mailbot.bat now re-opens exact CONFIG_DIR\accounts.ini and auto-retries config-ready up to 20 attempts with cancel guidance; update_and_run.bat now updates only on clean working tree via fetch + reset --hard origin/main and passes absolute config-dir to run stack; added tests for start config-dir isolation, run_stack web settings port propagation, and web main busy-port graceful exit.
@@ -106,14 +107,17 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Windows launcher UX and config-dir-first behavior for two-file mode are implemented with targeted regression tests.
-- Web UI main now exits gracefully with actionable message when configured port is occupied.
+- Telegram subject/body first-line dedupe fix is implemented and covered by focused Telegram rendering tests.
 Next:
-- Run full regression and validate Windows manual launcher flow (update_and_run.bat, run_mailbot.bat) on host machine.
+- Run broader regression sweep (`python -m pytest -q`) before release cut.
 - Continue separate hardening task for repeated IMAP UID reappearance (cursor/state persistence path).
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/pipeline/tg_renderer.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/tests/test_tg_renderer.py
+- mailbot_v26/tests/test_telegram_rendering_format.py
 - run_mailbot.bat
 - update_and_run.bat
 - mailbot_v26/web_observability/app.py

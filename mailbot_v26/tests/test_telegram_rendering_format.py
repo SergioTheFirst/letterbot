@@ -58,3 +58,18 @@ def test_full_message_no_duplicate_lines() -> None:
         if "Позвонить клиенту сегодня" in line
     ]
     assert len(matches) == 1
+
+
+def test_processor_format_drops_duplicate_subject_first_body_line_with_fw_re() -> None:
+    rendered = processor._build_telegram_text(
+        priority="🔴",
+        from_email="sender@example.com",
+        subject="FW: Счет",
+        action_line="RE:   счет",
+        body_summary="",
+        body_text="",
+        attachments=[],
+        attachment_summary="",
+    )
+
+    assert rendered.splitlines() == ["🔴 от sender@example.com — FW: Счет"]
