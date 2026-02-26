@@ -18,16 +18,23 @@ where git >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo [WARN] Git is not available in PATH. Continuing without update.
 ) else (
-    echo Fetching repo status...
-    git status -sb
-    if %ERRORLEVEL% NEQ 0 (
-        echo [WARN] Git status failed. Continuing without blocking startup.
+    echo Checking working tree cleanliness...
+    for /f %%I in ('git status --porcelain') do (
+        echo [WARN] Рабочее дерево не чистое. Обновление отменено, чтобы не потерять изменения.
+        echo [WARN] Закоммитьте/сохраните изменения и запустите скрипт снова.
+        exit /b 1
     )
 
-    echo Pulling latest changes...
-    git pull
+    echo Fetching origin/main...
+    git fetch origin main
     if %ERRORLEVEL% NEQ 0 (
-        echo [WARN] Git pull failed ^(no tracking/offline/conflict^). Continuing with local version.
+        echo [WARN] Git fetch failed. Continuing with local version.
+    ) else (
+        echo Resetting to origin/main...
+        git reset --hard origin/main
+        if %ERRORLEVEL% NEQ 0 (
+            echo [WARN] Git reset failed. Continuing with local version.
+        )
     )
 )
 
@@ -48,10 +55,6 @@ call "%REPO_ROOT%run_mailbot.bat"
 set "RUN_EXIT=%ERRORLEVEL%"
 if "%RUN_EXIT%"=="0" (
     echo Letterbot finished.
-) else if "%RUN_EXIT%"=="2" (
-    echo [INFO] Letterbot setup is incomplete. accounts.ini was opened for editing.
-    echo [INFO] Finish required IMAP fields, then run update_and_run.bat again.
-    set "RUN_EXIT=0"
 ) else (
     echo [ERROR] Letterbot terminated with errors.
 )

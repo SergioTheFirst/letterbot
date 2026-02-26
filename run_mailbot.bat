@@ -1,5 +1,5 @@
 @echo off
-setlocal enableextensions
+setlocal enableextensions enabledelayedexpansion
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 
@@ -49,18 +49,26 @@ if %ERRORLEVEL% EQU 2 (
     echo  Для Windows-домена: login = HQ\MedvedevSS
     echo.
     echo  Сейчас откроется accounts.ini. После сохранения закройте Блокнот.
+    echo  Чтобы отменить: нажмите Ctrl+C в этом окне.
+    set /a CONFIG_READY_ATTEMPTS=0
+    :CONFIG_READY_LOOP
+    set /a CONFIG_READY_ATTEMPTS+=1
+    if !CONFIG_READY_ATTEMPTS! GTR 20 (
+        echo [ERROR] Конфигурация всё ещё не готова после 20 попыток. Бот не запущен.
+        exit /b 2
+    )
     start /wait notepad.exe "%ACCOUNTS_FILE%"
 
     "%VENV_PY%" -m mailbot_v26 config-ready --config-dir "%CONFIG_DIR%" --verbose
     if %ERRORLEVEL% EQU 2 (
-        echo [ERROR] Конфигурация всё ещё не готова. Бот не запущен.
-        exit /b 2
+        echo [WARN] Попытка !CONFIG_READY_ATTEMPTS! из 20: обязательные поля ещё не заполнены.
+        goto :CONFIG_READY_LOOP
     )
 )
 REM === END ONBOARDING GATE ===
 
 echo Running doctor checks ^(warning-first^)...
-"%VENV_PY%" -m mailbot_v26.doctor --config-dir "mailbot_v26\config"
+"%VENV_PY%" -m mailbot_v26.doctor --config-dir "%CONFIG_DIR%"
 if %ERRORLEVEL% NEQ 0 (
     echo [WARN] Doctor found issues. Startup continues in non-strict mode.
 )
@@ -80,5 +88,5 @@ if defined WEB_HOST if defined WEB_PORT (
 )
 
 echo Starting Letterbot...
-"%VENV_PY%" -m mailbot_v26.start --config-dir "mailbot_v26\config"
+"%VENV_PY%" -m mailbot_v26.start --config-dir "%CONFIG_DIR%"
 exit /b %ERRORLEVEL%

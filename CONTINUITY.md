@@ -17,6 +17,8 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-26: follow-up hardening after review: fixed batch retry counter expansion in run_mailbot.bat (enabled delayed expansion + !CONFIG_READY_ATTEMPTS!), tightened update_and_run.bat clean-tree check to include untracked files via git status --porcelain, and made doctor web busy-port guidance point to the active config-dir settings.ini path; regression tests updated and full pytest green.
+- 2026-02-26: Windows first-run launcher loop hardened: run_mailbot.bat now re-opens exact CONFIG_DIR\accounts.ini and auto-retries config-ready up to 20 attempts with cancel guidance; update_and_run.bat now updates only on clean working tree via fetch + reset --hard origin/main and passes absolute config-dir to run stack; added tests for start config-dir isolation, run_stack web settings port propagation, and web main busy-port graceful exit.
 - 2026-02-25: added two-layer anti-duplicate delivery protection: ingestion duplicate detection skips PARSE enqueue for existing (account_email, uid) with `duplicate_ingest_skipped` log, and TG stage is now idempotent via `emails.telegram_delivered_at` guard (`telegram_duplicate_skipped` + queue done). Added regression tests for duplicate UID ingest and forced duplicate TG job skip.
 - 2026-02-25: added configurable web host/port via settings.ini [web] (2-file mode), wired web/runtime launcher defaults to settings.ini with legacy config.ini fallback, added non-fatal busy-port DEGRADED_NO_WEB stack behavior + actionable guidance, and doctor web host/port + port-availability WARN reporting with tests.
 - 2026-02-25: fixed 2-file LLM regression for startup-health compatibility: router keeps accounts.ini precedence, but silently uses legacy keys.ini secrets when accounts.ini lacks provider secrets; startup health + llm loader regression tests are green.
@@ -103,14 +105,21 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Duplicate-ingest and duplicate-TG protections are implemented and covered by regression tests.
-- Web observability smoke tests are green after the queue/delivery changes.
+- Windows launcher UX and config-dir-first behavior for two-file mode are implemented with targeted regression tests.
+- Web UI main now exits gracefully with actionable message when configured port is occupied.
 Next:
-- Investigate root cause of repeated IMAP UID reappearance (cursor/state persistence path) as a separate hardening task.
-- Run broader regression pack (polling loop + integration degradation scenarios) before release.
+- Run full regression and validate Windows manual launcher flow (update_and_run.bat, run_mailbot.bat) on host machine.
+- Continue separate hardening task for repeated IMAP UID reappearance (cursor/state persistence path).
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- run_mailbot.bat
+- update_and_run.bat
+- mailbot_v26/web_observability/app.py
+- mailbot_v26/doctor.py
+- mailbot_v26/tests/test_start_config_failures.py
+- mailbot_v26/tests/test_run_stack.py
+- mailbot_v26/tests/test_web_ui_main.py
 - mailbot_v26/bot_core/storage.py
 - mailbot_v26/start.py
 - mailbot_v26/tests/test_telegram_delivery_pipeline.py

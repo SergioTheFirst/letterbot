@@ -118,3 +118,4 @@ def test_doctor_reports_web_settings_and_warns_when_port_busy(
 
     assert any(entry.component == "web (settings.ini)" and "host=127.0.0.1; port=8787" in entry.details for entry in report.entries)
     assert any(entry.component == "web port availability" and entry.status == "WARN" for entry in report.entries)
+    assert any(str(tmp_path / "settings.ini") in (entry.details or "") for entry in report.entries if entry.component == "web port availability")
