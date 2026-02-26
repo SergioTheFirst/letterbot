@@ -4464,8 +4464,9 @@ def main() -> None:
     except OSError as exc:
         if "Address already in use" in str(exc):
             print(
-                f"[ERROR] Порт {port} занят. Откройте mailbot_v26/config/settings.ini и измените [web] port = ..."
+                f"[ERROR] Порт {port} занят. Откройте settings.ini в каталоге конфигурации и измените [web] port = ..."
             )
+            raise SystemExit(1)
         raise
 
 

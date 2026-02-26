@@ -59,3 +59,26 @@ def test_load_config_with_two_file_mode_only(tmp_path, capsys) -> None:
     assert config.general.check_interval == 120
     assert "config.yaml not found" not in output
     assert "Traceback" not in output
+
+
+def test_load_config_with_explicit_config_dir_ignores_cwd_yaml(tmp_path, monkeypatch, capsys) -> None:
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+    (config_dir / "settings.ini").write_text("[general]\ncheck_interval=120\n", encoding="utf-8")
+    (config_dir / "accounts.ini").write_text(
+        "[acc]\nlogin=u@example.com\npassword=p\nhost=imap.example.com\ntelegram_chat_id=1\n",
+        encoding="utf-8",
+    )
+
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "config.yaml").write_text("not: [valid", encoding="utf-8")
+
+    monkeypatch.chdir(cwd)
+
+    _path, _raw, config = start_module.load_config(config_dir)
+
+    output = capsys.readouterr().out
+    assert config.general.check_interval == 120
+    assert "config.yaml" not in output
+    assert "Traceback" not in output

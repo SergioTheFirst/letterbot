@@ -628,12 +628,12 @@ def _send_report_to_telegram(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m mailbot_v26.doctor")
-    parser.add_argument("--config-dir", default="mailbot_v26/config")
+    parser.add_argument("--config-dir", default=None)
     parser.add_argument("--strict", action="store_true")
     args = parser.parse_args(argv)
 
     try:
-        report = run_doctor(config_dir=Path(args.config_dir))
+        report = run_doctor(config_dir=Path(args.config_dir) if args.config_dir else None)
     except DependencyError as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(2)
