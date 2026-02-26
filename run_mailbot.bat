@@ -79,7 +79,7 @@ if %ERRORLEVEL% NEQ 0 (
     echo [WARN] validate-config reported warnings. Startup continues.
 )
 
-for /f "tokens=1,2 delims=|" %%A in ('"%VENV_PY%" -c "from pathlib import Path; from mailbot_v26.config_loader import load_web_config; web=load_web_config(Path(r"%CONFIG_DIR%")); print(f"{web.host}|{web.port}")"') do (
+for /f "tokens=1,2 delims= " %%A in ('"%VENV_PY%" -c "from pathlib import Path; from mailbot_v26.config_loader import load_web_config; web=load_web_config(Path(r'%CONFIG_DIR%')); print(str(web.host)+' '+str(web.port))"') do (
     set "WEB_HOST=%%A"
     set "WEB_PORT=%%B"
 )

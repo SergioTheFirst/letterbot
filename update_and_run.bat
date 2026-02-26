@@ -50,8 +50,14 @@ if %ERRORLEVEL% NEQ 0 (
     echo [WARN] Dependency installation failed. Continuing with existing environment.
 )
 
-echo Starting Letterbot via run_mailbot.bat...
-call "%REPO_ROOT%run_mailbot.bat"
+echo Running doctor checks (warning-first)...
+"%VENV_PY%" -m mailbot_v26.doctor --config-dir "%REPO_ROOT%mailbot_v26\config"
+if %ERRORLEVEL% NEQ 0 (
+    echo [WARN] Doctor found issues. Startup continues in non-strict mode.
+)
+
+echo Starting Letterbot...
+"%VENV_PY%" -m mailbot_v26.start --config-dir "%REPO_ROOT%mailbot_v26\config"
 set "RUN_EXIT=%ERRORLEVEL%"
 if "%RUN_EXIT%"=="0" (
     echo Letterbot finished.

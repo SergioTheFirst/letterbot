@@ -12,5 +12,5 @@ enable_daily_digest = true
 enable_weekly_digest = false
 
 [web]
-host = 127.0.0.1
-port = 8787
+host = 127.0.0.1  ; Web UI bind host
+port = 8787       ; Web UI bind port

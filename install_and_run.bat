@@ -24,5 +24,9 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo [3/3] Migrating to 2-file config mode and starting...
 "%VENV_PY%" -m mailbot_v26 migrate-config --config-dir "%~dp0mailbot_v26\config"
-call "%~dp0run_mailbot.bat"
+"%VENV_PY%" -m mailbot_v26.doctor --config-dir "%~dp0mailbot_v26\config"
+if %ERRORLEVEL% NEQ 0 (
+    echo [WARN] Doctor found issues. Startup continues in non-strict mode.
+)
+"%VENV_PY%" -m mailbot_v26.start --config-dir "%~dp0mailbot_v26\config"
 exit /b %ERRORLEVEL%

@@ -19,16 +19,19 @@ def test_run_mailbot_bat_uses_python_readiness_check_loop() -> None:
     assert "exit /b 2" in content
 
 
-def test_update_and_run_propagates_run_mailbot_exit_code() -> None:
+def test_update_and_run_propagates_start_exit_code() -> None:
     content = Path("update_and_run.bat").read_text(encoding="utf-8")
-    assert "set \"RUN_EXIT=%ERRORLEVEL%\"" in content
+    assert 'set "RUN_EXIT=%ERRORLEVEL%"' in content
     assert "exit /b %RUN_EXIT%" in content
-    assert "set \"RUN_EXIT=0\"" not in content
+    assert '-m mailbot_v26.doctor --config-dir "%REPO_ROOT%mailbot_v26\\config"' in content
+    assert '-m mailbot_v26.start --config-dir "%REPO_ROOT%mailbot_v26\\config"' in content
 
 
-def test_install_and_run_calls_migrate_config() -> None:
+def test_install_and_run_calls_migrate_doctor_and_start() -> None:
     content = Path("install_and_run.bat").read_text(encoding="utf-8")
     assert "-m mailbot_v26 migrate-config" in content
+    assert '-m mailbot_v26.doctor --config-dir "%~dp0mailbot_v26\\config"' in content
+    assert '-m mailbot_v26.start --config-dir "%~dp0mailbot_v26\\config"' in content
 
 
 def test_update_and_run_uses_safe_fetch_reset_and_warns_on_pip_failure() -> None:
@@ -39,3 +42,10 @@ def test_update_and_run_uses_safe_fetch_reset_and_warns_on_pip_failure() -> None
     assert "git status --porcelain" in content
     assert "Рабочее дерево не чистое" in content
     assert "Dependency installation failed. Continuing" in content
+
+
+def test_run_mailbot_bat_avoids_pipe_parsing_for_web_url() -> None:
+    content = Path("run_mailbot.bat").read_text(encoding="utf-8")
+    assert "delims=|" not in content
+    assert "| was unexpected at this time" not in content
+    assert "print(str(web.host)+' '+str(web.port))" in content
