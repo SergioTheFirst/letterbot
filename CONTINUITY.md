@@ -17,6 +17,9 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-27: 2-file mode premium default updated — `enable_premium_processor` now falls back to `true` when absent in `settings.ini` (legacy mode behavior unchanged), templates updated, and feature-flag regression test added.
+- 2026-02-27: legacy TG stage now attaches inline action keyboard (`reply_markup`) when premium flag is enabled in configured pipeline; delivery-pipeline regression test added.
+- 2026-02-27: Telegram duplicate subject line suppression hardened via explicit `_normalize_subject_for_compare` helper (trim, whitespace collapse, casefold, RE/FW/FWD prefix stripping); renderer regression tests extended for duplicate vs non-duplicate lines.
 - 2026-02-26: Telegram renderer now removes duplicate first body line when it matches header subject after normalization (trim/space-collapse/casefold/FW-RE chain stripping, including Cyrillic-safe compare); added renderer+processor regression tests for duplicate/non-duplicate/FW-RE/empty-subject cases.
 - 2026-02-26: fixed Windows launcher pipe-parsing crash by removing `delims=|`/f-string pipe output from run_mailbot.bat, switched install_and_run.bat and update_and_run.bat to direct `mailbot_v26.doctor` + `mailbot_v26.start` invocations with explicit config-dir paths, updated settings.ini.example [web] inline docs, and added launcher/config regression tests.
 - 2026-02-26: follow-up hardening after review: fixed batch retry counter expansion in run_mailbot.bat (enabled delayed expansion + !CONFIG_READY_ATTEMPTS!), tightened update_and_run.bat clean-tree check to include untracked files via git status --porcelain, and made doctor web busy-port guidance point to the active config-dir settings.ini path; regression tests updated and full pytest green.
@@ -107,13 +110,22 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Telegram subject/body first-line dedupe fix is implemented and covered by focused Telegram rendering tests.
+- Block 0 items (1)+(2): premium buttons default ON for 2-file mode and duplicate-subject dedupe behavior implemented with focused tests.
 Next:
-- Run broader regression sweep (`python -m pytest -q`) before release cut.
-- Continue separate hardening task for repeated IMAP UID reappearance (cursor/state persistence path).
+- Run full regression sweep (`python -m pytest -q`) before release cut.
+- Monitor if any legacy-mode deployments want premium default switched from false to true (UNCONFIRMED policy change).
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/features/flags.py
+- mailbot_v26/bot_core/pipeline.py
+- mailbot_v26/pipeline/tg_renderer.py
+- mailbot_v26/start.py
+- mailbot_v26/config/settings.ini.example
+- mailbot_v26/tools/config_bootstrap.py
+- mailbot_v26/tests/test_feature_flags.py
+- mailbot_v26/tests/test_telegram_delivery_pipeline.py
+- mailbot_v26/tests/test_tg_renderer.py
 - mailbot_v26/pipeline/tg_renderer.py
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/tests/test_tg_renderer.py

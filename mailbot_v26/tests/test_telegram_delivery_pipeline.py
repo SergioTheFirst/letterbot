@@ -88,9 +88,13 @@ def _seed_pipeline_context(email_id: int, account_email: str) -> PipelineContext
     return ctx
 
 
-def _configure_pipeline(config: BotConfig) -> MessageProcessor:
+def _configure_pipeline(config: BotConfig, *, enable_premium_processor: bool = False) -> MessageProcessor:
     processor = MessageProcessor(SimpleNamespace(), SimpleNamespace())
-    configure_pipeline(config, processor)
+    configure_pipeline(
+        config,
+        processor,
+        enable_premium_processor=enable_premium_processor,
+    )
     return processor
 
 
@@ -251,3 +255,29 @@ def test_duplicate_tg_job_skips_send_for_delivered_email(monkeypatch, tmp_path, 
     assert queue_size == 0
     assert calls == []
     assert "telegram_duplicate_skipped" in caplog.text
+
+
+def test_stage_tg_adds_inline_keyboard_when_premium_enabled(monkeypatch, tmp_path) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    email_id = _seed_queue(storage, config.accounts[0].login)
+    _seed_pipeline_context(email_id, config.accounts[0].login)
+    processor = _configure_pipeline(config, enable_premium_processor=True)
+
+    captured = {}
+
+    def fake_send(payload):
+        captured["payload"] = payload
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+
+    flags = FeatureFlags(base_dir=tmp_path)
+    flags.ENABLE_PREMIUM_PROCESSOR = False
+    _process_queue(storage, config, processor, flags)
+
+    reply_markup = captured["payload"].reply_markup
+    assert isinstance(reply_markup, dict)
+    assert "inline_keyboard" in reply_markup
+    _cleanup_pipeline(email_id)

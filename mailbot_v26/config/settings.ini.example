@@ -8,6 +8,7 @@ admin_chat_id =
 db_path = data/mailbot.sqlite
 
 [features]
+enable_premium_processor = true  ; premium TG renderer + inline buttons by default
 enable_daily_digest = true
 enable_weekly_digest = false
 

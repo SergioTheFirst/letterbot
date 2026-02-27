@@ -118,3 +118,12 @@ weekly_digest_enabled = true
 
     assert flags.ENABLE_DAILY_DIGEST is True
     assert flags.ENABLE_WEEKLY_DIGEST is True
+
+
+def test_premium_processor_defaults_to_true_in_two_file_mode(tmp_path: Path) -> None:
+    (tmp_path / "accounts.ini").write_text("[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8")
+    (tmp_path / "settings.ini").write_text("[features]\nenable_daily_digest = true\n", encoding="utf-8")
+
+    flags = FeatureFlags(tmp_path)
+
+    assert flags.ENABLE_PREMIUM_PROCESSOR is True

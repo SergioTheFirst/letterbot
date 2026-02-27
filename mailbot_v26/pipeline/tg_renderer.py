@@ -181,10 +181,11 @@ def dedup_rendered_text(text: str) -> str:
     return "\n".join(dedup_rendered_lines(text.splitlines()))
 
 
-def _normalize_subject_compare(text: str | None) -> str:
+def _normalize_subject_for_compare(text: str) -> str:
     working = (text or "").strip()
     if not working:
         return ""
+    working = re.sub(r"<[^>]+>", " ", working)
     working = working.replace("\\", "/")
     working = re.sub(r"\s+", " ", working)
     while True:
@@ -204,8 +205,8 @@ def _maybe_drop_duplicate_subject_line(
     first_line = (body_lines[0] or "").strip()
     if not first_line:
         return body_lines
-    normalized_subject = _normalize_subject_compare(header_subject)
-    normalized_first = _normalize_subject_compare(first_line)
+    normalized_subject = _normalize_subject_for_compare(header_subject)
+    normalized_first = _normalize_subject_for_compare(first_line)
     if normalized_subject and normalized_subject == normalized_first:
         return body_lines[1:]
     return body_lines
