@@ -144,7 +144,9 @@ class FeatureFlags:
             parser, "enable_deadlock_detection", default="shadow"
         )
         self.ENABLE_PREMIUM_PROCESSOR = self._get_flag(
-            parser, "enable_premium_processor"
+            parser,
+            "enable_premium_processor",
+            fallback_default=resolved.two_file_mode,
         )
         self.ENABLE_PREMIUM_CLARITY_V1 = self._get_flag(
             parser, "enable_premium_clarity_v1"
@@ -191,11 +193,16 @@ class FeatureFlags:
         return False
 
     @staticmethod
-    def _get_flag(parser: configparser.ConfigParser, option: str) -> bool:
+    def _get_flag(
+        parser: configparser.ConfigParser,
+        option: str,
+        *,
+        fallback_default: bool = False,
+    ) -> bool:
         try:
-            return parser.getboolean("features", option, fallback=False)
+            return parser.getboolean("features", option, fallback=fallback_default)
         except ValueError:
-            return False
+            return fallback_default
 
     @staticmethod
     def _get_float(

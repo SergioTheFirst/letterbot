@@ -25,6 +25,7 @@ from mailbot_v26.constants import (
 )
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
+from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.mime_utils import decode_bytes, decode_mime_header
 from mailbot_v26.text.sanitize import sanitize_text
 from mailbot_v26.telegram_utils import telegram_safe
@@ -64,13 +65,20 @@ PIPELINE_INBOUND_CACHE: Dict[int, InboundMessage] = {}
 _PIPELINE_CONFIG: BotConfig | None = None
 _PIPELINE_PROCESSOR: MessageProcessor | None = None
 _ACCOUNT_MAP: Dict[str, AccountConfig] = {}
+_ENABLE_PREMIUM_PROCESSOR: bool = False
 
 
-def configure_pipeline(config: BotConfig, processor: MessageProcessor) -> None:
-    global _PIPELINE_CONFIG, _PIPELINE_PROCESSOR, _ACCOUNT_MAP
+def configure_pipeline(
+    config: BotConfig,
+    processor: MessageProcessor,
+    *,
+    enable_premium_processor: bool = False,
+) -> None:
+    global _PIPELINE_CONFIG, _PIPELINE_PROCESSOR, _ACCOUNT_MAP, _ENABLE_PREMIUM_PROCESSOR
     _PIPELINE_CONFIG = config
     _PIPELINE_PROCESSOR = processor
     _ACCOUNT_MAP = {normalize_login(acc.login): acc for acc in (config.accounts or [])}
+    _ENABLE_PREMIUM_PROCESSOR = bool(enable_premium_processor)
 
 
 def remember_raw_email(email_id: int, raw_email: bytes) -> None:
@@ -596,6 +604,11 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
             "bot_token": _PIPELINE_CONFIG.keys.telegram_bot_token,
             "chat_id": account.telegram_chat_id,
         },
+        reply_markup=(
+            build_email_actions_keyboard(email_id=ctx.email_id, expanded=False)
+            if _ENABLE_PREMIUM_PROCESSOR
+            else None
+        ),
     )
     result = send_telegram(payload)
     if not result.delivered:

@@ -731,7 +731,11 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
         state = StateManager(CURRENT_DIR / "state.json")
         processor = MessageProcessor(config=config, state=state)
-        configure_pipeline(config, processor)
+        configure_pipeline(
+            config,
+            processor,
+            enable_premium_processor=flags.ENABLE_PREMIUM_PROCESSOR,
+        )
         digest_storage = DigestStorage(
             knowledge_db=processor_module.knowledge_db,
             analytics=processor_module.analytics,

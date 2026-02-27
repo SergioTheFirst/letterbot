@@ -168,3 +168,28 @@ def test_tg_render_empty_subject_is_stable() -> None:
     )
 
     assert "<b>(без темы)</b>" in rendered
+
+
+def test_tg_render_drops_duplicate_subject_with_whitespace_and_fwd_prefix() -> None:
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="  fWd:   Contract   Update  ",
+        action_line=" Re : contract update ",
+        attachments=[],
+    )
+
+    assert rendered.lower().count("contract") == 1
+
+
+def test_tg_render_keeps_body_line_when_subjects_differ_after_normalization() -> None:
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Contract update",
+        action_line="Please call tomorrow",
+        attachments=[],
+    )
+
+    assert "<b>Contract update</b>" in rendered
+    assert "<b><i>Please call tomorrow</i></b>" in rendered
