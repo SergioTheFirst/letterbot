@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from mailbot_v26.account_identity import normalize_login
 from mailbot_v26.state_manager import StateManager
 
 try:
@@ -349,9 +350,10 @@ class ResilientIMAP:
 
     def fetch_new_messages(self, *, limit: int = 50) -> List[Tuple[int, bytes]]:
         start_time_utc = self._start_time_utc or _utcnow()
+        state_login = normalize_login(self.account.user)
         range_start = 1
-        if self._state is not None and self.account.user:
-            range_start = max(1, self._state.get_last_uid(self.account.user) + 1)
+        if self._state is not None and state_login:
+            range_start = max(1, self._state.get_last_uid(state_login) + 1)
 
         def _search(client, criteria):
             return client.search(criteria)
@@ -394,10 +396,10 @@ class ResilientIMAP:
                 continue
             messages.append((uid, raw))
 
-        if self._state is not None and self.account.user:
+        if self._state is not None and state_login:
             if highest_seen is not None:
-                self._state.update_last_uid(self.account.user, highest_seen)
-            self._state.update_check_time(self.account.user)
+                self._state.update_last_uid(state_login, highest_seen)
+            self._state.update_check_time(state_login)
         return messages
 
 

@@ -22,7 +22,11 @@ from mailbot_v26.config_loader import (
     StorageConfig,
 )
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
-from mailbot_v26.start import _persist_inbound_and_enqueue_parse, _process_queue
+from mailbot_v26.start import (
+    _build_telegram_delivery_key,
+    _persist_inbound_and_enqueue_parse,
+    _process_queue,
+)
 from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
@@ -228,14 +232,12 @@ def test_duplicate_uid_ingest_enqueues_once_and_sends_once(monkeypatch, tmp_path
     assert len(calls) == 1
 
 
-def test_duplicate_tg_job_skips_send_for_delivered_email(monkeypatch, tmp_path, caplog: pytest.LogCaptureFixture) -> None:
+def test_tg_stage_idempotency_skips_duplicate_delivery(monkeypatch, tmp_path, caplog: pytest.LogCaptureFixture) -> None:
     config = _make_config(tmp_path)
     storage = Storage(config.storage.db_path)
     email_id = _seed_queue(storage, config.accounts[0].login)
     _seed_pipeline_context(email_id, config.accounts[0].login)
     processor = _configure_pipeline(config)
-    storage.mark_telegram_delivered(email_id)
-
     calls: list[object] = []
 
     def fake_send(payload):
@@ -246,6 +248,10 @@ def test_duplicate_tg_job_skips_send_for_delivered_email(monkeypatch, tmp_path, 
     monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
 
     flags = FeatureFlags(base_dir=tmp_path)
+    _process_queue(storage, config, processor, flags)
+
+    storage.enqueue_stage(email_id, "TG")
+    _seed_pipeline_context(email_id, config.accounts[0].login)
     with caplog.at_level("INFO"):
         _process_queue(storage, config, processor, flags)
 
@@ -253,8 +259,8 @@ def test_duplicate_tg_job_skips_send_for_delivered_email(monkeypatch, tmp_path, 
         queue_size = storage.conn.execute("SELECT COUNT(*) FROM queue").fetchone()[0]
 
     assert queue_size == 0
-    assert calls == []
-    assert "telegram_duplicate_skipped" in caplog.text
+    assert len(calls) == 1
+    assert "telegram_delivery_skipped_duplicate" in caplog.text
 
 
 def test_stage_tg_adds_inline_keyboard_when_premium_enabled(monkeypatch, tmp_path) -> None:
@@ -281,3 +287,98 @@ def test_stage_tg_adds_inline_keyboard_when_premium_enabled(monkeypatch, tmp_pat
     assert isinstance(reply_markup, dict)
     assert "inline_keyboard" in reply_markup
     _cleanup_pipeline(email_id)
+
+
+def test_tg_stage_rerun_after_success_still_sends_once(monkeypatch, tmp_path) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    email_id = _seed_queue(storage, config.accounts[0].login)
+    _seed_pipeline_context(email_id, config.accounts[0].login)
+    processor = _configure_pipeline(config)
+
+    calls: list[object] = []
+
+    def fake_send(payload):
+        calls.append(payload)
+        return DeliveryResult(delivered=True, retryable=False, message_id=42)
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+
+    flags = FeatureFlags(base_dir=tmp_path)
+    _process_queue(storage, config, processor, flags)
+
+    # simulate queue reclaim/rerun for already delivered email
+    storage.enqueue_stage(email_id, "TG")
+    _seed_pipeline_context(email_id, config.accounts[0].login)
+    _process_queue(storage, config, processor, flags)
+
+    with storage.conn:
+        delivery_rows = storage.conn.execute(
+            "SELECT COUNT(*) FROM telegram_delivery_log WHERE email_id = ? AND kind = 'email'",
+            (email_id,),
+        ).fetchone()[0]
+
+    assert len(calls) == 1
+    assert delivery_rows == 1
+
+
+def test_duplicate_uid_ingest_is_case_insensitive(monkeypatch, tmp_path) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    processor = _configure_pipeline(config)
+
+    calls: list[object] = []
+
+    def fake_send(payload):
+        calls.append(payload)
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+
+    email_id, enqueued = _persist_inbound_and_enqueue_parse(
+        storage=storage,
+        account_email="Account@Example.com",
+        uid=950,
+        message_id="msg-950",
+        from_email="sender@example.com",
+        from_name="Sender",
+        subject="Subject",
+        received_at=datetime.utcnow().isoformat(),
+        attachments_count=0,
+        raw_email=b"raw",
+        inbound=InboundMessage(subject="Subject", body="Body", sender="sender@example.com"),
+    )
+    assert enqueued is True
+    ctx = PIPELINE_CACHE[email_id]
+    ctx.llm_result = {"text": "Telegram message"}
+
+    flags = FeatureFlags(base_dir=tmp_path)
+    _process_queue(storage, config, processor, flags)
+
+    _, second_enqueued = _persist_inbound_and_enqueue_parse(
+        storage=storage,
+        account_email="account@example.com",
+        uid=950,
+        message_id="msg-950",
+        from_email="sender@example.com",
+        from_name="Sender",
+        subject="Subject",
+        received_at=datetime.utcnow().isoformat(),
+        attachments_count=0,
+        raw_email=b"raw",
+        inbound=InboundMessage(subject="Subject", body="Body", sender="sender@example.com"),
+    )
+
+    assert second_enqueued is False
+    assert len(calls) == 1
+
+
+def test_delivery_key_snooze_kind_separation() -> None:
+    email_key = _build_telegram_delivery_key(email_id=101, kind="email")
+    snooze_key = _build_telegram_delivery_key(email_id=101, kind="snooze", snooze_ts="2026-03-01T10:00:00Z")
+
+    assert email_key == "email:101"
+    assert snooze_key == "snooze:email:101:2026-03-01T10:00:00Z"
+    assert snooze_key != email_key

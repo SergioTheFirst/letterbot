@@ -85,6 +85,26 @@ class Storage:
             )
             self.conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS telegram_delivery_log (
+                    delivery_key TEXT PRIMARY KEY,
+                    email_id INTEGER,
+                    account_id TEXT,
+                    chat_id TEXT,
+                    kind TEXT NOT NULL DEFAULT 'email',
+                    first_sent_at TEXT,
+                    telegram_message_id TEXT,
+                    FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
+                );
+                """
+            )
+            self.conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_tg_delivery_log_email_kind
+                ON telegram_delivery_log(email_id, kind);
+                """
+            )
+            self.conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_queue_stage_time
                 ON queue(stage, not_before);
                 """
@@ -184,6 +204,61 @@ class Storage:
                 WHERE id = ?;
                 """,
                 (ts, self._now(), email_id),
+            )
+
+    def reserve_telegram_delivery(
+        self,
+        *,
+        delivery_key: str,
+        email_id: int | None,
+        account_id: str | None,
+        chat_id: str | None,
+        kind: str = "email",
+    ) -> str:
+        now = self._now()
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE;")
+            cursor.execute(
+                """
+                INSERT INTO telegram_delivery_log (
+                    delivery_key, email_id, account_id, chat_id, kind, first_sent_at
+                ) VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (delivery_key, email_id, account_id, chat_id, kind, now),
+            )
+            self.conn.commit()
+            return "reserved"
+        except sqlite3.IntegrityError:
+            self.conn.rollback()
+            return "duplicate"
+        except sqlite3.Error:
+            self.conn.rollback()
+            return "unavailable"
+        finally:
+            cursor.close()
+
+    def finalize_telegram_delivery(
+        self,
+        *,
+        delivery_key: str,
+        telegram_message_id: str | None,
+    ) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE telegram_delivery_log
+                SET telegram_message_id = COALESCE(?, telegram_message_id)
+                WHERE delivery_key = ?;
+                """,
+                (telegram_message_id, delivery_key),
+            )
+
+    def release_telegram_delivery(self, *, delivery_key: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM telegram_delivery_log WHERE delivery_key = ?;",
+                (delivery_key,),
             )
 
     def claim_next(self, stages: List[str]) -> Dict[str, Any] | None:
