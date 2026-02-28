@@ -18,12 +18,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Security
 - None.
 
-## [28.0.0-rc1] - 2026-03-XX
+## [28.0.0-rc] - 2026-03-01
+
+### Added
+- Release-candidate packaging and version surface synchronization
 
 ### Changed
-- Release candidate for 28.0.0.
-- Version surfaces bumped.
-- Docs updated for RC.
+- Version bumped from 27.2.0 to 28.0.0-rc for release candidate packaging
+- Release metadata synchronized across active version surfaces
+
+### Notes
+- No new end-user features in this release candidate
+- Functional scope matches 27.2.0 feature-complete baseline
 
 ## [28.0.0-rc.2] - 2026-02-28
 
