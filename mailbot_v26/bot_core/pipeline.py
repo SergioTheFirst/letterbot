@@ -604,11 +604,7 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
             "bot_token": _PIPELINE_CONFIG.keys.telegram_bot_token,
             "chat_id": account.telegram_chat_id,
         },
-        reply_markup=(
-            build_email_actions_keyboard(email_id=ctx.email_id, expanded=False)
-            if _ENABLE_PREMIUM_PROCESSOR
-            else None
-        ),
+        reply_markup=build_email_actions_keyboard(email_id=ctx.email_id, expanded=False),
     )
     result = send_telegram(payload)
     if not result.delivered:

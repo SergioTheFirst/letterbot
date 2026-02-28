@@ -91,7 +91,7 @@ def test_domain_classification_logging_does_not_change_output(caplog):
 
     assert result is not None
     assert result.split("\n")[0].startswith("🟡 от Billing — Invoice for services")
-    assert result.split("\n")[2].startswith("Оплатить")
+    assert any(line.startswith("Оплатить") for line in result.split("\n"))
     assert "Domain detected" not in caplog.text
 
 

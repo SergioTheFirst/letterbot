@@ -2,7 +2,12 @@ from datetime import datetime
 import re
 from types import SimpleNamespace
 
-from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
+from mailbot_v26.pipeline.processor import (
+    Attachment,
+    InboundMessage,
+    MessageProcessor,
+    _maybe_drop_duplicate_subject_line,
+)
 
 
 class DummyState:
@@ -103,8 +108,7 @@ def test_output_has_two_mandatory_lines():
     mandatory = [line for line in result.split("\n") if line.strip()][0:3]
     assert len(mandatory) >= 2
     assert mandatory[0].startswith(("🔴", "🟡", "🔵"))
-    assert mandatory[1].startswith("<b>")
-    assert mandatory[2].split()[0] in MessageProcessor._VERB_ORDER
+    assert mandatory[1].split()[0] in MessageProcessor._VERB_ORDER
 
 
 def test_no_duplicate_attachment_names():
@@ -294,6 +298,29 @@ def test_normalize_action_subject_deduplicates_tokens():
     assert action_two == "Проверить письмо"
 
 
+
+def test_process_drops_duplicate_subject_line_in_body():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="RE: Счёт за март",
+        sender="billing@example.com",
+        body="",
+        attachments=[],
+    )
+
+    result = processor.process("robot@example.com", msg)
+
+    lines = result.split("\n")
+    assert lines[0].startswith(("🔴", "🟡", "🔵"))
+    assert all("<b>" not in line for line in lines[1:])
+    assert "Оплатить счёт" in result
+
+
+def test_duplicate_subject_helper_keeps_non_matching_next_line():
+    lines = _maybe_drop_duplicate_subject_line("RE: Счёт", ["Проверить таблицу"])
+
+    assert lines == ["Проверить таблицу"]
+
 def test_action_line_prefers_mail_type_over_excel_attachment():
     processor = _processor()
     msg = InboundMessage(
@@ -319,7 +346,7 @@ def test_action_line_invoice_mail_type_overrides_excel_attachment():
         body="Просим оплатить в срок.",
         mail_type="INVOICE",
         attachments=[
-            Attachment(filename="invoice.xlsx", content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text="")
+            Attachment(filename="invoice.xls", content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text="")
         ],
     )
 
@@ -350,7 +377,7 @@ def test_action_line_falls_back_to_excel_attachment_when_mail_type_unknown():
         body="",
         mail_type="",
         attachments=[
-            Attachment(filename="totals.xlsx", content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text="")
+            Attachment(filename="totals.xls", content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text="")
         ],
     )
 
