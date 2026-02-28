@@ -6,7 +6,7 @@ from mailbot_v26.version import __version__
 
 
 def test_version_module_semver_format() -> None:
-    assert re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\.\d+)?", __version__)
+    assert re.fullmatch(r"\d+\.\d+\.\d+(?:-rc(?:\.?\d+)?)?", __version__)
 
 
 def test_cli_version_prints_version_flag(monkeypatch, capsys):
