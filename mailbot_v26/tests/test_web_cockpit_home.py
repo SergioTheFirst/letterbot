@@ -130,4 +130,4 @@ def test_cockpit_contacts_cards_survive_analytics_exceptions(tmp_path: Path) -> 
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
         assert "Контакты" in body
-        assert "— пусто —" in body
+        assert "— нет данных —" in body

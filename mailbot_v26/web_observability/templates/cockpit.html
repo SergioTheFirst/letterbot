@@ -247,7 +247,7 @@
           <div>• {{ item.display_name }} — {{ item.count }}</div>
           {% endfor %}
         {% else %}
-          <div class="hint">— пусто —</div>
+          <div class="hint">— нет данных —</div>
         {% endif %}
         <div class="hint" style="margin-top:8px;"><b>🔇 Молчат давно</b></div>
         {% if lane == "all" and silent_contacts %}
@@ -255,7 +255,7 @@
           <div>• {{ item.display_name }} — {{ item.days_silent }} дн.</div>
           {% endfor %}
         {% else %}
-          <div class="hint">— пусто —</div>
+          <div class="hint">— нет данных —</div>
         {% endif %}
         <div class="hint" style="margin-top:8px;"><b>🔁 Застрявшие диалоги</b></div>
         {% if lane == "all" and stalled_threads %}
@@ -263,7 +263,7 @@
           <div>• {{ item.from_email }} — {{ item.subject or item.snippet }} ({{ item.days_ago }} дн. назад)</div>
           {% endfor %}
         {% else %}
-          <div class="hint">— пусто —</div>
+          <div class="hint">— нет данных —</div>
         {% endif %}
       </div>
 

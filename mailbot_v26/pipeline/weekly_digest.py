@@ -205,8 +205,7 @@ def _format_weekly_accuracy_progress(
     corrections = int(progress.current_corrections)
     if corrections < 3:
         return None
-    accuracy_pct = 100 - int(progress.current_surprise_rate_pp)
-    if accuracy_pct < 80:
+    if float(progress.current_surprise_rate_pp) > 20:
         return None
     delta = int(progress.delta_pp)
     if abs(delta) < 2:

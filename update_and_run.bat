@@ -61,44 +61,43 @@ for /f "delims=" %%I in ('where python') do (
 
 "%PYTHON_EXE%" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >>"%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    call :log [ERROR] Python 3.10+ is required.
-    call :finish 1
-    exit /b 1
+    call :log [WARN] Python 3.10+ is required for best compatibility. Continuing anyway.
 )
 
 "%PYTHON_EXE%" -m pip --version >>"%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    call :log [ERROR] pip is not available in the selected Python environment.
-    call :finish 1
-    exit /b 1
+    call :log [WARN] pip is not available in the selected Python environment.
 )
 
 set "VENV_DIR=%REPO_ROOT%.venv"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+set "RUN_PY=%PYTHON_EXE%"
 if not exist "%VENV_PY%" (
     call :log Creating virtual environment...
     "%PYTHON_EXE%" -m venv "%VENV_DIR%" >>"%LOG_FILE%" 2>&1
     if %ERRORLEVEL% NEQ 0 (
-        call :log [ERROR] Failed to create .venv
-        call :finish 1
-        exit /b 1
+        call :log [WARN] Failed to create .venv. Using system Python.
     )
 )
-
-call :log Installing dependencies...
-"%VENV_PY%" -m pip install -r "%REPO_ROOT%requirements.txt" >>"%LOG_FILE%" 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    call :log [WARN] Dependency installation failed. Continuing with existing environment.
+if exist "%VENV_PY%" (
+    set "RUN_PY=%VENV_PY%"
+    call :log Installing dependencies...
+    "%RUN_PY%" -m pip install -r "%REPO_ROOT%requirements.txt" >>"%LOG_FILE%" 2>&1
+    if %ERRORLEVEL% NEQ 0 (
+        call :log [WARN] Dependency installation failed. Continuing with existing environment.
+    )
+) else (
+    call :log [WARN] Skipping dependency install because .venv is unavailable.
 )
 
 call :log Running doctor checks (warning-first)...
-"%VENV_PY%" -m mailbot_v26.doctor --config-dir "%REPO_ROOT%mailbot_v26\config" >>"%LOG_FILE%" 2>&1
+"%RUN_PY%" -m mailbot_v26.doctor --config-dir "%REPO_ROOT%mailbot_v26\config" >>"%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
     call :log [WARN] Doctor found issues. Startup continues in non-strict mode.
 )
 
 call :log Starting Letterbot...
-"%VENV_PY%" -m mailbot_v26.start --config-dir "%REPO_ROOT%mailbot_v26\config" >>"%LOG_FILE%" 2>&1
+"%RUN_PY%" -m mailbot_v26.start --config-dir "%REPO_ROOT%mailbot_v26\config" >>"%LOG_FILE%" 2>&1
 set "RUN_EXIT=%ERRORLEVEL%"
 if "%RUN_EXIT%"=="0" (
     call :log Letterbot finished.

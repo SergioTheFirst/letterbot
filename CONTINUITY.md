@@ -20,6 +20,8 @@ Done:
 - 2026-02-28: v28.0.0-rc.2 packaging convergence completed — one-folder chain switched to Letterbot naming (`dist/Letterbot`, `Letterbot.exe`, CI artifact/zip names), PyInstaller entrypoint moved to `mailbot_v26/__main__.py`, dist launcher migrated to 2-file onboarding (`settings.ini` + `accounts.ini`) with `config-ready` retries, manifest integrity made runtime-safe via deterministic mutable ignore set, deterministic Windows version-resource generation added, and Windows release docs/tests synchronized.
 - 2026-02-28: v28.0.0-rc.1 packaging pass completed — version unified to `28.0.0-rc.1` across source/web/CLI/status, release artifact contract added (`RELEASE_ARTIFACT.md`), static `MANIFEST.json` generated (version+commit+UTC+sha256 set), Windows `update_and_run.bat` upgraded with Python/pip diagnostics + explicit log path + summary, and RC smoke tests added.
 - 2026-02-28: Block 4 complete — preview trust gate moved inline into main Telegram payload (`💡 ...`) with all-time corrections gate (>=10), no user-visible second message path, and no-op `send_preview_to_telegram` retained for compatibility.
+- 2026-02-28: Block 4 + v27.2.0 — feature-complete release hygiene finalized (trust bootstrap 2-file priority, cockpit contact cards, inline preview trust gate, accuracy gate >=80%, changelog/version/windows bootstrap sync).
+- 2026-02-28: cockpit contacts empty-state wording aligned to explicit requirement (`— нет данных —`), and web guardrail tests narrowed to English banned empty-state phrases to avoid conflict.
 - 2026-02-28: Cockpit contacts block shipped with three cards (top traffic, silent contacts, stalled dialogs from deadlock signals) via resilient analytics methods returning empty lists on failures.
 - 2026-02-28: Weekly accuracy gate hardened in both digest scheduler and weekly digest render path: show only when `priority_corrections >= 3` and `accuracy_pct >= 80`, fail-closed when `accuracy_pct` is missing.
 - 2026-02-28: trust_bootstrap loader now supports 2-file priority (`settings.ini[trust_bootstrap]` first, fallback to legacy `config.ini`) and settings template thresholds lowered to min_samples=10 / templates_min_corrections=10.
@@ -127,9 +129,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- RC validation / dogfooding for `28.0.0-rc.2` packaging-convergence build.
+- v27.2.0 feature-complete.
 Next:
-- Prepare `v28.0.0` final release after `rc.2` validation window.
+- v28.0.0-rc packaging.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

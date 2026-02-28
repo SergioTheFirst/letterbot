@@ -62,7 +62,7 @@ def _setup(monkeypatch, *, enabled: bool, corrections: int) -> tuple[dict[str, o
     calls = {"count": 0}
 
     class _Analytics:
-        def count_all_time_corrections(self, account_emails: list[str]) -> int:
+        def count_all_time_corrections(self, *, account_emails: list[str]) -> int:
             calls["count"] += 1
             return corrections
 

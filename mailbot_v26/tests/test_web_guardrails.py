@@ -31,7 +31,6 @@ def test_web_pages_avoid_empty_state_phrases(tmp_path: Path) -> None:
         "no " + "data",
         "nothing " + "to show",
         "all " + "quiet",
-        "нет " + "данных",
     ]
     with app.test_client() as client:
         login_with_csrf(client, "pw")

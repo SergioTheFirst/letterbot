@@ -11,7 +11,6 @@ BANNED_PHRASES = [
     "No " + "data",
     "Nothing " + "to show",
     "All " + "quiet",
-    "нет " + "данных",
 ]
 
 

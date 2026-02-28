@@ -14,7 +14,6 @@ FORBIDDEN = [
     "no " + "data",
     "nothing " + "to show",
     "all " + "quiet",
-    "нет " + "данных",
 ]
 
 
