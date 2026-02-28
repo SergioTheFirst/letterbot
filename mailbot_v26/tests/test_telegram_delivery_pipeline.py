@@ -408,3 +408,83 @@ def test_delivery_key_snooze_kind_separation() -> None:
     assert email_key == "email:101"
     assert snooze_key == "snooze:email:101:2026-03-01T10:00:00Z"
     assert snooze_key != email_key
+
+
+def test_due_snooze_delivered_once(monkeypatch, tmp_path) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    email_id = _seed_queue(storage, config.accounts[0].login)
+    with storage.conn:
+        storage.conn.execute("DELETE FROM queue")
+        storage.conn.execute(
+            """
+            INSERT INTO telegram_snooze (email_id, deliver_at_utc, status, reminder_text, attempts, created_at, updated_at)
+            VALUES (?, datetime('now','-1 minute'), 'pending', 'orig', 0, datetime('now'), datetime('now'))
+            """,
+            (email_id,),
+        )
+
+    processor = _configure_pipeline(config)
+    calls: list[object] = []
+
+    def fake_send(payload):
+        calls.append(payload)
+        return DeliveryResult(delivered=True, retryable=False, message_id=77)
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+    flags = FeatureFlags(base_dir=tmp_path)
+
+    _process_queue(storage, config, processor, flags)
+    _process_queue(storage, config, processor, flags)
+
+    with storage.conn:
+        row = storage.conn.execute(
+            "SELECT status FROM telegram_snooze WHERE email_id = ?",
+            (email_id,),
+        ).fetchone()
+        log_count = storage.conn.execute(
+            "SELECT COUNT(*) FROM telegram_delivery_log WHERE email_id = ? AND kind = 'snooze'",
+            (email_id,),
+        ).fetchone()[0]
+
+    assert len(calls) == 1
+    assert row is not None and row[0] == "delivered"
+    assert log_count == 1
+
+
+def test_snooze_retry_on_failure_not_stuck(monkeypatch, tmp_path) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    email_id = _seed_queue(storage, config.accounts[0].login)
+    with storage.conn:
+        storage.conn.execute("DELETE FROM queue")
+        storage.conn.execute(
+            """
+            INSERT INTO telegram_snooze (email_id, deliver_at_utc, status, reminder_text, attempts, created_at, updated_at)
+            VALUES (?, datetime('now','-1 minute'), 'pending', 'orig', 0, datetime('now'), datetime('now'))
+            """,
+            (email_id,),
+        )
+
+    processor = _configure_pipeline(config)
+
+    def fake_send(_payload):
+        return DeliveryResult(delivered=False, retryable=True, error="tg down")
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+    flags = FeatureFlags(base_dir=tmp_path)
+
+    _process_queue(storage, config, processor, flags)
+
+    with storage.conn:
+        row = storage.conn.execute(
+            "SELECT status, attempts, last_error FROM telegram_snooze WHERE email_id = ?",
+            (email_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "pending"
+    assert int(row[1]) >= 1
+    assert "tg down" in str(row[2])

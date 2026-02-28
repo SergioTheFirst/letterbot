@@ -2153,6 +2153,36 @@ def _filter_insights_for_render(
     ]
 
 
+def _build_signal_hints(insights: list[Insight]) -> list[str]:
+    hints: list[str] = []
+    seen_types: set[str] = set()
+    for insight in insights:
+        insight_type = str(insight.type or "").strip().lower()
+        explanation = _sanitize_preview_line(insight.explanation)
+        normalized_expl = explanation.lower()
+        if (
+            "silence" in insight_type
+            or "молч" in insight_type
+            or "silence" in normalized_expl
+            or "молчит" in normalized_expl
+        ) and "silence" not in seen_types:
+            if explanation:
+                hints.append(f"⚠ {explanation}")
+                seen_types.add("silence")
+                continue
+        if (
+            "deadlock" in insight_type
+            or "без ответа" in insight_type
+            or "deadlock" in normalized_expl
+            or "без ответа" in normalized_expl
+        ) and "deadlock" not in seen_types:
+            if explanation:
+                hints.append(f"🔁 {explanation}")
+                seen_types.add("deadlock")
+                continue
+    return hints
+
+
 def _extract_narrative_insight(
     insights: list[Insight],
 ) -> tuple[NarrativeResult | None, list[Insight]]:
@@ -2353,6 +2383,9 @@ def build_telegram_payload(
                 action=narrative.action,
             )
             telegram_text = f"{telegram_text}\n\n{narrative_block}"
+        signal_hints = _build_signal_hints(remaining_insights)
+        if signal_hints:
+            telegram_text = f"{telegram_text}\n" + "\n".join(signal_hints)
         insights_section = _build_insights_section(
             remaining_insights, context.insight_digest
         )

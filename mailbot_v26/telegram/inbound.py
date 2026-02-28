@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -30,6 +30,9 @@ from mailbot_v26.telegram.decision_trace_ui import (
     PRIO_BACK_PREFIX,
     PRIO_MENU_PREFIX,
     PRIO_SET_PREFIX,
+    SNOOZE_BACK_PREFIX,
+    SNOOZE_MENU_PREFIX,
+    SNOOZE_SET_PREFIX,
     build_email_actions_keyboard,
 )
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
@@ -146,6 +149,63 @@ def _load_email_render_snapshot(db_path: Path, email_id: int) -> dict[str, objec
     return snapshot
 
 
+def _ensure_snooze_table(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS telegram_snooze (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email_id INTEGER NOT NULL,
+                deliver_at_utc TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                reminder_text TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                delivered_at TEXT,
+                UNIQUE(email_id, deliver_at_utc)
+            );
+            """
+        )
+
+
+def _save_snooze(
+    *,
+    db_path: Path,
+    email_id: int,
+    deliver_at_utc: datetime,
+    reminder_text: str,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    _ensure_snooze_table(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO telegram_snooze (
+                email_id,
+                deliver_at_utc,
+                status,
+                reminder_text,
+                attempts,
+                last_error,
+                created_at,
+                updated_at,
+                delivered_at
+            ) VALUES (?, ?, 'pending', ?, 0, NULL, ?, ?, NULL)
+            ON CONFLICT(email_id, deliver_at_utc) DO UPDATE SET
+                status = 'pending',
+                reminder_text = excluded.reminder_text,
+                attempts = 0,
+                last_error = NULL,
+                updated_at = excluded.updated_at,
+                delivered_at = NULL
+            """,
+            (email_id, deliver_at_utc.isoformat(), reminder_text.strip(), now, now),
+        )
+        conn.commit()
+
+
 def _render_tier1_message(snapshot: dict[str, object]) -> str:
     priority = str(snapshot.get("priority") or "🔵")
     from_email = str(snapshot.get("from_email") or "неизвестно")
@@ -228,6 +288,29 @@ def parse_callback_data(data: str) -> tuple[str, dict[str, str]] | None:
         if not email_id or not priority:
             return None
         return "prio_set", {"email_id": email_id, "priority": priority}
+
+    if raw.startswith(SNOOZE_MENU_PREFIX):
+        email_id = raw[len(SNOOZE_MENU_PREFIX) :].strip()
+        if not email_id.isdigit():
+            return None
+        return "snooze_menu", {"email_id": email_id}
+
+    if raw.startswith(SNOOZE_BACK_PREFIX):
+        email_id = raw[len(SNOOZE_BACK_PREFIX) :].strip()
+        if not email_id.isdigit():
+            return None
+        return "snooze_back", {"email_id": email_id}
+
+    if raw.startswith(SNOOZE_SET_PREFIX):
+        remainder = raw[len(SNOOZE_SET_PREFIX) :]
+        parts = remainder.split(":")
+        if len(parts) != 2:
+            return None
+        email_id = parts[0].strip()
+        snooze_code = parts[1].strip().lower()
+        if not email_id.isdigit() or snooze_code not in {"2h", "6h", "tom"}:
+            return None
+        return "snooze_set", {"email_id": email_id, "snooze": snooze_code}
 
     for prefix in _CALLBACK_PREFIXES:
         if raw.startswith(prefix):
@@ -467,6 +550,15 @@ class TelegramInboundProcessor:
                 callback_id,
                 _t("inbound.priority_ack", priority=payload.get("priority") or "🔵"),
             )
+        elif action == "snooze_menu":
+            self._open_snooze_menu(chat_id, message, payload)
+            self._answer_callback(callback_id, _t("inbound.ok"))
+        elif action == "snooze_back":
+            self._close_snooze_menu(chat_id, message, payload)
+            self._answer_callback(callback_id, _t("inbound.ok"))
+        elif action == "snooze_set":
+            ack = self._set_snooze(chat_id, message, payload)
+            self._answer_callback(callback_id, ack or _t("inbound.bad_button"))
 
     def handle_message(self, message: dict[str, object]) -> None:
         chat_id = ""
@@ -498,6 +590,9 @@ class TelegramInboundProcessor:
             return
         if command in {"/autopriority", "autopriority"}:
             self._handle_auto_priority_toggle(chat_id, args)
+            return
+        if command in {"/commitments", "/tasks", "commitments", "tasks"}:
+            self._handle_commitments(chat_id)
             return
 
         self._reply(chat_id, _t("inbound.command_unknown"))
@@ -772,6 +867,138 @@ class TelegramInboundProcessor:
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("telegram_inbound_edit_failed", error=str(exc))
 
+    def _open_snooze_menu(
+        self,
+        chat_id: str,
+        message: dict[str, object] | None,
+        payload: dict[str, str],
+    ) -> None:
+        self._render_with_keyboard(chat_id, message, payload, snooze_menu=True)
+
+    def _close_snooze_menu(
+        self,
+        chat_id: str,
+        message: dict[str, object] | None,
+        payload: dict[str, str],
+    ) -> None:
+        self._render_with_keyboard(chat_id, message, payload, snooze_menu=False)
+
+    def _set_snooze(
+        self,
+        chat_id: str,
+        message: dict[str, object] | None,
+        payload: dict[str, str],
+    ) -> str | None:
+        email_id_raw = payload.get("email_id")
+        if not email_id_raw or not email_id_raw.isdigit():
+            self._reply(chat_id, _t("inbound.bad_email_id"))
+            return None
+        snooze_code = str(payload.get("snooze") or "").strip().lower()
+        now_local = datetime.now().astimezone()
+        if snooze_code == "2h":
+            deliver_local = now_local + timedelta(hours=2)
+            ack = "⏰ Напомню в 2 часа"
+        elif snooze_code == "6h":
+            deliver_local = now_local + timedelta(hours=6)
+            ack = "⏰ Напомню в 6 часов"
+        elif snooze_code == "tom":
+            tomorrow = now_local.date() + timedelta(days=1)
+            deliver_local = datetime.combine(tomorrow, datetime.min.time(), tzinfo=now_local.tzinfo).replace(
+                hour=9,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            ack = "⏰ Напомню завтра в 09:00"
+        else:
+            return None
+
+        email_id = int(email_id_raw)
+        reminder_text = ""
+        if message and isinstance(message, dict):
+            reminder_text = _clean_text(message.get("text"))
+        if not reminder_text:
+            snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
+            if snapshot:
+                reminder_text = _render_tier1_message(snapshot)
+        if not reminder_text:
+            return None
+        _save_snooze(
+            db_path=self.knowledge_db.path,
+            email_id=email_id,
+            deliver_at_utc=deliver_local.astimezone(timezone.utc),
+            reminder_text=reminder_text,
+        )
+        self._render_with_keyboard(chat_id, message, payload, snooze_menu=False)
+        return ack
+
+    def _render_with_keyboard(
+        self,
+        chat_id: str,
+        message: dict[str, object] | None,
+        payload: dict[str, str],
+        *,
+        snooze_menu: bool,
+    ) -> None:
+        email_id_raw = payload.get("email_id")
+        if not email_id_raw or not email_id_raw.isdigit():
+            self._reply(chat_id, _t("inbound.bad_email_id"))
+            return
+        if not message or not isinstance(message, dict):
+            return
+        message_id = message.get("message_id")
+        try:
+            message_id_int = int(message_id)
+        except (TypeError, ValueError):
+            return
+        email_id = int(email_id_raw)
+        snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
+        if not snapshot:
+            return
+        expanded = _is_trace_expanded(message)
+        tier1_text = _render_tier1_message(snapshot)
+        full_text = tier1_text
+        if expanded:
+            try:
+                traces = load_latest_decision_traces(
+                    db_path=self.knowledge_db.path, email_id=email_id, limit=10
+                )
+                summaries = [build_decision_trace_summary(trace) for trace in traces]
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("telegram_inbound_trace_failed", error=str(exc))
+                summaries = []
+            trace_payload = [
+                {
+                    "decision_kind": summary.decision_kind,
+                    "decision_label": summary.decision_label,
+                    "evidence": summary.evidence,
+                    "explain_codes": summary.explain_codes,
+                    "counterfactuals": [
+                        {"signal": item.signal, "decision": item.decision}
+                        for item in summary.counterfactuals
+                    ],
+                }
+                for summary in summaries
+            ]
+            details_text = _render_decision_trace_details(trace_payload)
+            full_text = f"{tier1_text}\n\n{details_text}"
+
+        reply_markup = build_email_actions_keyboard(
+            email_id=email_id,
+            expanded=expanded,
+            snooze_menu=snooze_menu,
+        )
+        try:
+            edit_telegram_message(
+                bot_token=self.bot_token,
+                chat_id=chat_id,
+                message_id=message_id_int,
+                html_text=full_text,
+                reply_markup=reply_markup,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("telegram_inbound_edit_failed", error=str(exc))
+
     def _toggle_decision_trace(
         self,
         chat_id: str,
@@ -907,9 +1134,64 @@ class TelegramInboundProcessor:
                 _t("inbound.help.doctor"),
                 _t("inbound.help.digest"),
                 _t("inbound.help.autopriority"),
+                _t("inbound.help.commitments"),
                 _t("inbound.help.help"),
             ]
         )
+
+    def _handle_commitments(self, chat_id: str) -> None:
+        account_emails = list(self._account_emails())
+        if not account_emails:
+            self._reply(chat_id, "✅ Нет открытых обязательств")
+            return
+        placeholders = ",".join("?" for _ in account_emails)
+        try:
+            with sqlite3.connect(self.knowledge_db.path) as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT c.commitment_text, c.deadline_iso
+                    FROM commitments c
+                    JOIN emails e ON e.id = c.email_row_id
+                    WHERE lower(c.status) IN ('pending', 'unknown')
+                      AND lower(e.account_email) IN ({placeholders})
+                    ORDER BY
+                      CASE WHEN c.deadline_iso IS NULL OR c.deadline_iso = '' THEN 1 ELSE 0 END ASC,
+                      c.deadline_iso ASC,
+                      c.id DESC
+                    LIMIT 100
+                    """,
+                    tuple(email.casefold() for email in account_emails),
+                ).fetchall()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("telegram_inbound_commitments_failed", error=str(exc))
+            rows = []
+        if not rows:
+            self._reply(chat_id, "✅ Нет открытых обязательств")
+            return
+
+        deduped: list[str] = []
+        seen: set[tuple[str, str]] = set()
+        for row in rows:
+            text = _clean_text(str(row[0] if len(row) > 0 else ""))
+            if not text:
+                continue
+            deadline_raw = _clean_text(str(row[1] if len(row) > 1 else ""))
+            deadline = deadline_raw[:10] if len(deadline_raw) >= 10 else ""
+            key = (text.casefold(), deadline)
+            if key in seen:
+                continue
+            seen.add(key)
+            line = f"• {escape_tg_html(text)}"
+            if deadline:
+                line = f"{line} · до {escape_tg_html(deadline)}"
+            deduped.append(line)
+            if len(deduped) >= 7:
+                break
+
+        if not deduped:
+            self._reply(chat_id, "✅ Нет открытых обязательств")
+            return
+        self._reply(chat_id, "\n".join(["📋 <b>Обязательства:</b>", *deduped]))
 
     def _priority_help_text(self) -> str:
         return _t("inbound.priority_help")

@@ -109,6 +109,30 @@ class Storage:
                 ON queue(stage, not_before);
                 """
             )
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS telegram_snooze (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email_id INTEGER NOT NULL,
+                    deliver_at_utc TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    reminder_text TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    delivered_at TEXT,
+                    FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE,
+                    UNIQUE(email_id, deliver_at_utc)
+                );
+                """
+            )
+            self.conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_telegram_snooze_due
+                ON telegram_snooze(status, deliver_at_utc);
+                """
+            )
 
     def close(self) -> None:
         try:
@@ -259,6 +283,68 @@ class Storage:
             self.conn.execute(
                 "DELETE FROM telegram_delivery_log WHERE delivery_key = ?;",
                 (delivery_key,),
+            )
+
+    def list_due_snoozes(self, *, now_iso: str, limit: int = 20) -> List[Dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT id, email_id, deliver_at_utc, reminder_text, attempts
+            FROM telegram_snooze
+            WHERE status = 'pending'
+              AND deliver_at_utc <= ?
+            ORDER BY deliver_at_utc ASC, id ASC
+            LIMIT ?
+            """,
+            (now_iso, max(1, int(limit))),
+        ).fetchall()
+        result: List[Dict[str, Any]] = []
+        for row in rows:
+            result.append(
+                {
+                    "id": int(row[0]),
+                    "email_id": int(row[1]),
+                    "deliver_at_utc": str(row[2]),
+                    "reminder_text": str(row[3] or ""),
+                    "attempts": int(row[4] or 0),
+                }
+            )
+        return result
+
+    def mark_snooze_delivered(self, *, snooze_id: int, delivered_at: str | None = None) -> None:
+        ts = delivered_at or self._now()
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE telegram_snooze
+                SET status = 'delivered',
+                    delivered_at = ?,
+                    updated_at = ?,
+                    last_error = NULL
+                WHERE id = ?
+                """,
+                (ts, self._now(), snooze_id),
+            )
+
+    def reschedule_snooze_retry(
+        self,
+        *,
+        snooze_id: int,
+        next_deliver_at_utc: str,
+        attempts: int,
+        error: str,
+    ) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE telegram_snooze
+                SET status = 'pending',
+                    deliver_at_utc = ?,
+                    attempts = ?,
+                    last_error = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (next_deliver_at_utc, attempts, error, self._now(), snooze_id),
             )
 
     def claim_next(self, stages: List[str]) -> Dict[str, Any] | None:

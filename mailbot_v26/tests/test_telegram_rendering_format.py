@@ -73,3 +73,17 @@ def test_processor_format_drops_duplicate_subject_first_body_line_with_fw_re() -
     )
 
     assert rendered.splitlines() == ["🔴 от sender@example.com — FW: Счет"]
+
+
+def test_signal_hints_are_single_per_type() -> None:
+    insights = [
+        processor.Insight(type="silence", severity="MEDIUM", explanation="Контакт молчит 9 дней", recommendation=""),
+        processor.Insight(type="silence", severity="HIGH", explanation="Контакт молчит 10 дней", recommendation=""),
+        processor.Insight(type="deadlock", severity="MEDIUM", explanation="3-е письмо без ответа", recommendation=""),
+    ]
+
+    hints = processor._build_signal_hints(insights)
+
+    assert len(hints) == 2
+    assert hints[0].startswith("⚠ ")
+    assert hints[1].startswith("🔁 ")

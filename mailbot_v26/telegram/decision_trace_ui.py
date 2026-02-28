@@ -9,6 +9,9 @@ HIDE_PREFIX = "mb:h:"
 PRIO_MENU_PREFIX = "prio_menu:"
 PRIO_SET_PREFIX = "prio_set:"
 PRIO_BACK_PREFIX = "prio_back:"
+SNOOZE_MENU_PREFIX = "snz_m:"
+SNOOZE_SET_PREFIX = "snz_s:"
+SNOOZE_BACK_PREFIX = "snz_b:"
 
 logger = get_logger("mailbot")
 
@@ -56,6 +59,7 @@ def build_email_actions_keyboard(
     email_id: int | str,
     expanded: bool,
     prio_menu: bool = False,
+    snooze_menu: bool = False,
 ) -> dict[str, Any]:
     email_id_int = int(str(email_id))
     try:
@@ -88,6 +92,20 @@ def build_email_actions_keyboard(
             ]
             return {"inline_keyboard": [priority_row, back_row]}
 
+        if snooze_menu:
+            snooze_row = [
+                {"text": "2ч", "callback_data": _safe_callback(f"{SNOOZE_SET_PREFIX}{email_id_int}:2h")},
+                {"text": "6ч", "callback_data": _safe_callback(f"{SNOOZE_SET_PREFIX}{email_id_int}:6h")},
+                {"text": "Завтра", "callback_data": _safe_callback(f"{SNOOZE_SET_PREFIX}{email_id_int}:tom")},
+            ]
+            back_row = [
+                {
+                    "text": "Назад",
+                    "callback_data": _safe_callback(f"{SNOOZE_BACK_PREFIX}{email_id_int}"),
+                }
+            ]
+            return {"inline_keyboard": [snooze_row, back_row]}
+
         trace_label = "◀ Скрыть" if expanded else "▶ Подробнее"
         trace_callback = _safe_callback(
             build_decision_trace_callback(
@@ -95,11 +113,13 @@ def build_email_actions_keyboard(
             )
         )
         prio_callback = _safe_callback(f"{PRIO_MENU_PREFIX}{email_id_int}")
+        snooze_callback = _safe_callback(f"{SNOOZE_MENU_PREFIX}{email_id_int}")
         return {
             "inline_keyboard": [
                 [
                     {"text": trace_label, "callback_data": trace_callback},
                     {"text": "Приоритет", "callback_data": prio_callback},
+                    {"text": "⏰ Позже", "callback_data": snooze_callback},
                 ]
             ]
         }
@@ -118,4 +138,7 @@ __all__ = [
     "PRIO_MENU_PREFIX",
     "PRIO_SET_PREFIX",
     "PRIO_BACK_PREFIX",
+    "SNOOZE_MENU_PREFIX",
+    "SNOOZE_SET_PREFIX",
+    "SNOOZE_BACK_PREFIX",
 ]
