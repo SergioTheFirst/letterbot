@@ -34,7 +34,7 @@ from mailbot_v26.dist_self_check import validate_dist_runtime
 from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.config_loader import AccountConfig, BotConfig, load_config as load_ini_config
 from mailbot_v26.config.paths import resolve_config_paths
-from mailbot_v26.account_identity import logins_match
+from mailbot_v26.account_identity import logins_match, normalize_login
 from mailbot_v26.config_yaml import (
     ConfigError as YamlConfigError,
     SCHEMA_NEWER_MESSAGE,
@@ -407,14 +407,15 @@ def _persist_inbound_and_enqueue_parse(
     raw_email: bytes,
     inbound: InboundMessage,
 ) -> tuple[int, bool]:
+    normalized_account_email = normalize_login(account_email)
     find_email_id = getattr(storage, "find_email_id", None)
     existing_email_id = (
-        find_email_id(account_email, uid)
+        find_email_id(normalized_account_email, uid)
         if callable(find_email_id)
         else None
     )
     email_id = storage.upsert_email(
-        account_email=account_email,
+        account_email=normalized_account_email,
         uid=uid,
         message_id=message_id,
         from_email=from_email,
@@ -426,7 +427,7 @@ def _persist_inbound_and_enqueue_parse(
     if existing_email_id is not None:
         logger.info(
             "duplicate_ingest_skipped account_email=%s uid=%s email_id=%s",
-            account_email,
+            normalized_account_email,
             uid,
             email_id,
         )
@@ -434,7 +435,7 @@ def _persist_inbound_and_enqueue_parse(
 
     ctx = PipelineContext(
         email_id=email_id,
-        account_email=account_email,
+        account_email=normalized_account_email,
         uid=uid,
     )
     PIPELINE_CACHE[email_id] = ctx
@@ -442,6 +443,22 @@ def _persist_inbound_and_enqueue_parse(
     store_inbound(email_id, inbound)
     storage.enqueue_stage(email_id, "PARSE")
     return email_id, True
+
+
+def _build_telegram_delivery_key(
+    *,
+    email_id: int,
+    kind: str = "email",
+    snooze_ts: str | None = None,
+) -> str:
+    base_key = f"email:{email_id}"
+    if kind == "email":
+        return base_key
+    if kind == "snooze":
+        if not snooze_ts:
+            raise ValueError("snooze_ts is required for snooze delivery key")
+        return f"snooze:{base_key}:{snooze_ts}"
+    return f"{kind}:{base_key}"
 
 
 def _process_queue(
@@ -501,17 +518,52 @@ def _process_queue(
                 storage.mark_done(queue_id)
                 storage.enqueue_stage(email_id, "TG")
             elif stage == "TG":
-                if storage.is_telegram_delivered(email_id):
+                account = _get_account_by_login(config, ctx.account_email) if ctx else None
+                delivery_key = _build_telegram_delivery_key(email_id=email_id, kind="email")
+                dedup_state = storage.reserve_telegram_delivery(
+                    delivery_key=delivery_key,
+                    email_id=email_id,
+                    account_id=ctx.account_email if ctx else None,
+                    chat_id=account.telegram_chat_id if account else None,
+                    kind="email",
+                )
+                if dedup_state == "duplicate" or (
+                    dedup_state == "unavailable" and storage.is_telegram_delivered(email_id)
+                ):
                     storage.mark_done(queue_id)
                     logger.info(
-                        "telegram_duplicate_skipped email_id=%s queue_id=%s",
+                        "telegram_delivery_skipped_duplicate account_id=%s email_id=%s delivery_key=%s",
+                        ctx.account_email if ctx else "",
                         email_id,
-                        queue_id,
+                        delivery_key,
+                    )
+                    event_emitter.emit(
+                        type="telegram_delivery_skipped_duplicate",
+                        timestamp=datetime.now(timezone.utc),
+                        email_id=email_id,
+                        payload={"delivery_key": delivery_key, "kind": "email"},
                     )
                     continue
-                result = stage_tg(ctx)
+                if dedup_state == "unavailable":
+                    logger.warning(
+                        "telegram_delivery_dedup_unavailable email_id=%s account_id=%s delivery_key=%s",
+                        email_id,
+                        ctx.account_email if ctx else "",
+                        delivery_key,
+                    )
+                try:
+                    result = stage_tg(ctx)
+                except Exception:
+                    if dedup_state == "reserved":
+                        storage.release_telegram_delivery(delivery_key=delivery_key)
+                    raise
                 if result.delivered:
                     storage.mark_telegram_delivered(email_id)
+                    if dedup_state == "reserved":
+                        storage.finalize_telegram_delivery(
+                            delivery_key=delivery_key,
+                            telegram_message_id=(str(result.message_id) if result.message_id is not None else None),
+                        )
                     storage.mark_done(queue_id)
                     event_emitter.emit(
                         type="telegram_delivery_succeeded",
@@ -529,9 +581,10 @@ def _process_queue(
                         )
                 else:
                     error = result.error or "telegram delivery failed"
+                    if dedup_state == "reserved":
+                        storage.release_telegram_delivery(delivery_key=delivery_key)
                     if result.retryable:
                         raise RuntimeError(error)
-                    account = _get_account_by_login(config, ctx.account_email) if ctx else None
                     if account:
                         notice = "Telegram delivery failed. Check email client."
                         payload = _build_system_payload(

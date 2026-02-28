@@ -205,3 +205,36 @@ def test_internaldate_timezone_normalization(monkeypatch, tmp_path: Path, accoun
     messages = client.fetch_new_messages()
 
     assert [uid for uid, _ in messages] == [1]
+
+
+def test_fetch_uses_normalized_state_login_key(monkeypatch, tmp_path: Path, account: AccountConfig) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    fake_client.set_messages(
+        {
+            6: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 3, 12, 0, 0, tzinfo=timezone.utc)},
+        }
+    )
+
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    state = StateManager(tmp_path / "state.json")
+    state.update_last_uid("user@example.com", 5)
+
+    mixed_case = AccountConfig(
+        account_id=account.account_id,
+        login="User@Example.com",
+        password=account.password,
+        host=account.host,
+        port=account.port,
+        use_ssl=account.use_ssl,
+        telegram_chat_id=account.telegram_chat_id,
+    )
+    client = ResilientIMAP(
+        mixed_case,
+        state,
+        start_time=datetime(2024, 1, 3, 11, 0, 0, tzinfo=timezone.utc),
+    )
+    messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [6]
+    assert fake_client.search_calls[0] == ["UID", "6:*"]
+    assert state.get_last_uid("user@example.com") == 6
