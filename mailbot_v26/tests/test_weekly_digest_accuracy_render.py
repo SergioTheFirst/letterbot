@@ -20,38 +20,58 @@ def _base_weekly_kwargs() -> dict[str, object]:
     )
 
 
-def test_weekly_accuracy_report_block_hidden_when_flag_off() -> None:
-    data = weekly_digest.WeeklyDigestData(**_base_weekly_kwargs())
-    text = weekly_digest._build_weekly_digest_text(data)
-    assert "📊 Неделя:" not in text
-
-
-def test_weekly_accuracy_report_block_hidden_when_insufficient_corrections() -> None:
+def _text(report: dict[str, object]) -> str:
     data = weekly_digest.WeeklyDigestData(
         **{
             **_base_weekly_kwargs(),
-            "weekly_accuracy_report": {
-                "emails_received": 4,
-                "priority_corrections": 2,
-                "surprises": 0,
-            },
+            "weekly_accuracy_report": report,
         }
     )
-    text = weekly_digest._build_weekly_digest_text(data)
+    return weekly_digest._build_weekly_digest_text(data)
+
+
+def test_weekly_accuracy_hidden_below_80() -> None:
+    text = _text(
+        {
+            "emails_received": 12,
+            "priority_corrections": 5,
+            "surprises": 1,
+            "accuracy_pct": 75,
+        }
+    )
     assert "📊 Неделя:" not in text
 
 
-def test_weekly_accuracy_report_block_renders_when_enabled() -> None:
-    data = weekly_digest.WeeklyDigestData(
-        **{
-            **_base_weekly_kwargs(),
-            "weekly_accuracy_report": {
-                "emails_received": 12,
-                "priority_corrections": 3,
-                "surprises": 1,
-                "accuracy_pct": 67,
-            },
+def test_weekly_accuracy_shown_at_or_above_80() -> None:
+    text = _text(
+        {
+            "emails_received": 12,
+            "priority_corrections": 5,
+            "surprises": 1,
+            "accuracy_pct": 85,
         }
     )
-    text = weekly_digest._build_weekly_digest_text(data)
-    assert "📊 Неделя: 12 писем · 3 коррекции · точность 67%" in text
+    assert "📊 Неделя: 12 писем · 5 коррекции · точность 85%" in text
+
+
+def test_weekly_accuracy_hidden_when_accuracy_missing() -> None:
+    text = _text(
+        {
+            "emails_received": 12,
+            "priority_corrections": 5,
+            "surprises": 1,
+        }
+    )
+    assert "📊 Неделя:" not in text
+
+
+def test_weekly_accuracy_hidden_when_insufficient_corrections() -> None:
+    text = _text(
+        {
+            "emails_received": 12,
+            "priority_corrections": 2,
+            "surprises": 0,
+            "accuracy_pct": 90,
+        }
+    )
+    assert "📊 Неделя:" not in text

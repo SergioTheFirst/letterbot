@@ -202,6 +202,12 @@ def _format_weekly_accuracy_progress(
 ) -> str | None:
     if progress is None:
         return None
+    corrections = int(progress.current_corrections)
+    if corrections < 3:
+        return None
+    accuracy_pct = 100 - int(progress.current_surprise_rate_pp)
+    if accuracy_pct < 80:
+        return None
     delta = int(progress.delta_pp)
     if abs(delta) < 2:
         return None
@@ -575,14 +581,10 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
     if data.weekly_accuracy_report is not None:
         report = data.weekly_accuracy_report
         corrections = int(report.get("priority_corrections") or 0)
-        if corrections >= 3:
+        accuracy_raw = report.get("accuracy_pct")
+        accuracy_pct = int(accuracy_raw) if accuracy_raw is not None else None
+        if corrections >= 3 and accuracy_pct is not None and accuracy_pct >= 80:
             emails = int(report.get("emails_received") or 0)
-            accuracy_pct = report.get("accuracy_pct")
-            if accuracy_pct is None:
-                surprise_rate = report.get("surprise_rate")
-                if surprise_rate is not None:
-                    accuracy_pct = round((1 - float(surprise_rate)) * 100)
-            accuracy_pct = int(accuracy_pct or 0)
             lines.append(
                 f"📊 Неделя: {emails} писем · {corrections} коррекции · точность {accuracy_pct}%"
             )

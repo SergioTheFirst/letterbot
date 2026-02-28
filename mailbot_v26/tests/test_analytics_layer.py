@@ -144,3 +144,14 @@ def test_views_and_read_only_analytics(tmp_path: Path) -> None:
                 VALUES ('', '', '', '', '', '', '', '')
                 """
             )
+
+
+def test_cockpit_contact_methods_return_empty_on_empty_db(tmp_path: Path) -> None:
+    db_path = tmp_path / "empty.sqlite"
+    KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+
+    assert analytics.cockpit_top_senders(["a@example.com"]) == []
+    assert analytics.cockpit_silent_contacts(["a@example.com"]) == []
+    assert analytics.cockpit_stalled_threads(["a@example.com"]) == []
+    assert analytics.count_all_time_corrections(["a@example.com"]) == 0

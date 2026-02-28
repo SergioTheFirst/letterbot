@@ -139,11 +139,11 @@ max_items = 5
 
 [trust_bootstrap]
 learning_days = 14
-min_samples = 50
+min_samples = 10
 max_allowed_surprise_rate = 0.30
 hide_action_templates_until_ready = true
 templates_window_days = 7
-templates_min_corrections = 20
+templates_min_corrections = 10
 templates_max_surprise_rate = 0.15
 
 [regret_minimization]

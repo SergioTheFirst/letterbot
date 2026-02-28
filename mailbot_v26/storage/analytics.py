@@ -3206,6 +3206,175 @@ class KnowledgeAnalytics:
             since_ts=since_ts,
         )
 
+    def count_all_time_corrections(self, account_emails: list[str]) -> int:
+        account_ids = self._normalize_account_scope("", account_emails)
+        if not account_ids:
+            return 0
+        try:
+            query = """
+            SELECT COUNT(*) AS total
+            FROM events_v1
+            WHERE event_type = ?
+            """
+            params: list[object] = [EventType.PRIORITY_CORRECTION_RECORDED.value]
+            clause, clause_params = self._account_scope_clause(account_ids)
+            query += clause
+            params.extend(clause_params)
+            rows = self._execute_select(query, params)
+            return int(rows[0].get("total") or 0) if rows else 0
+        except Exception:
+            try:
+                query = """
+                SELECT COUNT(*) AS total
+                FROM priority_feedback
+                WHERE kind IN (?, ?, ?)
+                """
+                params = ["correction", "priority_correction", "priority_correction_recorded"]
+                email_clause, email_params = self._account_email_clause(account_ids)
+                query += email_clause
+                params.extend(email_params)
+                rows = self._execute_select(query, params)
+                return int(rows[0].get("total") or 0) if rows else 0
+            except Exception:
+                return 0
+
+    def cockpit_top_senders(
+        self,
+        account_emails: Iterable[str] | None,
+        days: int = 30,
+        limit: int = 3,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope("", account_emails)
+        if not account_ids or days <= 0 or limit <= 0:
+            return []
+        since_ts = self._window_start_ts(days)
+        try:
+            clause, clause_params = self._account_email_clause(account_ids)
+            rows = self._execute_select(
+                """
+                SELECT from_email, COUNT(*) AS total
+                FROM emails
+                WHERE datetime(received_at) >= datetime(?, 'unixepoch')
+                """
+                + clause
+                + """
+                GROUP BY from_email
+                ORDER BY total DESC, from_email ASC
+                LIMIT ?
+                """,
+                [since_ts, *clause_params, limit],
+            )
+        except Exception:
+            return []
+        items: list[dict[str, object]] = []
+        for row in rows:
+            email = str(row.get("from_email") or "").strip()
+            if not email:
+                continue
+            masked = self._mask_email_address(email) or email
+            items.append(
+                {
+                    "email": email,
+                    "display_name": masked,
+                    "count": int(row.get("total") or 0),
+                }
+            )
+        return items
+
+    def cockpit_silent_contacts(
+        self,
+        account_emails: Iterable[str] | None,
+        silent_days: int = 14,
+        days: int = 90,
+        min_msgs: int = 3,
+        limit: int = 3,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope("", account_emails)
+        if not account_ids or silent_days <= 0 or days <= 0 or min_msgs <= 0 or limit <= 0:
+            return []
+        since_ts = self._window_start_ts(days)
+        cutoff_ts = self._window_start_ts(silent_days)
+        now_ts = datetime.now(timezone.utc).timestamp()
+        try:
+            clause, clause_params = self._account_email_clause(account_ids)
+            rows = self._execute_select(
+                """
+                SELECT from_email, COUNT(*) AS total, MAX(strftime('%s', received_at)) AS last_ts
+                FROM emails
+                WHERE datetime(received_at) >= datetime(?, 'unixepoch')
+                """
+                + clause
+                + """
+                GROUP BY from_email
+                HAVING total >= ? AND COALESCE(last_ts, 0) < ?
+                ORDER BY last_ts ASC, from_email ASC
+                LIMIT ?
+                """,
+                [since_ts, *clause_params, min_msgs, cutoff_ts, limit],
+            )
+        except Exception:
+            return []
+        items: list[dict[str, object]] = []
+        for row in rows:
+            email = str(row.get("from_email") or "").strip()
+            if not email:
+                continue
+            try:
+                last_ts = float(row.get("last_ts") or 0.0)
+            except (TypeError, ValueError):
+                last_ts = 0.0
+            days_silent = max(0, int((now_ts - last_ts) // 86400)) if last_ts > 0 else silent_days
+            masked = self._mask_email_address(email) or email
+            items.append(
+                {
+                    "email": email,
+                    "display_name": masked,
+                    "days_silent": days_silent,
+                }
+            )
+        return items
+
+    def cockpit_stalled_threads(
+        self,
+        account_emails: Iterable[str] | None,
+        days: int = 30,
+        limit: int = 3,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope("", account_emails)
+        if not account_ids or days <= 0 or limit <= 0:
+            return []
+        try:
+            insights = self.get_deadlock_insights(
+                account_email=account_ids[0],
+                account_emails=account_ids,
+                window_days=days,
+                limit=limit,
+            )
+        except Exception:
+            return []
+        if not insights:
+            return []
+        now_ts = datetime.now(timezone.utc).timestamp()
+        items: list[dict[str, object]] = []
+        for row in insights[:limit]:
+            detected_ts = 0.0
+            received_at = str(row.get("received_at") or "").strip()
+            if received_at:
+                parsed = parse_sqlite_datetime(received_at)
+                if parsed is not None:
+                    detected_ts = parsed.timestamp()
+            days_ago = max(0, int((now_ts - detected_ts) // 86400)) if detected_ts > 0 else 0
+            from_email = str(row.get("from_email") or "").strip()
+            items.append(
+                {
+                    "from_email": self._mask_email_address(from_email) or from_email,
+                    "subject": str(row.get("subject") or "").strip(),
+                    "snippet": str(row.get("snippet") or "").strip(),
+                    "days_ago": days_ago,
+                }
+            )
+        return items
+
     def uncertainty_queue_items(
         self,
         account_email: str,

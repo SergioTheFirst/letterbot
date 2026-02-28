@@ -41,6 +41,15 @@ class FakeAnalytics:
             if include_engineer
             else {},
         }
+    def cockpit_top_senders(self, account_emails, days=30, limit=3):
+        return []
+
+    def cockpit_silent_contacts(self, account_emails, silent_days=14, days=90, min_msgs=3, limit=3):
+        return []
+
+    def cockpit_stalled_threads(self, account_emails, days=30, limit=3):
+        return []
+
 
 
 def _build_app_with_email(tmp_path: Path, *, allow_pii: bool = False):
@@ -96,3 +105,29 @@ def test_cockpit_pii_default_and_override(tmp_path: Path) -> None:
         unmasked_body = unmasked.get_data(as_text=True)
         assert "alice@example.com" not in unmasked_body
         assert "a…@example.com" in unmasked_body
+
+
+
+def test_cockpit_contacts_cards_survive_analytics_exceptions(tmp_path: Path) -> None:
+    db_path = tmp_path / "errors.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+
+    class BrokenAnalytics(FakeAnalytics):
+        def cockpit_top_senders(self, account_emails, days=30, limit=3):
+            raise RuntimeError("boom")
+
+        def cockpit_silent_contacts(self, account_emails, silent_days=14, days=90, min_msgs=3, limit=3):
+            raise RuntimeError("boom")
+
+        def cockpit_stalled_threads(self, account_emails, days=30, limit=3):
+            raise RuntimeError("boom")
+
+    app.config["ANALYTICS_FACTORY"] = lambda: BrokenAnalytics()
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Контакты" in body
+        assert "— пусто —" in body

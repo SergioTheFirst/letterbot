@@ -25,13 +25,23 @@ class TrustBootstrapConfig:
 def load_trust_bootstrap_config(
     config_dir: Path | None = None,
 ) -> TrustBootstrapConfig:
-    config_path = (config_dir or Path(__file__).resolve().parent) / "config.ini"
-    parser = read_user_ini_with_defaults(
-        config_path,
+    base_dir = config_dir or Path(__file__).resolve().parent
+    settings_path = base_dir / "settings.ini"
+    config_path = base_dir / "config.ini"
+    settings_parser = read_user_ini_with_defaults(
+        settings_path,
         logger=_LOGGER,
         scope_label="trust bootstrap settings",
     )
-    section = parser["trust_bootstrap"] if "trust_bootstrap" in parser else None
+    if "trust_bootstrap" in settings_parser:
+        section = settings_parser["trust_bootstrap"]
+    else:
+        parser = read_user_ini_with_defaults(
+            config_path,
+            logger=_LOGGER,
+            scope_label="trust bootstrap settings",
+        )
+        section = parser["trust_bootstrap"] if "trust_bootstrap" in parser else None
 
     learning_days = 14
     min_samples = 50
