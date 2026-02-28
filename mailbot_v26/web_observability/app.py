@@ -67,7 +67,7 @@ from mailbot_v26.observability.decision_trace_v1 import (
 )
 from mailbot_v26.observability.decision_trace_view import summaries_as_payload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
-from mailbot_v26.version import __version__
+from mailbot_v26.version import get_version
 from mailbot_v26.web_observability.doctor_export import build_diagnostics_zip
 
 logger = logging.getLogger(__name__)
@@ -198,7 +198,7 @@ def _render_template(app: Flask, template_name: str, **context: object) -> str:
     donate_enabled = bool(app.config.get("DONATE_ENABLED", False))
     context.setdefault("support_nav_enabled", support_nav_enabled)
     context.setdefault("cfg", {"features": {"donate_enabled": donate_enabled}})
-    context.setdefault("app_version", __version__)
+    context.setdefault("app_version", get_version())
     if USING_FLASK_STUB:
         template_path = Path(app.template_folder or "") / template_name
         return _render_stub_html(template_name, context, template_path)
@@ -2092,7 +2092,7 @@ def create_app(
             "doctor.html",
             title=app.config["APP_TITLE"],
             page_title="One-click Doctor",
-            app_version=__version__,
+            app_version=get_version(),
             manifest_status=manifest_status,
             log_path=str(app.config["DOCTOR_LOG_PATH"]),
             csrf_token=_get_or_create_csrf_token(),

@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-28: v28.0.0-rc.1 packaging pass completed — version unified to `28.0.0-rc.1` across source/web/CLI/status, release artifact contract added (`RELEASE_ARTIFACT.md`), static `MANIFEST.json` generated (version+commit+UTC+sha256 set), Windows `update_and_run.bat` upgraded with Python/pip diagnostics + explicit log path + summary, and RC smoke tests added.
 - 2026-02-28: Block 4 complete — preview trust gate moved inline into main Telegram payload (`💡 ...`) with all-time corrections gate (>=10), no user-visible second message path, and no-op `send_preview_to_telegram` retained for compatibility.
 - 2026-02-28: Cockpit contacts block shipped with three cards (top traffic, silent contacts, stalled dialogs from deadlock signals) via resilient analytics methods returning empty lists on failures.
 - 2026-02-28: Weekly accuracy gate hardened in both digest scheduler and weekly digest render path: show only when `priority_corrections >= 3` and `accuracy_pct >= 80`, fail-closed when `accuracy_pct` is missing.
@@ -125,14 +126,27 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- `27.2.0` feature-complete.
-- Monitor production deployments and telemetry after rollout.
+- RC validation / dogfooding for `28.0.0-rc.1` packaging build.
 Next:
-- Prepare separate `v28.0.0-rc` release packaging pass.
-- Align version surfaces (Windows resource / dist artifact contract) for next release train.
+- Prepare `v28.0.0` final release after RC validation window.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/version.py
+- mailbot_v26/__main__.py
+- mailbot_v26/telegram/inbound.py
+- mailbot_v26/web_observability/app.py
+- update_and_run.bat
+- RELEASE_ARTIFACT.md
+- MANIFEST.json
+- CHANGELOG.md
+- CONTINUITY.md
+- tests/test_cli_version.py
+- tests/test_manifest_contract.py
+- tests/test_version_surfaces.py
+- tests/test_launcher_warning_first.py
+- mailbot_v26/tests/test_telegram_inbound.py
+- mailbot_v26/tests/test_rc_smoke.py
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/text/clean_email.py
 - mailbot_v26/tests/test_pipeline_processor.py
