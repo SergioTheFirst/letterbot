@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-28: Block 0 tasks 0.3+0.4 complete — MessageProcessor action line priority fixed to mail_type-first (act/invoice/contract), subject/attachment/generic fallbacks tightened (no plural "таблицы" fallback), and clean_email disclaimer cutoff now removes RU/EN external-mail warning tails; regression tests added for action-line priority and disclaimer trimming.
 - 2026-02-28: Task 0.9 complete — TG-stage One-Message Rule now enforced by persistent SQLite `telegram_delivery_log` atomic reservation/finalize/release guard keyed by `email:{email_id}` (kind-aware for snooze compatibility), duplicate skips emit `telegram_delivery_skipped_duplicate`, ingest dedupe normalizes account login, IMAP cursor keys normalized to prevent UID reappearance loops, and regression tests added for TG idempotency/rerun, case-insensitive UID dedupe, snooze key separation, and normalized IMAP state cursor.
 - 2026-02-27: 2-file mode premium default updated — `enable_premium_processor` now falls back to `true` when absent in `settings.ini` (legacy mode behavior unchanged), templates updated, and feature-flag regression test added.
 - 2026-02-27: legacy TG stage now attaches inline action keyboard (`reply_markup`) when premium flag is enabled in configured pipeline; delivery-pipeline regression test added.
@@ -111,13 +112,17 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Block 0 item (0.9): One-Message Rule hard invariant delivered with persistent TG dedupe + UID loop normalization fixes; full pytest green.
+- Block 0 tasks 0.3+0.4 delivered with targeted fixes (action line priority + disclaimer trim); full pytest green (807 passed).
 Next:
-- Monitor runtime logs for `telegram_delivery_dedup_unavailable` and `telegram_delivery_skipped_duplicate` rates in production-like runs.
-- Validate snooze flow integration to emit `kind=snooze` delivery keys when reminder feature is wired.
+- Monitor runtime message quality for action-line mapping on mail_type variants (act/invoice/contract) and disclaimer-cut edge cases in production-like traffic.
+- Continue One-Message Rule production monitoring (`telegram_delivery_dedup_unavailable` / `telegram_delivery_skipped_duplicate`) and validate future snooze `kind=snooze` keys.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/text/clean_email.py
+- mailbot_v26/tests/test_pipeline_processor.py
+- mailbot_v26/tests/test_clean_email.py
 - mailbot_v26/bot_core/storage.py
 - mailbot_v26/start.py
 - mailbot_v26/imap_client.py
