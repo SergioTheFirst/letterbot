@@ -575,20 +575,17 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
     if data.weekly_accuracy_report is not None:
         report = data.weekly_accuracy_report
         corrections = int(report.get("priority_corrections") or 0)
-        if corrections > 0:
+        if corrections >= 3:
             emails = int(report.get("emails_received") or 0)
-            surprises = int(report.get("surprises") or 0)
-            window_days = int(report.get("window_days") or 7)
             accuracy_pct = report.get("accuracy_pct")
             if accuracy_pct is None:
                 surprise_rate = report.get("surprise_rate")
                 if surprise_rate is not None:
                     accuracy_pct = round((1 - float(surprise_rate)) * 100)
             accuracy_pct = int(accuracy_pct or 0)
-            lines.append(f"<b>Отчёт точности ({window_days} дней)</b>")
-            lines.append(f"• Писем обработано: {emails}")
-            lines.append(f"• Коррекции приоритета: {corrections}")
-            lines.append(f"• Сюрпризы: {surprises} (точность: {accuracy_pct}%)")
+            lines.append(
+                f"📊 Неделя: {emails} писем · {corrections} коррекции · точность {accuracy_pct}%"
+            )
     if data.weekly_calibration_report is not None:
         report = data.weekly_calibration_report
         corrections = int(report.get("corrections") or 0)

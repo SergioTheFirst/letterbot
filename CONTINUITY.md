@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-28: Block 2A (2.1/2.2/2.3) implemented with minimal diffs — Telegram action keyboard now includes `✓ Верно` (`mb:ok:<email_id>`) persisted as `priority_confirmation` in existing `priority_feedback` contour with graceful callback fail-safe; weekly digest accuracy line now renders as one compact row only when `priority_corrections >= 3`; new `/week` (`week`) command added with compact 7-day summary sourced from `KnowledgeAnalytics.weekly_compact_summary`; focused tests updated for keyboard/inbound/weekly gate+format/command.
 - 2026-02-28: Block 1 package completed — Telegram inline keyboard now includes snooze menu (`⏰ Позже` → 2ч/6ч/Завтра) with persistent SQLite `telegram_snooze`, inbound callbacks schedule reminders, runtime loop delivers `📌 Напоминание` via existing telegram dedupe keys (`kind=snooze`), `/commitments` + `/tasks` command added from existing commitments data (deduped, limit 7), silence/deadlock defaults switched to enabled in settings templates, silence gate hardened (>=5 msgs in 30d + 14d cooldown default), deadlock cooldown default set to 7d, and regression tests added/updated; full pytest green (829 passed).
 - 2026-02-28: Block 0A completed in one package — MessageProcessor now applies subject-line dedupe using shared compare helper (casefold/trim/space-collapse/RE-FW strip), action-line priority remains mail_type-first with `.xls` regressions (ACT/INVOICE override attachment fallback), clean_email external disclaimer cutoff (RU/EN markers) is enforced, and TG stage now always attaches inline action keyboard regardless of `enable_premium_processor`; targeted pytest suite green.
 - 2026-02-28: Block 0 tasks 0.5+0.7 complete — Excel extractor dependency chain now includes `xlrd>=2.0.1` for `.xls`, extraction routing/fail-safe behavior covered by regression tests (`.xls`→xlrd, missing-xlrd no-crash, `.xlsx`→openpyxl), and `mailbot_v26/config/settings.ini.example` synchronized with `SETTINGS_TEMPLATE` plus parser/regression tests guarding template parity and int/bool parsing.
@@ -116,11 +117,11 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Block 1 scope closed; monitoring snooze reminder telemetry and inbound command usage in production.
+- Block 2A (2.1/2.2/2.3) delivered and regression-covered; monitor real-world usage of `✓ Верно`, `/week`, and weekly accuracy gate behavior.
 Next:
-- Monitor snooze reminder retries/failures (`telegram_snooze` pending/attempts/last_error) under real Telegram instability windows.
-- Track `/commitments` usage quality and tune compact formatting only if user feedback indicates ambiguity.
-- Keep One-Message Rule telemetry monitoring (`telegram_delivery_dedup_unavailable` / `telegram_delivery_skipped_duplicate`) for stability under retries/reruns.
+- Monitor `priority_confirmation_recorded` volume vs `priority_correction_recorded` to validate visible-learning adoption.
+- Collect early UX feedback on `/week` compact format and adjust labels only if clarity issues are reported.
+- Watch weekly digest runs to confirm accuracy line appears only at corrections threshold (`>=3`) across account scopes.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
@@ -370,3 +371,13 @@ Attention economics v1 (explainable, cached, CSV export, indexed).
 - 2026-01-20: Decision-trace health endpoint with emitter snapshot and drop-log tail.
 - 2026-01-21: maintenance-mode indexes, decision-trace failure log hardening, post-start ingest rule clarified.
 - 2026-01-22: telegram renderer semantic dedupe gates and golden tests.
+
+- mailbot_v26/telegram/decision_trace_ui.py
+- mailbot_v26/telegram/inbound.py
+- mailbot_v26/pipeline/weekly_digest.py
+- mailbot_v26/ui/i18n.py
+- mailbot_v26/tests/test_priority_keyboard.py
+- mailbot_v26/tests/test_telegram_inbound.py
+- mailbot_v26/tests/test_weekly_digest_accuracy_render.py
+- mailbot_v26/tests/test_weekly_accuracy_report_queries.py
+- SQLite table: priority_feedback

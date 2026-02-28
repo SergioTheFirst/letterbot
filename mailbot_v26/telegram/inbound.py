@@ -9,7 +9,7 @@ from typing import Callable, Iterable
 
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
-from mailbot_v26.feedback import record_priority_correction
+from mailbot_v26.feedback import record_priority_confirmation, record_priority_correction
 from mailbot_v26.insights.auto_priority_quality_gate import AutoPriorityQualityGate
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
@@ -30,6 +30,7 @@ from mailbot_v26.telegram.decision_trace_ui import (
     PRIO_BACK_PREFIX,
     PRIO_MENU_PREFIX,
     PRIO_SET_PREFIX,
+    PRIO_OK_PREFIX,
     SNOOZE_BACK_PREFIX,
     SNOOZE_MENU_PREFIX,
     SNOOZE_SET_PREFIX,
@@ -312,6 +313,12 @@ def parse_callback_data(data: str) -> tuple[str, dict[str, str]] | None:
             return None
         return "snooze_set", {"email_id": email_id, "snooze": snooze_code}
 
+    if raw.startswith(PRIO_OK_PREFIX):
+        email_id = raw[len(PRIO_OK_PREFIX) :].strip()
+        if not email_id.isdigit():
+            return None
+        return "priority_ok", {"email_id": email_id}
+
     for prefix in _CALLBACK_PREFIXES:
         if raw.startswith(prefix):
             remainder = raw[len(prefix) :]
@@ -559,6 +566,11 @@ class TelegramInboundProcessor:
         elif action == "snooze_set":
             ack = self._set_snooze(chat_id, message, payload)
             self._answer_callback(callback_id, ack or _t("inbound.bad_button"))
+        elif action == "priority_ok":
+            if self._record_priority_confirmation(payload):
+                self._answer_callback(callback_id, "✓ Учёл")
+            else:
+                self._answer_callback(callback_id, "Не удалось учесть")
 
     def handle_message(self, message: dict[str, object]) -> None:
         chat_id = ""
@@ -594,6 +606,9 @@ class TelegramInboundProcessor:
         if command in {"/commitments", "/tasks", "commitments", "tasks"}:
             self._handle_commitments(chat_id)
             return
+        if command in {"/week", "week"}:
+            self._reply(chat_id, self._week_text())
+            return
 
         self._reply(chat_id, _t("inbound.command_unknown"))
 
@@ -625,6 +640,34 @@ class TelegramInboundProcessor:
 
     def _is_allowed_chat(self, chat_id: str) -> bool:
         return chat_id in self.allowed_chat_ids
+
+    def _record_priority_confirmation(self, payload: dict[str, str]) -> bool:
+        email_id_raw = payload.get("email_id")
+        if not email_id_raw or not email_id_raw.isdigit():
+            return False
+        snapshot = _load_email_snapshot(self.knowledge_db.path, int(email_id_raw))
+        if not snapshot:
+            return False
+        priority = str(snapshot.get("priority") or "").strip()
+        if not priority:
+            return False
+        account_email = str(snapshot.get("account_email") or "")
+        sender_email = str(snapshot.get("from_email") or "")
+        try:
+            record_priority_confirmation(
+                knowledge_db=self.knowledge_db,
+                email_id=int(email_id_raw),
+                priority=priority,
+                entity_id=None,
+                sender_email=sender_email or None,
+                account_email=account_email or None,
+                system_mode=system_health.mode,
+                event_emitter=self.event_emitter,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("telegram_inbound_priority_ok_failed", error=str(exc))
+            return False
+        return True
 
     def _apply_priority(self, chat_id: str, payload: dict[str, str]) -> None:
         email_id_raw = payload.get("email_id")
@@ -1135,6 +1178,7 @@ class TelegramInboundProcessor:
                 _t("inbound.help.digest"),
                 _t("inbound.help.autopriority"),
                 _t("inbound.help.commitments"),
+                _t("inbound.help.week"),
                 _t("inbound.help.help"),
             ]
         )
@@ -1192,6 +1236,30 @@ class TelegramInboundProcessor:
             self._reply(chat_id, "✅ Нет открытых обязательств")
             return
         self._reply(chat_id, "\n".join(["📋 <b>Обязательства:</b>", *deduped]))
+
+    def _week_text(self) -> str:
+        account_emails = list(self._account_emails())
+        if not account_emails:
+            return (
+                "📊 Letterbot — неделя\n"
+                "Писем: 0 · Важных: 0 · Низких: 0\n"
+                "Коррекций: 0 · Точность: н/д\n"
+                "Обязательств открыто: 0"
+            )
+        primary = account_emails[0]
+        summary = self.analytics.weekly_compact_summary(
+            account_email=primary,
+            account_emails=account_emails,
+            days=7,
+        )
+        accuracy_pct = summary.get("accuracy_pct")
+        accuracy_text = f"{int(accuracy_pct)}%" if accuracy_pct is not None else "н/д"
+        return (
+            "📊 Letterbot — неделя\n"
+            f"Писем: {int(summary.get('emails_total') or 0)} · Важных: {int(summary.get('important') or 0)} · Низких: {int(summary.get('low') or 0)}\n"
+            f"Коррекций: {int(summary.get('corrections') or 0)} · Точность: {accuracy_text}\n"
+            f"Обязательств открыто: {int(summary.get('open_commitments') or 0)}"
+        )
 
     def _priority_help_text(self) -> str:
         return _t("inbound.priority_help")

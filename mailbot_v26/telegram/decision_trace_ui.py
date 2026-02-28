@@ -12,6 +12,7 @@ PRIO_BACK_PREFIX = "prio_back:"
 SNOOZE_MENU_PREFIX = "snz_m:"
 SNOOZE_SET_PREFIX = "snz_s:"
 SNOOZE_BACK_PREFIX = "snz_b:"
+PRIO_OK_PREFIX = "mb:ok:"
 
 logger = get_logger("mailbot")
 
@@ -114,13 +115,17 @@ def build_email_actions_keyboard(
         )
         prio_callback = _safe_callback(f"{PRIO_MENU_PREFIX}{email_id_int}")
         snooze_callback = _safe_callback(f"{SNOOZE_MENU_PREFIX}{email_id_int}")
+        ok_callback = _safe_callback(f"{PRIO_OK_PREFIX}{email_id_int}")
         return {
             "inline_keyboard": [
                 [
                     {"text": trace_label, "callback_data": trace_callback},
                     {"text": "Приоритет", "callback_data": prio_callback},
                     {"text": "⏰ Позже", "callback_data": snooze_callback},
-                ]
+                ],
+                [
+                    {"text": "✓ Верно", "callback_data": ok_callback},
+                ],
             ]
         }
     except ValueError as exc:
@@ -141,4 +146,5 @@ __all__ = [
     "SNOOZE_MENU_PREFIX",
     "SNOOZE_SET_PREFIX",
     "SNOOZE_BACK_PREFIX",
+    "PRIO_OK_PREFIX",
 ]

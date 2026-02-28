@@ -43,6 +43,8 @@ def test_email_actions_keyboard_contains_snooze_button() -> None:
     keyboard = build_email_actions_keyboard(email_id=123, expanded=False)
     labels = [button["text"] for button in keyboard["inline_keyboard"][0]]
     assert labels == ["▶ Подробнее", "Приоритет", "⏰ Позже"]
+    assert keyboard["inline_keyboard"][1][0]["text"] == "✓ Верно"
+    assert keyboard["inline_keyboard"][1][0]["callback_data"] == "mb:ok:123"
 
 
 def test_snooze_callbacks_parse() -> None:
