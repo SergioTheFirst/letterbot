@@ -11,6 +11,7 @@ logger = get_logger("mailbot")
 
 _DIGEST_KEY = "digest_enabled"
 _AUTO_PRIORITY_KEY = "auto_priority_enabled"
+_INSIDER_SINCE_KEY = "insider_since"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +53,34 @@ class RuntimeOverrideStore:
     def set_auto_priority_enabled(self, enabled: bool) -> None:
         self._write_bool(_AUTO_PRIORITY_KEY, enabled)
 
+
+    def set_insider_since(self, value: str) -> None:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            self._write_text(_INSIDER_SINCE_KEY, None)
+            return
+        self._write_text(_INSIDER_SINCE_KEY, cleaned)
+
+    def get_insider_since(self) -> str | None:
+        return self._read_text(_INSIDER_SINCE_KEY)
+
+
+
+    def _read_text(self, key: str) -> str | None:
+        try:
+            with sqlite3.connect(self._path) as conn:
+                row = conn.execute(
+                    "SELECT value FROM runtime_overrides WHERE key = ?",
+                    (key,),
+                ).fetchone()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("runtime_overrides_read_failed", key=key, error=str(exc))
+            return None
+        if not row:
+            return None
+        value = str(row[0] or "").strip()
+        return value or None
+
     def _read_bool(self, key: str) -> bool | None:
         try:
             with sqlite3.connect(self._path) as conn:
@@ -72,7 +101,9 @@ class RuntimeOverrideStore:
         return None
 
     def _write_bool(self, key: str, enabled: bool) -> None:
-        value = "1" if enabled else "0"
+        self._write_text(key, "1" if enabled else "0")
+
+    def _write_text(self, key: str, value: str | None) -> None:
         ts = datetime.now(timezone.utc).isoformat()
         try:
             with sqlite3.connect(self._path) as conn:

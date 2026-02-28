@@ -9,6 +9,7 @@ from mailbot_v26.config_loader import (
     load_general_config,
     load_keys_config,
     load_storage_config,
+    load_support_settings,
     load_web_config,
 )
 
@@ -178,3 +179,105 @@ host = imap.example.com
 
     assert web.host == "127.0.0.1"
     assert web.port == 8787
+
+
+def test_load_support_settings_two_file_mode_ignores_yaml(tmp_path: Path) -> None:
+    write_file(
+        tmp_path,
+        "settings.ini",
+        """[support]
+enabled = true
+text = Support text
+url = https://example.com/donate
+label = Поддержать
+frequency_days = 45
+""",
+    )
+    write_file(
+        tmp_path,
+        "accounts.ini",
+        """[acc]
+login = u@example.com
+password = p
+host = imap.example.com
+""",
+    )
+    write_file(
+        tmp_path,
+        "config.yaml",
+        "support:\n  enabled: false\n",
+    )
+
+    from mailbot_v26 import config_loader as loader
+
+    original = loader._load_support_from_yaml
+
+    def _boom(_raw):
+        raise AssertionError("YAML fallback must not be used in 2-file mode")
+
+    loader._load_support_from_yaml = _boom
+    try:
+        support = loader.load_support_settings(tmp_path)
+    finally:
+        loader._load_support_from_yaml = original
+
+    assert support.enabled is True
+    assert support.text == "Support text"
+    assert support.url == "https://example.com/donate"
+    assert support.label == "Поддержать"
+    assert support.frequency_days == 45
+
+
+def test_load_support_settings_defaults_without_section(tmp_path: Path) -> None:
+    write_file(
+        tmp_path,
+        "settings.ini",
+        """[general]
+check_interval = 120
+""",
+    )
+    write_file(
+        tmp_path,
+        "accounts.ini",
+        """[acc]
+login = u@example.com
+password = p
+host = imap.example.com
+""",
+    )
+
+    support = load_support_settings(tmp_path)
+
+    assert support.enabled is False
+    assert support.text == "Если Letterbot помогает, проект можно поддержать"
+    assert support.url == "CHANGE_ME"
+    assert support.label == "Поддержать Letterbot"
+    assert support.frequency_days == 30
+
+
+def test_load_support_settings_invalid_frequency_falls_back_to_default(tmp_path: Path) -> None:
+    write_file(
+        tmp_path,
+        "settings.ini",
+        """[support]
+enabled = true
+text = t
+url = https://example.com
+label = l
+frequency_days = bad
+""",
+    )
+    write_file(
+        tmp_path,
+        "accounts.ini",
+        """[acc]
+login = u@example.com
+password = p
+host = imap.example.com
+""",
+    )
+
+    support = load_support_settings(tmp_path)
+
+    assert support.enabled is True
+    assert support.frequency_days == 30
