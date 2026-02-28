@@ -6,11 +6,11 @@ VSVersionInfo(
       StringTable('040904B0', [
         StringStruct('CompanyName', 'Letterbot'),
         StringStruct('FileDescription', 'Letterbot'),
-        StringStruct('FileVersion', '28.0.0-rc1'),
+        StringStruct('FileVersion', '28.0.0-rc'),
         StringStruct('InternalName', 'Letterbot'),
         StringStruct('OriginalFilename', 'Letterbot.exe'),
         StringStruct('ProductName', 'Letterbot'),
-        StringStruct('ProductVersion', '28.0.0-rc1')
+        StringStruct('ProductVersion', '28.0.0-rc')
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
