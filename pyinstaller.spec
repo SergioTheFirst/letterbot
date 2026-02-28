@@ -1,18 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
+from mailbot_v26.tools.windows_version_resource import ensure_windows_version_info
+
 block_cipher = None
 
 datas = [
     (str(Path("mailbot_v26/web_observability/templates")), "mailbot_v26/web_observability/templates"),
     (str(Path("mailbot_v26/web_observability/static")), "mailbot_v26/web_observability/static"),
-    (str(Path("mailbot_v26/config/config.ini")), "mailbot_v26/config"),
-    (str(Path("mailbot_v26/config/keys.ini")), "mailbot_v26/config"),
-    (str(Path("mailbot_v26/config/accounts.ini")), "mailbot_v26/config"),
+    (str(Path("mailbot_v26/config/settings.ini.example")), "mailbot_v26/config"),
+    (str(Path("mailbot_v26/config/accounts.ini.example")), "mailbot_v26/config"),
 ]
 
+version_info_path = ensure_windows_version_info(Path("build/windows_version_info.txt"))
+
 a = Analysis(
-    ["mailbot_v26/start.py"],
+    ["mailbot_v26/__main__.py"],
     pathex=["."],
     binaries=[],
     datas=datas,
@@ -31,13 +34,13 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="MailBot",
+    name="Letterbot",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     console=True,
-    version=str(Path("build/windows_version_info.txt")),
+    version=str(version_info_path),
 )
 coll = COLLECT(
     exe,
@@ -46,5 +49,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="MailBot",
+    name="Letterbot",
 )

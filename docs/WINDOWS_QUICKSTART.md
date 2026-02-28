@@ -42,7 +42,7 @@ require_strong_password_on_lan = true
 
 
 ## Windows SmartScreen (первый запуск)
-Если при запуске `MailBot.exe` видно «Windows protected your PC», это стандартное предупреждение для неподписанных файлов. Нажмите `More info` → `Run anyway` (или «Подробнее» → «Выполнить в любом случае»).
+Если при запуске `Letterbot.exe` видно «Windows protected your PC», это стандартное предупреждение для неподписанных файлов. Нажмите `More info` → `Run anyway` (или «Подробнее» → «Выполнить в любом случае»).
 
 ## Module-based commands (recommended)
 - Doctor diagnostics: `python -m mailbot_v26.doctor`

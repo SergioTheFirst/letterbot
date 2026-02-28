@@ -4,8 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 
 _REQUIRED_DIST_FILES: tuple[str, ...] = (
-    "MailBot.exe",
-    "config.example.yaml",
+    "Letterbot.exe",
+    "mailbot_v26/config/settings.ini.example",
+    "mailbot_v26/config/accounts.ini.example",
     "manifest.sha256.json",
 )
 

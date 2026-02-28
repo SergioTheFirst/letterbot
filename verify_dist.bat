@@ -8,5 +8,5 @@ if not exist "%VENV_PY%" (
     exit /b 1
 )
 
-"%VENV_PY%" -m mailbot_v26.tools.verify_dist "%REPO_ROOT%dist\MailBot"
+"%VENV_PY%" -m mailbot_v26.tools.verify_dist "%REPO_ROOT%dist\Letterbot"
 exit /b %ERRORLEVEL%

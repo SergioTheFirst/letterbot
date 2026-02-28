@@ -1,6 +1,6 @@
 """Single source of truth for MailBot app version."""
 
-__version__ = "28.0.0-rc.1"
+__version__ = "28.0.0-rc.2"
 BUILD_METADATA = ""
 
 
