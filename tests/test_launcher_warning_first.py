@@ -49,3 +49,13 @@ def test_run_mailbot_bat_avoids_pipe_parsing_for_web_url() -> None:
     assert "delims=|" not in content
     assert "| was unexpected at this time" not in content
     assert "print(str(web.host)+' '+str(web.port))" in content
+
+
+def test_update_and_run_has_python_pip_and_log_diagnostics() -> None:
+    content = Path("update_and_run.bat").read_text(encoding="utf-8")
+    assert "Python 3.10+ is required" in content
+    assert "pip is not available in the selected Python environment" in content
+    assert "Virtual environment:" in content
+    assert "Log file:" in content
+    assert "[SUMMARY] OK" in content
+    assert "[SUMMARY] FAIL" in content

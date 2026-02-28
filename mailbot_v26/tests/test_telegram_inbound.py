@@ -16,6 +16,7 @@ from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
+from mailbot_v26.version import __version__
 from mailbot_v26.telegram.inbound import (
     InboundStateStore,
     TelegramInboundProcessor,
@@ -580,6 +581,7 @@ def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
     assert "⭐ Letterbot Insider since:" not in sent[-1]
+    assert f"Version: {__version__}" in sent[-1]
 
 
 def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:

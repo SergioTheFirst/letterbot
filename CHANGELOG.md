@@ -7,10 +7,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- Placeholder for upcoming changes.
+- None.
 
 ### Changed
 - None.
+
+### Fixed
+- None.
+
+### Security
+- None.
+
+## [28.0.0-rc.1] - 2026-02-28
+
+### Added
+- Release packaging pass: unified version surfaces (`__version__` + helper), `RELEASE_ARTIFACT.md`, `MANIFEST.json`, and compact RC smoke suite.
+
+### Changed
+- Windows `update_and_run.bat` diagnostics improved (Python >=3.10 check, pip check, explicit venv/log path, summary OK/FAIL).
 
 ### Fixed
 - None.

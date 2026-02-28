@@ -24,6 +24,7 @@ from mailbot_v26.pipeline import tg_renderer
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
+from mailbot_v26.version import get_version
 from mailbot_v26.system_health import system_health
 from mailbot_v26.telegram.decision_trace_ui import (
     DETAILS_PREFIX,
@@ -1348,6 +1349,7 @@ class TelegramInboundProcessor:
         insider_since = self.override_store.get_insider_since(chat_id=chat_id)
         if insider_since:
             status_lines.append(f"⭐ Letterbot Insider since: {insider_since}")
+        status_lines.append(f"Version: {get_version()}")
         return "\n".join(status_lines)
 
     def _doctor_text(self) -> str:

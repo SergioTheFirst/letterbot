@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from mailbot_v26.deps import DependencyError, require_runtime_for
-from mailbot_v26.version import __version__
+from mailbot_v26.version import get_version
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -87,7 +87,7 @@ def _run() -> None:
     args = parser.parse_args()
 
     if args.version or args.command == "version":
-        print(__version__)
+        print(get_version())
         return
 
     try:
