@@ -18,6 +18,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Security
 - None.
 
+## [28.0.0-rc1] - 2026-03-XX
+
+### Changed
+- Release candidate for 28.0.0.
+- Version surfaces bumped.
+- Docs updated for RC.
+
 ## [28.0.0-rc.2] - 2026-02-28
 
 ### Added
