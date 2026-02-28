@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
+from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.insights.auto_priority_quality_gate import GateResult
@@ -105,6 +106,8 @@ def test_parse_callback_data_priority() -> None:
     assert parsed == ("details", {"email_id": "42"})
     parsed = parse_callback_data("mb:h:7")
     assert parsed == ("hide", {"email_id": "7"})
+    parsed = parse_callback_data("mb:ok:11")
+    assert parsed == ("priority_ok", {"email_id": "11"})
     assert parse_callback_data("mb:prio:bad") is None
     assert parse_callback_data("mb:prio::R") is None
 
@@ -326,3 +329,138 @@ def test_tasks_alias_and_limit(tmp_path: Path) -> None:
     output = sent[-1]
     assert output.startswith("📋 <b>Обязательства:</b>")
     assert output.count("\n• ") == 7
+
+
+def test_priority_ok_callback_records_positive_feedback(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-ok",
+            "data": f"mb:ok:{email_id}",
+            "message": {"chat": {"id": "chat"}, "message_id": 10, "text": "msg"},
+        }
+    )
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        rows = conn.execute(
+            "SELECT kind, value FROM priority_feedback WHERE email_id = ?",
+            (str(email_id),),
+        ).fetchall()
+    assert rows == [("priority_confirmation", "🔵")]
+
+
+def test_priority_ok_callback_graceful_on_missing_email(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-ok-missing",
+            "data": "mb:ok:99999",
+            "message": {"chat": {"id": "chat"}, "message_id": 10, "text": "msg"},
+        }
+    )
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM priority_feedback").fetchone()[0]
+    assert count == 0
+
+
+def test_week_command_returns_compact_summary_with_empty_dataset(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/week"})
+
+    assert sent[-1] == (
+        "📊 Letterbot — неделя\n"
+        "Писем: 0 · Важных: 0 · Низких: 0\n"
+        "Коррекций: 0 · Точность: н/д\n"
+        "Обязательств открыто: 0"
+    )
+
+
+def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    processor.contract_event_emitter.emit(
+        EventV1(
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=now_ts,
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=email_id,
+            payload={},
+        )
+    )
+    processor.contract_event_emitter.emit(
+        EventV1(
+            event_type=EventType.PRIORITY_CORRECTION_RECORDED,
+            ts_utc=now_ts + 1,
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=email_id,
+            payload={"old_priority": "🔵", "new_priority": "🔴"},
+        )
+    )
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        conn.execute("UPDATE emails SET priority = '🔴' WHERE id = ?", (email_id,))
+        conn.execute(
+            """
+            INSERT INTO commitments (email_row_id, source, commitment_text, deadline_iso, status, confidence, created_at)
+            VALUES (?, 'llm', 'Проверить договор', NULL, 'pending', 0.9, ?)
+            """,
+            (email_id, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "week"})
+
+    assert sent[-1] == (
+        "📊 Letterbot — неделя\n"
+        "Писем: 1 · Важных: 1 · Низких: 0\n"
+        "Коррекций: 1 · Точность: 100%\n"
+        "Обязательств открыто: 1"
+    )

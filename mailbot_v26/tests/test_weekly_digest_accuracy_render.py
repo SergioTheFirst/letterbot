@@ -23,22 +23,22 @@ def _base_weekly_kwargs() -> dict[str, object]:
 def test_weekly_accuracy_report_block_hidden_when_flag_off() -> None:
     data = weekly_digest.WeeklyDigestData(**_base_weekly_kwargs())
     text = weekly_digest._build_weekly_digest_text(data)
-    assert "Отчёт точности" not in text
+    assert "📊 Неделя:" not in text
 
 
-def test_weekly_accuracy_report_block_hidden_when_no_corrections() -> None:
+def test_weekly_accuracy_report_block_hidden_when_insufficient_corrections() -> None:
     data = weekly_digest.WeeklyDigestData(
         **{
             **_base_weekly_kwargs(),
             "weekly_accuracy_report": {
                 "emails_received": 4,
-                "priority_corrections": 0,
+                "priority_corrections": 2,
                 "surprises": 0,
             },
         }
     )
     text = weekly_digest._build_weekly_digest_text(data)
-    assert "Отчёт точности" not in text
+    assert "📊 Неделя:" not in text
 
 
 def test_weekly_accuracy_report_block_renders_when_enabled() -> None:
@@ -54,7 +54,4 @@ def test_weekly_accuracy_report_block_renders_when_enabled() -> None:
         }
     )
     text = weekly_digest._build_weekly_digest_text(data)
-    assert "<b>Отчёт точности (7 дней)</b>" in text
-    assert "• Писем обработано: 12" in text
-    assert "• Коррекции приоритета: 3" in text
-    assert "• Сюрпризы: 1 (точность: 67%)" in text
+    assert "📊 Неделя: 12 писем · 3 коррекции · точность 67%" in text

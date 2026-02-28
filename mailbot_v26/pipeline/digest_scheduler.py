@@ -403,7 +403,7 @@ def _has_weekly_content(data: weekly_digest.WeeklyDigestData) -> bool:
         or data.attention_economics is not None
         or (
             data.weekly_accuracy_report is not None
-            and int(data.weekly_accuracy_report.get("priority_corrections") or 0) > 0
+            and int(data.weekly_accuracy_report.get("priority_corrections") or 0) >= 3
         )
     )
 

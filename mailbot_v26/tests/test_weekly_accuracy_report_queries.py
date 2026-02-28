@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import sqlite3
 
 import pytest
 
@@ -104,3 +105,64 @@ def test_weekly_accuracy_report_skips_rate_without_corrections(tmp_path) -> None
     assert report["priority_corrections"] == 0
     assert "surprise_rate" not in report
     assert "accuracy_pct" not in report
+
+
+def test_weekly_compact_summary_returns_expected_counts(tmp_path) -> None:
+    db_path = tmp_path / "weekly_compact.sqlite"
+    KnowledgeDB(db_path)
+    emitter = ContractEventEmitter(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    now = datetime.now(timezone.utc)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO emails (account_email, from_email, subject, received_at, priority, action_line, body_summary, raw_body_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "acc@example.com",
+                "from@example.com",
+                "A",
+                now.isoformat(),
+                "🔴",
+                "",
+                "",
+                "h1",
+            ),
+        )
+        email_id = conn.execute("SELECT id FROM emails ORDER BY id DESC LIMIT 1").fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO commitments (email_row_id, source, commitment_text, deadline_iso, status, confidence, created_at)
+            VALUES (?, 'llm', 'Task', NULL, 'pending', 0.8, ?)
+            """,
+            (email_id, now.isoformat()),
+        )
+        conn.commit()
+
+    _emit_event(
+        emitter,
+        event_type=EventType.EMAIL_RECEIVED,
+        ts_utc=now.timestamp(),
+        account_email="acc@example.com",
+        payload={},
+    )
+    _emit_event(
+        emitter,
+        event_type=EventType.PRIORITY_CORRECTION_RECORDED,
+        ts_utc=now.timestamp() + 1,
+        account_email="acc@example.com",
+        payload={"old_priority": "🔵", "new_priority": "🔴"},
+    )
+
+    summary = analytics.weekly_compact_summary(account_email="acc@example.com", days=7)
+
+    assert summary == {
+        "emails_total": 1,
+        "important": 1,
+        "low": 0,
+        "corrections": 1,
+        "accuracy_pct": 100,
+        "open_commitments": 1,
+    }

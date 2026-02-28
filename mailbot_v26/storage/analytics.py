@@ -4603,6 +4603,90 @@ class KnowledgeAnalytics:
                 return True
         return False
 
+
+    def weekly_compact_summary(
+        self,
+        *,
+        account_email: str,
+        days: int = 7,
+        account_emails: Iterable[str] | None = None,
+    ) -> dict[str, int | None]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return {
+                "emails_total": 0,
+                "important": 0,
+                "low": 0,
+                "corrections": 0,
+                "accuracy_pct": None,
+                "open_commitments": 0,
+            }
+
+        volume = self.weekly_email_volume(
+            account_email=account_email,
+            days=days,
+            account_emails=account_ids,
+        )
+        accuracy = self.weekly_accuracy_report(
+            account_email=account_email,
+            days=days,
+            account_emails=account_ids,
+        )
+
+        since_iso = datetime.fromtimestamp(self._window_start_ts(days), tz=timezone.utc).isoformat()
+        clause, clause_params = self._account_email_clause(account_ids)
+        priority_rows: list[dict[str, object]] = []
+        try:
+            priority_rows = self._execute_select(
+                """
+                SELECT priority, COUNT(*) AS count
+                FROM emails
+                WHERE received_at >= ?
+                """
+                + clause
+                + " GROUP BY priority",
+                [since_iso, *clause_params],
+            )
+        except sqlite3.OperationalError:
+            priority_rows = []
+
+        important = 0
+        low = 0
+        for row in priority_rows:
+            raw_priority = str(row.get("priority") or "").strip().lower()
+            count = int(row.get("count") or 0)
+            if raw_priority in {"🔴", "🟠", "🟡", "high", "medium"}:
+                important += count
+            elif raw_priority in {"🔵", "low"}:
+                low += count
+
+        open_commitments = 0
+        placeholders = ",".join("?" for _ in account_ids)
+        try:
+            rows = self._execute_select(
+                f"""
+                SELECT COUNT(*) AS count
+                FROM commitments c
+                JOIN emails e ON e.id = c.email_row_id
+                WHERE lower(c.status) IN ('pending', 'unknown')
+                  AND lower(e.account_email) IN ({placeholders})
+                """,
+                [account.casefold() for account in account_ids],
+            )
+            if rows:
+                open_commitments = int(rows[0].get("count") or 0)
+        except sqlite3.OperationalError:
+            open_commitments = 0
+
+        accuracy_pct = accuracy.get("accuracy_pct")
+        return {
+            "emails_total": int(volume.get("total") or 0),
+            "important": int(important),
+            "low": int(low),
+            "corrections": int(accuracy.get("priority_corrections") or 0),
+            "accuracy_pct": int(accuracy_pct) if accuracy_pct is not None else None,
+            "open_commitments": int(open_commitments),
+        }
     def weekly_email_volume(
         self,
         *,

@@ -198,6 +198,44 @@ def record_priority_correction(
     return feedback_id
 
 
+def record_priority_confirmation(
+    *,
+    knowledge_db: KnowledgeDB,
+    email_id: int | str,
+    priority: str,
+    entity_id: str | None = None,
+    sender_email: str | None = None,
+    account_email: str | None = None,
+    system_mode: OperationalMode = OperationalMode.FULL,
+    event_emitter: EventEmitter | None = None,
+) -> str:
+    feedback_id, _ = knowledge_db.save_priority_feedback(
+        email_id=email_id,
+        kind="priority_confirmation",
+        value=priority,
+        entity_id=entity_id,
+        sender_email=sender_email,
+        account_email=account_email,
+    )
+    if event_emitter is not None:
+        event_emitter.emit(
+            type="priority_confirmation_recorded",
+            entity_id=entity_id,
+            email_id=email_id,
+            payload={"priority": priority},
+        )
+    logger.info(
+        "priority_confirmation_recorded",
+        email_id=str(email_id),
+        priority=priority,
+        entity_id=entity_id or "",
+        sender_email=sender_email or "",
+        account_email=account_email or "",
+        system_mode=system_mode.value,
+    )
+    return feedback_id
+
+
 def _latest_priority_trace_payload(
     *,
     knowledge_db: KnowledgeDB,
@@ -265,4 +303,8 @@ def _surprise_enabled(mode: str) -> bool:
     return str(mode or "").strip().lower() in {"enabled", "shadow", "true", "on"}
 
 
-__all__ = ["record_action_feedback", "record_priority_correction"]
+__all__ = [
+    "record_action_feedback",
+    "record_priority_correction",
+    "record_priority_confirmation",
+]

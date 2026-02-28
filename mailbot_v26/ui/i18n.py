@@ -165,6 +165,7 @@ _STRINGS_RU = {
     "inbound.help.digest": "/digest on|off — включить или выключить дайджесты",
     "inbound.help.autopriority": "/autopriority on|off — включить или выключить автоприоритет",
     "inbound.help.commitments": "/commitments (/tasks) — открытые обязательства",
+    "inbound.help.week": "/week — краткая статистика за 7 дней",
     "inbound.help.help": "/help — эта справка",
     "inbound.status.title": "Статус системы",
     "inbound.status.mode": "Режим: {mode}",
