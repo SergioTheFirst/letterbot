@@ -3206,7 +3206,7 @@ class KnowledgeAnalytics:
             since_ts=since_ts,
         )
 
-    def count_all_time_corrections(self, account_emails: list[str]) -> int:
+    def count_all_time_corrections(self, *, account_emails: list[str]) -> int:
         account_ids = self._normalize_account_scope("", account_emails)
         if not account_ids:
             return 0
@@ -3227,16 +3227,29 @@ class KnowledgeAnalytics:
                 query = """
                 SELECT COUNT(*) AS total
                 FROM priority_feedback
-                WHERE kind IN (?, ?, ?)
+                WHERE action = ?
                 """
-                params = ["correction", "priority_correction", "priority_correction_recorded"]
+                params: list[object] = ["correction"]
                 email_clause, email_params = self._account_email_clause(account_ids)
                 query += email_clause
                 params.extend(email_params)
                 rows = self._execute_select(query, params)
                 return int(rows[0].get("total") or 0) if rows else 0
             except Exception:
-                return 0
+                try:
+                    query = """
+                    SELECT COUNT(*) AS total
+                    FROM priority_feedback
+                    WHERE kind IN (?, ?, ?)
+                    """
+                    params = ["correction", "priority_correction", "priority_correction_recorded"]
+                    email_clause, email_params = self._account_email_clause(account_ids)
+                    query += email_clause
+                    params.extend(email_params)
+                    rows = self._execute_select(query, params)
+                    return int(rows[0].get("total") or 0) if rows else 0
+                except Exception:
+                    return 0
 
     def cockpit_top_senders(
         self,
