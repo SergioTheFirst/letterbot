@@ -18,6 +18,7 @@ State:
 - Premium processor routing available behind feature flag.
 Done:
 - 2026-02-28: Block 3A foundation delivered — added `[support]` defaults to 2-file templates (`settings.ini.example` + bootstrap template), introduced typed `load_support_settings()` with strict 2-file INI priority and legacy YAML fallback only outside 2-file mode, added Telegram `/support` command + `/help` line, added Insider badge rendering in `/status` backed by new runtime override store methods (`set_insider_since`/`get_insider_since`), and added/updated regression tests; targeted + full pytest green (850 passed).
+- 2026-02-28: Block 3.2+3.3 completed — support ask moved to 2-file `[support]` config (`enabled/telegram/min_days_between_asks/url/message`) with weekly-only footer injection and 30-day runtime_overrides rate-limit (`support:last_ask_utc:{chat_id}` fallback to account), fail-closed on override errors/no DB; `/status` Insider badge now uses chat-scoped runtime override key `user:insider_since:{telegram_chat_id}`; no `support_state.json` dependency in scheduler path; targeted + full pytest green (847 passed).
 - 2026-02-28: Block 2.4 implemented — Telegram attachment line now renders one deterministic insight (`build_attachment_insight`) with strict A/B/C priority (invoice amount+due, act reconciliation period/counterparty, table headers, honest fallback), threaded `mail_type` into TG render path, and added regressions for invoice/act/excel/fallback/no-hallucination/no-dup; full pytest green (840 passed).
 - 2026-02-28: Block 2A (2.1/2.2/2.3) implemented with minimal diffs — Telegram action keyboard now includes `✓ Верно` (`mb:ok:<email_id>`) persisted as `priority_confirmation` in existing `priority_feedback` contour with graceful callback fail-safe; weekly digest accuracy line now renders as one compact row only when `priority_corrections >= 3`; new `/week` (`week`) command added with compact 7-day summary sourced from `KnowledgeAnalytics.weekly_compact_summary`; focused tests updated for keyboard/inbound/weekly gate+format/command.
 - 2026-02-28: Block 1 package completed — Telegram inline keyboard now includes snooze menu (`⏰ Позже` → 2ч/6ч/Завтра) with persistent SQLite `telegram_snooze`, inbound callbacks schedule reminders, runtime loop delivers `📌 Напоминание` via existing telegram dedupe keys (`kind=snooze`), `/commitments` + `/tasks` command added from existing commitments data (deduped, limit 7), silence/deadlock defaults switched to enabled in settings templates, silence gate hardened (>=5 msgs in 30d + 14d cooldown default), deadlock cooldown default set to 7d, and regression tests added/updated; full pytest green (829 passed).
@@ -119,11 +120,11 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Block 3A delivered and regression-covered; monitor support command UX (`/support` disabled/misconfigured states) and Insider badge visibility in `/status`.
+- Block 3.2 + 3.3 delivered for 2-file mode: weekly-only support footer from `settings.ini`, SQLite runtime override rate-limit keys, and chat-scoped Insider badge in `/status`; full pytest green (847 passed).
 Next:
-- Validate production config hygiene: ensure operators fill `[support].url` away from `CHANGE_ME` where support is enabled.
-- Collect feedback on `/support` wording brevity and tune copy only if confusion appears.
-- Keep watching One-Message Rule invariants while support/identity foundation is in place for later digest touchpoints.
+- Monitor operator adoption of new `[support]` keys (`telegram`, `min_days_between_asks`, `message`) in 2-file deployments.
+- Keep watching weekly digest One-Message Rule and fail-closed behavior when runtime overrides are unavailable.
+- Decide whether legacy YAML support ask branch can be fully retired after migration window.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

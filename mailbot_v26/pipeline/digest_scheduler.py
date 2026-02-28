@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import configparser
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -10,6 +9,7 @@ from typing import Callable, Iterable
 
 from mailbot_v26.behavior.silence_detector import run_silence_scan
 from mailbot_v26.config_loader import resolve_account_scope
+from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.regret_minimization import (
     RegretMinimizationConfig,
@@ -120,8 +120,10 @@ class RegretMinimizationDigestConfig:
 @dataclass(frozen=True, slots=True)
 class SupportTelegramConfig:
     enabled: bool
-    frequency_days: int
-    text: str
+    telegram: bool
+    min_days_between_asks: int
+    url: str
+    message: str
 
 
 def _load_ini_parser() -> configparser.ConfigParser:
@@ -332,62 +334,130 @@ def _resolve_yaml_config_path() -> Path | None:
     return None
 
 
-def _load_support_telegram_config() -> SupportTelegramConfig:
-    config_path = _resolve_yaml_config_path()
-    if config_path is None:
-        return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
-    try:
-        raw = load_yaml_config(config_path)
-    except Exception:
-        return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
-    if not isinstance(raw, dict):
-        return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
-    if not resolve_support_enabled(raw):
-        return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
-    support = raw.get("support") if isinstance(raw, dict) else None
-    telegram = support.get("telegram") if isinstance(support, dict) else None
-    if not isinstance(telegram, dict):
-        return SupportTelegramConfig(enabled=False, frequency_days=30, text="")
+def _disabled_support_config() -> SupportTelegramConfig:
     return SupportTelegramConfig(
-        enabled=bool(telegram.get("enabled", False)),
-        frequency_days=max(7, min(365, int(telegram.get("frequency_days", 30) or 30))),
-        text=str(telegram.get("text", "") or "").strip(),
+        enabled=False,
+        telegram=False,
+        min_days_between_asks=30,
+        url="",
+        message="",
     )
 
 
-def _support_state_path(storage: DigestStorage) -> Path:
-    return storage.knowledge_db.path.parent / "support_state.json"
-
-
-def _support_due(*, now: datetime, state_path: Path, frequency_days: int) -> bool:
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    if not state_path.exists():
-        return True
+def _load_support_config_from_settings(
+    settings: configparser.ConfigParser,
+) -> SupportTelegramConfig | None:
+    if "support" not in settings:
+        return None
+    section = settings["support"]
+    disabled = _disabled_support_config()
     try:
-        payload = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return True
-    last_shown_raw = payload.get("last_shown_utc") if isinstance(payload, dict) else None
-    if not isinstance(last_shown_raw, str) or not last_shown_raw.strip():
-        return True
-    try:
-        last_shown = datetime.fromisoformat(last_shown_raw)
+        enabled = section.getboolean("enabled", fallback=disabled.enabled)
     except ValueError:
-        return True
-    if last_shown.tzinfo is None:
-        last_shown = last_shown.replace(tzinfo=timezone.utc)
-    return now >= last_shown + timedelta(days=max(7, frequency_days))
+        enabled = disabled.enabled
+    try:
+        telegram_enabled = section.getboolean("telegram", fallback=True)
+    except ValueError:
+        telegram_enabled = True
+    try:
+        min_days_between_asks = max(1, section.getint("min_days_between_asks", fallback=30))
+    except ValueError:
+        min_days_between_asks = 30
+    url = str(section.get("url", fallback="")).strip()
+    message = str(section.get("message", fallback="")).strip()
+    return SupportTelegramConfig(
+        enabled=enabled,
+        telegram=telegram_enabled,
+        min_days_between_asks=min_days_between_asks,
+        url=url,
+        message=message,
+    )
 
 
-def _store_support_shown_at(*, now: datetime, state_path: Path) -> None:
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = state_path.with_suffix(".tmp")
-    payload = {"last_shown_utc": now.astimezone(timezone.utc).isoformat()}
-    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(state_path)
+def _load_support_telegram_config() -> SupportTelegramConfig:
+    resolved_paths = resolve_config_paths(_CONFIG_PATH.parent)
+    if resolved_paths.two_file_mode:
+        settings = _load_ini_parser()
+        loaded = _load_support_config_from_settings(settings)
+        return loaded or _disabled_support_config()
+
+    config_path = _resolve_yaml_config_path()
+    if config_path is None:
+        return _disabled_support_config()
+    try:
+        raw = load_yaml_config(config_path)
+    except Exception:
+        return _disabled_support_config()
+    if not isinstance(raw, dict):
+        return _disabled_support_config()
+    if not resolve_support_enabled(raw):
+        return _disabled_support_config()
+    support = raw.get("support") if isinstance(raw, dict) else None
+    telegram = support.get("telegram") if isinstance(support, dict) else None
+    if not isinstance(telegram, dict):
+        return _disabled_support_config()
+    text = str(telegram.get("text", "") or "").strip()
+    return SupportTelegramConfig(
+        enabled=bool(telegram.get("enabled", False)),
+        telegram=True,
+        min_days_between_asks=max(7, min(365, int(telegram.get("frequency_days", 30) or 30))),
+        url="",
+        message=text,
+    )
+
+
+def _support_last_ask_key(*, chat_id: str | None, account_email: str) -> str:
+    identity = str(chat_id or "").strip() or account_email.strip().lower()
+    return f"support:last_ask_utc:{identity}"
+
+
+def _parse_iso_utc(value: str) -> datetime | None:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return None
+    try:
+        parsed = datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _render_support_footer(config: SupportTelegramConfig) -> str:
+    message = config.message.strip()
+    if not message:
+        return ""
+    resolved_url = config.url.strip()
+    if "{url}" in message and resolved_url:
+        message = message.replace("{url}", resolved_url)
+    return f"💛 {message}".strip()
+
+
+def _resolve_weekly_support_footer(
+    *,
+    now_utc: datetime,
+    account_email: str,
+    chat_id: str,
+    override_store: RuntimeOverrideStore,
+    support_config: SupportTelegramConfig,
+) -> str:
+    if not support_config.enabled or not support_config.telegram:
+        return ""
+    footer = _render_support_footer(support_config)
+    if not footer:
+        return ""
+    key = _support_last_ask_key(chat_id=chat_id, account_email=account_email)
+    last_ask_raw = override_store.get_value(key)
+    if last_ask_raw:
+        last_ask = _parse_iso_utc(last_ask_raw)
+        if last_ask is None:
+            return ""
+        min_delta = timedelta(days=max(1, support_config.min_days_between_asks))
+        if now_utc < last_ask + min_delta:
+            return ""
+    override_store.set_value(key, now_utc.astimezone(timezone.utc).isoformat())
+    return footer
 
 
 def _has_weekly_content(data: weekly_digest.WeeklyDigestData) -> bool:
@@ -414,11 +484,8 @@ def _build_daily_payload(
     chat_id: str,
     bot_token: str,
     data: daily_digest.DigestData,
-    support_ps: str = "",
 ) -> TelegramPayload:
     digest_text = daily_digest._build_digest_text(data)
-    if support_ps:
-        digest_text = f"{digest_text}\n\n<i>P.S. {support_ps}</i>"
     return TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",
@@ -437,8 +504,11 @@ def _build_weekly_payload(
     bot_token: str,
     week_key: str,
     data: weekly_digest.WeeklyDigestData,
+    support_footer: str = "",
 ) -> TelegramPayload:
     digest_text = weekly_digest._build_weekly_digest_text(data)
+    if support_footer:
+        digest_text = f"{digest_text}\n{support_footer}"
     return TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",
@@ -671,13 +741,6 @@ def _run_daily_digest(
     scope_account_emails = (
         resolved_scope.account_emails if resolved_scope else None
     )
-    support_cfg = _load_support_telegram_config()
-    support_state_path = _support_state_path(storage)
-    support_ps = ""
-    if support_cfg.enabled and support_cfg.text:
-        if _support_due(now=now, state_path=support_state_path, frequency_days=support_cfg.frequency_days):
-            support_ps = support_cfg.text
-
     if not _is_daily_due(now, config):
         logger.info(
             "digest_tick_checked",
@@ -775,7 +838,6 @@ def _run_daily_digest(
         chat_id=chat_id,
         bot_token=bot_token,
         data=data,
-        support_ps=support_ps,
     )
 
     try:
@@ -795,8 +857,6 @@ def _run_daily_digest(
                 account_email=email,
                 sent_at=now,
             )
-        if support_ps:
-            _store_support_shown_at(now=now, state_path=support_state_path)
         logger.info(
             "digest_sent",
             digest_type="daily",
@@ -962,12 +1022,26 @@ def _run_weekly_digest(
                 },
             )
         return
+    support_footer = ""
+    support_cfg = _load_support_telegram_config()
+    try:
+        support_footer = _resolve_weekly_support_footer(
+            now_utc=now,
+            account_email=account_email,
+            chat_id=chat_id,
+            override_store=RuntimeOverrideStore(storage.knowledge_db.path),
+            support_config=support_cfg,
+        )
+    except Exception as exc:
+        logger.error("weekly_support_footer_unavailable", account_email=account_email, error=str(exc))
+
     payload = _build_weekly_payload(
         account_email=account_email,
         chat_id=chat_id,
         bot_token=bot_token,
         week_key=week_key,
         data=data,
+        support_footer=support_footer,
     )
 
     try:

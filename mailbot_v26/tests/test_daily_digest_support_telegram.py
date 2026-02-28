@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta, timezone
+import configparser
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 from mailbot_v26.pipeline import daily_digest
 from mailbot_v26.pipeline import digest_scheduler
+from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 
 
 def _base_digest_data() -> daily_digest.DigestData:
@@ -31,66 +32,80 @@ def _base_digest_data() -> daily_digest.DigestData:
     )
 
 
-def test_support_telegram_not_added_when_disabled() -> None:
+def test_support_config_from_settings_section() -> None:
+    parser = configparser.ConfigParser()
+    parser.read_string(
+        """[support]
+enabled = true
+telegram = true
+min_days_between_asks = 30
+url = https://example.com/insider
+message = Поддержать Letterbot → {url}
+"""
+    )
+
+    cfg = digest_scheduler._load_support_config_from_settings(parser)
+
+    assert cfg is not None
+    assert cfg.enabled is True
+    assert cfg.telegram is True
+    assert cfg.min_days_between_asks == 30
+
+
+def test_support_telegram_not_added_to_daily_payload() -> None:
     payload = digest_scheduler._build_daily_payload(
         account_email="account@example.com",
         chat_id="chat",
         bot_token="token",
         data=_base_digest_data(),
-        support_ps="",
     )
 
-    assert "P.S." not in payload.html_text
+    assert "💛" not in payload.html_text
 
 
-def test_support_telegram_added_when_due(tmp_path) -> None:
-    now = datetime.now(timezone.utc)
-    state_path = tmp_path / "support_state.json"
-
-    due = digest_scheduler._support_due(now=now, state_path=state_path, frequency_days=30)
-    payload = digest_scheduler._build_daily_payload(
-        account_email="account@example.com",
-        chat_id="chat",
-        bot_token="token",
-        data=_base_digest_data(),
-        support_ps="MailBot бесплатный. Поддержать разработку: /support",
+def test_weekly_support_footer_rate_limited_via_runtime_overrides(tmp_path) -> None:
+    now = datetime(2026, 2, 1, 10, 0, tzinfo=timezone.utc)
+    store = RuntimeOverrideStore(tmp_path / "runtime.sqlite")
+    cfg = digest_scheduler.SupportTelegramConfig(
+        enabled=True,
+        telegram=True,
+        min_days_between_asks=30,
+        url="https://example.com/insider",
+        message="Поддержать Letterbot → {url}",
     )
 
-    assert due is True
-    assert "P.S." in payload.html_text
-    assert "Поддержать разработку" in payload.html_text
+    first = digest_scheduler._resolve_weekly_support_footer(
+        now_utc=now,
+        account_email="user@example.com",
+        chat_id="chat-1",
+        override_store=store,
+        support_config=cfg,
+    )
+    last_ask_key = "support:last_ask_utc:chat-1"
+    first_saved = store.get_value(last_ask_key)
 
-
-def test_support_telegram_not_repeated_before_frequency(tmp_path) -> None:
-    now = datetime.now(timezone.utc)
-    state_path = tmp_path / "support_state.json"
-    state_path.write_text(
-        json.dumps({"last_shown_utc": (now - timedelta(days=5)).isoformat()}, ensure_ascii=False),
-        encoding="utf-8",
+    second = digest_scheduler._resolve_weekly_support_footer(
+        now_utc=now,
+        account_email="user@example.com",
+        chat_id="chat-1",
+        override_store=store,
+        support_config=cfg,
     )
 
-    due = digest_scheduler._support_due(now=now, state_path=state_path, frequency_days=30)
-
-    assert due is False
-
-
-def test_support_telegram_config_disabled_when_feature_flag_off(monkeypatch) -> None:
-    monkeypatch.setattr(digest_scheduler, "_resolve_yaml_config_path", lambda: Path("config.yaml"))
-    monkeypatch.setattr(
-        digest_scheduler,
-        "load_yaml_config",
-        lambda _path: {
-            "features": {"donate_enabled": False},
-            "support": {
-                "telegram": {"enabled": True, "frequency_days": 30, "text": "Letterbot бесплатный. Поддержка: /support"}
-            },
-        },
+    old = now - timedelta(days=31)
+    store.set_value(last_ask_key, old.isoformat())
+    third = digest_scheduler._resolve_weekly_support_footer(
+        now_utc=now,
+        account_email="user@example.com",
+        chat_id="chat-1",
+        override_store=store,
+        support_config=cfg,
     )
 
-    cfg = digest_scheduler._load_support_telegram_config()
-
-    assert cfg.enabled is False
-    assert cfg.text == ""
+    assert first.startswith("💛 Поддержать Letterbot")
+    assert first_saved is not None
+    assert second == ""
+    assert third.startswith("💛 Поддержать Letterbot")
 
 
 def test_support_telegram_config_enabled_when_feature_flag_on(monkeypatch) -> None:
@@ -101,51 +116,21 @@ def test_support_telegram_config_enabled_when_feature_flag_on(monkeypatch) -> No
         lambda _path: {
             "features": {"donate_enabled": True},
             "support": {
-                "telegram": {"enabled": True, "frequency_days": 30, "text": "Letterbot бесплатный. Поддержка: /support"}
+                "telegram": {
+                    "enabled": True,
+                    "frequency_days": 30,
+                    "text": "Letterbot бесплатный. Поддержка: /support",
+                }
             },
         },
+    )
+    monkeypatch.setattr(
+        digest_scheduler,
+        "resolve_config_paths",
+        lambda _base_dir: type("Paths", (), {"two_file_mode": False})(),
     )
 
     cfg = digest_scheduler._load_support_telegram_config()
 
     assert cfg.enabled is True
-    assert cfg.text == "Letterbot бесплатный. Поддержка: /support"
-
-
-def test_support_telegram_config_enabled_via_support_enabled(monkeypatch) -> None:
-    monkeypatch.setattr(digest_scheduler, "_resolve_yaml_config_path", lambda: Path("config.yaml"))
-    monkeypatch.setattr(
-        digest_scheduler,
-        "load_yaml_config",
-        lambda _path: {
-            "support": {
-                "enabled": True,
-                "telegram": {"enabled": True, "frequency_days": 30, "text": "Letterbot бесплатный. Поддержка: /support"},
-            },
-        },
-    )
-
-    cfg = digest_scheduler._load_support_telegram_config()
-
-    assert cfg.enabled is True
-    assert cfg.text == "Letterbot бесплатный. Поддержка: /support"
-
-
-def test_support_telegram_config_support_enabled_overrides_legacy_feature(monkeypatch) -> None:
-    monkeypatch.setattr(digest_scheduler, "_resolve_yaml_config_path", lambda: Path("config.yaml"))
-    monkeypatch.setattr(
-        digest_scheduler,
-        "load_yaml_config",
-        lambda _path: {
-            "features": {"donate_enabled": True},
-            "support": {
-                "enabled": False,
-                "telegram": {"enabled": True, "frequency_days": 30, "text": "Letterbot бесплатный. Поддержка: /support"},
-            },
-        },
-    )
-
-    cfg = digest_scheduler._load_support_telegram_config()
-
-    assert cfg.enabled is False
-    assert cfg.text == ""
+    assert cfg.message == "Letterbot бесплатный. Поддержка: /support"

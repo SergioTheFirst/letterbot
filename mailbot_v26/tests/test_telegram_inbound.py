@@ -594,7 +594,7 @@ def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:
         engine="priority_v2_auto",
     )
     processor = _build_processor(tmp_path, sent, gate_result)
-    processor.override_store.set_insider_since("2026-02")
+    processor.override_store.set_insider_since("2026-02", chat_id="chat")
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
@@ -604,10 +604,10 @@ def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:
 def test_runtime_override_store_insider_roundtrip(tmp_path: Path) -> None:
     store = RuntimeOverrideStore(tmp_path / "runtime.sqlite")
 
-    assert store.get_insider_since() is None
+    assert store.get_insider_since(chat_id="chat") is None
 
-    store.set_insider_since("2025-12")
-    assert store.get_insider_since() == "2025-12"
+    store.set_insider_since("2025-12", chat_id="chat")
+    assert store.get_insider_since(chat_id="chat") == "2025-12"
 
-    store.set_insider_since("")
-    assert store.get_insider_since() is None
+    store.set_insider_since("", chat_id="chat")
+    assert store.get_insider_since(chat_id="chat") is None
