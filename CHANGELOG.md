@@ -18,6 +18,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Security
 - None.
 
+## [28.0.0-rc.2] - 2026-02-28
+
+### Added
+- Deterministic Windows version-resource generator (`build/windows_version_info.txt`) tied to `mailbot_v26.version.get_version()`.
+
+### Changed
+- Windows one-folder artifact converged to Letterbot contract: `dist/Letterbot`, `Letterbot.exe`, `dist/Letterbot.zip`, and CI artifact `Letterbot-windows-onefolder`.
+- PyInstaller entrypoint aligned to `mailbot_v26/__main__.py`; bundled config assets aligned to 2-file mode (`settings.ini.example` + `accounts.ini.example`).
+- Dist launcher (`run_dist.bat`) switched to 2-file onboarding with `config-ready` retry gate and warning-first doctor flow.
+- Release/Windows docs synchronized for current new-install flow (`settings.ini` + `accounts.ini`).
+
+### Fixed
+- Manifest integrity checks now ignore expected runtime-mutable files (`mailbot.log`, sqlite WAL/SHM, state/config runtime files) while still detecting unexpected extras/tampering.
+
+### Security
+- None.
+
 ## [28.0.0-rc.1] - 2026-02-28
 
 ### Added

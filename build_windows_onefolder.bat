@@ -29,16 +29,22 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-set "DIST_DIR=%REPO_ROOT%dist\MailBot"
+set "DIST_DIR=%REPO_ROOT%dist\Letterbot"
 if not exist "%DIST_DIR%" (
-    echo ERROR: dist\MailBot not found after build.
+    echo ERROR: dist\Letterbot not found after build.
     exit /b 1
 )
 
-if exist "%REPO_ROOT%config.example.yaml" (
-    copy /Y "%REPO_ROOT%config.example.yaml" "%DIST_DIR%\config.example.yaml" >nul
+if exist "%REPO_ROOT%mailbot_v26\config\settings.ini.example" (
+    copy /Y "%REPO_ROOT%mailbot_v26\config\settings.ini.example" "%DIST_DIR%\mailbot_v26\config\settings.ini.example" >nul
 ) else (
-    echo WARNING: config.example.yaml not found in repo root.
+    echo WARNING: mailbot_v26\config\settings.ini.example not found.
+)
+
+if exist "%REPO_ROOT%mailbot_v26\config\accounts.ini.example" (
+    copy /Y "%REPO_ROOT%mailbot_v26\config\accounts.ini.example" "%DIST_DIR%\mailbot_v26\config\accounts.ini.example" >nul
+) else (
+    echo WARNING: mailbot_v26\config\accounts.ini.example not found.
 )
 
 if exist "%REPO_ROOT%README_QUICKSTART_WINDOWS.md" (
@@ -69,12 +75,11 @@ if exist "%REPO_ROOT%CHANGELOG.md" (
     echo WARNING: CHANGELOG.md not found.
 )
 
-"%VENV_PY%" -c "from pathlib import Path; import json; from mailbot_v26.integrity import compute_manifest; root=Path(r'%DIST_DIR%'); manifest=compute_manifest(root); manifest.pop('config.yaml', None); manifest.pop('manifest.sha256.json', None); (root/'manifest.sha256.json').write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding='utf-8')"
+"%VENV_PY%" -c "from pathlib import Path; import json; from mailbot_v26.integrity import compute_manifest, manifest_ignore_paths; root=Path(r'%DIST_DIR%'); ignored=set(manifest_ignore_paths()) | {'manifest.sha256.json'}; manifest={k:v for k,v in compute_manifest(root).items() if k not in ignored}; (root/'manifest.sha256.json').write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding='utf-8')"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Failed to write manifest.sha256.json
     exit /b 1
 )
-
 
 call "%REPO_ROOT%verify_dist.bat"
 if %ERRORLEVEL% NEQ 0 (

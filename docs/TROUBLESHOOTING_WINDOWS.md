@@ -53,10 +53,10 @@ Each block is one symptom, one cause, one fix.
 - Cause: Production web server is requested but dependency is unavailable.
 - Fix: Install runtime requirements in `.venv` and restart.
 
-## 11) Dist run fails with missing `MailBot.exe`
-- Symptom: `run.bat` or `run_dist.bat` says `MailBot.exe not found`.
+## 11) Dist run fails with missing `Letterbot.exe`
+- Symptom: `run.bat` or `run.bat` says `Letterbot.exe not found`.
 - Cause: Dist folder is incomplete or wrong launch directory is used.
-- Fix: Start from `dist\MailBot` folder that contains `MailBot.exe`.
+- Fix: Start from `dist\Letterbot` folder that contains `Letterbot.exe`.
 
 ## 12) SmartScreen blocks first run
 - Symptom: Windows shows `Windows protected your PC`.

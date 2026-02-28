@@ -1,7 +1,6 @@
 {
-  "version": "28.0.0-rc.1",
-  "commit": null,
   "build_date_utc": "2026-02-28T19:44:25Z",
+  "commit": null,
   "files": [
     {
       "path": "requirements.txt",
@@ -39,5 +38,6 @@
       "path": "RELEASE_ARTIFACT.md",
       "sha256": "02148a3f64165c809f43ba1672772850e4472e729d03044c5d02037efb738391"
     }
-  ]
+  ],
+  "version": "28.0.0-rc.2"
 }

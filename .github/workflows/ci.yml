@@ -72,11 +72,11 @@ jobs:
         run: cmd /c build_windows_onefolder.bat
 
       - name: Package release
-        run: powershell Compress-Archive dist/MailBot dist/MailBot.zip
+        run: powershell Compress-Archive dist/Letterbot dist/Letterbot.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MailBot-windows-onefolder
-          path: dist/MailBot.zip
+          name: Letterbot-windows-onefolder
+          path: dist/Letterbot.zip
           retention-days: 7

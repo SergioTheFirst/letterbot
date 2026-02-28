@@ -17,7 +17,7 @@ def test_module_entrypoint_runs_start(monkeypatch):
 
     runpy.run_module("mailbot_v26", run_name="__main__")
 
-    assert called["config_dir"] is None
+    assert str(called["config_dir"]) == "mailbot_v26/config"
 
 
 def test_module_entrypoint_config_ready_command(monkeypatch):

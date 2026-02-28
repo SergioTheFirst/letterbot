@@ -6,6 +6,21 @@ import json
 from pathlib import Path
 from typing import Iterable
 
+_RUNTIME_MUTABLE_PATHS: tuple[str, ...] = (
+    "manifest.sha256.json",
+    "mailbot.log",
+    "state.json",
+    "database.sqlite",
+    "database.sqlite-wal",
+    "database.sqlite-shm",
+    "mailbot_v26/config/settings.ini",
+    "mailbot_v26/config/accounts.ini",
+)
+
+
+def manifest_ignore_paths() -> tuple[str, ...]:
+    return _RUNTIME_MUTABLE_PATHS
+
 
 def _hash_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
     sha256 = hashlib.sha256()
@@ -27,7 +42,7 @@ def compute_manifest(root_dir: Path) -> dict[str, str]:
 
 
 def _normalize_ignore_paths(root_dir: Path, manifest_path: Path) -> set[str]:
-    ignored = {"config.yaml", "manifest.sha256.json"}
+    ignored = set(manifest_ignore_paths())
     try:
         ignored.add(manifest_path.relative_to(root_dir).as_posix())
     except ValueError:

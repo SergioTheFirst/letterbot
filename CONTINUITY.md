@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-28: v28.0.0-rc.2 packaging convergence completed — one-folder chain switched to Letterbot naming (`dist/Letterbot`, `Letterbot.exe`, CI artifact/zip names), PyInstaller entrypoint moved to `mailbot_v26/__main__.py`, dist launcher migrated to 2-file onboarding (`settings.ini` + `accounts.ini`) with `config-ready` retries, manifest integrity made runtime-safe via deterministic mutable ignore set, deterministic Windows version-resource generation added, and Windows release docs/tests synchronized.
 - 2026-02-28: v28.0.0-rc.1 packaging pass completed — version unified to `28.0.0-rc.1` across source/web/CLI/status, release artifact contract added (`RELEASE_ARTIFACT.md`), static `MANIFEST.json` generated (version+commit+UTC+sha256 set), Windows `update_and_run.bat` upgraded with Python/pip diagnostics + explicit log path + summary, and RC smoke tests added.
 - 2026-02-28: Block 4 complete — preview trust gate moved inline into main Telegram payload (`💡 ...`) with all-time corrections gate (>=10), no user-visible second message path, and no-op `send_preview_to_telegram` retained for compatibility.
 - 2026-02-28: Cockpit contacts block shipped with three cards (top traffic, silent contacts, stalled dialogs from deadlock signals) via resilient analytics methods returning empty lists on failures.
@@ -126,9 +127,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- RC validation / dogfooding for `28.0.0-rc.1` packaging build.
+- RC validation / dogfooding for `28.0.0-rc.2` packaging-convergence build.
 Next:
-- Prepare `v28.0.0` final release after RC validation window.
+- Prepare `v28.0.0` final release after `rc.2` validation window.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

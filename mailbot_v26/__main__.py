@@ -79,6 +79,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print version and exit.",
     )
     subparsers.add_parser("version", help="Print version and exit.")
+    parser.add_argument(
+        "--config-dir",
+        default="mailbot_v26/config",
+        help="Config directory for default runtime start (default: mailbot_v26/config).",
+    )
     return parser
 
 
@@ -144,7 +149,7 @@ def _run() -> None:
         require_runtime_for("runtime")
         from mailbot_v26.start import main
 
-        main()
+        main(config_dir=Path(args.config_dir))
     except DependencyError as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(2)
