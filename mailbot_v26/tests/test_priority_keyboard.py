@@ -37,3 +37,18 @@ def test_priority_menu_callbacks_parse() -> None:
         "prio_set",
         {"email_id": "123", "priority": "🔴"},
     )
+
+
+def test_email_actions_keyboard_contains_snooze_button() -> None:
+    keyboard = build_email_actions_keyboard(email_id=123, expanded=False)
+    labels = [button["text"] for button in keyboard["inline_keyboard"][0]]
+    assert labels == ["▶ Подробнее", "Приоритет", "⏰ Позже"]
+
+
+def test_snooze_callbacks_parse() -> None:
+    assert parse_callback_data("snz_m:123") == ("snooze_menu", {"email_id": "123"})
+    assert parse_callback_data("snz_b:123") == ("snooze_back", {"email_id": "123"})
+    assert parse_callback_data("snz_s:123:2h") == (
+        "snooze_set",
+        {"email_id": "123", "snooze": "2h"},
+    )

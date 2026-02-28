@@ -240,3 +240,89 @@ def test_run_inbound_polling_survives_errors(tmp_path: Path) -> None:
     )
 
     assert state_store.get_last_update_id() == 11
+
+
+def test_snooze_callback_creates_pending_record(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    processor.handle_callback_query(
+        {
+            "id": "cb1",
+            "data": f"snz_s:{email_id}:2h",
+            "message": {"chat": {"id": "chat"}, "message_id": 10, "text": "msg"},
+        }
+    )
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        row = conn.execute(
+            "SELECT email_id, status FROM telegram_snooze WHERE email_id = ?",
+            (email_id,),
+        ).fetchone()
+    assert row is not None
+    assert int(row[0]) == email_id
+    assert row[1] == "pending"
+
+
+def test_commitments_command_empty(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/commitments"})
+
+    assert sent[-1] == "✅ Нет открытых обязательств"
+
+
+def test_tasks_alias_and_limit(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        for idx in range(10):
+            conn.execute(
+                """
+                INSERT INTO commitments (email_row_id, source, commitment_text, deadline_iso, status, confidence, created_at)
+                VALUES (?, 'llm', ?, ?, 'pending', 0.9, ?)
+                """,
+                (
+                    email_id,
+                    f"Задача {idx}",
+                    f"2026-03-{idx+1:02d}T10:00:00+00:00",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+        conn.commit()
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/tasks"})
+
+    output = sent[-1]
+    assert output.startswith("📋 <b>Обязательства:</b>")
+    assert output.count("\n• ") == 7

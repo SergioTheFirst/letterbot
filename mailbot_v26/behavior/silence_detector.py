@@ -25,8 +25,12 @@ def run_silence_scan(
         scope_emails = _normalize_account_scope(account_email, account_emails)
         placeholders = ",".join("?" for _ in scope_emails)
         cutoff_ts = now_ts - (policy.lookback_days * 86400)
+        history_cutoff_ts = now_ts - (30 * 86400)
         cutoff_iso = datetime.fromtimestamp(
             cutoff_ts, tz=timezone.utc
+        ).isoformat()
+        history_cutoff_iso = datetime.fromtimestamp(
+            history_cutoff_ts, tz=timezone.utc
         ).isoformat()
         with sqlite3.connect(knowledge_db.path) as conn:
             rows = conn.execute(
@@ -35,7 +39,8 @@ def run_silence_scan(
                     from_email,
                     MIN(received_at),
                     MAX(received_at),
-                    COUNT(*)
+                    COUNT(*),
+                    SUM(CASE WHEN received_at >= ? THEN 1 ELSE 0 END)
                 FROM emails
                 WHERE account_email IN ({placeholders})
                   AND received_at >= ?
@@ -44,7 +49,7 @@ def run_silence_scan(
                 GROUP BY from_email
                 HAVING COUNT(*) >= ?
                 """,
-                (*scope_emails, cutoff_iso, policy.min_messages),
+                (history_cutoff_iso, *scope_emails, cutoff_iso, policy.min_messages),
             ).fetchall()
 
             cooldown_ts = now_ts - (policy.cooldown_hours * 3600)
@@ -77,7 +82,9 @@ def run_silence_scan(
         return 0
 
     candidates: list[dict[str, object]] = []
-    for from_email, first_seen, last_seen, msg_count in rows:
+    for from_email, first_seen, last_seen, msg_count, recent_count in rows:
+        if int(recent_count or 0) < int(policy.min_messages):
+            continue
         try:
             first_dt = _parse_iso(first_seen)
             last_dt = _parse_iso(last_seen)

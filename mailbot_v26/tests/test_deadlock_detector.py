@@ -141,3 +141,45 @@ def test_deadlock_does_not_emit_below_threshold(tmp_path) -> None:
             "SELECT COUNT(*) FROM events_v1"
         ).fetchone()[0]
     assert count == 0
+
+
+def test_deadlock_can_reemit_after_seven_day_cooldown(tmp_path) -> None:
+    db_path = tmp_path / "deadlock.sqlite"
+    knowledge_db = KnowledgeDB(db_path)
+    emitter = ContractEventEmitter(db_path)
+    policy = DeadlockPolicyConfig(window_days=5, min_messages=2, cooldown_hours=168)
+    now = datetime(2024, 1, 5, tzinfo=timezone.utc)
+    _seed_emails(
+        db_path,
+        account_email="account@example.com",
+        thread_key="thread-4",
+        count=2,
+        received_at=now - timedelta(days=1),
+    )
+
+    first = maybe_emit_deadlock(
+        knowledge_db=knowledge_db,
+        event_emitter=emitter,
+        account_email="account@example.com",
+        thread_key="thread-4",
+        policy=policy,
+        now_ts=now.timestamp(),
+    )
+    _seed_emails(
+        db_path,
+        account_email="account@example.com",
+        thread_key="thread-4",
+        count=2,
+        received_at=now + timedelta(days=7),
+    )
+    second = maybe_emit_deadlock(
+        knowledge_db=knowledge_db,
+        event_emitter=emitter,
+        account_email="account@example.com",
+        thread_key="thread-4",
+        policy=policy,
+        now_ts=(now + timedelta(days=8)).timestamp(),
+    )
+
+    assert first is True
+    assert second is True

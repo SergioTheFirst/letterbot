@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-28: Block 1 package completed — Telegram inline keyboard now includes snooze menu (`⏰ Позже` → 2ч/6ч/Завтра) with persistent SQLite `telegram_snooze`, inbound callbacks schedule reminders, runtime loop delivers `📌 Напоминание` via existing telegram dedupe keys (`kind=snooze`), `/commitments` + `/tasks` command added from existing commitments data (deduped, limit 7), silence/deadlock defaults switched to enabled in settings templates, silence gate hardened (>=5 msgs in 30d + 14d cooldown default), deadlock cooldown default set to 7d, and regression tests added/updated; full pytest green (829 passed).
 - 2026-02-28: Block 0A completed in one package — MessageProcessor now applies subject-line dedupe using shared compare helper (casefold/trim/space-collapse/RE-FW strip), action-line priority remains mail_type-first with `.xls` regressions (ACT/INVOICE override attachment fallback), clean_email external disclaimer cutoff (RU/EN markers) is enforced, and TG stage now always attaches inline action keyboard regardless of `enable_premium_processor`; targeted pytest suite green.
 - 2026-02-28: Block 0 tasks 0.5+0.7 complete — Excel extractor dependency chain now includes `xlrd>=2.0.1` for `.xls`, extraction routing/fail-safe behavior covered by regression tests (`.xls`→xlrd, missing-xlrd no-crash, `.xlsx`→openpyxl), and `mailbot_v26/config/settings.ini.example` synchronized with `SETTINGS_TEMPLATE` plus parser/regression tests guarding template parity and int/bool parsing.
 - 2026-02-28: Block 0 task 0.8 smoke coverage tightened — added fresh-clone regressions for missing `settings.ini` defaults in 2-file mode, migrate-config runtime section creation, and `settings.ini.example` inline-comment safety checks; targeted config/bootstrap and entrypoint pytest suites green.
@@ -115,9 +116,10 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Block 0 tasks 0.5/0.7/0.8 regression hardening finished with targeted excel+config bootstrap+entrypoint test suites green.
+- Block 1 scope closed; monitoring snooze reminder telemetry and inbound command usage in production.
 Next:
-- Monitor fresh-clone onboarding telemetry for 2-file mode bootstrap/readiness behavior on Windows installs.
+- Monitor snooze reminder retries/failures (`telegram_snooze` pending/attempts/last_error) under real Telegram instability windows.
+- Track `/commitments` usage quality and tune compact formatting only if user feedback indicates ambiguity.
 - Keep One-Message Rule telemetry monitoring (`telegram_delivery_dedup_unavailable` / `telegram_delivery_skipped_duplicate`) for stability under retries/reruns.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?

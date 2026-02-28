@@ -62,6 +62,7 @@ from mailbot_v26.telegram import (
     TelegramInboundProcessor,
     run_inbound_polling,
 )
+from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.storage.self_check import run_self_check
 from mailbot_v26.system.startup_health import (
     LaunchReportBuilder,
@@ -467,6 +468,7 @@ def _process_queue(
     processor: MessageProcessor,
     flags: FeatureFlags,
 ) -> None:
+    _process_due_snoozes(storage=storage, config=config)
     max_tg_attempts = 3
     while True:
         item = storage.claim_next(["PARSE", "LLM", "TG"])
@@ -692,6 +694,94 @@ def _process_queue(
             except Exception:
                 logger.exception("Failed to mark error for queue_id %s", queue_id)
             _fail_open_process(config, processor, ctx)
+    _process_due_snoozes(storage=storage, config=config)
+
+
+def _render_snooze_reminder_text(storage: Storage, *, email_id: int, reminder_text: str) -> str:
+    existing = str(reminder_text or "").strip()
+    if existing:
+        return existing
+    row = storage.conn.execute(
+        """
+        SELECT priority, from_email, subject, action_line
+        FROM emails
+        WHERE id = ?
+        """,
+        (email_id,),
+    ).fetchone()
+    if not row:
+        return f"Письмо #{email_id}"
+    priority = str(row[0] or "🔵")
+    from_email = str(row[1] or "неизвестно")
+    subject = str(row[2] or "(без темы)")
+    action_line = str(row[3] or "Проверить")
+    return f"{priority} от {from_email}:\n{subject}\n{action_line}"
+
+
+def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
+    now = datetime.now(timezone.utc)
+    due_items = storage.list_due_snoozes(now_iso=now.isoformat(), limit=20)
+    if not due_items:
+        return
+    account = config.accounts[0] if config.accounts else None
+    if not account:
+        return
+
+    for item in due_items:
+        snooze_id = int(item["id"])
+        email_id = int(item["email_id"])
+        deliver_at = str(item["deliver_at_utc"])
+        attempts = int(item.get("attempts") or 0)
+        reminder_text = _render_snooze_reminder_text(
+            storage,
+            email_id=email_id,
+            reminder_text=str(item.get("reminder_text") or ""),
+        )
+        delivery_key = _build_telegram_delivery_key(
+            email_id=email_id,
+            kind="snooze",
+            snooze_ts=deliver_at,
+        )
+        dedup_state = storage.reserve_telegram_delivery(
+            delivery_key=delivery_key,
+            email_id=email_id,
+            account_id=account.login,
+            chat_id=account.telegram_chat_id,
+            kind="snooze",
+        )
+        if dedup_state == "duplicate":
+            storage.mark_snooze_delivered(snooze_id=snooze_id)
+            continue
+        payload = TelegramPayload(
+            html_text=telegram_safe(f"📌 Напоминание\n\n{reminder_text}"),
+            priority="🔵",
+            metadata={
+                "bot_token": config.keys.telegram_bot_token,
+                "chat_id": account.telegram_chat_id,
+            },
+            reply_markup=build_email_actions_keyboard(email_id=email_id, expanded=False),
+        )
+        result = send_telegram(payload)
+        if result.delivered:
+            storage.mark_snooze_delivered(snooze_id=snooze_id)
+            if dedup_state == "reserved":
+                storage.finalize_telegram_delivery(
+                    delivery_key=delivery_key,
+                    telegram_message_id=(str(result.message_id) if result.message_id is not None else None),
+                )
+            continue
+        if dedup_state == "reserved":
+            storage.release_telegram_delivery(delivery_key=delivery_key)
+        next_attempts = attempts + 1
+        backoff_seconds = min(3600, 60 * (2 ** min(next_attempts, 5)))
+        next_dt = now.timestamp() + backoff_seconds
+        next_iso = datetime.fromtimestamp(next_dt, tz=timezone.utc).isoformat()
+        storage.reschedule_snooze_retry(
+            snooze_id=snooze_id,
+            next_deliver_at_utc=next_iso,
+            attempts=next_attempts,
+            error=result.error or "snooze telegram delivery failed",
+        )
 
 
 def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> None:

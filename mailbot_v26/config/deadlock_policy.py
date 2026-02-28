@@ -15,7 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 class DeadlockPolicyConfig:
     window_days: int = 5
     min_messages: int = 10
-    cooldown_hours: int = 24
+    cooldown_hours: int = 168
     max_per_run: int = 20
 
 
@@ -36,7 +36,7 @@ def load_deadlock_policy_config(
     return DeadlockPolicyConfig(
         window_days=_get_int(section, "window_days", default=5),
         min_messages=_get_int(section, "min_messages", default=10),
-        cooldown_hours=_get_int(section, "cooldown_hours", default=24),
+        cooldown_hours=_get_int(section, "cooldown_hours", default=168),
         max_per_run=_get_int(section, "max_per_run", default=20),
     )
 

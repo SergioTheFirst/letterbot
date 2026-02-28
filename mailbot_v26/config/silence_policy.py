@@ -14,10 +14,10 @@ _LOGGER = logging.getLogger(__name__)
 @dataclass(frozen=True, slots=True)
 class SilencePolicyConfig:
     lookback_days: int = 60
-    min_messages: int = 6
+    min_messages: int = 5
     silence_factor: float = 3.0
     min_silence_days: int = 7
-    cooldown_hours: int = 72
+    cooldown_hours: int = 336
     max_per_run: int = 20
 
 
@@ -37,10 +37,10 @@ def load_silence_policy_config(
     section = parser["silence_policy"]
     return SilencePolicyConfig(
         lookback_days=_get_int(section, "lookback_days", default=60),
-        min_messages=_get_int(section, "min_messages", default=6),
+        min_messages=_get_int(section, "min_messages", default=5),
         silence_factor=_get_float(section, "silence_factor", default=3.0),
         min_silence_days=_get_int(section, "min_silence_days", default=7),
-        cooldown_hours=_get_int(section, "cooldown_hours", default=72),
+        cooldown_hours=_get_int(section, "cooldown_hours", default=336),
         max_per_run=_get_int(section, "max_per_run", default=20),
     )
 

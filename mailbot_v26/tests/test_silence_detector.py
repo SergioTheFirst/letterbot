@@ -277,3 +277,36 @@ def test_silence_scope_aggregates_and_dedupes(tmp_path) -> None:
     assert row is not None
     payload = json.loads(row[0])
     assert payload["count_window"] == 4
+
+
+def test_silence_not_emitted_with_insufficient_recent_history(tmp_path) -> None:
+    db_path = tmp_path / "silence.sqlite"
+    knowledge_db = KnowledgeDB(db_path)
+    emitter = ContractEventEmitter(db_path)
+    policy = SilencePolicyConfig(
+        lookback_days=60,
+        min_messages=5,
+        silence_factor=2.0,
+        min_silence_days=7,
+        cooldown_hours=336,
+        max_per_run=20,
+    )
+    now = datetime(2024, 2, 20, tzinfo=timezone.utc)
+    old = now - timedelta(days=45)
+    recent = now - timedelta(days=10)
+    _seed_emails(
+        db_path,
+        account_email="account@example.com",
+        from_email="contact@example.com",
+        received_at_list=[old, old, old, old, recent],
+    )
+
+    emitted = run_silence_scan(
+        knowledge_db=knowledge_db,
+        event_emitter=emitter,
+        account_email="account@example.com",
+        now_ts=now.timestamp(),
+        policy=policy,
+    )
+
+    assert emitted == 0
