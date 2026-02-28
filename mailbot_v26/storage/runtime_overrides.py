@@ -11,7 +11,7 @@ logger = get_logger("mailbot")
 
 _DIGEST_KEY = "digest_enabled"
 _AUTO_PRIORITY_KEY = "auto_priority_enabled"
-_INSIDER_SINCE_KEY = "insider_since"
+_INSIDER_SINCE_KEY_PREFIX = "user:insider_since"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,16 +53,22 @@ class RuntimeOverrideStore:
     def set_auto_priority_enabled(self, enabled: bool) -> None:
         self._write_bool(_AUTO_PRIORITY_KEY, enabled)
 
+    def get_value(self, key: str) -> str | None:
+        return self._read_text(key)
 
-    def set_insider_since(self, value: str) -> None:
+    def set_value(self, key: str, value: str) -> None:
+        self._write_text(key, str(value))
+
+    def set_insider_since(self, value: str, *, chat_id: str | None = None) -> None:
+        key = _insider_since_key(chat_id)
         cleaned = str(value or "").strip()
         if not cleaned:
-            self._write_text(_INSIDER_SINCE_KEY, None)
+            self._write_text(key, None)
             return
-        self._write_text(_INSIDER_SINCE_KEY, cleaned)
+        self._write_text(key, cleaned)
 
-    def get_insider_since(self) -> str | None:
-        return self._read_text(_INSIDER_SINCE_KEY)
+    def get_insider_since(self, *, chat_id: str | None = None) -> str | None:
+        return self._read_text(_insider_since_key(chat_id))
 
 
 
@@ -120,6 +126,13 @@ class RuntimeOverrideStore:
                 conn.commit()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("runtime_overrides_write_failed", key=key, error=str(exc))
+
+
+def _insider_since_key(chat_id: str | None) -> str:
+    cleaned_chat_id = str(chat_id or "").strip()
+    if not cleaned_chat_id:
+        return _INSIDER_SINCE_KEY_PREFIX
+    return f"{_INSIDER_SINCE_KEY_PREFIX}:{cleaned_chat_id}"
 
 
 __all__ = ["RuntimeOverrideStore", "RuntimeOverrides"]

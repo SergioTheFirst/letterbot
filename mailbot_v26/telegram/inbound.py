@@ -595,7 +595,7 @@ class TelegramInboundProcessor:
             self._reply(chat_id, self._help_text())
             return
         if command in {"/status", "status"}:
-            self._reply(chat_id, self._status_text())
+            self._reply(chat_id, self._status_text(chat_id=chat_id))
             return
         if command in {"/doctor", "doctor"}:
             self._reply(chat_id, self._doctor_text())
@@ -1283,7 +1283,7 @@ class TelegramInboundProcessor:
             support.url,
         ])
 
-    def _status_text(self) -> str:
+    def _status_text(self, *, chat_id: str) -> str:
         mode_label = humanize_mode(system_health.mode.value, locale="ru")
         sla = compute_notification_sla(analytics=self.analytics)
         digest_override = self.override_store.get_overrides().digest_enabled
@@ -1345,7 +1345,7 @@ class TelegramInboundProcessor:
             _t("inbound.status.last_digests"),
             accounts_block,
         ]
-        insider_since = self.override_store.get_insider_since()
+        insider_since = self.override_store.get_insider_since(chat_id=chat_id)
         if insider_since:
             status_lines.append(f"⭐ Letterbot Insider since: {insider_since}")
         return "\n".join(status_lines)

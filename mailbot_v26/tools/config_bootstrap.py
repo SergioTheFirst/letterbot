@@ -87,11 +87,16 @@ enable_uncertainty_queue = false
 enable_commitment_chain_digest = false
 
 [support]
+; Show a support message in weekly digest (rate-limited)
 enabled = false
-text = Если Letterbot помогает, проект можно поддержать
+; If true, add support line to weekly digest footer (never to normal notifications)
+telegram = true
+; Min days between asks (hard cap: 30 by default)
+min_days_between_asks = 30
+; Link shown to the user (no raw markdown, Telegram HTML safe)
 url = CHANGE_ME
-label = Поддержать Letterbot
-frequency_days = 30
+; Short message shown in footer (keep it 1-2 lines max)
+message = Поддержать Letterbot → {url}
 
 [premium_clarity]
 premium_clarity_confidence_dots = auto
