@@ -2,14 +2,13 @@ import io
 
 import pytest
 
-pytest.importorskip("openpyxl")
-
-from openpyxl import Workbook
-
+from mailbot_v26.bot_core.extractors import excel
 from mailbot_v26.bot_core.extractors.excel import extract_excel_text
 
 
 def _build_workbook_bytes(fill_rows: int, fill_cols: int) -> bytes:
+    openpyxl = pytest.importorskip("openpyxl")
+    Workbook = openpyxl.Workbook
     buffer = io.BytesIO()
     workbook = Workbook()
     sheet = workbook.active
@@ -21,6 +20,8 @@ def _build_workbook_bytes(fill_rows: int, fill_cols: int) -> bytes:
 
 
 def test_extract_excel_text_openpyxl_values():
+    openpyxl = pytest.importorskip("openpyxl")
+    Workbook = openpyxl.Workbook
     buffer = io.BytesIO()
     workbook = Workbook()
     sheet = workbook.active
@@ -56,3 +57,56 @@ def test_extract_excel_text_column_limit():
     assert len(columns) <= 30
     assert "R1C30" in first_line
     assert "R1C31" not in first_line
+
+
+def test_extract_excel_text_routes_xls_to_xlrd(monkeypatch):
+    calls = []
+
+    def _fail_openpyxl(_file_bytes: bytes) -> list[str]:
+        calls.append("openpyxl")
+        return ["unexpected"]
+
+    def _collect_xlrd(_file_bytes: bytes) -> list[str]:
+        calls.append("xlrd")
+        return ["XLS_ROW"]
+
+    monkeypatch.setattr(excel, "_collect_rows_from_openpyxl", _fail_openpyxl)
+    monkeypatch.setattr(excel, "_collect_rows_from_xlrd", _collect_xlrd)
+
+    text = extract_excel_text(b"xls-bytes", "legacy.xls")
+
+    assert text == "XLS_ROW"
+    assert calls == ["xlrd"]
+
+
+def test_collect_rows_from_xlrd_missing_dependency_returns_empty(monkeypatch):
+    real_import = __import__
+
+    def _import_without_xlrd(name, *args, **kwargs):
+        if name == "xlrd":
+            raise ImportError("xlrd missing")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", _import_without_xlrd)
+
+    assert excel._collect_rows_from_xlrd(b"broken") == []
+
+
+def test_extract_excel_text_xlsx_still_uses_openpyxl_branch(monkeypatch):
+    calls = []
+
+    def _collect_openpyxl(_file_bytes: bytes) -> list[str]:
+        calls.append("openpyxl")
+        return ["XLSX_ROW"]
+
+    def _collect_xlrd(_file_bytes: bytes) -> list[str]:
+        calls.append("xlrd")
+        return ["legacy"]
+
+    monkeypatch.setattr(excel, "_collect_rows_from_openpyxl", _collect_openpyxl)
+    monkeypatch.setattr(excel, "_collect_rows_from_xlrd", _collect_xlrd)
+
+    text = extract_excel_text(b"xlsx-bytes", "current.xlsx")
+
+    assert text == "XLSX_ROW"
+    assert calls == ["openpyxl"]

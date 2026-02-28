@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-28: Block 0 tasks 0.5+0.7 complete — Excel extractor dependency chain now includes `xlrd>=2.0.1` for `.xls`, extraction routing/fail-safe behavior covered by regression tests (`.xls`→xlrd, missing-xlrd no-crash, `.xlsx`→openpyxl), and `mailbot_v26/config/settings.ini.example` synchronized with `SETTINGS_TEMPLATE` plus parser/regression tests guarding template parity and int/bool parsing.
 - 2026-02-28: Block 0 tasks 0.3+0.4 complete — MessageProcessor action line priority fixed to mail_type-first (act/invoice/contract), subject/attachment/generic fallbacks tightened (no plural "таблицы" fallback), and clean_email disclaimer cutoff now removes RU/EN external-mail warning tails; regression tests added for action-line priority and disclaimer trimming.
 - 2026-02-28: Task 0.9 complete — TG-stage One-Message Rule now enforced by persistent SQLite `telegram_delivery_log` atomic reservation/finalize/release guard keyed by `email:{email_id}` (kind-aware for snooze compatibility), duplicate skips emit `telegram_delivery_skipped_duplicate`, ingest dedupe normalizes account login, IMAP cursor keys normalized to prevent UID reappearance loops, and regression tests added for TG idempotency/rerun, case-insensitive UID dedupe, snooze key separation, and normalized IMAP state cursor.
 - 2026-02-27: 2-file mode premium default updated — `enable_premium_processor` now falls back to `true` when absent in `settings.ini` (legacy mode behavior unchanged), templates updated, and feature-flag regression test added.
@@ -112,9 +113,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Block 0 tasks 0.3+0.4 delivered with targeted fixes (action line priority + disclaimer trim); full pytest green (807 passed).
+- Block 0 tasks 0.5+0.7 delivered with targeted fixes (`.xls` xlrd dependency/routing/fail-safe + settings template/example sync); full pytest green (812 passed).
 Next:
-- Monitor runtime message quality for action-line mapping on mail_type variants (act/invoice/contract) and disclaimer-cut edge cases in production-like traffic.
+- Monitor attachment extraction behavior for `.xls`/`.xlsx` in production-like traffic (especially optional-dependency environments).
 - Continue One-Message Rule production monitoring (`telegram_delivery_dedup_unavailable` / `telegram_delivery_skipped_duplicate`) and validate future snooze `kind=snooze` keys.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
