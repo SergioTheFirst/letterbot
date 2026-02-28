@@ -134,6 +134,8 @@ def test_settings_example_parses_as_ints_and_booleans() -> None:
     assert parser.getboolean("support", "enabled") is False
     assert parser.getboolean("support", "telegram") is True
     assert parser.getint("support", "min_days_between_asks") == 30
+    assert parser.getint("trust_bootstrap", "min_samples") == 10
+    assert parser.getint("trust_bootstrap", "templates_min_corrections") == 10
 
 
 def test_settings_example_contains_runtime_sections_and_no_inline_comments() -> None:

@@ -38,10 +38,21 @@ if %ERRORLEVEL% NEQ 0 (
     )
 )
 
-set "VENV_PY=%REPO_ROOT%.venv\Scripts\python.exe"
-if not exist "%VENV_PY%" (
-    echo [ERROR] .venv not found. Please run install_and_run.bat first.
+where python >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] Python not found in PATH. Install Python 3.11+ and rerun.
     exit /b 1
+)
+
+set "VENV_DIR=%REPO_ROOT%.venv"
+set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+if not exist "%VENV_PY%" (
+    echo Creating virtual environment...
+    python -m venv "%VENV_DIR%"
+    if %ERRORLEVEL% NEQ 0 (
+        echo [ERROR] Failed to create .venv
+        exit /b 1
+    )
 )
 
 echo Installing dependencies...

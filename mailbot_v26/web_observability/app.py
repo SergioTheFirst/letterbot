@@ -2265,6 +2265,29 @@ def create_app(
             if isinstance(engineer_payload, Mapping)
             else []
         )
+        top_senders: list[dict[str, object]] = []
+        silent_contacts: list[dict[str, object]] = []
+        stalled_threads: list[dict[str, object]] = []
+        if account_emails:
+            try:
+                top_senders = analytics.cockpit_top_senders(account_emails, days=30, limit=3)
+            except Exception:
+                top_senders = []
+            try:
+                silent_contacts = analytics.cockpit_silent_contacts(
+                    account_emails,
+                    silent_days=14,
+                    days=90,
+                    min_msgs=3,
+                    limit=3,
+                )
+            except Exception:
+                silent_contacts = []
+            try:
+                stalled_threads = analytics.cockpit_stalled_threads(account_emails, days=30, limit=3)
+            except Exception:
+                stalled_threads = []
+
         open_commitments = 0
         commitments_url = None
         if account_emails and hasattr(analytics, "commitment_status_counts"):
@@ -2362,6 +2385,9 @@ def create_app(
             latency_distribution=latency_distribution,
             open_commitments=open_commitments,
             commitments_url=commitments_url,
+            top_senders=top_senders,
+            silent_contacts=silent_contacts,
+            stalled_threads=stalled_threads,
             hide_limit=True,
             status_refresh_ms=STATUS_STRIP_REFRESH_MS,
             share_url=share_url,

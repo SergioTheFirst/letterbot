@@ -17,6 +17,11 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-28: Block 4 complete — preview trust gate moved inline into main Telegram payload (`💡 ...`) with all-time corrections gate (>=10), no user-visible second message path, and no-op `send_preview_to_telegram` retained for compatibility.
+- 2026-02-28: Cockpit contacts block shipped with three cards (top traffic, silent contacts, stalled dialogs from deadlock signals) via resilient analytics methods returning empty lists on failures.
+- 2026-02-28: Weekly accuracy gate hardened in both digest scheduler and weekly digest render path: show only when `priority_corrections >= 3` and `accuracy_pct >= 80`, fail-closed when `accuracy_pct` is missing.
+- 2026-02-28: trust_bootstrap loader now supports 2-file priority (`settings.ini[trust_bootstrap]` first, fallback to legacy `config.ini`) and settings template thresholds lowered to min_samples=10 / templates_min_corrections=10.
+- 2026-02-28: Release hygiene for 27.2.0 completed (CHANGELOG entry, version bump, Windows update script first-run/repair flow).
 - 2026-02-28: Block 3A foundation delivered — added `[support]` defaults to 2-file templates (`settings.ini.example` + bootstrap template), introduced typed `load_support_settings()` with strict 2-file INI priority and legacy YAML fallback only outside 2-file mode, added Telegram `/support` command + `/help` line, added Insider badge rendering in `/status` backed by new runtime override store methods (`set_insider_since`/`get_insider_since`), and added/updated regression tests; targeted + full pytest green (850 passed).
 - 2026-02-28: Block 3.2+3.3 completed — support ask moved to 2-file `[support]` config (`enabled/telegram/min_days_between_asks/url/message`) with weekly-only footer injection and 30-day runtime_overrides rate-limit (`support:last_ask_utc:{chat_id}` fallback to account), fail-closed on override errors/no DB; `/status` Insider badge now uses chat-scoped runtime override key `user:insider_since:{telegram_chat_id}`; no `support_state.json` dependency in scheduler path; targeted + full pytest green (847 passed).
 - 2026-02-28: Block 2.4 implemented — Telegram attachment line now renders one deterministic insight (`build_attachment_insight`) with strict A/B/C priority (invoice amount+due, act reconciliation period/counterparty, table headers, honest fallback), threaded `mail_type` into TG render path, and added regressions for invoice/act/excel/fallback/no-hallucination/no-dup; full pytest green (840 passed).
@@ -120,11 +125,11 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Block 3.2 + 3.3 delivered for 2-file mode: weekly-only support footer from `settings.ini`, SQLite runtime override rate-limit keys, and chat-scoped Insider badge in `/status`; full pytest green (847 passed).
+- `27.2.0` feature-complete.
+- Monitor production deployments and telemetry after rollout.
 Next:
-- Monitor operator adoption of new `[support]` keys (`telegram`, `min_days_between_asks`, `message`) in 2-file deployments.
-- Keep watching weekly digest One-Message Rule and fail-closed behavior when runtime overrides are unavailable.
-- Decide whether legacy YAML support ask branch can be fully retired after migration window.
+- Prepare separate `v28.0.0-rc` release packaging pass.
+- Align version surfaces (Windows resource / dist artifact contract) for next release train.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

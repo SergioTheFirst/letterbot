@@ -238,6 +238,37 @@
 
       <div class="card golden-card">
         <div class="section-title">
+          <h2>Контакты</h2>
+          <div class="hint">30–90 дней</div>
+        </div>
+        <div class="hint"><b>🔝 Топ по трафику</b></div>
+        {% if lane == "all" and top_senders %}
+          {% for item in top_senders %}
+          <div>• {{ item.display_name }} — {{ item.count }}</div>
+          {% endfor %}
+        {% else %}
+          <div class="hint">— пусто —</div>
+        {% endif %}
+        <div class="hint" style="margin-top:8px;"><b>🔇 Молчат давно</b></div>
+        {% if lane == "all" and silent_contacts %}
+          {% for item in silent_contacts %}
+          <div>• {{ item.display_name }} — {{ item.days_silent }} дн.</div>
+          {% endfor %}
+        {% else %}
+          <div class="hint">— пусто —</div>
+        {% endif %}
+        <div class="hint" style="margin-top:8px;"><b>🔁 Застрявшие диалоги</b></div>
+        {% if lane == "all" and stalled_threads %}
+          {% for item in stalled_threads %}
+          <div>• {{ item.from_email }} — {{ item.subject or item.snippet }} ({{ item.days_ago }} дн. назад)</div>
+          {% endfor %}
+        {% else %}
+          <div class="hint">— пусто —</div>
+        {% endif %}
+      </div>
+
+      <div class="card golden-card">
+        <div class="section-title">
           <h2>Golden signals</h2>
           <div class="hint">Windowed aggregates</div>
         </div>
