@@ -167,6 +167,39 @@ from mailbot_v26.ui.i18n import (
 
 logger = get_logger("mailbot")
 
+_SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
+
+
+def _normalize_subject_for_compare(text: str) -> str:
+    working = (text or "").strip()
+    if not working:
+        return ""
+    working = re.sub(r"<[^>]+>", " ", working)
+    working = working.replace("\\", "/")
+    working = re.sub(r"\s+", " ", working)
+    while True:
+        stripped = _SUBJECT_PREFIX_RE.sub("", working).strip()
+        if stripped == working:
+            break
+        working = stripped
+    return working.casefold()
+
+
+def _maybe_drop_duplicate_subject_line(
+    header_subject: str,
+    body_lines: list[str],
+) -> list[str]:
+    if not body_lines:
+        return body_lines
+    first_line = (body_lines[0] or "").strip()
+    if not first_line:
+        return body_lines
+    normalized_subject = _normalize_subject_for_compare(header_subject)
+    normalized_first = _normalize_subject_for_compare(first_line)
+    if normalized_subject and normalized_subject == normalized_first:
+        return body_lines[1:]
+    return body_lines
+
 class _LazyFeatureFlags:
     def __init__(self) -> None:
         self._flags: FeatureFlags | None = None
@@ -886,14 +919,13 @@ class MessageProcessor:
         safe_sender = escape_tg_html(display_sender)
         safe_subject = escape_tg_html(subject)
         safe_summary = escape_tg_html(summary)
-        safe_action_line = escape_tg_html(action_line)
         safe_account_login = escape_tg_html(account_login)
 
-        lines = [
-            f"{priority} от {safe_sender} — {safe_subject}",
-            f"<b>{safe_subject}</b>",
-            safe_action_line,
-        ]
+        body_lines = _maybe_drop_duplicate_subject_line(subject, [subject])
+        lines = [f"{priority} от {safe_sender} — {safe_subject}"]
+        if body_lines:
+            lines.append(f"<b>{escape_tg_html(body_lines[0])}</b>")
+        lines.append(escape_tg_html(action_line))
         if safe_summary:
             lines.append(f"<i>{safe_summary}</i>")
         if attachments:

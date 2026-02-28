@@ -47,7 +47,7 @@ def test_empty_body_uses_fallback_phrase():
     summary = _summary_line(result or "")
 
     assert summary == ""
-    assert len([line for line in result.split("\n") if line.strip()]) == 4
+    assert len([line for line in result.split("\n") if line.strip()]) == 3
 
 
 def test_long_body_trims_to_word_budget():
@@ -93,5 +93,5 @@ def test_greeting_only_body_skipped():
     assert result is not None
 
     lines = [line for line in result.split("\n") if line.strip()]
-    assert len(lines) == 4
+    assert len(lines) == 3
     assert all("здравствуйте" not in line.lower() for line in lines)
