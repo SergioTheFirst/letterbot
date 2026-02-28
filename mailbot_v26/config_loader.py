@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 import re
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional
+from typing import Any, Callable, Iterable, List, Optional
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.paths import resolve_config_paths
@@ -89,6 +89,18 @@ class WebConfig:
     host: str
     port: int
 
+
+
+
+@dataclass
+class SupportSettings:
+    """Telegram support banner settings."""
+
+    enabled: bool
+    text: str
+    url: str
+    label: str
+    frequency_days: int
 
 @dataclass
 class BotConfig:
@@ -359,6 +371,105 @@ def load_maintenance_config(base_dir: Path = CONFIG_DIR) -> MaintenanceConfig:
         return MaintenanceConfig(maintenance_mode=False)
 
 
+
+
+def _support_defaults() -> SupportSettings:
+    return SupportSettings(
+        enabled=False,
+        text="Если Letterbot помогает, проект можно поддержать",
+        url="CHANGE_ME",
+        label="Поддержать Letterbot",
+        frequency_days=30,
+    )
+
+
+def _normalize_support_frequency(raw: object, *, default: int = 30) -> int:
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(default, value)
+
+
+def _load_support_from_ini(parser: configparser.ConfigParser) -> SupportSettings:
+    defaults = _support_defaults()
+    if "support" not in parser:
+        return defaults
+    section = parser["support"]
+    try:
+        enabled = section.getboolean("enabled", fallback=defaults.enabled)
+    except ValueError:
+        enabled = defaults.enabled
+    text = str(section.get("text", fallback=defaults.text)).strip() or defaults.text
+    url = str(section.get("url", fallback=defaults.url)).strip() or defaults.url
+    label = str(section.get("label", fallback=defaults.label)).strip() or defaults.label
+    frequency_days = _normalize_support_frequency(
+        section.get("frequency_days", fallback=str(defaults.frequency_days)),
+        default=defaults.frequency_days,
+    )
+    return SupportSettings(
+        enabled=enabled,
+        text=text,
+        url=url,
+        label=label,
+        frequency_days=frequency_days,
+    )
+
+
+def _load_support_from_yaml(raw: Any) -> SupportSettings:
+    defaults = _support_defaults()
+    if not isinstance(raw, dict):
+        return defaults
+    support = raw.get("support")
+    if not isinstance(support, dict):
+        return defaults
+
+    telegram = support.get("telegram")
+    telegram = telegram if isinstance(telegram, dict) else {}
+    methods = support.get("methods")
+    method0 = methods[0] if isinstance(methods, list) and methods and isinstance(methods[0], dict) else {}
+
+    text = str(telegram.get("text") or support.get("text") or defaults.text).strip() or defaults.text
+    url = str(support.get("url") or method0.get("url") or defaults.url).strip() or defaults.url
+    label = str(support.get("label") or method0.get("label") or defaults.label).strip() or defaults.label
+    return SupportSettings(
+        enabled=bool(support.get("enabled", False)),
+        text=text,
+        url=url,
+        label=label,
+        frequency_days=_normalize_support_frequency(
+            telegram.get("frequency_days", support.get("frequency_days", defaults.frequency_days)),
+            default=defaults.frequency_days,
+        ),
+    )
+
+
+def load_support_settings(base_dir: Path = CONFIG_DIR) -> SupportSettings:
+    resolved = resolve_config_paths(base_dir)
+    if resolved.two_file_mode:
+        return _load_support_from_ini(_read_config_file(resolved.settings_path))
+
+    settings_path = resolved.settings_path if resolved.settings_path.exists() else resolved.legacy_ini_path
+    parser = _read_config_file(settings_path)
+    ini_settings = _load_support_from_ini(parser)
+    if "support" in parser:
+        return ini_settings
+
+    yaml_path = resolved.yaml_path
+    if not yaml_path or not yaml_path.exists():
+        return ini_settings
+    try:
+        from mailbot_v26.config_yaml import load_config as load_yaml_config
+    except Exception as exc:
+        _LOGGER.warning("support_yaml_loader_unavailable: %s", exc)
+        return ini_settings
+    try:
+        raw = load_yaml_config(yaml_path)
+    except Exception as exc:
+        _LOGGER.warning("support_yaml_load_failed: %s", exc)
+        return ini_settings
+    return _load_support_from_yaml(raw)
+
 def load_web_config(base_dir: Path = CONFIG_DIR) -> WebConfig:
     parser = _read_config_file(_resolve_settings_path(base_dir))
 
@@ -431,6 +542,7 @@ __all__ = [
     "InvalidAccountIdError",
     "KeysConfig",
     "StorageConfig",
+    "SupportSettings",
     "get_account_scope",
     "load_config",
     "load_accounts_config",
@@ -440,5 +552,6 @@ __all__ = [
     "load_web_config",
     "load_keys_config",
     "load_storage_config",
+    "load_support_settings",
     "resolve_account_scope",
 ]

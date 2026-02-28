@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
+from mailbot_v26.config_loader import SupportSettings
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.features.flags import FeatureFlags
@@ -464,3 +465,149 @@ def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
         "Коррекций: 1 · Точность: 100%\n"
         "Обязательств открыто: 1"
     )
+
+
+def test_support_command_disabled_returns_honest_message(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    processor.support_settings = SupportSettings(
+        enabled=False,
+        text="text",
+        url="CHANGE_ME",
+        label="Поддержать Letterbot",
+        frequency_days=30,
+    )
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/support"})
+
+    assert sent[-1] == "Поддержка проекта сейчас не настроена."
+
+
+def test_support_command_enabled_with_url_returns_three_lines(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    processor.support_settings = SupportSettings(
+        enabled=True,
+        text="Если Letterbot помогает, проект можно поддержать",
+        url="https://example.com/insider",
+        label="Поддержать Letterbot",
+        frequency_days=30,
+    )
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "support"})
+
+    assert sent[-1] == (
+        "Поддержать Letterbot\n"
+        "Если Letterbot помогает, проект можно поддержать\n"
+        "https://example.com/insider"
+    )
+
+
+def test_support_command_enabled_without_url_reports_not_configured(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    processor.support_settings = SupportSettings(
+        enabled=True,
+        text="text",
+        url="CHANGE_ME",
+        label="Поддержать Letterbot",
+        frequency_days=30,
+    )
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/support"})
+
+    assert sent[-1] == "Поддержка включена, но ссылка ещё не настроена."
+
+
+def test_help_contains_support_command(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/help"})
+
+    assert "/support — поддержать проект" in sent[-1]
+
+
+def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
+
+    assert "⭐ Letterbot Insider since:" not in sent[-1]
+
+
+def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    processor.override_store.set_insider_since("2026-02")
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
+
+    assert "⭐ Letterbot Insider since: 2026-02" in sent[-1]
+
+
+def test_runtime_override_store_insider_roundtrip(tmp_path: Path) -> None:
+    store = RuntimeOverrideStore(tmp_path / "runtime.sqlite")
+
+    assert store.get_insider_since() is None
+
+    store.set_insider_since("2025-12")
+    assert store.get_insider_since() == "2025-12"
+
+    store.set_insider_since("")
+    assert store.get_insider_since() is None

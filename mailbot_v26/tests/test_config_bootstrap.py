@@ -130,13 +130,15 @@ def test_settings_example_parses_as_ints_and_booleans() -> None:
     assert parser.getint("general", "check_interval") == 120
     assert parser.getboolean("features", "enable_premium_processor") is True
     assert parser.getint("weekly_calibration_report", "top_n") == 3
+    assert parser.has_section("support")
+    assert parser.getint("support", "frequency_days") == 30
 
 
 def test_settings_example_contains_runtime_sections_and_no_inline_comments() -> None:
     parser = configparser.ConfigParser()
     parser.read_string(SETTINGS_TEMPLATE)
 
-    required_sections = {"general", "features", "web", "delivery_policy", "silence_policy", "deadlock_policy"}
+    required_sections = {"general", "features", "web", "delivery_policy", "silence_policy", "deadlock_policy", "support"}
     assert required_sections.issubset(set(parser.sections()))
 
     for section in parser.sections():

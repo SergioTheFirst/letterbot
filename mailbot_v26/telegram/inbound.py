@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
+from mailbot_v26.config_loader import SupportSettings, load_support_settings
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.feedback import record_priority_confirmation, record_priority_correction
 from mailbot_v26.insights.auto_priority_quality_gate import AutoPriorityQualityGate
@@ -368,6 +369,7 @@ def parse_command(text: str) -> tuple[str, list[str]]:
 @dataclass(frozen=True, slots=True)
 class TelegramInboundClient:
     bot_token: str
+    support_settings: SupportSettings | None = None
     timeout_s: int = 5
     _requests: object | None = None
 
@@ -500,6 +502,7 @@ class TelegramInboundProcessor:
     feature_flags: FeatureFlags
     allowed_chat_ids: frozenset[str]
     bot_token: str
+    support_settings: SupportSettings | None = None
 
     def handle_update(self, update: dict[str, object]) -> None:
         if "callback_query" in update:
@@ -608,6 +611,9 @@ class TelegramInboundProcessor:
             return
         if command in {"/week", "week"}:
             self._reply(chat_id, self._week_text())
+            return
+        if command in {"/support", "support"}:
+            self._reply(chat_id, self._support_text())
             return
 
         self._reply(chat_id, _t("inbound.command_unknown"))
@@ -1179,6 +1185,7 @@ class TelegramInboundProcessor:
                 _t("inbound.help.autopriority"),
                 _t("inbound.help.commitments"),
                 _t("inbound.help.week"),
+                _t("inbound.help.support"),
                 _t("inbound.help.help"),
             ]
         )
@@ -1264,6 +1271,18 @@ class TelegramInboundProcessor:
     def _priority_help_text(self) -> str:
         return _t("inbound.priority_help")
 
+    def _support_text(self) -> str:
+        support = self.support_settings or load_support_settings()
+        if not support.enabled:
+            return "Поддержка проекта сейчас не настроена."
+        if not support.url or support.url == "CHANGE_ME":
+            return "Поддержка включена, но ссылка ещё не настроена."
+        return "\n".join([
+            support.label or "Поддержать Letterbot",
+            support.text,
+            support.url,
+        ])
+
     def _status_text(self) -> str:
         mode_label = humanize_mode(system_health.mode.value, locale="ru")
         sla = compute_notification_sla(analytics=self.analytics)
@@ -1316,16 +1335,20 @@ class TelegramInboundProcessor:
             else _t("inbound.status.short_off"),
         )
 
-        return (
-            f"{_t('inbound.status.title')}\n"
-            f"{_t('inbound.status.mode', mode=mode_label)}\n"
-            f"{_t('inbound.status.sla', delivery=_format_percent(sla.delivery_rate_24h), errors=_format_percent(sla.error_rate_24h))}\n"
-            f"{_t('inbound.status.digest', digest=digest_flag)}\n"
-            f"{_t('inbound.status.autopriority', mode=auto_mode)}\n"
-            f"{flags_line}\n"
-            f"{_t('inbound.status.last_digests')}\n"
-            f"{accounts_block}"
-        )
+        status_lines = [
+            _t("inbound.status.title"),
+            _t("inbound.status.mode", mode=mode_label),
+            _t("inbound.status.sla", delivery=_format_percent(sla.delivery_rate_24h), errors=_format_percent(sla.error_rate_24h)),
+            _t("inbound.status.digest", digest=digest_flag),
+            _t("inbound.status.autopriority", mode=auto_mode),
+            flags_line,
+            _t("inbound.status.last_digests"),
+            accounts_block,
+        ]
+        insider_since = self.override_store.get_insider_since()
+        if insider_since:
+            status_lines.append(f"⭐ Letterbot Insider since: {insider_since}")
+        return "\n".join(status_lines)
 
     def _doctor_text(self) -> str:
         try:

@@ -166,6 +166,7 @@ _STRINGS_RU = {
     "inbound.help.autopriority": "/autopriority on|off — включить или выключить автоприоритет",
     "inbound.help.commitments": "/commitments (/tasks) — открытые обязательства",
     "inbound.help.week": "/week — краткая статистика за 7 дней",
+    "inbound.help.support": "/support — поддержать проект",
     "inbound.help.help": "/help — эта справка",
     "inbound.status.title": "Статус системы",
     "inbound.status.mode": "Режим: {mode}",

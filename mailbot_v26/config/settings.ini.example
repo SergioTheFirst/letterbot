@@ -66,6 +66,13 @@ enable_regret_minimization = false
 enable_uncertainty_queue = false
 enable_commitment_chain_digest = false
 
+[support]
+enabled = false
+text = Если Letterbot помогает, проект можно поддержать
+url = CHANGE_ME
+label = Поддержать Letterbot
+frequency_days = 30
+
 [premium_clarity]
 premium_clarity_confidence_dots = auto
 premium_clarity_confidence_threshold = 75
