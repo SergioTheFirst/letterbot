@@ -110,3 +110,16 @@ def test_extract_excel_text_xlsx_still_uses_openpyxl_branch(monkeypatch):
 
     assert text == "XLSX_ROW"
     assert calls == ["openpyxl"]
+
+
+def test_extract_excel_text_corrupt_xls_returns_empty_with_warning(monkeypatch, caplog):
+    def _collect_xlrd(_file_bytes: bytes) -> list[str]:
+        return []
+
+    monkeypatch.setattr(excel, "_collect_rows_from_xlrd", _collect_xlrd)
+
+    with caplog.at_level("WARNING"):
+        text = extract_excel_text(b"not-a-real-xls", "broken.xls")
+
+    assert text == ""
+    assert "Failed to extract text from broken.xls" in caplog.text
