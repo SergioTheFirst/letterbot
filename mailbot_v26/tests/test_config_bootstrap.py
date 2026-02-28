@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import configparser
+from pathlib import Path
+
 from mailbot_v26.tools.config_bootstrap import (
+    SETTINGS_TEMPLATE,
     check_config_ready,
     init_config,
     run_config_ready,
@@ -104,3 +108,23 @@ use_ssl = true
     )
 
     assert run_config_ready(tmp_path, verbose=False) == 0
+
+
+def test_settings_example_matches_settings_template() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    example_path = repo_root / "mailbot_v26" / "config" / "settings.ini.example"
+    example_text = example_path.read_text(encoding="utf-8")
+
+    assert example_text == SETTINGS_TEMPLATE
+
+
+def test_settings_example_parses_as_ints_and_booleans() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    example_path = repo_root / "mailbot_v26" / "config" / "settings.ini.example"
+
+    parser = configparser.ConfigParser()
+    parser.read(example_path, encoding="utf-8")
+
+    assert parser.getint("general", "check_interval") == 120
+    assert parser.getboolean("features", "enable_premium_processor") is True
+    assert parser.getint("weekly_calibration_report", "top_n") == 3
