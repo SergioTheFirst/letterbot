@@ -114,10 +114,7 @@ def test_tg_payload_with_attachments(monkeypatch) -> None:
     assert isinstance(payload.metadata, dict)
     assert payload.priority == "🔴"
     telegram_text = payload.html_text
-    assert "Вложения: 4 (DOC×1, PDF×1, XLS×1, XLSX×1)" in telegram_text
-    assert "one.doc" in telegram_text
-    assert "two.xls" in telegram_text
-    assert "three.pdf" in telegram_text
+    assert "Вложения: 4" in telegram_text
 
 
 def test_tg_payload_never_subject_only(monkeypatch) -> None:

@@ -37,6 +37,22 @@ _CONTEXT_KEYWORDS = (
     "задерж",
 )
 _SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
+_RUB_AMOUNT_RE = re.compile(
+    r"(\d{1,3}(?:[ \u00a0]\d{3})+|\d{4,})(?:[\.,]\d{1,2})?\s*(?:₽|руб\.?|рублей|rur)?",
+    re.IGNORECASE,
+)
+_DATE_RE = re.compile(r"\b(\d{2})\.(\d{2})(?:\.(\d{2,4}))?\b")
+_PAYMENT_DUE_CONTEXT_RE = re.compile(
+    r"(?:оплат(?:ить|а|е)?\s*до|срок\s*оплат[ыы]?|до)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
+    re.IGNORECASE,
+)
+_PERIOD_RE = re.compile(
+    r"\b(январ(?:ь|я)|феврал(?:ь|я)|март(?:а)?|апрел(?:ь|я)|ма[йя]|июн(?:ь|я)|июл(?:ь|я)|август(?:а)?|сентябр(?:ь|я)|октябр(?:ь|я)|ноябр(?:ь|я)|декабр(?:ь|я))\s+(20\d{2})\b",
+    re.IGNORECASE,
+)
+_COUNTERPARTY_RE = re.compile(r"\b(ООО|АО|ПАО|ИП)\s+[A-Za-zА-Яа-яЁё0-9\-«»\"]{2,}")
+_TOKEN_CLEAN_RE = re.compile(r"[^A-Za-zА-Яа-яЁё0-9_\-]+")
+_INSIGHT_SUFFIX_LIMIT = 60
 
 
 @dataclass(frozen=True)
@@ -278,6 +294,148 @@ def _truncate_attachment_text(text: str) -> str:
     return f"{truncated}...."
 
 
+def _collect_attachment_source_text(
+    attachments: list[dict[str, Any]],
+    *,
+    subject: str,
+    summary: str,
+) -> str:
+    parts: list[str] = [subject or "", summary or ""]
+    for attachment in attachments:
+        text = _normalize_attachment_text(attachment.get("text"))
+        if text and not _is_binary_leak(text):
+            parts.append(text)
+        attachment_summary = _normalize_attachment_text(attachment.get("summary"))
+        if attachment_summary:
+            parts.append(attachment_summary)
+    return " ".join(part for part in parts if part).strip()
+
+
+def _normalize_amount(amount: str) -> str:
+    cleaned = " ".join((amount or "").replace("\u00a0", " ").split())
+    digits = re.sub(r"[^0-9]", "", cleaned)
+    if not digits:
+        return ""
+    grouped = f"{int(digits):,}".replace(",", " ")
+    return f"{grouped} ₽"
+
+
+def _compact_date(date_value: str) -> str:
+    match = _DATE_RE.search(date_value or "")
+    if not match:
+        return ""
+    day, month = match.group(1), match.group(2)
+    return f"{day}.{month}"
+
+
+def _invoice_attachment_insight(mail_type: str, text: str, attachments_count: int) -> str | None:
+    invoice_types = {"INVOICE", "PAYMENT_REMINDER", "INVOICE_OVERDUE", "OVERDUE_INVOICE"}
+    if mail_type not in invoice_types:
+        return None
+    lowered = text.lower()
+    amount = ""
+    for match in _RUB_AMOUNT_RE.finditer(text):
+        chunk = match.group(0)
+        start = max(0, match.start() - 28)
+        context = lowered[start : match.end() + 6]
+        if any(token in context for token in ("итого", "сумм", "к оплат", "оплат")):
+            amount = _normalize_amount(chunk)
+            break
+        if not amount:
+            amount = _normalize_amount(chunk)
+    due_match = _PAYMENT_DUE_CONTEXT_RE.search(text)
+    due_date = _compact_date(due_match.group(1)) if due_match else ""
+    if not due_date:
+        for match in _DATE_RE.finditer(text):
+            start = max(0, match.start() - 24)
+            context = lowered[start : match.end() + 8]
+            if any(token in context for token in ("до", "срок", "оплат")):
+                due_date = _compact_date(match.group(0))
+                break
+    if amount and due_date:
+        return f"💰 {amount} · до {due_date}"
+    if amount:
+        return f"💰 {amount}"
+    suffix = "влож." if attachments_count > 0 else "вложение"
+    count = max(attachments_count, 1)
+    return f"📎 Счёт · {count} {suffix}"
+
+
+def _act_attachment_insight(mail_type: str, text: str) -> str | None:
+    if not (mail_type.startswith("ACT") or "RECONCILIATION" in mail_type):
+        return None
+    period_match = _PERIOD_RE.search(text)
+    if period_match:
+        month = period_match.group(1)
+        year = period_match.group(2)
+        return f"📎 Акт сверки · {month} {year}"
+    counterparty_match = _COUNTERPARTY_RE.search(text)
+    if counterparty_match:
+        return f"📎 Акт сверки · {counterparty_match.group(0)}"
+    return "📎 Акт сверки"
+
+
+def _table_attachment_insight(attachments: list[dict[str, Any]]) -> str | None:
+    for attachment in attachments:
+        filename = str(attachment.get("filename") or "вложение").strip()
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in {"xls", "xlsx", "xlsm", "xlsb", "csv"}:
+            continue
+        text = _normalize_attachment_text(attachment.get("text") or attachment.get("summary") or "")
+        if not text:
+            continue
+        raw_tokens = _TOKEN_CLEAN_RE.sub(" ", text).split()
+        tokens: list[str] = []
+        for token in raw_tokens:
+            if len(token) < 3 or token.isdigit():
+                continue
+            lowered = token.lower()
+            if lowered in {"sheet", "лист", "строка", "колонка", "таблица", "nan"}:
+                continue
+            if token in tokens:
+                continue
+            tokens.append(token)
+            if len(tokens) == 3:
+                break
+        if not tokens:
+            continue
+        suffix = " / ".join(tokens)
+        if len(suffix) > _INSIGHT_SUFFIX_LIMIT:
+            suffix = suffix[: _INSIGHT_SUFFIX_LIMIT - 1].rstrip() + "…"
+        return f"📎 {filename} — {suffix}"
+    return None
+
+
+def build_attachment_insight(
+    *,
+    mail_type: str | None,
+    attachments: list[dict[str, Any]],
+    subject: str = "",
+    summary: str = "",
+) -> str | None:
+    if not attachments:
+        return None
+    normalized_mail_type = (mail_type or "").strip().upper()
+    source_text = _collect_attachment_source_text(attachments, subject=subject, summary=summary)
+    invoice_line = _invoice_attachment_insight(
+        normalized_mail_type,
+        source_text,
+        len(attachments),
+    )
+    if invoice_line:
+        return invoice_line
+    act_line = _act_attachment_insight(normalized_mail_type, source_text)
+    if act_line:
+        return act_line
+    table_line = _table_attachment_insight(attachments)
+    if table_line:
+        return table_line
+    if len(attachments) == 1:
+        filename = str(attachments[0].get("filename") or "вложение").strip()
+        return f"📎 1 вложение: {filename}"
+    return f"📎 {len(attachments)} вложения"
+
+
 def _is_binary_leak(text: str) -> bool:
     if not text:
         return False
@@ -436,6 +594,8 @@ def build_telegram_text(
     subject: str,
     action_line: str,
     attachments: list[dict[str, Any]],
+    mail_type: str | None = None,
+    summary: str = "",
 ) -> str:
     body_lines = _maybe_drop_duplicate_subject_line(subject, [format_main_action(action_line)])
     lines = [
@@ -443,10 +603,15 @@ def build_telegram_text(
         format_subject(subject),
         *body_lines,
     ]
-    attachments_block = format_attachments_block(attachments)
-    if attachments_block:
+    attachment_line = build_attachment_insight(
+        mail_type=mail_type,
+        attachments=attachments,
+        subject=subject,
+        summary=summary,
+    )
+    if attachment_line:
         lines.append("")
-        lines.append(attachments_block)
+        lines.append(_escape_dynamic(attachment_line))
     return dedup_rendered_text("\n".join(lines))
 
 
@@ -460,6 +625,7 @@ def render_telegram_message(
     insights: Iterable[str] | None = None,
     commitments: Iterable[str] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    mail_type: str | None = None,
 ) -> str:
     fields = apply_semantic_gates(
         action_line=action_line,
@@ -473,6 +639,8 @@ def render_telegram_message(
         subject=subject,
         action_line=_resolve_action_line(fields.action_line),
         attachments=attachments or [],
+        mail_type=mail_type,
+        summary=fields.summary,
     )
     if fields.summary:
         safe_summary = _escape_dynamic(fields.summary)

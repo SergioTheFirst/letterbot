@@ -46,6 +46,7 @@ def test_full_message_no_duplicate_lines() -> None:
         from_email="sender@example.com",
         subject="Subject",
         action_line="Позвонить клиенту сегодня",
+        mail_type="",
         body_summary="",
         body_text="",
         attachments=[],
@@ -66,6 +67,7 @@ def test_processor_format_drops_duplicate_subject_first_body_line_with_fw_re() -
         from_email="sender@example.com",
         subject="FW: Счет",
         action_line="RE:   счет",
+        mail_type="",
         body_summary="",
         body_text="",
         attachments=[],
@@ -87,3 +89,20 @@ def test_signal_hints_are_single_per_type() -> None:
     assert len(hints) == 2
     assert hints[0].startswith("⚠ ")
     assert hints[1].startswith("🔁 ")
+
+
+def test_processor_build_telegram_text_uses_mail_type_for_attachment_insight() -> None:
+    rendered = processor._build_telegram_text(
+        priority="🔴",
+        from_email="sender@example.com",
+        subject="Счет",
+        action_line="Оплатить",
+        mail_type="INVOICE",
+        body_summary="",
+        body_text="",
+        attachments=[{"filename": "bill.pdf", "text": "Сумма 58200 руб до 28.02.2026"}],
+        attachment_summary=None,
+    )
+
+    assert "💰 58 200 ₽ · до 28.02" in rendered
+    assert "bill.pdf" not in rendered
