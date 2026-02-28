@@ -737,6 +737,7 @@ class InboundMessage:
     subject: str
     body: str
     sender: str = ""
+    mail_type: str = ""
     attachments: list[Attachment] = field(default_factory=list)
     received_at: datetime | None = None
     rfc_message_id: str | None = None
@@ -874,15 +875,10 @@ class MessageProcessor:
         subject = message.subject or "(без темы)"
         body_text = message.body or ""
         priority = self._choose_priority(subject, body_text, message.attachments or [])
-        verb = "Проверить"
-        lowered_text = f"{subject} {body_text}".lower()
-        if any(token in lowered_text for token in ("счет", "оплат", "invoice")):
-            verb = "Оплатить"
         action_line = self._normalize_action_subject(
-            verb,
+            message.mail_type,
             subject,
             message.attachments or [],
-            body_text,
         )
         summary = self._summarize_body(body_text, subject)
         attachments = self._build_attachment_summaries(message.attachments or [], subject)
@@ -1065,21 +1061,31 @@ class MessageProcessor:
 
     def _normalize_action_subject(
         self,
-        verb: str,
+        mail_type: str,
         subject: str,
         attachments: list[Attachment],
-        body: str,
     ) -> str:
+        normalized_mail_type = (mail_type or "").strip().upper()
+        if normalized_mail_type:
+            if normalized_mail_type.startswith("ACT") or "RECONCILIATION" in normalized_mail_type:
+                return "Проверить акт"
+            if normalized_mail_type.startswith("INVOICE") or normalized_mail_type.startswith("PAYMENT_REMINDER"):
+                return "Оплатить счёт"
+            if normalized_mail_type.startswith("OVERDUE_INVOICE"):
+                return "Оплатить счёт"
+            if normalized_mail_type.startswith("CONTRACT") or "AMENDMENT" in normalized_mail_type:
+                return "Проверить договор"
+
         lowered = (subject or "").lower()
-        if "прайс" in lowered or "цена" in lowered or "счет" in lowered:
-            return f"{verb} цены"
-        if "документ" in lowered or "договор" in lowered:
-            return f"{verb} документы"
+        if any(token in lowered for token in ("счет", "счёт", "invoice", "оплат")):
+            return "Оплатить счёт"
+        if any(token in lowered for token in ("договор", "contract", "соглашени")):
+            return "Проверить договор"
+        if "прайс" in lowered or "цена" in lowered or "цен" in lowered:
+            return "Проверить цены"
         if any(att.filename.lower().endswith((".xls", ".xlsx")) for att in attachments if att.filename):
-            return f"{verb} таблицы"
-        if body and "договор" in body.lower():
-            return f"{verb} документы"
-        return f"{verb} письмо"
+            return "Проверить таблицу"
+        return "Проверить письмо"
 
 
 __all__ = ["Attachment", "AttachmentSummary", "InboundMessage", "MessageProcessor"]

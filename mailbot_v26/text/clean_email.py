@@ -22,6 +22,14 @@ SIGNATURE_MARKERS = (
     "regards,",
 )
 
+DISCLAIMER_MARKERS = (
+    "внешняя почта:",
+    "external email:",
+    "this email was sent from outside",
+    "caution: external email",
+    "this message is from an external sender",
+)
+
 
 def _to_str(text: Any) -> str:
     if text is None:
@@ -44,6 +52,13 @@ def _is_signature_start(line: str) -> bool:
     if lower.startswith("--"):
         return True
     return any(lower.startswith(marker) for marker in SIGNATURE_MARKERS)
+
+
+def _is_disclaimer_start(line: str) -> bool:
+    lowered = line.strip().lower()
+    if not lowered:
+        return False
+    return any(lowered.startswith(marker) for marker in DISCLAIMER_MARKERS)
 
 
 def _looks_like_html(text: str) -> bool:
@@ -82,6 +97,8 @@ def clean_email_body(text: Any) -> str:
         if _is_forward_start(line):
             break
         if _is_signature_start(line):
+            break
+        if _is_disclaimer_start(line):
             break
         cleaned.append(line)
 

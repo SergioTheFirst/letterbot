@@ -284,11 +284,89 @@ def test_body_placeholder_is_silent_when_empty():
 def test_normalize_action_subject_deduplicates_tokens():
     processor = _processor()
     action_one = processor._normalize_action_subject(
-        "Проверить", "Прайс лист", [], ""
+        "", "Прайс лист", []
     )
     assert action_one == "Проверить цены"
 
     action_two = processor._normalize_action_subject(
-        "Проверить", "Проверка с документами", [], ""
+        "", "Проверка с документами", []
     )
-    assert action_two == "Проверить документы"
+    assert action_two == "Проверить письмо"
+
+
+def test_action_line_prefers_mail_type_over_excel_attachment():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Акт сверки за январь",
+        sender="finance@example.com",
+        body="Во вложении акт сверки и таблица.",
+        mail_type="ACT_RECONCILIATION",
+        attachments=[
+            Attachment(filename="reconciliation.xls", content=b"", content_type="application/vnd.ms-excel", text="")
+        ],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    assert "Проверить акт" in result
+    assert "Проверить таблицу" not in result
+
+
+def test_action_line_invoice_mail_type_overrides_excel_attachment():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Счет за услуги",
+        sender="billing@example.com",
+        body="Просим оплатить в срок.",
+        mail_type="INVOICE",
+        attachments=[
+            Attachment(filename="invoice.xlsx", content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text="")
+        ],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    assert "Оплатить счёт" in result
+    assert "Проверить таблицу" not in result
+
+
+def test_action_line_falls_back_to_subject_price_keywords():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Обновленные цены на продукцию",
+        sender="sales@example.com",
+        body="Прайс во вложении.",
+        mail_type="",
+        attachments=[],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    assert "Проверить цены" in result
+
+
+def test_action_line_falls_back_to_excel_attachment_when_mail_type_unknown():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Файл по итогам",
+        sender="ops@example.com",
+        body="",
+        mail_type="",
+        attachments=[
+            Attachment(filename="totals.xlsx", content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text="")
+        ],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    assert "Проверить таблицу" in result
+
+
+def test_action_line_generic_fallback_when_no_signals():
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Информационное письмо",
+        sender="info@example.com",
+        body="Добрый день. Информация к сведению.",
+        mail_type="",
+        attachments=[],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    assert "Проверить письмо" in result
