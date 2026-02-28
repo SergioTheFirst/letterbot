@@ -275,8 +275,12 @@ auto_action_engine = AutoActionEngine(
 system_orchestrator = SystemOrchestrator()
 notification_alert_store = NotificationAlertStore(DB_PATH)
 MAX_TELEGRAM_WAIT_SECONDS = 180
-_PREVIEW_CORRECTIONS_TTL_SECONDS = 60.0
-_preview_corrections_cache: dict[str, tuple[float, int]] = {}
+_CORRECTION_CACHE_TTL = 60.0
+_CORRECTION_COUNT_CACHE: dict[str, tuple[int, float]] = {}
+_MIN_CORRECTIONS_FOR_PREVIEW = 10
+
+_PREVIEW_CORRECTIONS_TTL_SECONDS = _CORRECTION_CACHE_TTL
+_preview_corrections_cache = _CORRECTION_COUNT_CACHE
 budget_gate = BudgetGate(DB_PATH, BudgetGateConfig(), emitter=contract_event_emitter)
 budget_consumer = BudgetConsumer(budget_gate)
 llm_request_queue: LLMRequestQueue | None = None
@@ -2382,8 +2386,6 @@ def build_telegram_payload(
                 attachment_summary=context.attachment_summary,
             )
     telegram_text = telegram_text_raw
-    if context.preview_hint:
-        telegram_text = f"{telegram_text}\n💡 {escape_tg_html(_sanitize_preview_line(context.preview_hint))}"
 
     if render_mode == TelegramRenderMode.FULL and not payload_invalid:
         if narrative:
@@ -2401,6 +2403,8 @@ def build_telegram_payload(
         )
         if insights_section:
             telegram_text = f"{telegram_text}{escape_tg_html(insights_section)}"
+    if context.preview_hint:
+        telegram_text = f"{telegram_text}\n💡 {escape_tg_html(_sanitize_preview_line(context.preview_hint))}"
     if render_mode != TelegramRenderMode.FULL or payload_invalid:
         fallback_reason = ",".join(fallback_reasons) if fallback_reasons else "payload_validation_failed"
         event_emitter.emit(
@@ -2485,23 +2489,27 @@ def _extract_preview_actions(proposed_action: dict | list | None) -> list[str]:
     return [_sanitize_preview_line(action) for action in actions if action]
 
 
-def _get_all_time_corrections_cached(account_email: str) -> int:
+def _get_correction_count(account_email: str) -> int:
     key = str(account_email or "").strip()
     if not key:
         return 0
     now_mono = time.monotonic()
-    cached = _preview_corrections_cache.get(key)
+    cached = _CORRECTION_COUNT_CACHE.get(key)
     if cached is not None:
-        cached_at, cached_value = cached
-        if now_mono - cached_at <= _PREVIEW_CORRECTIONS_TTL_SECONDS:
+        cached_value, cached_at = cached
+        if now_mono - cached_at <= _CORRECTION_CACHE_TTL:
             return int(cached_value)
     try:
-        value = int(analytics.count_all_time_corrections([key]))
+        value = int(analytics.count_all_time_corrections(account_emails=[key]))
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("preview_corrections_query_failed", account_email=key, error=str(exc))
         value = 0
-    _preview_corrections_cache[key] = (now_mono, max(0, value))
+    _CORRECTION_COUNT_CACHE[key] = (max(0, value), now_mono)
     return max(0, value)
+
+
+def _get_all_time_corrections_cached(account_email: str) -> int:
+    return _get_correction_count(account_email)
 
 
 def _read_llm_field(llm_result: Any, key: str, default: Any = None) -> Any:
@@ -4541,66 +4549,62 @@ def process_message(
                 logger.info("auto_action_skipped", reason="conditions_not_met")
     
         preview_hint: str | None = None
-        if getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False) and proposed_action:
+        if (
+            getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False)
+            and proposed_action
+            and policy_decision.allow_preview
+            and _get_correction_count(account_email) >= _MIN_CORRECTIONS_FOR_PREVIEW
+        ):
+            preview_actions = [
+                action for action in _extract_preview_actions(proposed_action) if action
+            ]
+            if not preview_actions:
+                logger.info(
+                    "preview_actions_skipped",
+                    reason="no_proposals",
+                    email_id=message_id,
+                    account_email=account_email,
+                    system_mode=policy_decision.mode.value,
+                )
+            else:
+                preview_reasons = [
+                    reason
+                    for reason in (shadow_action_reason, shadow_reason, priority_reason)
+                    if reason
+                ]
+                preview = {
+                    "email_id": message_id,
+                    "original_priority": original_priority or llm_result.priority,
+                    "final_priority": priority,
+                    "proposed_actions": [proposed_action],
+                    "confidence": proposed_action.get("confidence", 0.0),
+                    "reasons": preview_reasons,
+                }
+                logger.info("preview_action_generated", preview=preview)
+                preview_hint = preview_actions[0]
+                try:
+                    knowledge_db.save_preview_action(
+                        email_id=message_id,
+                        proposed_action=proposed_action,
+                        confidence=proposed_action.get("confidence"),
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error("preview_action_persist_failed", error=str(exc))
+        elif getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False) and proposed_action:
+            preview_skip_reason = "insufficient_corrections"
             if not policy_decision.allow_preview:
                 preview_skip_reason = (
                     "system_degraded_no_llm"
                     if policy_decision.mode == OperationalMode.DEGRADED_NO_LLM
                     else "policy_denied"
                 )
-                logger.info(
-                    "preview_actions_skipped",
-                    reason=preview_skip_reason,
-                    email_id=message_id,
-                    account_email=account_email,
-                    system_mode=policy_decision.mode.value,
-                )
-            else:
-                corrections_total = _get_all_time_corrections_cached(account_email)
-                if corrections_total < 10:
-                    logger.info(
-                        "preview_actions_skipped",
-                        reason="insufficient_corrections",
-                        email_id=message_id,
-                        account_email=account_email,
-                        corrections=corrections_total,
-                    )
-                else:
-                    preview_actions = [
-                        action for action in _extract_preview_actions(proposed_action) if action
-                    ]
-                    if not preview_actions:
-                        logger.info(
-                            "preview_actions_skipped",
-                            reason="no_proposals",
-                            email_id=message_id,
-                            account_email=account_email,
-                            system_mode=policy_decision.mode.value,
-                        )
-                    else:
-                        preview_reasons = [
-                            reason
-                            for reason in (shadow_action_reason, shadow_reason, priority_reason)
-                            if reason
-                        ]
-                        preview = {
-                            "email_id": message_id,
-                            "original_priority": original_priority or llm_result.priority,
-                            "final_priority": priority,
-                            "proposed_actions": [proposed_action],
-                            "confidence": proposed_action.get("confidence", 0.0),
-                            "reasons": preview_reasons,
-                        }
-                        logger.info("preview_action_generated", preview=preview)
-                        preview_hint = preview_actions[0]
-                        try:
-                            knowledge_db.save_preview_action(
-                                email_id=message_id,
-                                proposed_action=proposed_action,
-                                confidence=proposed_action.get("confidence"),
-                            )
-                        except Exception as exc:  # pragma: no cover - defensive logging
-                            logger.error("preview_action_persist_failed", error=str(exc))
+            logger.info(
+                "preview_actions_skipped",
+                reason=preview_skip_reason,
+                email_id=message_id,
+                account_email=account_email,
+                system_mode=policy_decision.mode.value,
+            )
     
         if feature_flags.ENABLE_SHADOW_PERSISTENCE:
             shadow_priority_to_persist = shadow_priority
