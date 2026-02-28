@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-02-28: Block 2.4 implemented — Telegram attachment line now renders one deterministic insight (`build_attachment_insight`) with strict A/B/C priority (invoice amount+due, act reconciliation period/counterparty, table headers, honest fallback), threaded `mail_type` into TG render path, and added regressions for invoice/act/excel/fallback/no-hallucination/no-dup; full pytest green (840 passed).
 - 2026-02-28: Block 2A (2.1/2.2/2.3) implemented with minimal diffs — Telegram action keyboard now includes `✓ Верно` (`mb:ok:<email_id>`) persisted as `priority_confirmation` in existing `priority_feedback` contour with graceful callback fail-safe; weekly digest accuracy line now renders as one compact row only when `priority_corrections >= 3`; new `/week` (`week`) command added with compact 7-day summary sourced from `KnowledgeAnalytics.weekly_compact_summary`; focused tests updated for keyboard/inbound/weekly gate+format/command.
 - 2026-02-28: Block 1 package completed — Telegram inline keyboard now includes snooze menu (`⏰ Позже` → 2ч/6ч/Завтра) with persistent SQLite `telegram_snooze`, inbound callbacks schedule reminders, runtime loop delivers `📌 Напоминание` via existing telegram dedupe keys (`kind=snooze`), `/commitments` + `/tasks` command added from existing commitments data (deduped, limit 7), silence/deadlock defaults switched to enabled in settings templates, silence gate hardened (>=5 msgs in 30d + 14d cooldown default), deadlock cooldown default set to 7d, and regression tests added/updated; full pytest green (829 passed).
 - 2026-02-28: Block 0A completed in one package — MessageProcessor now applies subject-line dedupe using shared compare helper (casefold/trim/space-collapse/RE-FW strip), action-line priority remains mail_type-first with `.xls` regressions (ACT/INVOICE override attachment fallback), clean_email external disclaimer cutoff (RU/EN markers) is enforced, and TG stage now always attaches inline action keyboard regardless of `enable_premium_processor`; targeted pytest suite green.
@@ -117,11 +118,11 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Block 2A (2.1/2.2/2.3) delivered and regression-covered; monitor real-world usage of `✓ Верно`, `/week`, and weekly accuracy gate behavior.
+- Block 2.4 delivered and regression-covered; monitor production feedback on attachment insight usefulness/noise ratio in Tier-1 Telegram notifications.
 Next:
-- Monitor `priority_confirmation_recorded` volume vs `priority_correction_recorded` to validate visible-learning adoption.
-- Collect early UX feedback on `/week` compact format and adjust labels only if clarity issues are reported.
-- Watch weekly digest runs to confirm accuracy line appears only at corrections threshold (`>=3`) across account scopes.
+- Track false-positive rate for invoice/act attachment insight extraction (amount/date/period/counterparty) and tighten regexes only if needed.
+- Validate that fallback paths (SAFE_FALLBACK / minimal render) remain One-Message compliant with no attachment-line duplication.
+- Continue monitoring `priority_confirmation_recorded` vs `priority_correction_recorded` and `/week` clarity feedback from Block 2A.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

@@ -95,8 +95,7 @@ def test_telegram_contains_attachment_summary(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert "Вложения: 1 (DOC×1)" in html_text
-    assert "doc1.doc — <i>" in html_text
+    assert "📎 1 вложение: doc1.doc" in html_text
 
 
 def test_action_rendered_in_tg(monkeypatch) -> None:

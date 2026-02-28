@@ -273,6 +273,7 @@ def test_telegram_payload_unchanged(monkeypatch):
         from_email="sender@example.com",
         subject="Subject",
         action_line=llm_result.action_line,
+        mail_type="",
         body_summary=llm_result.body_summary,
         body_text="Body",
         attachments=[],

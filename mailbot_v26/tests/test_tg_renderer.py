@@ -16,7 +16,7 @@ def test_tg_render_standard() -> None:
         attachments=attachments,
     )
 
-    assert "Вложения: 1 (PDF×1)" in rendered
+    assert "📎 1 вложение: report.pdf" in rendered
     assert "<b><i>Проверить письмо</i></b>" in rendered
 
 
@@ -193,3 +193,102 @@ def test_tg_render_keeps_body_line_when_subjects_differ_after_normalization() ->
 
     assert "<b>Contract update</b>" in rendered
     assert "<b><i>Please call tomorrow</i></b>" in rendered
+
+
+def test_attachment_insight_invoice_amount_due_date() -> None:
+    attachments = [
+        {
+            "filename": "invoice.pdf",
+            "text": "Итого 58200 руб. Оплатить до 28.02.2026",
+        }
+    ]
+
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔴",
+        from_email="sender@example.com",
+        subject="Счет",
+        action_line="Оплатить",
+        attachments=attachments,
+        mail_type="INVOICE",
+    )
+
+    assert "💰 58 200 ₽ · до 28.02" in rendered
+    assert "invoice.pdf" not in rendered
+
+
+def test_attachment_insight_act_reconciliation_period() -> None:
+    attachments = [
+        {
+            "filename": "act.pdf",
+            "text": "Акт сверки за январь 2026 по договору",
+        }
+    ]
+
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Акт",
+        action_line="Проверить",
+        attachments=attachments,
+        mail_type="ACT_RECONCILIATION",
+    )
+
+    assert "📎 Акт сверки · январь 2026" in rendered
+    assert "таблиц" not in rendered.lower()
+
+
+def test_attachment_insight_generic_excel_headers() -> None:
+    attachments = [
+        {
+            "filename": "domains.xlsx",
+            "text": "URL Created Expires\nexample.com 2026-01-01 2027-01-01",
+        }
+    ]
+
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Файл",
+        action_line="Проверить",
+        attachments=attachments,
+        mail_type="",
+    )
+
+    assert "📎 domains.xlsx — URL / Created / Expires" in rendered
+
+
+def test_attachment_insight_honest_fallback_for_unreadable_file() -> None:
+    attachments = [
+        {"filename": "Счет.xls", "text": "@@@ ###"},
+    ]
+
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Вложение",
+        action_line="Проверить",
+        attachments=attachments,
+        mail_type="",
+    )
+
+    assert "📎 1 вложение: Счет.xls" in rendered
+    assert "\n\n\n" not in rendered
+
+
+def test_attachment_insight_does_not_hallucinate_invoice_or_act() -> None:
+    attachments = [
+        {"filename": "note.txt", "text": "просто текст без фактов"},
+    ]
+
+    rendered = tg_renderer.build_telegram_text(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Заметка",
+        action_line="Проверить",
+        attachments=attachments,
+        mail_type="STATUS_UPDATE",
+    )
+
+    assert "💰" not in rendered
+    assert "Акт сверки" not in rendered
+    assert "📎 Счёт" not in rendered

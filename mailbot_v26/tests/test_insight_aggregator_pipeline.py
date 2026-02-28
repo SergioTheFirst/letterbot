@@ -136,6 +136,7 @@ def test_insight_aggregator_does_not_change_telegram_payload(monkeypatch) -> Non
         from_email="sender@example.com",
         subject="Subject",
         action_line="Проверить письмо",
+        mail_type="",
         body_summary="Body summary",
         body_text="Text",
         attachments=[],

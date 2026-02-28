@@ -804,6 +804,7 @@ class TelegramBuildContext:
     from_email: str
     subject: str
     action_line: str
+    mail_type: str
     body_summary: str
     body_text: str
     attachment_summary: str
@@ -1924,6 +1925,7 @@ def _build_telegram_text(
     from_email: str,
     subject: str,
     action_line: str,
+    mail_type: str = "",
     body_summary: str,
     body_text: str,
     attachments: list[dict[str, Any]] | None = None,
@@ -1937,6 +1939,7 @@ def _build_telegram_text(
             action_line=_resolve_action_line(action_line),
             summary=body_summary,
             attachments=attachments or [],
+            mail_type=mail_type,
         )
     fields = tg_renderer.apply_semantic_gates(
         action_line=_resolve_action_line(action_line),
@@ -2264,6 +2267,7 @@ def build_telegram_payload(
                 action_line=context.action_line,
                 body_summary=context.body_summary,
                 body_text=context.body_text,
+                mail_type=context.mail_type,
                 attachments=context.attachment_files,
                 attachment_summary=None,
             )
@@ -3698,6 +3702,7 @@ def _render_notification(
     from_name: str | None,
     subject: str,
     action_line: str,
+    mail_type: str,
     body_summary: str,
     body_text: str,
     attachments: list[dict[str, Any]],
@@ -3739,6 +3744,7 @@ def _render_notification(
         from_email=from_email,
         subject=subject,
         action_line=action_line,
+        mail_type=mail_type or "",
         body_summary=body_summary,
         body_text=body_text or "",
         attachment_summary=attachment_summary,
@@ -4661,6 +4667,7 @@ def process_message(
             from_name=from_name,
             subject=subject,
             action_line=action_line,
+            mail_type=mail_type or "",
             body_summary=body_summary,
             body_text=body_text or "",
             attachments=attachments,
