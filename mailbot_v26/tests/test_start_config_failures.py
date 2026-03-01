@@ -82,3 +82,27 @@ def test_load_config_with_explicit_config_dir_ignores_cwd_yaml(tmp_path, monkeyp
     assert config.general.check_interval == 120
     assert "config.yaml" not in output
     assert "Traceback" not in output
+
+
+def test_start_fails_fast_on_invalid_telegram_contract(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval=120\n", encoding="utf-8")
+    (tmp_path / "accounts.ini").write_text(
+        "[acc]\nlogin=u@example.com\npassword=p\nhost=imap.example.com\n\n"
+        "[telegram]\nbot_token=CHANGE_ME\nchat_id==272123\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(start_module, "require_runtime_for", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(start_module, "validate_dist_runtime", lambda **kwargs: (True, ""))
+    monkeypatch.setattr(start_module, "_check_build_integrity", lambda: None)
+
+    try:
+        start_module.main(config_dir=tmp_path, max_cycles=0)
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("Expected startup to fail-fast with invalid telegram config")
+
+    output = capsys.readouterr().out
+    assert "Telegram configuration is invalid" in output
+    assert "accounts.ini" in output

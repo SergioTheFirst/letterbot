@@ -5,7 +5,7 @@ set "PYTHONUTF8=1"
 
 cd /d "%~dp0"
 set "REPO_ROOT=%CD%"
-set "CONFIG_DIR=%REPO_ROOT%\mailbot_v26\config"
+set "CONFIG_DIR=%REPO_ROOT%"
 set "SETTINGS_FILE=%CONFIG_DIR%\settings.ini"
 set "ACCOUNTS_FILE=%CONFIG_DIR%\accounts.ini"
 
