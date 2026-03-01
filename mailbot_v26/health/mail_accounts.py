@@ -31,6 +31,13 @@ class MailAccountHealth:
     error: str | None
 
 
+@dataclass
+class StartupMailHealthcheckOutcome:
+    accounts_to_poll: List[AccountConfig]
+    results: List[MailAccountHealth]
+    unavailable_reason: str | None = None
+
+
 def check_mail_accounts(
     accounts: Iterable[AccountConfig],
     *,
@@ -187,10 +194,27 @@ def format_account_failure_message(result: MailAccountHealth) -> str:
 def run_startup_mail_account_healthcheck(
     config: BotConfig,
     send_telegram_func: Callable[[TelegramPayload], DeliveryResult],
-) -> List[AccountConfig]:
+    *,
+    return_outcome: bool = False,
+) -> List[AccountConfig] | StartupMailHealthcheckOutcome:
     logger = logging.getLogger("mailbot")
     observability = observability_logger.get_logger("mailbot")
-    results = check_mail_accounts(config.accounts)
+    try:
+        results = check_mail_accounts(config.accounts)
+    except Exception as exc:
+        error_details = _format_exception(exc)
+        logger.exception("mail_account_healthcheck_unavailable")
+        observability.error("mail_account_healthcheck_unavailable", error=error_details)
+        system_health.update_component("Mail", False, reason=error_details)
+        outcome = StartupMailHealthcheckOutcome(
+            accounts_to_poll=list(config.accounts),
+            results=[],
+            unavailable_reason=error_details,
+        )
+        if return_outcome:
+            return outcome
+        return outcome.accounts_to_poll
+
     observability.info(
         "mail_account_healthcheck",
         results=[asdict(result) for result in results],
@@ -199,7 +223,13 @@ def run_startup_mail_account_healthcheck(
     failed = [result for result in results if result.status != "OK"]
     if not failed:
         system_health.update_component("Mail", True)
-        return list(config.accounts)
+        outcome = StartupMailHealthcheckOutcome(
+            accounts_to_poll=list(config.accounts),
+            results=results,
+        )
+        if return_outcome:
+            return outcome
+        return outcome.accounts_to_poll
 
     observability.warning(
         "mail_account_startup_blocked",
@@ -239,11 +269,18 @@ def run_startup_mail_account_healthcheck(
     else:
         system_health.update_component("Mail", True)
 
-    return accounts_to_poll
+    outcome = StartupMailHealthcheckOutcome(
+        accounts_to_poll=accounts_to_poll,
+        results=results,
+    )
+    if return_outcome:
+        return outcome
+    return outcome.accounts_to_poll
 
 
 __all__ = [
     "MailAccountHealth",
+    "StartupMailHealthcheckOutcome",
     "check_mail_accounts",
     "filter_accounts_by_health",
     "format_account_failure_message",

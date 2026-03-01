@@ -158,8 +158,19 @@ class LaunchReportBuilder:
     def __init__(self, version_label: str = "MailBot Premium v26") -> None:
         self._version_label = version_label
 
-    def build(self, results: Sequence[dict[str, str]], mode: OperationalMode) -> str:
+    def build(
+        self,
+        results: Sequence[dict[str, str]],
+        mode: OperationalMode,
+        *,
+        mail_accounts: Sequence[dict[str, str]] | None = None,
+        mail_check_unavailable_reason: str | None = None,
+    ) -> str:
         index = {item["component"]: item for item in results}
+        mail_lines = self._format_mail_accounts(
+            mail_accounts=mail_accounts,
+            unavailable_reason=mail_check_unavailable_reason,
+        )
         lines = [
             "---",
             f"{self._version_label} started",
@@ -176,11 +187,35 @@ class LaunchReportBuilder:
             "Telegram:",
             self._format_line("Status", index.get("Telegram")),
             "",
+            "Mail accounts:",
+            *mail_lines,
+            "",
             "Mode:",
             f"- Operational mode: {mode.value}",
             "---",
         ]
         return "\n".join(lines)
+
+    def _format_mail_accounts(
+        self,
+        *,
+        mail_accounts: Sequence[dict[str, str]] | None,
+        unavailable_reason: str | None,
+    ) -> list[str]:
+        if unavailable_reason:
+            return [f"- check unavailable ({self._sanitize_details(unavailable_reason)})"]
+        if not mail_accounts:
+            return ["- none configured"]
+        lines: list[str] = []
+        for account in mail_accounts:
+            account_id = account.get("account_id", "unknown")
+            status = account.get("status", HealthStatus.FAILED)
+            if status == HealthStatus.OK:
+                lines.append(f"- {account_id}: OK")
+                continue
+            error = account.get("error") or "unknown error"
+            lines.append(f"- {account_id}: FAILED ({self._sanitize_details(error)})")
+        return lines
 
     def _format_line(self, label: str, entry: dict[str, str] | None) -> str:
         if not entry:
@@ -188,8 +223,12 @@ class LaunchReportBuilder:
         status = entry.get("status", HealthStatus.FAILED)
         details = entry.get("details", "")
         if details:
-            return f"- {label}: {status} ({details})"
+            return f"- {label}: {status} ({self._sanitize_details(details)})"
         return f"- {label}: {status}"
+
+    def _sanitize_details(self, details: str) -> str:
+        sanitized = " ".join((details or "").split())
+        return sanitized[:180]
 
 
 def dispatch_launch_report(bot_token: str, chat_id: str, report: str) -> bool:

@@ -201,3 +201,38 @@ def test_healthcheck_imap_auth_failure_details(monkeypatch) -> None:
     assert results[0].status == "FAILED"
     assert results[0].error is not None
     assert "AUTH failed" in results[0].error
+
+
+def test_startup_healthcheck_returns_unavailable_outcome_on_check_error(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config = _make_config(
+        tmp_path,
+        [
+            AccountConfig(
+                account_id="A",
+                login="ok@example.com",
+                password="pw",
+                host="imap.ok",
+                port=993,
+                use_ssl=True,
+                telegram_chat_id="chat",
+            ),
+        ],
+    )
+
+    def _boom(_accounts):
+        raise TimeoutError("read operation timed out")
+
+    monkeypatch.setattr(mail_accounts, "check_mail_accounts", _boom)
+
+    outcome = mail_accounts.run_startup_mail_account_healthcheck(
+        config,
+        lambda *_args, **_kwargs: DeliveryResult(delivered=True, retryable=False),
+        return_outcome=True,
+    )
+
+    assert outcome.unavailable_reason is not None
+    assert "TimeoutError" in outcome.unavailable_reason
+    assert [account.account_id for account in outcome.accounts_to_poll] == ["A"]

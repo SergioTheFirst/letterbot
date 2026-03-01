@@ -827,7 +827,12 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         polling_interval, reload_interval = get_polling_intervals(raw_config)
         last_reload_at = time.monotonic()
 
-        accounts_to_poll = run_startup_mail_account_healthcheck(config, send_telegram)
+        mail_health = run_startup_mail_account_healthcheck(
+            config,
+            send_telegram,
+            return_outcome=True,
+        )
+        accounts_to_poll = mail_health.accounts_to_poll
         for account in config.accounts:
             runtime_health.register_account(account)
 
@@ -837,7 +842,19 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             mode = health_checker.evaluate_mode(results)
             report = LaunchReportBuilder(
                 version_label=f"Letterbot Premium {__version__}"
-            ).build(results, mode)
+            ).build(
+                results,
+                mode,
+                mail_accounts=[
+                    {
+                        "account_id": item.account_id,
+                        "status": item.status,
+                        "error": item.error or "",
+                    }
+                    for item in mail_health.results
+                ],
+                mail_check_unavailable_reason=mail_health.unavailable_reason,
+            )
             launch_chat_id = config.general.admin_chat_id
             if not launch_chat_id and config.accounts:
                 launch_chat_id = config.accounts[0].telegram_chat_id
