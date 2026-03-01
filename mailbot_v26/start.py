@@ -56,7 +56,11 @@ from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor, eve
 from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.pipeline import processor as processor_module
-from mailbot_v26.pipeline.digest_scheduler import DigestStorage, run_digest_tick
+from mailbot_v26.pipeline.digest_scheduler import (
+    DigestStorage,
+    configure_digest_config_dir,
+    run_digest_tick,
+)
 from mailbot_v26.observability import get_logger
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.state_manager import StateManager
@@ -319,6 +323,7 @@ def _run_premium_processor(
         body_text=inbound.body or "",
         attachments=attachments,
         telegram_chat_id=account.telegram_chat_id,
+        telegram_bot_token=config.keys.telegram_bot_token,
         rfc_message_id=rfc_message_id or None,
         in_reply_to=in_reply_to or None,
         references=references or None,
@@ -827,6 +832,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             config = config_result
         resolved_paths = resolve_config_paths(config_dir)
         resolved_config_dir = resolved_paths.config_dir
+        processor_module.configure_processor_config_dir(resolved_config_dir)
+        configure_digest_config_dir(resolved_config_dir)
         flags = FeatureFlags(base_dir=resolved_config_dir)
         logger.info("Configuration loaded: %d accounts", len(config.accounts))
         print(f"[OK] Loaded {len(config.accounts)} accounts")

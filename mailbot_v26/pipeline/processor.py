@@ -286,11 +286,34 @@ budget_consumer = BudgetConsumer(budget_gate)
 llm_request_queue: LLMRequestQueue | None = None
 llm_worker: Optional[BackgroundLLMWorker] = None
 _ORIGINAL_RUN_LLM_STAGE = run_llm_stage
+_MODULE_CONFIG_DIR: Path | None = None
+
+
+def configure_processor_config_dir(config_dir: Path) -> None:
+    """Configure config search path for processor module-level loaders."""
+    global _MODULE_CONFIG_DIR
+    global auto_priority_gate_config, deadlock_policy, premium_clarity_config
+    global budget_gate_config, budget_usage_config, llm_queue_config
+
+    _MODULE_CONFIG_DIR = config_dir
+    auto_priority_gate_config = load_auto_priority_gate_config(config_dir)
+    deadlock_policy = load_deadlock_policy_config(config_dir)
+    premium_clarity_config = load_premium_clarity_config(config_dir)
+    budget_gate_config = load_budget_gate_config(config_dir)
+    budget_usage_config = load_budget_usage_config(config_dir)
+    llm_queue_config = load_llm_queue_config(config_dir)
+
+    _load_auto_priority_gate_config_cached.cache_clear()
+    _load_deadlock_policy_cached.cache_clear()
+    _load_premium_clarity_config_cached.cache_clear()
+    _load_budget_gate_config_cached.cache_clear()
+    _load_budget_usage_config_cached.cache_clear()
+    _load_llm_queue_config_cached.cache_clear()
 
 
 @lru_cache(maxsize=1)
 def _load_auto_priority_gate_config_cached() -> AutoPriorityGateConfig:
-    return load_auto_priority_gate_config()
+    return load_auto_priority_gate_config(_MODULE_CONFIG_DIR)
 
 
 def get_auto_priority_gate_config() -> AutoPriorityGateConfig:
@@ -301,7 +324,7 @@ def get_auto_priority_gate_config() -> AutoPriorityGateConfig:
 
 @lru_cache(maxsize=1)
 def _load_deadlock_policy_cached() -> DeadlockPolicyConfig:
-    return load_deadlock_policy_config()
+    return load_deadlock_policy_config(_MODULE_CONFIG_DIR)
 
 
 def get_deadlock_policy_config() -> DeadlockPolicyConfig:
@@ -312,7 +335,7 @@ def get_deadlock_policy_config() -> DeadlockPolicyConfig:
 
 @lru_cache(maxsize=1)
 def _load_premium_clarity_config_cached() -> PremiumClarityConfig:
-    return load_premium_clarity_config()
+    return load_premium_clarity_config(_MODULE_CONFIG_DIR)
 
 
 def get_premium_clarity_config() -> PremiumClarityConfig:
@@ -323,7 +346,7 @@ def get_premium_clarity_config() -> PremiumClarityConfig:
 
 @lru_cache(maxsize=1)
 def _load_budget_gate_config_cached() -> BudgetGateConfig:
-    return load_budget_gate_config()
+    return load_budget_gate_config(_MODULE_CONFIG_DIR)
 
 
 def get_budget_gate_config() -> BudgetGateConfig:
@@ -334,7 +357,7 @@ def get_budget_gate_config() -> BudgetGateConfig:
 
 @lru_cache(maxsize=1)
 def _load_budget_usage_config_cached() -> BudgetUsageConfig:
-    return load_budget_usage_config()
+    return load_budget_usage_config(_MODULE_CONFIG_DIR)
 
 
 def get_budget_usage_config() -> BudgetUsageConfig:
@@ -345,7 +368,7 @@ def get_budget_usage_config() -> BudgetUsageConfig:
 
 @lru_cache(maxsize=1)
 def _load_llm_queue_config_cached() -> LLMQueueConfig:
-    return load_llm_queue_config()
+    return load_llm_queue_config(_MODULE_CONFIG_DIR)
 
 
 def get_llm_queue_config() -> LLMQueueConfig:
@@ -2608,11 +2631,21 @@ def _compute_heuristic_priority(
 
 def _process_llm_queue_request(request: LLMRequest) -> None:
     try:
+        llm_ctx = SimpleNamespace(
+            account_email=request.account_email,
+            email_id=request.email_id,
+            from_email=request.from_email,
+            subject=request.subject,
+            body_text=request.body_text,
+            attachments_text=[str(item.get("text") or "") for item in request.attachments],
+            llm_result=None,
+        )
         llm_result = run_llm_stage(
             subject=request.subject,
             from_email=request.from_email,
             body_text=request.body_text,
             attachments=request.attachments,
+            ctx=llm_ctx,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("llm_queue_request_failed", email_id=request.email_id, error=str(exc))
@@ -3744,6 +3777,7 @@ def _render_notification(
     aggregated_insights: list[Insight],
     insight_digest: InsightDigest | None,
     telegram_chat_id: str,
+    telegram_bot_token: str,
     account_email: str,
     attachment_summaries: list[dict[str, Any]],
     commitments: list[Commitment],
@@ -3795,6 +3829,7 @@ def _render_notification(
         preview_hint=preview_hint,
         metadata={
             "chat_id": telegram_chat_id,
+            "bot_token": telegram_bot_token,
             "account_email": account_email,
             "action_line": action_line,
             "body_summary": body_summary,
@@ -3825,6 +3860,7 @@ def process_message(
     body_text: str,
     attachments: list[dict[str, Any]],
     telegram_chat_id: str,
+    telegram_bot_token: str = "",
     rfc_message_id: str | None = None,
     in_reply_to: str | None = None,
     references: str | None = None,
@@ -4198,11 +4234,21 @@ def process_message(
             else:
                 llm_start = time.perf_counter()
                 try:
+                    llm_ctx = SimpleNamespace(
+                        account_email=account_email,
+                        email_id=message_id,
+                        from_email=from_email,
+                        subject=subject,
+                        body_text=llm_body_text,
+                        attachments_text=[str(item.get("text") or "") for item in attachments],
+                        llm_result=None,
+                    )
                     llm_result = run_llm_stage(
                         subject=subject,
                         from_email=from_email,
                         body_text=llm_body_text,
                         attachments=attachments,
+                        ctx=llm_ctx,
                     )
                     llm_used = True
                     llm_called_direct = True
@@ -4731,6 +4777,7 @@ def process_message(
             aggregated_insights=analytics_result.aggregated_insights,
             insight_digest=analytics_result.insight_digest,
             telegram_chat_id=telegram_chat_id,
+            telegram_bot_token=telegram_bot_token,
             account_email=account_email,
             attachment_summaries=attachment_summaries,
             commitments=commitments,

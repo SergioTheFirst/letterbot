@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-01: Fixed premium processor delivery chain regressions in one patch: process_message now accepts/propagates telegram_bot_token into Telegram payload metadata, LLM stage calls now pass ctx to avoid "LLM stage is not configured" path, and startup now propagates resolved config_dir into processor/digest module loaders; targeted regressions added for ctx propagation, TG missing-credentials behavior, and config_dir configurators.
 - 2026-03-01: Unified config_dir source-of-truth to mailbot_v26/config defaults (CLI + runtime path resolver), added startup config snapshot diagnostics, tightened Telegram contract validation for enabled chat targets (including invalid leading "=" chat IDs), and introduced canonical one-click letterbot.bat (runtime + optional web UI) with legacy BAT wrappers; regression tests added for config_dir unification and TG payload credential propagation.
 - 2026-03-01: Full pytest stability restored (870 passed): startup mail-healthcheck backward compatibility added for legacy list-return mocks, and processor-side tests now enforce deterministic healthy policy inputs to avoid cross-test DB/mode bleed.
 - 2026-03-01: Task 0.9 One-Message Rule hardened end-to-end — persistent SQLite telegram_delivery_log dedupe at TG stage (email + snooze kinds), duplicate-skip event/log, and UID replay hardening via normalized state-manager account keys; regression tests added/updated for idempotent delivery and legacy state key normalization.
@@ -135,13 +136,13 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Validate unified config_dir + one-click launcher behavior across Windows scripts
+- Validate premium pipeline fixes in runtime logs (telegram_delivery_succeeded, llm_decision provider, no wrong-path settings warnings)
 - Monitor One-Message Rule regressions in TG stage + IMAP UID replay guard
 - Keep full pytest green while finishing RC verification
 Next:
+- Validate on Windows run with --config-dir repo root and confirm no config-path fallback warnings
 - stable 28.0.0 after RC verification
 - Keep TG delivery dedupe + Telegram config contract invariants covered in CI regression tests
-- Remove remaining legacy repo-root config assumptions from auxiliary tools/docs
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):

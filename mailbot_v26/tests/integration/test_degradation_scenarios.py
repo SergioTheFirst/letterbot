@@ -120,7 +120,7 @@ class DummyResponse:
 
 
 def _with_bot_token(payload, *, bot_token: str) -> object:
-    payload.metadata.setdefault("bot_token", bot_token)
+    payload.metadata["bot_token"] = bot_token
     payload.metadata.setdefault("chat_id", payload.metadata.get("chat_id") or "chat")
     return payload
 

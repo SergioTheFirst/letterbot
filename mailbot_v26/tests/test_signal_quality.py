@@ -46,6 +46,7 @@ def _configure_minimal_processor(monkeypatch, llm_result) -> dict[str, str]:
 
     def _fake_run_llm_stage(**kwargs):
         captured["body_text"] = kwargs.get("body_text", "")
+        captured["ctx"] = kwargs.get("ctx")
         return llm_result
 
     monkeypatch.setattr(processor, "run_llm_stage", _fake_run_llm_stage)
@@ -93,6 +94,7 @@ def test_signal_fallback_used_for_low_entropy(monkeypatch) -> None:
     )
 
     assert "Тело письма недоступно" in captured["body_text"]
+    assert captured["ctx"] is not None
     assert "Тема: Subject" in captured["body_text"]
     assert "От: sender@example.com" in captured["body_text"]
 
@@ -120,3 +122,4 @@ def test_signal_fallback_not_used_for_normal_text(monkeypatch) -> None:
     )
 
     assert captured["body_text"] == body_text
+    assert captured["ctx"] is not None

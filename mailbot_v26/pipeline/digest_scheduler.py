@@ -56,6 +56,11 @@ _system_orchestrator = SystemOrchestrator()
 _system_gates = SystemGates()
 
 
+def configure_digest_config_dir(config_dir: Path) -> None:
+    global _CONFIG_PATH
+    _CONFIG_PATH = config_dir / "config.ini"
+
+
 @dataclass(frozen=True, slots=True)
 class DigestStorage:
     knowledge_db: KnowledgeDB

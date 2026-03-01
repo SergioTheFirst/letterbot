@@ -48,6 +48,7 @@ def test_telegram_payload_unchanged(monkeypatch) -> None:
         body_text="Body",
         attachments=[],
         telegram_chat_id="chat",
+        telegram_bot_token="test:token",
     )
 
     payload = captured["payload"]
@@ -55,6 +56,7 @@ def test_telegram_payload_unchanged(monkeypatch) -> None:
     assert payload.metadata["subject"] == "Subject"
     assert payload.metadata["sender"] == "sender@example.com"
     assert payload.metadata["extracted_text"] == "Body"
+    assert payload.metadata["bot_token"] == "test:token"
 
 
 def test_telegram_payload_unchanged_with_gigachat_provider(monkeypatch) -> None:
@@ -97,6 +99,7 @@ def test_telegram_payload_unchanged_with_gigachat_provider(monkeypatch) -> None:
         body_text="Body",
         attachments=[],
         telegram_chat_id="chat",
+        telegram_bot_token="test:token",
     )
 
     payload = captured["payload"]
