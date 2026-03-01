@@ -1,9 +1,8 @@
-"""Configuration loading utilities for MailBot Premium v26.
+"""Configuration loading utilities for Letterbot Premium v26.
 
 This module follows the project Constitution by favoring clarity and
 strict validation over implicit defaults. All configuration files are
-stored under ``mailbot_v26/config`` and are separated to keep secrets
-and per-account settings isolated.
+stored at repo root (same folder as launcher .bat).
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.account_identity import normalize_login
 
-CONFIG_DIR = Path(__file__).resolve().parent / "config"
+CONFIG_DIR = Path(__file__).resolve().parents[1]
 SETTINGS_INI_NAME = "settings.ini"
 
 
@@ -64,6 +63,7 @@ class KeysConfig:
     """External service tokens."""
 
     telegram_bot_token: str
+    telegram_chat_id: str
     cf_account_id: str
     cf_api_token: str
 
@@ -162,8 +162,25 @@ def _resolve_settings_path(base_dir: Path) -> Path:
     return resolved.legacy_ini_path
 
 
+def _read_settings_with_legacy_fallback(
+    base_dir: Path,
+    *,
+    section: str | None = None,
+) -> configparser.ConfigParser:
+    resolved = resolve_config_paths(base_dir)
+    parser = _read_config_file(resolved.settings_path)
+    if section is None or section in parser:
+        return parser
+    if resolved.legacy_ini_path.exists():
+        legacy_parser = _read_config_file(resolved.legacy_ini_path)
+        if section in legacy_parser:
+            _LOGGER.info("settings.ini missing [%s], using legacy config.ini fallback", section)
+            return legacy_parser
+    return parser
+
+
 def load_general_config(base_dir: Path = CONFIG_DIR) -> GeneralConfig:
-    parser = _read_config_file(_resolve_settings_path(base_dir))
+    parser = _read_settings_with_legacy_fallback(base_dir, section="general")
 
     if "general" not in parser:
         return GeneralConfig(
@@ -211,6 +228,8 @@ def load_general_config(base_dir: Path = CONFIG_DIR) -> GeneralConfig:
 
 def load_accounts_config(base_dir: Path = CONFIG_DIR) -> List[AccountConfig]:
     parser = _read_config_file(base_dir / "accounts.ini")
+    telegram_section = parser["telegram"] if "telegram" in parser else {}
+    global_chat_id = str(telegram_section.get("chat_id", "")).strip()
     accounts: List[AccountConfig] = []
     invalid_ids: list[str] = []
     for section_name in parser.sections():
@@ -230,7 +249,7 @@ def load_accounts_config(base_dir: Path = CONFIG_DIR) -> List[AccountConfig]:
                 host=section.get("host", ""),
                 port=section.getint("port", fallback=993),
                 use_ssl=section.getboolean("use_ssl", fallback=True),
-                telegram_chat_id=section.get("telegram_chat_id", fallback=""),
+                telegram_chat_id=(section.get("telegram_chat_id", fallback="") or global_chat_id).strip(),
             )
         except KeyError as exc:
             _LOGGER.warning("Skipping account [%s]: missing required field %s", section_name, exc)
@@ -321,13 +340,52 @@ def load_keys_config(base_dir: Path = CONFIG_DIR) -> KeysConfig:
     cloudflare = parser["cloudflare"] if "cloudflare" in parser else {}
     return KeysConfig(
         telegram_bot_token=str(telegram.get("bot_token", "")),
+        telegram_chat_id=str(telegram.get("chat_id", "")).strip(),
         cf_account_id=str(cloudflare.get("account_id", "")),
         cf_api_token=str(cloudflare.get("api_token", "")),
     )
 
 
+def parse_telegram_chat_id(raw_chat_id: object) -> str:
+    value = str(raw_chat_id or "").strip()
+    if not value or value.upper() == "CHANGE_ME" or value.startswith("="):
+        return ""
+    if value.startswith("+"):
+        value = value[1:]
+    if value.startswith("-"):
+        return value if value[1:].isdigit() else ""
+    return value if value.isdigit() else ""
+
+
+def validate_telegram_contract(config: BotConfig, *, config_dir: Path) -> list[str]:
+    errors: list[str] = []
+    token = str(config.keys.telegram_bot_token or "").strip()
+    if not token or token.upper() == "CHANGE_ME" or ":" not in token:
+        errors.append(
+            f"Missing/invalid [telegram].bot_token in {config_dir / 'accounts.ini'} (expected format <bot_id>:<secret>)."
+        )
+
+    global_chat_id = parse_telegram_chat_id(config.keys.telegram_chat_id)
+    if str(config.keys.telegram_chat_id or "").strip() and not global_chat_id:
+        errors.append(
+            f"Invalid [telegram].chat_id in {config_dir / 'accounts.ini'} (must be integer, e.g. -1001234567890)."
+        )
+
+    for account in config.accounts:
+        resolved_chat_id = parse_telegram_chat_id(account.telegram_chat_id) or global_chat_id
+        if not resolved_chat_id:
+            errors.append(
+                "Missing Telegram chat_id for account "
+                f"[{account.account_id}] in {config_dir / 'accounts.ini'} "
+                "(set account.telegram_chat_id or [telegram].chat_id)."
+            )
+            continue
+        account.telegram_chat_id = resolved_chat_id
+    return errors
+
+
 def load_storage_config(base_dir: Path = CONFIG_DIR) -> StorageConfig:
-    parser = _read_config_file(_resolve_settings_path(base_dir))
+    parser = _read_settings_with_legacy_fallback(base_dir, section="storage")
     default_path = Path(__file__).resolve().parents[1] / "data" / "mailbot.sqlite"
     db_path_raw = parser.get("storage", "db_path", fallback=str(default_path))
     db_path = Path(db_path_raw)
@@ -338,7 +396,7 @@ def load_storage_config(base_dir: Path = CONFIG_DIR) -> StorageConfig:
 
 
 def load_ingest_config(base_dir: Path = CONFIG_DIR) -> IngestConfig:
-    parser = _read_config_file(_resolve_settings_path(base_dir))
+    parser = _read_settings_with_legacy_fallback(base_dir, section="ingest")
     if "ingest" not in parser:
         return IngestConfig(allow_prestart_emails=False)
     section = parser["ingest"]
@@ -355,7 +413,7 @@ def load_ingest_config(base_dir: Path = CONFIG_DIR) -> IngestConfig:
 
 
 def load_maintenance_config(base_dir: Path = CONFIG_DIR) -> MaintenanceConfig:
-    parser = _read_config_file(_resolve_settings_path(base_dir))
+    parser = _read_settings_with_legacy_fallback(base_dir, section="maintenance")
     if "maintenance" not in parser:
         return MaintenanceConfig(maintenance_mode=False)
     section = parser["maintenance"]
@@ -471,7 +529,7 @@ def load_support_settings(base_dir: Path = CONFIG_DIR) -> SupportSettings:
     return _load_support_from_yaml(raw)
 
 def load_web_config(base_dir: Path = CONFIG_DIR) -> WebConfig:
-    parser = _read_config_file(_resolve_settings_path(base_dir))
+    parser = _read_settings_with_legacy_fallback(base_dir, section="web")
 
     host = "127.0.0.1"
     port = 8787
@@ -509,7 +567,7 @@ def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
     Parameters
     ----------
     base_dir:
-        Optional base directory override. Defaults to ``mailbot_v26/config``.
+        Optional base directory override. Defaults to repo root ``.``.
     """
 
     general = load_general_config(base_dir)
@@ -553,5 +611,7 @@ __all__ = [
     "load_keys_config",
     "load_storage_config",
     "load_support_settings",
+    "parse_telegram_chat_id",
+    "validate_telegram_contract",
     "resolve_account_scope",
 ]

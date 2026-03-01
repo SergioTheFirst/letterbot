@@ -139,10 +139,22 @@ Now:
 - Keep full pytest green while finishing RC verification
 Next:
 - stable 28.0.0 after RC verification
-- Keep TG delivery dedupe invariants covered in CI regression tests
+- Keep TG delivery dedupe + Telegram config contract invariants covered in CI regression tests
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/config/paths.py
+- mailbot_v26/config_loader.py
+- mailbot_v26/start.py
+- mailbot_v26/__main__.py
+- mailbot_v26/tools/config_bootstrap.py
+- mailbot_v26/config/accounts.ini.example
+- install_and_run.bat
+- run_mailbot.bat
+- update_and_run.bat
+- mailbot_v26/tests/test_config_loader.py
+- mailbot_v26/tests/test_start_config_failures.py
+- mailbot_v26/tests/test_main_entrypoint.py
 - mailbot_v26/version.py
 - mailbot_v26/__main__.py
 - mailbot_v26/telegram/inbound.py

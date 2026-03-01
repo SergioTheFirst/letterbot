@@ -8,8 +8,10 @@ from mailbot_v26.config_loader import (
     load_config,
     load_general_config,
     load_keys_config,
+    parse_telegram_chat_id,
     load_storage_config,
     load_support_settings,
+    validate_telegram_contract,
     load_web_config,
 )
 
@@ -49,6 +51,7 @@ telegram_chat_id = 222
 
 [telegram]
 bot_token = token
+chat_id = -100200300
 
 [cloudflare]
 account_id = acc
@@ -66,8 +69,58 @@ def test_load_full_config(tmp_path: Path) -> None:
     assert cfg.accounts[0].account_id == "primary"
     assert cfg.accounts[0].login == "sample@example.com"
     assert cfg.keys.telegram_bot_token == "token"
+    assert cfg.keys.telegram_chat_id == "-100200300"
     storage_cfg = load_storage_config(tmp_path)
     assert cfg.storage.db_path == storage_cfg.db_path
+    assert cfg.accounts[0].telegram_chat_id == "222"
+
+
+def test_accounts_use_global_telegram_chat_id_when_account_override_missing(tmp_path: Path) -> None:
+    write_file(
+        tmp_path,
+        "accounts.ini",
+        """[primary]
+login = sample@example.com
+password = secret
+host = imap.example.com
+
+[telegram]
+bot_token = 123:abc
+chat_id = -100555666
+""",
+    )
+
+    accounts = load_accounts_config(tmp_path)
+
+    assert len(accounts) == 1
+    assert accounts[0].telegram_chat_id == "-100555666"
+
+
+def test_parse_telegram_chat_id_rejects_invalid_value() -> None:
+    assert parse_telegram_chat_id("=272123") == ""
+    assert parse_telegram_chat_id("-100272123") == "-100272123"
+
+
+def test_validate_telegram_contract_fails_fast_on_missing_credentials(tmp_path: Path) -> None:
+    build_sample_config(tmp_path)
+    (tmp_path / "accounts.ini").write_text(
+        """[primary]
+login = sample@example.com
+password = secret
+host = imap.example.com
+
+[telegram]
+bot_token = CHANGE_ME
+chat_id = =272123
+""",
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+
+    errors = validate_telegram_contract(cfg, config_dir=tmp_path)
+
+    assert any("bot_token" in item for item in errors)
+    assert any("chat_id" in item for item in errors)
 
 
 def test_missing_files_use_deterministic_defaults() -> None:

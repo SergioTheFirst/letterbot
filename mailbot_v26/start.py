@@ -32,7 +32,12 @@ from mailbot_v26.bot_core.pipeline import (
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.dist_self_check import validate_dist_runtime
 from mailbot_v26.bot_core.storage import Storage
-from mailbot_v26.config_loader import AccountConfig, BotConfig, load_config as load_ini_config
+from mailbot_v26.config_loader import (
+    AccountConfig,
+    BotConfig,
+    load_config as load_ini_config,
+    validate_telegram_contract,
+)
 from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.account_identity import logins_match, normalize_login
 from mailbot_v26.config_yaml import (
@@ -820,9 +825,25 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             config_path = None
             raw_config = {}
             config = config_result
-        flags = FeatureFlags(base_dir=CURRENT_DIR / "config")
+        resolved_config_dir = resolve_config_paths(config_dir).config_dir
+        flags = FeatureFlags(base_dir=resolved_config_dir)
         logger.info("Configuration loaded: %d accounts", len(config.accounts))
         print(f"[OK] Loaded {len(config.accounts)} accounts")
+        print(f"[CONFIG] repo_root: {resolved_config_dir.resolve()}")
+        print(f"[CONFIG] settings.ini: {(resolved_config_dir / 'settings.ini').resolve()}")
+        print(f"[CONFIG] accounts.ini: {(resolved_config_dir / 'accounts.ini').resolve()}")
+
+        telegram_errors = validate_telegram_contract(config, config_dir=resolved_config_dir)
+        if telegram_errors:
+            logger.error("telegram_startup_validation_failed errors=%s", telegram_errors)
+            print("[ERROR] Telegram configuration is invalid. Fix accounts.ini and restart.")
+            for error in telegram_errors:
+                print(f"[ERROR] {error}")
+            sys.exit(2)
+
+        print(f"[CONFIG] telegram configured: yes (bot_token present)")
+        for account in config.accounts:
+            print(f"[CONFIG] account [{account.account_id}] chat_id={account.telegram_chat_id}")
 
         polling_interval, reload_interval = get_polling_intervals(raw_config)
         last_reload_at = time.monotonic()
@@ -1236,7 +1257,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--config-dir",
         type=Path,
         default=None,
-        help="Optional config directory (default: mailbot_v26/config).",
+        help="Optional config directory (default: repo root (.)).",
     )
     parser.add_argument(
         "--max-cycles",

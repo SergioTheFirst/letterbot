@@ -25,13 +25,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     doctor_parser.add_argument(
         "--config-dir",
-        default="mailbot_v26/config",
-        help="Config directory (default: mailbot_v26/config).",
+        default=".",
+        help="Config directory (default: .).",
     )
     init_parser = subparsers.add_parser("init-config", help="Create configuration templates.")
-    init_parser.add_argument("--config-dir", default="mailbot_v26/config", help="Config directory (default: mailbot_v26/config).")
+    init_parser.add_argument("--config-dir", default=".", help="Config directory (default: .).")
     migrate_parser = subparsers.add_parser("migrate-config", help="Migrate legacy config files to settings.ini/accounts.ini.")
-    migrate_parser.add_argument("--config-dir", default="mailbot_v26/config", help="Config directory (default: mailbot_v26/config).")
+    migrate_parser.add_argument("--config-dir", default=".", help="Config directory (default: .).")
     validate_parser = subparsers.add_parser("validate-config", help="Validate configuration files.")
     validate_parser.add_argument(
         "--compat",
@@ -45,8 +45,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     validate_parser.add_argument(
         "--config-dir",
-        default="mailbot_v26/config",
-        help="Config directory (default: mailbot_v26/config).",
+        default=".",
+        help="Config directory (default: .).",
     )
     ready_parser = subparsers.add_parser(
         "config-ready",
@@ -54,8 +54,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ready_parser.add_argument(
         "--config-dir",
-        default="mailbot_v26/config",
-        help="Config directory (default: mailbot_v26/config).",
+        default=".",
+        help="Config directory (default: .).",
     )
     ready_parser.add_argument(
         "--verbose",
@@ -81,8 +81,8 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("version", help="Print version and exit.")
     parser.add_argument(
         "--config-dir",
-        default="mailbot_v26/config",
-        help="Config directory for default runtime start (default: mailbot_v26/config).",
+        default=".",
+        help="Config directory for default runtime start (default: .).",
     )
     return parser
 
