@@ -163,3 +163,36 @@ def test_renderer_mode_logged(monkeypatch, caplog: pytest.LogCaptureFixture) -> 
         )
 
     assert "tg_render_mode_selected" in caplog.text
+
+
+def test_full_pipeline_excel_attachment_stays_in_full_mode() -> None:
+    context = processor.TelegramBuildContext(
+        email_id=100,
+        received_at=datetime(2024, 1, 1, 12, 0),
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Тема",
+        action_line="Ответить",
+        mail_type="SECURITY_ALERT",
+        body_summary="Краткое summary",
+        body_text="Текст письма",
+        attachment_summary="",
+        attachment_details=[],
+        attachment_files=[
+            {"filename": "УПД.xlsx", "text": "Поставщик Итого 15000"},
+            {"filename": "УПД.pdf", "text": ""},
+        ],
+        attachments_count=4,
+        extracted_text_len=2292,
+        llm_failed=False,
+        signal_invalid=False,
+        insights=[],
+        insight_digest=None,
+        commitments_present=False,
+    )
+
+    payload, render_mode, payload_invalid = processor.build_telegram_payload(context)
+
+    assert render_mode == processor.TelegramRenderMode.FULL
+    assert payload_invalid is False
+    assert "📎" in payload.html_text

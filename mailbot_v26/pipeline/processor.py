@@ -2067,7 +2067,7 @@ def validate_tg_payload(text: str, ctx: EmailContext) -> str:
     action_line = ctx.action_line.strip() or "Действий не требуется"
     if not action_line:
         raise InvalidTelegramPayload("missing_action")
-    if ctx.attachments_count > 0 and "влож" not in text.lower():
+    if ctx.attachments_count > 0 and "влож" not in text.lower() and "📎" not in text:
         raise InvalidTelegramPayload("attachments missing")
     if _looks_like_subject_only(text, ctx.subject) and (
         ctx.body_text.strip() or ctx.attachments_count > 0

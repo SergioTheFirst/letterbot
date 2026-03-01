@@ -127,3 +127,22 @@ def test_premium_processor_defaults_to_true_in_two_file_mode(tmp_path: Path) -> 
     flags = FeatureFlags(tmp_path)
 
     assert flags.ENABLE_PREMIUM_PROCESSOR is True
+
+
+def test_settings_example_has_premium_processor_enabled() -> None:
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read("mailbot_v26/config/settings.ini.example", encoding="utf-8")
+
+    assert parser.getboolean("features", "enable_premium_processor") is True
+    assert parser.getboolean("features", "enable_premium_clarity_v1") is True
+
+
+def test_settings_example_has_daily_digest_enabled() -> None:
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read("mailbot_v26/config/settings.ini.example", encoding="utf-8")
+
+    assert parser.getboolean("daily_digest", "enabled") is True

@@ -79,7 +79,7 @@ enable_surprise_budget = true
 enable_silence_as_signal = enabled
 enable_deadlock_detection = enabled
 enable_premium_processor = true
-enable_premium_clarity_v1 = false
+enable_premium_clarity_v1 = true
 enable_behavior_metrics_digest = false
 enable_trust_bootstrap = false
 enable_regret_minimization = false
@@ -104,6 +104,7 @@ premium_clarity_confidence_threshold = 75
 premium_clarity_confidence_dots_scale = 10
 
 [daily_digest]
+enabled = true
 hour = 9
 minute = 0
 

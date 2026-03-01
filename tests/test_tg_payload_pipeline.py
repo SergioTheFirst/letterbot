@@ -163,3 +163,34 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, caplog):
         "Внимание: доставка в Telegram деградировала"
     ) or telegram_text.startswith("🔵 от hq@example.com:")
     assert any(event.get("type") == "tg_payload_invalid" for event in emitted_events)
+
+
+def test_validate_tg_payload_accepts_emoji_attachment_line():
+    text_with_emoji = "🔵 от sender:\nТема\nОтветить\n\n📎 УПД.xlsx — Поставщик"
+    ctx = processor_module.EmailContext(
+        subject="Тема",
+        from_email="sender",
+        body_text="body",
+        attachments_count=1,
+        summary="Содержательное резюме письма",
+        action_line="Ответить",
+    )
+
+    result = processor_module.validate_tg_payload(text_with_emoji, ctx)
+
+    assert result == text_with_emoji
+
+
+def test_validate_tg_payload_rejects_if_no_attachment_marker():
+    text_no_marker = "🔵 от sender:\nТема\nОтветить\nКакой-то текст"
+    ctx = processor_module.EmailContext(
+        subject="Тема",
+        from_email="sender",
+        body_text="body",
+        attachments_count=2,
+        summary="Содержательное резюме письма",
+        action_line="Ответить",
+    )
+
+    with pytest.raises(processor_module.InvalidTelegramPayload, match="attachments missing"):
+        processor_module.validate_tg_payload(text_no_marker, ctx)
