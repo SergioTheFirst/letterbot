@@ -14,7 +14,7 @@ set "LOG_FILE=%LOG_DIR%\update_and_run.log"
 call :log =============================================
 call :log   Letterbot Premium - Update and Run
 call :log =============================================
-call :log "Virtual environment: %REPO_ROOT%.venv"
+call :log "Virtual environment: %REPO_ROOT%\.venv"
 call :log "Log file: %LOG_FILE%"
 
 if not exist .git (
@@ -69,7 +69,7 @@ if %ERRORLEVEL% NEQ 0 (
     call :log [WARN] pip is not available in the selected Python environment.
 )
 
-set "VENV_DIR=%REPO_ROOT%.venv"
+set "VENV_DIR=%REPO_ROOT%\.venv"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 set "RUN_PY=%PYTHON_EXE%"
 if not exist "%VENV_PY%" (
@@ -82,7 +82,7 @@ if not exist "%VENV_PY%" (
 if exist "%VENV_PY%" (
     set "RUN_PY=%VENV_PY%"
     call :log Installing dependencies...
-    "%RUN_PY%" -m pip install -r "%REPO_ROOT%requirements.txt" >>"%LOG_FILE%" 2>&1
+    "%RUN_PY%" -m pip install -r "%REPO_ROOT%\requirements.txt" >>"%LOG_FILE%" 2>&1
     if %ERRORLEVEL% NEQ 0 (
         call :log [WARN] Dependency installation failed. Continuing with existing environment.
     )
@@ -91,13 +91,13 @@ if exist "%VENV_PY%" (
 )
 
 call :log Running doctor checks (warning-first)...
-"%RUN_PY%" -m mailbot_v26.doctor --config-dir "%REPO_ROOT%mailbot_v26\config" >>"%LOG_FILE%" 2>&1
+"%RUN_PY%" -m mailbot_v26.doctor --config-dir "%REPO_ROOT%" >>"%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
     call :log [WARN] Doctor found issues. Startup continues in non-strict mode.
 )
 
 call :log Starting Letterbot...
-"%RUN_PY%" -m mailbot_v26.start --config-dir "%REPO_ROOT%mailbot_v26\config" >>"%LOG_FILE%" 2>&1
+"%RUN_PY%" -m mailbot_v26.start --config-dir "%REPO_ROOT%" >>"%LOG_FILE%" 2>&1
 set "RUN_EXIT=%ERRORLEVEL%"
 if "%RUN_EXIT%"=="0" (
     call :log Letterbot finished.

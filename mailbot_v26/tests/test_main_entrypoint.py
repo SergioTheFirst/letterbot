@@ -17,7 +17,7 @@ def test_module_entrypoint_runs_start(monkeypatch):
 
     runpy.run_module("mailbot_v26", run_name="__main__")
 
-    assert str(called["config_dir"]) == "mailbot_v26/config"
+    assert str(called["config_dir"]) == "."
 
 
 def test_module_entrypoint_config_ready_command(monkeypatch):

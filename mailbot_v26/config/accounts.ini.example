@@ -9,6 +9,7 @@ telegram_chat_id = CHANGE_ME
 
 [telegram]
 bot_token = CHANGE_ME
+chat_id = CHANGE_ME
 
 [cloudflare]
 account_id = CHANGE_ME

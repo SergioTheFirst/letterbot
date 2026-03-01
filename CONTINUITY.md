@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-01: Unified canonical config root to repo root (`.`), wired startup/CLI/Windows launchers to 2-file mode (`settings.ini` + `accounts.ini`) with explicit `config.ini` fallback, added strict Telegram contract validation (fail-fast for invalid/missing bot_token/chat_id), and added regression tests for loader + startup validation.
 - 2026-03-01: Task 0.9 One-Message Rule hardened end-to-end — persistent SQLite telegram_delivery_log dedupe at TG stage (email + snooze kinds), duplicate-skip event/log, and UID replay hardening via normalized state-manager account keys; regression tests added/updated for idempotent delivery and legacy state key normalization.
 - 2026-03-01: Startup Telegram report now includes Mail accounts block sourced from existing startup mail-account healthcheck (OK/FAILED/none configured/check unavailable) with startup/report regressions.
 - 2026-03-01: v28.0.0-rc release pass — version surfaces synchronized, changelog updated, release candidate packaging hygiene completed.
@@ -133,14 +134,26 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- v28.0.0-rc validation / smoke testing / release handoff
-- Monitor One-Message Rule regressions in TG stage + IMAP UID replay guard
+- Validate canonical repo-root config flow on Windows packaging/runtime smoke
+- Monitor Telegram delivery fail-fast signals and chat_id normalization regressions
 Next:
 - stable 28.0.0 after RC verification
-- Keep TG delivery dedupe invariants covered in CI regression tests
+- Keep TG delivery dedupe + Telegram config contract invariants covered in CI regression tests
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/config/paths.py
+- mailbot_v26/config_loader.py
+- mailbot_v26/start.py
+- mailbot_v26/__main__.py
+- mailbot_v26/tools/config_bootstrap.py
+- mailbot_v26/config/accounts.ini.example
+- install_and_run.bat
+- run_mailbot.bat
+- update_and_run.bat
+- mailbot_v26/tests/test_config_loader.py
+- mailbot_v26/tests/test_start_config_failures.py
+- mailbot_v26/tests/test_main_entrypoint.py
 - mailbot_v26/version.py
 - mailbot_v26/__main__.py
 - mailbot_v26/telegram/inbound.py
