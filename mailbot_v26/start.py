@@ -853,7 +853,17 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             send_telegram,
             return_outcome=True,
         )
-        accounts_to_poll = mail_health.accounts_to_poll
+        if hasattr(mail_health, "accounts_to_poll"):
+            accounts_to_poll = list(mail_health.accounts_to_poll)
+            mail_results = list(getattr(mail_health, "results", []) or [])
+            mail_unavailable_reason = str(
+                getattr(mail_health, "unavailable_reason", "") or ""
+            )
+        else:
+            # Backward compatibility for tests/mocks returning a plain account list.
+            accounts_to_poll = list(mail_health or [])
+            mail_results = []
+            mail_unavailable_reason = ""
         for account in config.accounts:
             runtime_health.register_account(account)
 
@@ -872,9 +882,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                         "status": item.status,
                         "error": item.error or "",
                     }
-                    for item in mail_health.results
+                    for item in mail_results
                 ],
-                mail_check_unavailable_reason=mail_health.unavailable_reason,
+                mail_check_unavailable_reason=mail_unavailable_reason,
             )
             launch_chat_id = config.general.admin_chat_id
             if not launch_chat_id and config.accounts:

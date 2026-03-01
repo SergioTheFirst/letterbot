@@ -4,6 +4,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
+from mailbot_v26.observability.notification_sla import NotificationSLAResult
 
 
 def _llm_result() -> SimpleNamespace:
@@ -16,6 +17,27 @@ def _llm_result() -> SimpleNamespace:
 
 
 def _setup(monkeypatch, *, enabled: bool, corrections: int) -> tuple[dict[str, object], dict[str, int]]:
+    processor.system_health.reset()
+    monkeypatch.setattr(
+        processor,
+        "compute_notification_sla",
+        lambda **_kwargs: NotificationSLAResult(
+            delivery_rate_24h=1.0,
+            delivery_rate_7d=1.0,
+            salvage_rate_24h=0.0,
+            p50_latency_24h=10.0,
+            p90_latency_24h=20.0,
+            p99_latency_24h=30.0,
+            p50_latency_7d=10.0,
+            p90_latency_7d=20.0,
+            p99_latency_7d=30.0,
+            top_error_reasons_24h=[],
+            error_rate_24h=0.0,
+            undelivered_24h=0,
+            delivered_24h=1,
+            total_24h=1,
+        ),
+    )
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: _llm_result())
     monkeypatch.setattr(
         processor.shadow_priority_engine,

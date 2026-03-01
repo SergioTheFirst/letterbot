@@ -17,7 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
-- 2026-03-01: Unified canonical config root to repo root (`.`), wired startup/CLI/Windows launchers to 2-file mode (`settings.ini` + `accounts.ini`) with explicit `config.ini` fallback, added strict Telegram contract validation (fail-fast for invalid/missing bot_token/chat_id), and added regression tests for loader + startup validation.
+- 2026-03-01: Full pytest stability restored (870 passed): startup mail-healthcheck backward compatibility added for legacy list-return mocks, and processor-side tests now enforce deterministic healthy policy inputs to avoid cross-test DB/mode bleed.
 - 2026-03-01: Task 0.9 One-Message Rule hardened end-to-end — persistent SQLite telegram_delivery_log dedupe at TG stage (email + snooze kinds), duplicate-skip event/log, and UID replay hardening via normalized state-manager account keys; regression tests added/updated for idempotent delivery and legacy state key normalization.
 - 2026-03-01: Startup Telegram report now includes Mail accounts block sourced from existing startup mail-account healthcheck (OK/FAILED/none configured/check unavailable) with startup/report regressions.
 - 2026-03-01: v28.0.0-rc release pass — version surfaces synchronized, changelog updated, release candidate packaging hygiene completed.
@@ -134,8 +134,9 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Validate canonical repo-root config flow on Windows packaging/runtime smoke
-- Monitor Telegram delivery fail-fast signals and chat_id normalization regressions
+- v28.0.0-rc validation / smoke testing / release handoff
+- Monitor One-Message Rule regressions in TG stage + IMAP UID replay guard
+- Keep full pytest green while finishing RC verification
 Next:
 - stable 28.0.0 after RC verification
 - Keep TG delivery dedupe + Telegram config contract invariants covered in CI regression tests
