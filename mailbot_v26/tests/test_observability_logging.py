@@ -13,6 +13,7 @@ from mailbot_v26.priority.auto_engine import AutoPriorityEngine
 from mailbot_v26.priority.auto_gates import CircuitBreakerStatus, GateDecision
 from mailbot_v26.insights.auto_priority_quality_gate import GateResult
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
+from mailbot_v26.observability.notification_sla import NotificationSLAResult
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
@@ -54,6 +55,27 @@ def _enable_auto_priority_gate(monkeypatch) -> None:
 
 
 def _setup_processor(monkeypatch, processor_module) -> None:
+    processor_module.system_health.reset()
+    monkeypatch.setattr(
+        processor_module,
+        "compute_notification_sla",
+        lambda **_kwargs: NotificationSLAResult(
+            delivery_rate_24h=1.0,
+            delivery_rate_7d=1.0,
+            salvage_rate_24h=0.0,
+            p50_latency_24h=10.0,
+            p90_latency_24h=20.0,
+            p99_latency_24h=30.0,
+            p50_latency_7d=10.0,
+            p90_latency_7d=20.0,
+            p99_latency_7d=30.0,
+            top_error_reasons_24h=[],
+            error_rate_24h=0.0,
+            undelivered_24h=0,
+            delivered_24h=1,
+            total_24h=1,
+        ),
+    )
     llm_result = SimpleNamespace(
         priority="🔵",
         action_line="Ответить клиенту",
@@ -254,6 +276,27 @@ def test_signal_fallback_logging(monkeypatch) -> None:
 
 
 def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
+    processor.system_health.reset()
+    monkeypatch.setattr(
+        processor,
+        "compute_notification_sla",
+        lambda **_kwargs: NotificationSLAResult(
+            delivery_rate_24h=1.0,
+            delivery_rate_7d=1.0,
+            salvage_rate_24h=0.0,
+            p50_latency_24h=10.0,
+            p90_latency_24h=20.0,
+            p99_latency_24h=30.0,
+            p50_latency_7d=10.0,
+            p90_latency_7d=20.0,
+            p99_latency_7d=30.0,
+            top_error_reasons_24h=[],
+            error_rate_24h=0.0,
+            undelivered_24h=0,
+            delivered_24h=1,
+            total_24h=1,
+        ),
+    )
     llm_result = SimpleNamespace(
         priority="🟡",
         action_line="Проверить документы",

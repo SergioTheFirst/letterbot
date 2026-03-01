@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from mailbot_v26.account_identity import normalize_login
+
 DEFAULT_STATE_PATH = Path(__file__).resolve().parent / "state.json"
 
 
@@ -66,10 +68,26 @@ class StateManager:
         except (json.JSONDecodeError, OSError):
             return BotState()
 
-        accounts = {
-            login: AccountState(**data)
-            for login, data in raw.get("accounts", {}).items()
-        }
+        accounts: Dict[str, AccountState] = {}
+        for login, data in raw.get("accounts", {}).items():
+            normalized = normalize_login(login)
+            if not normalized:
+                continue
+            candidate = AccountState(**data)
+            existing = accounts.get(normalized)
+            if existing is None:
+                accounts[normalized] = candidate
+                continue
+            if candidate.last_uid > existing.last_uid:
+                existing.last_uid = candidate.last_uid
+            if candidate.last_check_time and (
+                not existing.last_check_time or candidate.last_check_time > existing.last_check_time
+            ):
+                existing.last_check_time = candidate.last_check_time
+            if candidate.last_error:
+                existing.last_error = candidate.last_error
+            if candidate.imap_status and candidate.imap_status != "unknown":
+                existing.imap_status = candidate.imap_status
         llm_raw = raw.get("llm", {})
         meta_raw = raw.get("meta", {})
         return BotState(
@@ -79,32 +97,43 @@ class StateManager:
         )
 
     def get_last_uid(self, login: str) -> int:
+        key = normalize_login(login)
         with self._lock:
-            return self._state.accounts.get(login, AccountState()).last_uid
+            return self._state.accounts.get(key, AccountState()).last_uid
 
     def update_last_uid(self, login: str, uid: int) -> None:
+        key = normalize_login(login)
+        if not key:
+            return
         with self._lock:
-            account = self._state.accounts.setdefault(login, AccountState())
+            account = self._state.accounts.setdefault(key, AccountState())
             account.last_uid = uid
             self._mark_dirty()
 
     def update_check_time(self, login: str, timestamp: Optional[datetime] = None) -> None:
+        key = normalize_login(login)
+        if not key:
+            return
         with self._lock:
             ts = (timestamp or datetime.now()).isoformat()
-            account = self._state.accounts.setdefault(login, AccountState())
+            account = self._state.accounts.setdefault(key, AccountState())
             account.last_check_time = ts
             self._mark_dirty()
 
     def get_last_check_time(self, login: str) -> Optional[datetime]:
+        key = normalize_login(login)
         with self._lock:
-            time_str = self._state.accounts.get(login, AccountState()).last_check_time
+            time_str = self._state.accounts.get(key, AccountState()).last_check_time
         if not time_str:
             return None
         return datetime.fromisoformat(time_str)
 
     def set_imap_status(self, login: str, status: str, error: str = "") -> None:
+        key = normalize_login(login)
+        if not key:
+            return
         with self._lock:
-            account = self._state.accounts.setdefault(login, AccountState())
+            account = self._state.accounts.setdefault(key, AccountState())
             account.imap_status = status
             account.last_error = error
             self._mark_dirty()

@@ -1,5 +1,5 @@
 from datetime import datetime
-from datetime import datetime
+import json
 from pathlib import Path
 
 from mailbot_v26.state_manager import StateManager
@@ -27,3 +27,45 @@ def test_llm_unavailable_flag(tmp_path: Path) -> None:
     reloaded = StateManager(tmp_path / "state.json")
     assert reloaded._state.llm.unavailable is True
     assert reloaded._state.llm.last_error == "maintenance"
+
+
+def test_state_normalizes_login_keys_and_merges_legacy_variants(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "accounts": {
+                    "User@Example.com": {
+                        "last_uid": 5,
+                        "last_check_time": "2024-01-01T10:00:00",
+                        "imap_status": "ok",
+                        "last_error": "",
+                    },
+                    "user@example.com": {
+                        "last_uid": 7,
+                        "last_check_time": "2024-01-01T12:00:00",
+                        "imap_status": "failed",
+                        "last_error": "timeout",
+                    },
+                },
+                "llm": {},
+                "meta": {},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    manager = StateManager(state_path)
+
+    assert manager.get_last_uid("USER@example.com") == 7
+    assert manager.get_last_check_time("user@example.com") == datetime.fromisoformat(
+        "2024-01-01T12:00:00"
+    )
+
+    manager.update_last_uid("USER@EXAMPLE.COM", 9)
+    manager.save(force=True)
+
+    reloaded = json.loads(state_path.read_text(encoding="utf-8"))
+    assert set(reloaded.get("accounts", {}).keys()) == {"user@example.com"}
+    assert reloaded["accounts"]["user@example.com"]["last_uid"] == 9
