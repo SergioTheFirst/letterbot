@@ -10,19 +10,21 @@ echo =============================================
 echo   Letterbot Premium - Backup
 echo =============================================
 
-echo Checking virtual environment...
-if not exist "%REPO_ROOT%.venv\Scripts\activate.bat" (
-    echo ERROR: .venv not found. Please run install_and_run.bat first.
-    exit /b 1
+set "VENV_PY=%REPO_ROOT%.venv\Scripts\python.exe"
+set "RUN_PY=%VENV_PY%"
+
+if not exist "%RUN_PY%" (
+    echo [WARN] .venv Python not found. Falling back to system python.
+    set "RUN_PY=python"
 )
 
-call "%REPO_ROOT%.venv\Scripts\activate.bat"
+"%RUN_PY%" --version >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Failed to activate virtual environment.
+    echo ERROR: Python not found. Please run letterbot.bat first.
     exit /b 1
 )
 
-python -m mailbot_v26 backup
+"%RUN_PY%" -m mailbot_v26 backup
 set EXITCODE=%ERRORLEVEL%
 
 echo =============================================
