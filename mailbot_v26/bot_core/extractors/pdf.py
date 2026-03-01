@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Optional, List
+from typing import List
 
 try:
     from pypdf import PdfReader
@@ -33,6 +33,14 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
+
+PDF_ZERO_REASON_PYPDF_EMPTY = "pypdf_empty"
+PDF_ZERO_REASON_PIKEPDF_EMPTY = "pikepdf_empty"
+PDF_ZERO_REASON_PDFMINER_EMPTY = "pdfminer_empty"
+PDF_ZERO_REASON_IMAGE_ONLY = "image_only"
+PDF_ZERO_REASON_ENCRYPTED = "encrypted"
+PDF_ZERO_REASON_BROKEN = "broken_pdf"
+PDF_ZERO_REASON_ALL_EMPTY = "all_extractors_empty"
 
 
 def _safe_join(chunks: List[str], limit: int = 50_000) -> str:
@@ -94,7 +102,6 @@ def _extract_with_pikepdf(file_bytes: bytes) -> str:
     try:
         for page in pdf.pages:
             try:
-                # это очень грубый способ, но иногда вытаскивает текст
                 contents = page.get("/Contents", None)
                 if contents is None:
                     continue
@@ -140,39 +147,80 @@ def _ocr_pdf_if_possible(file_bytes: bytes) -> str:
     return ""
 
 
-def extract_pdf(file_bytes: bytes, filename: str) -> str:
-    """
-    Главная точка входа.
+def _looks_encrypted_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "encrypt" in message or "password" in message
 
-    Порядок:
-    1. pypdf — быстрый, дешёвый, для 90% PDF
-    2. pikepdf — fallback для странных/сломаных PDF
-    3. pdfminer — для XFA/ЭЦП документов (УПД, счета-фактуры ФНС)
-    4. EasyOCR — только если RAM ≥ 800 МБ и все предыдущие дали пустоту
+
+def _is_image_only_pdf(file_bytes: bytes) -> bool:
+    if PdfReader is None:
+        return False
+    try:
+        reader = PdfReader(io.BytesIO(file_bytes))
+    except Exception:
+        return False
+    pages = list(reader.pages)
+    if not pages:
+        return False
+
+    for page in pages:
+        try:
+            resources = page.get("/Resources") or {}
+            fonts = resources.get("/Font") if hasattr(resources, "get") else None
+            if fonts:
+                return False
+            extracted = page.extract_text() or ""
+            if extracted.strip():
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def extract_pdf(file_bytes: bytes, filename: str) -> tuple[str, str]:
+    """
+    Returns (text, zero_reason).
+    zero_reason is "" if text is non-empty.
     """
     name = (filename or "").lower()
     if not name.endswith(".pdf"):
-        # Защита от неправильного вызова
-        return ""
+        return "", PDF_ZERO_REASON_BROKEN
 
-    # 1. pypdf
-    text = _extract_with_pypdf(file_bytes)
+    try:
+        text = _extract_with_pypdf(file_bytes)
+    except Exception as exc:
+        reason = PDF_ZERO_REASON_ENCRYPTED if _looks_encrypted_error(exc) else PDF_ZERO_REASON_BROKEN
+        logger.warning("pypdf extraction exception for %s: %s", filename, exc)
+        return "", reason
     if text.strip():
-        return text
+        return text, ""
 
-    # 2. pikepdf fallback
-    text = _extract_with_pikepdf(file_bytes)
+    try:
+        text = _extract_with_pikepdf(file_bytes)
+    except Exception as exc:
+        reason = PDF_ZERO_REASON_ENCRYPTED if _looks_encrypted_error(exc) else PDF_ZERO_REASON_BROKEN
+        logger.warning("pikepdf extraction exception for %s: %s", filename, exc)
+        return "", reason
     if text.strip():
-        return text
+        return text, ""
 
-    # 3. pdfminer (XFA / ЭЦП / сложные PDF)
-    text = _extract_with_pdfminer(file_bytes)
+    try:
+        text = _extract_with_pdfminer(file_bytes)
+    except Exception:
+        text = ""
     if text.strip():
-        return text
+        return text, ""
 
-    # 4. OCR как последний шанс
     ocr_text = _ocr_pdf_if_possible(file_bytes)
-    return ocr_text or ""
+    if ocr_text.strip():
+        return ocr_text, ""
+
+    if _is_image_only_pdf(file_bytes):
+        return "", PDF_ZERO_REASON_IMAGE_ONLY
+
+    return "", PDF_ZERO_REASON_ALL_EMPTY
 
 
-extract_pdf_text = extract_pdf
+def extract_pdf_text(file_bytes: bytes, filename: str) -> str:
+    text, _reason = extract_pdf(file_bytes, filename)
+    return text

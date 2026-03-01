@@ -4,7 +4,7 @@
 1. Ensure `.venv` contains runtime + build deps.
 2. Run `build_windows_onefolder.bat`.
 3. Confirm output folder `dist\Letterbot`.
-4. Confirm required files:
+4. Confirm required files (per current `pyinstaller.spec` layout):
    - `Letterbot.exe`
    - `run.bat`
    - `mailbot_v26\config\settings.ini.example`

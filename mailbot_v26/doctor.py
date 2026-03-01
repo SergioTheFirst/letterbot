@@ -328,7 +328,20 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
 def _validate_accounts_ini(base_dir: Path) -> tuple[DoctorEntry, list[dict[str, object]]]:
     path = base_dir / "accounts.ini"
     if not path.exists():
-        return DoctorEntry("accounts.ini", "FAIL", f"Файл не найден: {path}"), []
+        repo_root = Path(__file__).resolve().parents[1]
+        source = repo_root / "mailbot_v26" / "config" / "accounts.ini.example"
+        target = repo_root / "accounts.ini"
+        return (
+            DoctorEntry(
+                "accounts.ini",
+                "FAIL",
+                (
+                    f"Файл не найден: {path}. "
+                    f"Создайте файл командой: copy \"{source}\" \"{target}\""
+                ),
+            ),
+            [],
+        )
 
     parser = read_user_ini_with_defaults(
         path,
@@ -442,15 +455,19 @@ def _resolve_yaml_config_path(config_dir: Path | None) -> Path | None:
     return resolve_config_paths(config_dir).yaml_path
 
 
-def _config_template_hint(config_path: Path) -> str:
+def _config_template_hint(config_path: Path, *, two_file_mode: bool = False) -> str:
     example_path = config_path.with_name(f"{config_path.name}.example")
+    if two_file_mode:
+        return (
+            f"Файл не найден: {config_path}. Используйте шаблон {example_path}. "
+            f"Скопировать: copy {example_path.name} {config_path.name}"
+        )
     compact_example_path = config_path.with_name("config.ini.compact.example")
     return (
         f"Файл не найден: {config_path}. Используйте шаблон {example_path} "
         f"или начните с компактного {compact_example_path}. "
         f"Скопировать (полный): copy {example_path.name} {config_path.name}. "
-        f"Скопировать (compact): copy mailbot_v26\\config\\config.ini.compact.example "
-        f"mailbot_v26\\config\\config.ini"
+        f"Скопировать (compact): copy config.ini.compact.example config.ini"
     )
 
 

@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-01: Unified config-dir perimeter for 2-file mode (open_config_folder.bat/backup.bat/doctor hints/Windows quickstart), added PDF zero-text taxonomy with `(text, zero_reason)` extractor contract plus compatibility alias, and added happy-path integration smoke tests for end-to-end email→DB→TG delivery metadata.
 - 2026-03-01: Fixed TG attachment validator false-positive for emoji attachment insight lines ("📎" accepted marker alongside "влож"), enabled premium clarity + daily digest defaults in settings/templates, and added pdfminer third fallback in PDF extractor with regression tests; full pytest green (890 passed).
 - 2026-03-01: Replaced root `letterbot.bat` stub with full Windows launcher flow (python discovery, optional `.venv`, warning-first pip/doctor/validate, first-run `init-config` + Notepad prompt, `config-ready`, and `run_stack --no-browser` against repo-root config); verified `run_stack --dry-run` prints worker+web commands and full pytest remains green (883 passed).
 - 2026-03-01: Fixed premium processor delivery chain regressions in one patch: process_message now accepts/propagates telegram_bot_token into Telegram payload metadata, LLM stage calls now pass ctx to avoid "LLM stage is not configured" path, and startup now propagates resolved config_dir into processor/digest module loaders; targeted regressions added for ctx propagation, TG missing-credentials behavior, and config_dir configurators.
@@ -138,14 +139,15 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Validate Windows launcher runtime on target host (letterbot.bat with repo-root --config-dir and run_stack web+worker path)
-- Monitor One-Message Rule regressions in TG stage + IMAP UID replay guard
 - Keep full pytest green while finishing RC verification
+- Validate latest 2-file config_dir perimeter consistency across launchers/docs/doctor hints
+- Monitor One-Message Rule regressions in TG stage + IMAP UID replay guard
 - Monitor production logs for TG render_mode regressions on attachment-heavy emails (Excel/PDF mixes)
 Next:
 - Collect Windows host validation evidence for letterbot.bat (config bootstrap + 127.0.0.1:8787 availability)
 - stable 28.0.0 after RC verification
 - Keep TG delivery dedupe + Telegram config contract invariants covered in CI regression tests
+- Gather production stats for new PDF zero-text reason taxonomy (encrypted/image_only/all_extractors_empty)
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
@@ -442,4 +444,15 @@ Attention economics v1 (explainable, cached, CSV export, indexed).
 - tests/test_tg_payload_pipeline.py
 - mailbot_v26/tests/test_telegram_render_modes.py
 - mailbot_v26/tests/test_feature_flags.py
+- mailbot_v26/tests/test_pdf_extractor.py
+
+- tests/test_happy_path_smoke.py
+- tests/test_config_dir_perimeter.py
+- open_config_folder.bat
+- backup.bat
+- README_QUICKSTART_WINDOWS.md
+- docs/RELEASE_CHECKLIST_WINDOWS.md
+- mailbot_v26/bot_core/extractors/pdf.py
+- mailbot_v26/bot_core/pipeline.py
+- mailbot_v26/doctor.py
 - mailbot_v26/tests/test_pdf_extractor.py

@@ -16,7 +16,7 @@ import zipfile
 
 from mailbot_v26.bot_core.extractors.doc import extract_docx_text
 from mailbot_v26.bot_core.extractors.excel import extract_excel_text
-from mailbot_v26.bot_core.extractors.pdf import extract_pdf_text
+from mailbot_v26.bot_core.extractors.pdf import extract_pdf, extract_pdf_text
 from mailbot_v26.constants import (
     MAX_ATTACHMENT_BYTES,
     MAX_CHARS_PER_ATTACHMENT,
@@ -297,12 +297,30 @@ def _extract_attachment_text(
 
         sanitize_limit = max(max_chars * 5, max_chars) if max_chars > 0 else 8000
         if name_lower.endswith(".pdf"):
+            legacy_text = extract_pdf_text(att.content, att.filename)
+            if legacy_text.strip():
+                text = sanitize_text(
+                    legacy_text,
+                    max_len=sanitize_limit,
+                )
+                text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
+                logger.info("PDF extraction: %d chars from %s", len(text), att.filename)
+                return text
+
+            extracted_text, zero_reason = extract_pdf(att.content, att.filename)
             text = sanitize_text(
-                extract_pdf_text(att.content, att.filename),
+                extracted_text,
                 max_len=sanitize_limit,
             )
             text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
-            logger.info("PDF extraction: %d chars from %s", len(text), att.filename)
+            if text:
+                logger.info("PDF extraction: %d chars from %s", len(text), att.filename)
+            else:
+                logger.warning(
+                    "pdf_zero_text filename=%s reason=%s",
+                    att.filename,
+                    zero_reason,
+                )
             return text
 
         if name_lower.endswith((".doc", ".docx")):
