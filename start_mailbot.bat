@@ -6,5 +6,6 @@ set "PYTHONUTF8=1"
 set "REPO_ROOT=%~dp0"
 cd /d "%REPO_ROOT%"
 
-call "%REPO_ROOT%run_mailbot.bat"
+echo [DEPRECATED] start_mailbot.bat -> letterbot.bat
+call "%REPO_ROOT%letterbot.bat"
 exit /b %ERRORLEVEL%

@@ -1,9 +1,4 @@
-"""Configuration loading utilities for Letterbot Premium v26.
-
-This module follows the project Constitution by favoring clarity and
-strict validation over implicit defaults. All configuration files are
-stored at repo root (same folder as launcher .bat).
-"""
+"""Configuration loading utilities for Letterbot Premium v26."""
 
 from __future__ import annotations
 
@@ -19,7 +14,7 @@ from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.account_identity import normalize_login
 
-CONFIG_DIR = Path(__file__).resolve().parents[1]
+CONFIG_DIR = resolve_config_paths().config_dir
 SETTINGS_INI_NAME = "settings.ini"
 
 
@@ -62,10 +57,10 @@ class AccountScope:
 class KeysConfig:
     """External service tokens."""
 
-    telegram_bot_token: str
-    telegram_chat_id: str
-    cf_account_id: str
-    cf_api_token: str
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    cf_account_id: str = ""
+    cf_api_token: str = ""
 
 
 @dataclass
@@ -350,29 +345,44 @@ def parse_telegram_chat_id(raw_chat_id: object) -> str:
     value = str(raw_chat_id or "").strip()
     if not value or value.upper() == "CHANGE_ME" or value.startswith("="):
         return ""
-    if value.startswith("+"):
+    if value.startswith("+") and len(value) > 1:
         value = value[1:]
-    if value.startswith("-"):
-        return value if value[1:].isdigit() else ""
-    return value if value.isdigit() else ""
+    return value
 
 
 def validate_telegram_contract(config: BotConfig, *, config_dir: Path) -> list[str]:
     errors: list[str] = []
     token = str(config.keys.telegram_bot_token or "").strip()
-    if not token or token.upper() == "CHANGE_ME" or ":" not in token:
-        errors.append(
-            f"Missing/invalid [telegram].bot_token in {config_dir / 'accounts.ini'} (expected format <bot_id>:<secret>)."
-        )
 
     global_chat_id = parse_telegram_chat_id(config.keys.telegram_chat_id)
     if str(config.keys.telegram_chat_id or "").strip() and not global_chat_id:
         errors.append(
-            f"Invalid [telegram].chat_id in {config_dir / 'accounts.ini'} (must be integer, e.g. -1001234567890)."
+            f"Invalid [telegram].chat_id in {config_dir / 'accounts.ini'} (remove placeholders/leading '=')."
+        )
+
+    telegram_targets = [
+        account
+        for account in config.accounts
+        if account.enabled
+        and (str(account.telegram_chat_id or "").strip() or str(config.keys.telegram_chat_id or "").strip())
+    ]
+    if telegram_targets and (not token or token.upper() == "CHANGE_ME"):
+        errors.append(
+            f"Missing/invalid [telegram].bot_token in {config_dir / 'accounts.ini'} (set a non-empty token)."
         )
 
     for account in config.accounts:
-        resolved_chat_id = parse_telegram_chat_id(account.telegram_chat_id) or global_chat_id
+        account_chat_raw = str(account.telegram_chat_id or "").strip()
+        account_chat_id = parse_telegram_chat_id(account_chat_raw)
+        if account_chat_raw and not account_chat_id:
+            errors.append(
+                f"Invalid [{account.account_id}].telegram_chat_id in {config_dir / 'accounts.ini'} "
+                f"(got '{account_chat_raw}'; remove placeholders/leading '=')."
+            )
+        resolved_chat_id = account_chat_id or global_chat_id
+        if not account.enabled:
+            account.telegram_chat_id = resolved_chat_id
+            continue
         if not resolved_chat_id:
             errors.append(
                 "Missing Telegram chat_id for account "

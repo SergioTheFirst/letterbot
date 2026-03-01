@@ -96,8 +96,10 @@ if %ERRORLEVEL% NEQ 0 (
     call :log [WARN] Doctor found issues. Startup continues in non-strict mode.
 )
 
-call :log Starting Letterbot...
-"%RUN_PY%" -m mailbot_v26.start --config-dir "%REPO_ROOT%" >>"%LOG_FILE%" 2>&1
+call :log Starting Letterbot stack via letterbot.bat...
+REM "%RUN_PY%" -m mailbot_v26.doctor --config-dir "%REPO_ROOT%mailbot_v26\config"
+REM "%RUN_PY%" -m mailbot_v26.start --config-dir "%REPO_ROOT%mailbot_v26\config"
+call "%REPO_ROOT%letterbot.bat" >>"%LOG_FILE%" 2>&1
 set "RUN_EXIT=%ERRORLEVEL%"
 if "%RUN_EXIT%"=="0" (
     call :log Letterbot finished.
