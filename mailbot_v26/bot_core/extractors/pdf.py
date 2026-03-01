@@ -6,6 +6,7 @@ DLL-free, Windows-friendly, RAM-safe.
 Использует только:
 - pypdf (основной путь для текстовых PDF)
 - pikepdf (fallback для странных/частично сломанных PDF)
+- pdfminer.six (fallback для XFA/ЭЦП документов)
 - опционально OCR через EasyOCR (если RAM позволяет)
 
 Соответствует КОНСТИТУЦИИ:
@@ -108,6 +109,32 @@ def _extract_with_pikepdf(file_bytes: bytes) -> str:
     return _safe_join(chunks, limit=50_000)
 
 
+def _extract_with_pdfminer(file_bytes: bytes) -> str:
+    """
+    Третий fallback: pdfminer для XFA/encrypted/signed PDF.
+    Использует LAParams для лучшего извлечения таблиц.
+    """
+    try:
+        from pdfminer.high_level import extract_text_to_fp
+        from pdfminer.layout import LAParams
+        import io as _io
+
+        output = _io.StringIO()
+        extract_text_to_fp(
+            _io.BytesIO(file_bytes),
+            output,
+            laparams=LAParams(),
+            output_type="text",
+            codec="utf-8",
+        )
+        return output.getvalue().strip()
+    except ImportError:
+        return ""
+    except Exception as e:
+        logger.warning("pdfminer extract failed: %s", e)
+        return ""
+
+
 def _ocr_pdf_if_possible(file_bytes: bytes) -> str:
     """OCR disabled per CONSTITUTION (torch forbidden)."""
     return ""
@@ -120,7 +147,8 @@ def extract_pdf(file_bytes: bytes, filename: str) -> str:
     Порядок:
     1. pypdf — быстрый, дешёвый, для 90% PDF
     2. pikepdf — fallback для странных/сломаных PDF
-    3. EasyOCR — только если RAM ≥ 800 МБ и два первых способа дали пустоту
+    3. pdfminer — для XFA/ЭЦП документов (УПД, счета-фактуры ФНС)
+    4. EasyOCR — только если RAM ≥ 800 МБ и все предыдущие дали пустоту
     """
     name = (filename or "").lower()
     if not name.endswith(".pdf"):
@@ -137,7 +165,12 @@ def extract_pdf(file_bytes: bytes, filename: str) -> str:
     if text.strip():
         return text
 
-    # 3. OCR как последний шанс
+    # 3. pdfminer (XFA / ЭЦП / сложные PDF)
+    text = _extract_with_pdfminer(file_bytes)
+    if text.strip():
+        return text
+
+    # 4. OCR как последний шанс
     ocr_text = _ocr_pdf_if_possible(file_bytes)
     return ocr_text or ""
 
