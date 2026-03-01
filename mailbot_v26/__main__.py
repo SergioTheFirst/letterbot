@@ -6,6 +6,7 @@ from pathlib import Path
 
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.version import get_version
+from mailbot_v26.config_loader import CONFIG_DIR
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -25,13 +26,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     doctor_parser.add_argument(
         "--config-dir",
-        default=".",
-        help="Config directory (default: .).",
+        default=str(CONFIG_DIR),
+        help="Config directory.",
     )
     init_parser = subparsers.add_parser("init-config", help="Create configuration templates.")
-    init_parser.add_argument("--config-dir", default=".", help="Config directory (default: .).")
+    init_parser.add_argument("--config-dir", default=str(CONFIG_DIR), help="Config directory.")
     migrate_parser = subparsers.add_parser("migrate-config", help="Migrate legacy config files to settings.ini/accounts.ini.")
-    migrate_parser.add_argument("--config-dir", default=".", help="Config directory (default: .).")
+    migrate_parser.add_argument("--config-dir", default=str(CONFIG_DIR), help="Config directory.")
     validate_parser = subparsers.add_parser("validate-config", help="Validate configuration files.")
     validate_parser.add_argument(
         "--compat",
@@ -45,8 +46,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     validate_parser.add_argument(
         "--config-dir",
-        default=".",
-        help="Config directory (default: .).",
+        default=str(CONFIG_DIR),
+        help="Config directory.",
     )
     ready_parser = subparsers.add_parser(
         "config-ready",
@@ -54,8 +55,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ready_parser.add_argument(
         "--config-dir",
-        default=".",
-        help="Config directory (default: .).",
+        default=str(CONFIG_DIR),
+        help="Config directory.",
     )
     ready_parser.add_argument(
         "--verbose",
@@ -82,7 +83,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config-dir",
         default=".",
-        help="Config directory for default runtime start (default: .).",
+        help="Config directory for default runtime start.",
     )
     return parser
 

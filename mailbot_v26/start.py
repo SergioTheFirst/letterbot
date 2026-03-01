@@ -825,13 +825,19 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             config_path = None
             raw_config = {}
             config = config_result
-        resolved_config_dir = resolve_config_paths(config_dir).config_dir
+        resolved_paths = resolve_config_paths(config_dir)
+        resolved_config_dir = resolved_paths.config_dir
         flags = FeatureFlags(base_dir=resolved_config_dir)
         logger.info("Configuration loaded: %d accounts", len(config.accounts))
         print(f"[OK] Loaded {len(config.accounts)} accounts")
-        print(f"[CONFIG] repo_root: {resolved_config_dir.resolve()}")
-        print(f"[CONFIG] settings.ini: {(resolved_config_dir / 'settings.ini').resolve()}")
-        print(f"[CONFIG] accounts.ini: {(resolved_config_dir / 'accounts.ini').resolve()}")
+        print(
+            "[CONFIG] snapshot: "
+            f"config_dir={resolved_config_dir.resolve()} "
+            f"two_file_mode={str(resolved_paths.two_file_mode).lower()} "
+            f"accounts_path={resolved_paths.accounts_path.resolve()} exists={resolved_paths.accounts_path.exists()} "
+            f"settings_path={resolved_paths.settings_path.resolve()} exists={resolved_paths.settings_path.exists()} "
+            f"telegram_bot_token_present={str(bool(str(config.keys.telegram_bot_token or '').strip())).lower()}"
+        )
 
         telegram_errors = validate_telegram_contract(config, config_dir=resolved_config_dir)
         if telegram_errors:
@@ -1257,7 +1263,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--config-dir",
         type=Path,
         default=None,
-        help="Optional config directory (default: repo root (.)).",
+        help="Optional config directory (default: mailbot_v26/config).",
     )
     parser.add_argument(
         "--max-cycles",

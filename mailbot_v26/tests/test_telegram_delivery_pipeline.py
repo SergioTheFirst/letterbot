@@ -263,6 +263,31 @@ def test_tg_stage_idempotency_skips_duplicate_delivery(monkeypatch, tmp_path, ca
     assert "telegram_delivery_skipped_duplicate" in caplog.text
 
 
+
+
+def test_stage_tg_payload_carries_bot_token_and_chat_id(monkeypatch, tmp_path) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    email_id = _seed_queue(storage, config.accounts[0].login)
+    _seed_pipeline_context(email_id, config.accounts[0].login)
+    processor = _configure_pipeline(config)
+
+    captured: dict[str, object] = {}
+
+    def fake_send(payload):
+        captured["payload"] = payload
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+
+    flags = FeatureFlags(base_dir=tmp_path)
+    _process_queue(storage, config, processor, flags)
+
+    payload = captured["payload"]
+    assert payload.metadata["bot_token"] == config.keys.telegram_bot_token
+    assert payload.metadata["chat_id"] == config.accounts[0].telegram_chat_id
+    _cleanup_pipeline(email_id)
 def test_stage_tg_adds_inline_keyboard_when_premium_enabled(monkeypatch, tmp_path) -> None:
     config = _make_config(tmp_path)
     storage = Storage(config.storage.db_path)

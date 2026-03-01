@@ -16,8 +16,7 @@ class ConfigPaths:
 
 
 def resolve_config_paths(config_dir: Path | None = None) -> ConfigPaths:
-    root_dir = Path(__file__).resolve().parents[2]
-    default_config_dir = root_dir
+    default_config_dir = Path(__file__).resolve().parents[1] / "config"
     selected_dir = config_dir if config_dir is not None else default_config_dir
 
     yaml_candidates: list[Path]
