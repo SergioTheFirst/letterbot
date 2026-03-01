@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-01: Startup Telegram report now includes Mail accounts block sourced from existing startup mail-account healthcheck (OK/FAILED/none configured/check unavailable) with startup/report regressions.
 - 2026-03-01: v28.0.0-rc release pass — version surfaces synchronized, changelog updated, release candidate packaging hygiene completed.
 - 2026-02-28: Release cycle kickoff for 28.0.0-rc1 — version surfaces bumped to `28.0.0-rc1`, changelog RC declaration added, manifest/windows resource refreshed for packaging readiness.
 - 2026-02-28: v28.0.0-rc.2 packaging convergence completed — one-folder chain switched to Letterbot naming (`dist/Letterbot`, `Letterbot.exe`, CI artifact/zip names), PyInstaller entrypoint moved to `mailbot_v26/__main__.py`, dist launcher migrated to 2-file onboarding (`settings.ini` + `accounts.ini`) with `config-ready` retries, manifest integrity made runtime-safe via deterministic mutable ignore set, deterministic Windows version-resource generation added, and Windows release docs/tests synchronized.

@@ -121,6 +121,56 @@ def test_launch_report_deterministic() -> None:
     assert report_a == report_b
 
 
+def test_startup_report_includes_mail_account_status_ok() -> None:
+    builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
+    report = builder.build(
+        results=[],
+        mode=SimpleNamespace(value="FULL"),
+        mail_accounts=[{"account_id": "mos_ru", "status": "OK", "error": ""}],
+    )
+
+    assert "Mail accounts:" in report
+    assert "- mos_ru: OK" in report
+
+
+def test_startup_report_includes_mail_account_status_failed() -> None:
+    builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
+    report = builder.build(
+        results=[],
+        mode=SimpleNamespace(value="FULL"),
+        mail_accounts=[
+            {
+                "account_id": "corp",
+                "status": "FAILED",
+                "error": "TimeoutError: timed out\nTraceback: hidden",
+            }
+        ],
+    )
+
+    assert "- corp: FAILED (TimeoutError: timed out Traceback: hidden)" in report
+    assert "\nTraceback" not in report
+
+
+def test_startup_report_handles_no_accounts() -> None:
+    builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
+    report = builder.build(results=[], mode=SimpleNamespace(value="FULL"), mail_accounts=[])
+
+    assert "Mail accounts:" in report
+    assert "- none configured" in report
+
+
+def test_startup_report_degrades_if_mail_check_unavailable() -> None:
+    builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
+    report = builder.build(
+        results=[],
+        mode=SimpleNamespace(value="FULL"),
+        mail_check_unavailable_reason="RuntimeError: imap unavailable",
+    )
+
+    assert "Mail accounts:" in report
+    assert "check unavailable (RuntimeError: imap unavailable)" in report
+
+
 def test_dispatch_launch_report_does_not_raise(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
     def raising_send(*_args, **_kwargs) -> bool:
         raise RuntimeError("send failed")
