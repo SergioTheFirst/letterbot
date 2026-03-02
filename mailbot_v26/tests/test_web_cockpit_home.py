@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
-from mailbot_v26.web_observability.app import SupportSettings, create_app
+from mailbot_v26.web_observability.app import SupportMethod, SupportSettings, create_app
 from mailbot_v26.tests._web_helpers import login_with_csrf
 
 
@@ -133,23 +133,62 @@ def test_cockpit_contacts_cards_survive_analytics_exceptions(tmp_path: Path) -> 
         assert "— нет данных —" in body
 
 
-def test_cockpit_home_shows_support_link_when_enabled(tmp_path: Path) -> None:
+def test_cockpit_home_shows_premium_support_card_when_enabled(tmp_path: Path) -> None:
     db_path = tmp_path / "support-enabled.sqlite"
     KnowledgeDB(db_path)
     app = create_app(
         db_path=db_path,
         password="pw",
         secret_key="secret",
-        support_settings=SupportSettings(enabled=True, show_in_nav=True, methods=[]),
+        support_settings=SupportSettings(
+            enabled=True,
+            show_in_nav=True,
+            methods=[],
+        ),
     )
     with app.test_client() as client:
         login_with_csrf(client, "pw")
         resp = client.get("/")
         assert resp.status_code == 200
-        assert 'href="/support"' in resp.get_data(as_text=True)
+        body = resp.get_data(as_text=True)
+        assert 'href="/support"' in body
+        assert "Support Letterbot" in body
 
 
-def test_cockpit_home_hides_support_link_when_disabled(tmp_path: Path) -> None:
+def test_cockpit_home_shows_support_qr_preview_when_available(tmp_path: Path) -> None:
+    db_path = tmp_path / "support-qr.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        support_settings=SupportSettings(
+            enabled=True,
+            show_in_nav=True,
+            methods=[
+                SupportMethod(
+                    "support",
+                    "Поддержать Letterbot",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "support.png",
+                    "data:image/png;base64,abc",
+                )
+            ],
+        ),
+    )
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Support QR" in body
+        assert "<img" in body
+
+
+def test_cockpit_home_hides_support_card_when_disabled(tmp_path: Path) -> None:
     db_path = tmp_path / "support-disabled.sqlite"
     KnowledgeDB(db_path)
     app = create_app(
@@ -162,4 +201,34 @@ def test_cockpit_home_hides_support_link_when_disabled(tmp_path: Path) -> None:
         login_with_csrf(client, "pw")
         resp = client.get("/")
         assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert 'href="/support"' not in body
+        assert "Support Letterbot" not in body
+
+
+def test_footer_support_link_visibility(tmp_path: Path) -> None:
+    db_path = tmp_path / "support-footer.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        support_settings=SupportSettings(enabled=True, show_in_nav=True, methods=[]),
+    )
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/")
+        assert 'app-footer' in resp.get_data(as_text=True)
+        assert 'href="/support"' in resp.get_data(as_text=True)
+
+    app_hidden = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        support_settings=SupportSettings(enabled=False, show_in_nav=False, methods=[]),
+    )
+    with app_hidden.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/")
+        assert 'app-footer' in resp.get_data(as_text=True)
         assert 'href="/support"' not in resp.get_data(as_text=True)

@@ -239,11 +239,16 @@
       {% if cfg.features.donate_enabled and support_nav_enabled %}
       <div class="card golden-card">
         <div class="section-title">
-          <h2>Support</h2>
+          <h2>Support Letterbot</h2>
         </div>
-        <div class="hint">Help keep Letterbot stable and improving.</div>
+        <div class="hint">Fuel premium reliability and fast improvements.</div>
+        {% if support_methods and support_methods[0].qr_image_data_uri %}
+        <div style="margin-top:8px;">
+          <img src="{{ support_methods[0].qr_image_data_uri }}" alt="Support QR" style="max-width:72px; border-radius:8px; border:1px solid var(--border);">
+        </div>
+        {% endif %}
         <div class="card-actions">
-          <a class="btn ghost" href="/support">Open support page</a>
+          <a class="btn" href="/support">Open support page</a>
         </div>
       </div>
       {% endif %}

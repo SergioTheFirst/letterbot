@@ -132,6 +132,7 @@ class SupportSettings:
     enabled: bool
     show_in_nav: bool
     methods: list[SupportMethod]
+    text: str = ""
 
 
 class _TTLCache:
@@ -292,9 +293,19 @@ def _render_stub_html(
             if engineer_mode
             else ""
         )
+        support_card = ""
+        support_enabled = bool(context.get("support_nav_enabled")) if isinstance(context, Mapping) else False
+        if support_enabled:
+            support_preview = ""
+            methods = context.get("support_methods") if isinstance(context, Mapping) else []
+            if isinstance(methods, list) and methods:
+                qr_uri = str(getattr(methods[0], "qr_image_data_uri", "") or "")
+                if qr_uri:
+                    support_preview = '<img alt="Support QR" src="%s">' % html.escape(qr_uri)
+            support_card = f"<h2>Support Letterbot</h2><a href=\"/support\">/support</a>{support_preview}"
         return (
             f"<html><body>{header}<h2>Today Digest</h2>{digest_today_block}<h2>Week Digest</h2>{digest_week_block}"
-            f"<h2>Recent Activity</h2>{lane_html}{engineer_block}<table>{activity_body}</table></body></html>"
+            f"<h2>Recent Activity</h2>{lane_html}{engineer_block}{support_card}<table>{activity_body}</table></body></html>"
         )
 
     if template_name in {"health.html", "partials/health_overview.html"}:
@@ -964,24 +975,69 @@ def _image_data_uri(path: Path) -> str:
 
 
 def _load_support_settings(config_path: Path | None) -> SupportSettings:
-    if config_path is None or not config_path.exists():
+    def _from_ini(settings_path: Path) -> SupportSettings:
+        parser = configparser.ConfigParser()
+        if not settings_path.exists():
+            return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+        try:
+            parser.read(settings_path, encoding="utf-8")
+        except (OSError, configparser.Error) as exc:
+            logger.warning("support_settings_ini_load_failed", path=str(settings_path), error=str(exc))
+            return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+        if not parser.has_section("support"):
+            return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+
+        enabled = parser.getboolean("support", "enabled", fallback=False)
+        show_in_nav = parser.getboolean("support", "show_in_nav", fallback=True)
+        label = parser.get("support", "label", fallback="Support Letterbot").strip()
+        text = parser.get("support", "text", fallback="").strip()
+        details = parser.get("support", "details", fallback="").strip()
+        url = parser.get("support", "url", fallback="").strip()
+        qr_rel = parser.get("support", "qr_image", fallback="").strip()
+        qr_uri = ""
+        if qr_rel:
+            qr_path = (settings_path.parent / qr_rel).resolve()
+            try:
+                qr_uri = _image_data_uri(qr_path)
+            except Exception as exc:
+                logger.warning("support_qr_load_failed", path=str(qr_path), error=str(exc))
+                qr_uri = ""
+        method = SupportMethod(
+            type="support",
+            label=label,
+            details=details,
+            phone="",
+            number="",
+            url=url,
+            qr_image=qr_rel,
+            qr_image_data_uri=qr_uri,
+        )
+        methods = [method] if enabled else []
+        return SupportSettings(enabled=enabled, show_in_nav=show_in_nav, methods=methods, text=text)
+
+    if config_path is None:
         return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+    settings_path = config_path.parent / "settings.ini"
+    if not config_path.exists():
+        return _from_ini(settings_path)
     try:
         raw = load_yaml_config(config_path)
     except Exception as exc:
         logger.warning("support_config_load_failed", error=str(exc))
-        return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+        return _from_ini(settings_path)
     if not isinstance(raw, dict):
-        return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+        return _from_ini(settings_path)
     if not resolve_support_enabled(raw):
-        return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+        return _from_ini(settings_path)
     support = raw.get("support")
     if not isinstance(support, dict):
-        return SupportSettings(enabled=False, show_in_nav=False, methods=[])
+        return _from_ini(settings_path)
     enabled = bool(support.get("enabled", False))
     ui = support.get("ui") if isinstance(support.get("ui"), dict) else {}
     show_in_nav = bool(ui.get("show_in_nav", False))
     methods_raw = support.get("methods") if isinstance(support.get("methods"), list) else []
+    if not enabled or not methods_raw:
+        return _from_ini(settings_path)
     methods: list[SupportMethod] = []
     base_dir = config_path.parent
     for item in methods_raw:
@@ -2109,6 +2165,7 @@ def create_app(
             title=app.config["APP_TITLE"],
             page_title="Support",
             support_methods=support_settings.methods,
+            support_text=support_settings.text,
             hide_limit=True,
             dashboard_vars=None,
             pii_allowed=False,
@@ -2388,6 +2445,7 @@ def create_app(
             top_senders=top_senders,
             silent_contacts=silent_contacts,
             stalled_threads=stalled_threads,
+            support_methods=app.config["SUPPORT_SETTINGS"].methods[:1],
             hide_limit=True,
             status_refresh_ms=STATUS_STRIP_REFRESH_MS,
             share_url=share_url,

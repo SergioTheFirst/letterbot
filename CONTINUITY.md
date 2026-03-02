@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-02: Web support UI now falls back to settings.ini [support] when YAML support methods are missing/disabled, adds master/nav switches for /support and cockpit/footer visibility, premium cockpit support card with QR preview, and updated support INI templates/bootstrap with focused web tests.
 - 2026-03-02: Unified watermark/branding layer across Telegram/runtime surfaces (ordinary, premium clarity, fallback, digests, startup/system/SLA notices), cockpit footer branding, and conditional cockpit support card linking to /support; targeted branding/support tests updated.
 - 2026-03-02: Final P0 release contracts closed: PDF zero-text taxonomy hardened (encrypted/broken_pdf/image_only/all_extractors_empty with backward-compatible extract_pdf_text alias), pipeline PDF zero-text reason logging aligned to existing logger style, happy-path smoke tests anchored for email→DB→TG delivery metadata contract, and Windows quickstart synchronized to current source/dist launcher-config contract with docs contract tests.
 - 2026-03-02: Hardened Windows path safety for spaces/cyrillic: quoted and trailing-backslash-safe config-dir handling in letterbot/update/open_config_folder/backup BAT launchers, resolved absolute config_dir embedding in run_stack worker/web/doctor subprocess commands, and added unicode-path regression tests; full pytest green (907 passed).
