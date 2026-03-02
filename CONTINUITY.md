@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-02: Premium polish for web support surfaces: upgraded cockpit support card and footer support link styling, richer /support hero/cards/QR/empty-state UI, and copy-paste-friendly [support] INI template/bootstrap comments while preserving enabled/show_in_nav switches; web support tests refreshed and full pytest green.
 - 2026-03-02: Web support UI now falls back to settings.ini [support] when YAML support methods are missing/disabled, adds master/nav switches for /support and cockpit/footer visibility, premium cockpit support card with QR preview, and updated support INI templates/bootstrap with focused web tests.
 - 2026-03-02: Unified watermark/branding layer across Telegram/runtime surfaces (ordinary, premium clarity, fallback, digests, startup/system/SLA notices), cockpit footer branding, and conditional cockpit support card linking to /support; targeted branding/support tests updated.
 - 2026-03-02: Final P0 release contracts closed: PDF zero-text taxonomy hardened (encrypted/broken_pdf/image_only/all_extractors_empty with backward-compatible extract_pdf_text alias), pipeline PDF zero-text reason logging aligned to existing logger style, happy-path smoke tests anchored for email→DB→TG delivery metadata contract, and Windows quickstart synchronized to current source/dist launcher-config contract with docs contract tests.
@@ -143,8 +144,8 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Run requested targeted pytest for watermark/support surfaces, then full pytest --tb=short -q.
 - Keep One-Message Rule / Telegram metadata contract regressions green.
+- Monitor web support/branding surfaces for regressions while P0 remains stable.
 Next:
 - Start P1 PyInstaller phase after final P0 pytest confirmation.
 - Keep TG delivery dedupe + Telegram config contract invariants covered in CI regression tests.

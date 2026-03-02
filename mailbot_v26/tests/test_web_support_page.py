@@ -39,9 +39,45 @@ def test_support_page_renders_methods(tmp_path: Path) -> None:
             enabled=True,
             show_in_nav=True,
             methods=[
-                SupportMethod("card", "Карта", "", "", "2202 20XX XXXX XXXX", "", "", ""),
+                SupportMethod("card", "Карта", "Для переводов", "", "2202 20XX XXXX XXXX", "", "", ""),
                 SupportMethod("sbp", "СБП", "По номеру телефона", "+70000000000", "", "", "", ""),
                 SupportMethod("yoomoney", "ЮMoney", "", "", "", "https://yoomoney.ru/to/abc", "", ""),
+            ],
+            text="Поддержать можно любым удобным способом.",
+        ),
+    )
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        response = client.get("/support")
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert "Support Letterbot" in body
+        assert "Letterbot остаётся бесплатным" in body
+        assert "support-method-card" in body
+        assert "2202 20XX XXXX XXXX" in body
+        assert "+70000000000" in body
+        assert 'href="https://yoomoney.ru/to/abc"' in body
+        assert "support-url-cta" in body
+        assert "Скопировать" in body
+
+
+def test_support_page_renders_qr_when_available(tmp_path: Path) -> None:
+    app = _build_app(
+        tmp_path,
+        SupportSettings(
+            enabled=True,
+            show_in_nav=True,
+            methods=[
+                SupportMethod(
+                    "support",
+                    "Поддержать Letterbot",
+                    "",
+                    "",
+                    "",
+                    "https://example.com/support",
+                    "support.png",
+                    "data:image/png;base64,abc",
+                )
             ],
         ),
     )
@@ -50,11 +86,21 @@ def test_support_page_renders_methods(tmp_path: Path) -> None:
         response = client.get("/support")
         body = response.get_data(as_text=True)
         assert response.status_code == 200
-        assert "2202 20XX XXXX XXXX" in body
-        assert "+70000000000" in body
-        assert "https://yoomoney.ru/to/abc" in body
-        assert "Скопировать" in body
-        assert "Поддержать разработку" in body
+        assert "support-qr-frame" in body
+        assert '<img src="data:image/png;base64,abc"' in body
+
+
+def test_support_page_renders_empty_state_when_no_methods(tmp_path: Path) -> None:
+    app = _build_app(
+        tmp_path,
+        SupportSettings(enabled=True, show_in_nav=True, methods=[]),
+    )
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        response = client.get("/support")
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert "Способы поддержки ещё не настроены" in body
 
 
 def test_support_page_hides_when_disabled(tmp_path: Path) -> None:
@@ -74,7 +120,6 @@ def test_support_page_hides_when_disabled(tmp_path: Path) -> None:
         home = client.get("/")
         body = home.get_data(as_text=True)
         assert "Support" not in body
-        assert "Поддержать разработку" not in body
 
 
 def test_support_page_renders_from_ini_fallback(tmp_path: Path) -> None:
@@ -109,4 +154,4 @@ qr_image = support.png
         assert "Поддержать Letterbot" in body
         assert "Поддержать проект можно по ссылке или QR-коду" in body
         assert "https://example.com/support" in body
-        assert "<img" in body
+        assert '<img src="data:image/png;base64,' in body
