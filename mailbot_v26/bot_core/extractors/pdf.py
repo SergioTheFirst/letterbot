@@ -149,7 +149,42 @@ def _ocr_pdf_if_possible(file_bytes: bytes) -> str:
 
 def _looks_encrypted_error(exc: Exception) -> bool:
     message = str(exc).lower()
-    return "encrypt" in message or "password" in message
+    return any(
+        marker in message
+        for marker in ("encrypted", "not decrypted", "decrypted", "password", "decrypt")
+    )
+
+
+def _probe_pdf_state(file_bytes: bytes) -> tuple[bool, bool, int, bool]:
+    """
+    Returns (opened, encrypted, page_count, encrypted_error).
+    """
+    if PdfReader is None:
+        return False, False, 0, False
+    try:
+        reader = PdfReader(io.BytesIO(file_bytes))
+    except Exception as exc:
+        return False, False, 0, _looks_encrypted_error(exc)
+
+    encrypted = bool(getattr(reader, "is_encrypted", False))
+    page_count = 0
+    try:
+        page_count = len(reader.pages)
+    except Exception as exc:
+        if _looks_encrypted_error(exc):
+            return True, True, 0, True
+    return True, encrypted, page_count, False
+
+
+def _pikepdf_can_open(file_bytes: bytes) -> tuple[bool, bool]:
+    if pikepdf is None:
+        return False, False
+    try:
+        pdf = pikepdf.open(io.BytesIO(file_bytes))
+    except Exception as exc:
+        return False, _looks_encrypted_error(exc)
+    pdf.close()
+    return True, False
 
 
 def _is_image_only_pdf(file_bytes: bytes) -> bool:
@@ -186,6 +221,10 @@ def extract_pdf(file_bytes: bytes, filename: str) -> tuple[str, str]:
     if not name.endswith(".pdf"):
         return "", PDF_ZERO_REASON_BROKEN
 
+    opened, encrypted, page_count, encrypted_error = _probe_pdf_state(file_bytes)
+    if encrypted or encrypted_error:
+        return "", PDF_ZERO_REASON_ENCRYPTED
+
     try:
         text = _extract_with_pypdf(file_bytes)
     except Exception as exc:
@@ -215,7 +254,14 @@ def extract_pdf(file_bytes: bytes, filename: str) -> tuple[str, str]:
     if ocr_text.strip():
         return ocr_text, ""
 
-    if _is_image_only_pdf(file_bytes):
+    pikepdf_opened, pikepdf_encrypted_error = _pikepdf_can_open(file_bytes)
+    if pikepdf_encrypted_error:
+        return "", PDF_ZERO_REASON_ENCRYPTED
+
+    if not opened and not pikepdf_opened:
+        return "", PDF_ZERO_REASON_BROKEN
+
+    if opened and page_count > 0 and _is_image_only_pdf(file_bytes):
         return "", PDF_ZERO_REASON_IMAGE_ONLY
 
     return "", PDF_ZERO_REASON_ALL_EMPTY

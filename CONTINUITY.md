@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-02: Final P0 release contracts closed: PDF zero-text taxonomy hardened (encrypted/broken_pdf/image_only/all_extractors_empty with backward-compatible extract_pdf_text alias), pipeline PDF zero-text reason logging aligned to existing logger style, happy-path smoke tests anchored for email→DB→TG delivery metadata contract, and Windows quickstart synchronized to current source/dist launcher-config contract with docs contract tests.
 - 2026-03-02: Hardened Windows path safety for spaces/cyrillic: quoted and trailing-backslash-safe config-dir handling in letterbot/update/open_config_folder/backup BAT launchers, resolved absolute config_dir embedding in run_stack worker/web/doctor subprocess commands, and added unicode-path regression tests; full pytest green (907 passed).
 - 2026-03-01: Unified config-dir perimeter for 2-file mode (open_config_folder.bat/backup.bat/doctor hints/Windows quickstart), added PDF zero-text taxonomy with `(text, zero_reason)` extractor contract plus compatibility alias, and added happy-path integration smoke tests for end-to-end email→DB→TG delivery metadata.
 - 2026-03-01: Fixed TG attachment validator false-positive for emoji attachment insight lines ("📎" accepted marker alongside "влож"), enabled premium clarity + daily digest defaults in settings/templates, and added pdfminer third fallback in PDF extractor with regression tests; full pytest green (890 passed).
@@ -140,15 +141,13 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Keep full pytest green after unicode/space Windows path hardening (907 passed).
-- Validate latest 2-file config_dir perimeter consistency across launchers/docs/doctor hints
-- Monitor One-Message Rule regressions in TG stage + IMAP UID replay guard
-- Monitor production logs for TG render_mode regressions on attachment-heavy emails (Excel/PDF mixes)
+- Run full pytest --tb=short -q and confirm final P0 contract status (target 907+ passed, 0 failed).
+- Validate PDF zero-text reason telemetry in pipeline logs on empty extraction path.
+- Keep One-Message Rule / Telegram metadata contract regressions green.
 Next:
-- Collect Windows host validation evidence for trailing-backslash-safe launchers under cyrillic+space install paths (e.g., C:\Users\Иванов Иван\Документы\letterbot).
-- stable 28.0.0 after RC verification
-- Keep TG delivery dedupe + Telegram config contract invariants covered in CI regression tests
-- Gather production stats for new PDF zero-text reason taxonomy (encrypted/image_only/all_extractors_empty)
+- Start P1 PyInstaller phase after final P0 pytest confirmation.
+- Collect production stats for PDF zero-text reasons to drive next extraction decisions.
+- Keep TG delivery dedupe + Telegram config contract invariants covered in CI regression tests.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
@@ -458,3 +457,11 @@ Attention economics v1 (explainable, cached, CSV export, indexed).
 - mailbot_v26/doctor.py
 - mailbot_v26/tests/test_pdf_extractor.py
 - tests/test_unicode_paths.py
+
+- mailbot_v26/bot_core/extractors/pdf.py
+- mailbot_v26/bot_core/pipeline.py
+- mailbot_v26/tests/test_pdf_extractor.py
+- tests/test_happy_path_smoke.py
+- README_QUICKSTART_WINDOWS.md
+- tests/test_docs_contract.py
+- tests/test_config_dir_perimeter.py

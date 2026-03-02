@@ -1,30 +1,49 @@
-## Быстрый старт (исходники)
+## Quickstart (Windows)
 
-1. Запустите `letterbot.bat` двойным кликом.
-2. При первом запуске автоматически создастся `accounts.ini` в корне папки.
-3. Откроется Блокнот — заполните обязательные поля:
-   - В секции `[telegram]`: `bot_token` и `chat_id`
-   - В секции `[имя_аккаунта]`: `login`, `password`, `host`, `port`, `use_ssl`
-4. Сохраните файл, запустите `letterbot.bat` снова.
-5. Web UI откроется на http://127.0.0.1:8787/
+### 1) Source mode (run from repository)
 
-## Быстрый старт (dist / Letterbot.exe)
+1. Open the repository folder.
+2. Run `letterbot.bat`.
+3. On first launch, Letterbot bootstraps config files in the **repository root**:
+   - `settings.ini`
+   - `accounts.ini`
+4. Fill required values in `accounts.ini` (`bot_token`, `chat_id`, IMAP account fields).
+5. Run `letterbot.bat` again.
+6. Web UI is available at `http://127.0.0.1:8787/` (if enabled in config).
 
-1. Распакуйте архив `Letterbot.zip` в любую папку.
-2. Запустите `run.bat` двойным кликом.
-3. При первом запуске создастся `accounts.ini` рядом с `run.bat`.
-4. Заполните `accounts.ini`, запустите `run.bat` снова.
+### 2) Dist mode (one-folder build)
 
-## Конфигурационные файлы
+Current dist contract (from build scripts):
 
-| Файл | Назначение |
-|---|---|
-| `accounts.ini` | IMAP-аккаунты, Telegram bot_token, LLM-ключи |
-| `settings.ini` | Поведение бота (дайджесты, таймауты, web UI) |
+- launcher: `run.bat` (copied from `run_dist.bat`)
+- executable: `Letterbot.exe`
+- config directory: `mailbot_v26\config\`
+- config files used at runtime:
+  - `mailbot_v26\config\settings.ini`
+  - `mailbot_v26\config\accounts.ini`
+- first launch creates those files from examples in the same `mailbot_v26\config\` folder.
 
-Оба файла лежат в корне репозитория (или рядом с Letterbot.exe в dist).
+Steps:
 
-## Если Windows показывает SmartScreen
+1. Extract `Letterbot.zip`.
+2. Open `dist\Letterbot` contents.
+3. Run `run.bat`.
+4. Fill `mailbot_v26\config\accounts.ini`.
+5. Run `run.bat` again.
 
-Нажмите «Подробнее» → «Выполнить в любом случае».
-Это ожидаемо для нового/неподписанного исполняемого файла.
+### 3) Windows SmartScreen
+
+For a new unsigned build, Windows may show SmartScreen warning.
+Use **More info → Run anyway** for trusted internal build artifacts.
+
+### 4) Diagnostics
+
+From source mode repository root:
+
+- `python -m mailbot_v26 doctor --config-dir .`
+- `python -m mailbot_v26 doctor --print-lan-url --config-dir .`
+
+From dist mode folder:
+
+- `Letterbot.exe doctor --config-dir mailbot_v26\config`
+- `Letterbot.exe doctor --print-lan-url --config-dir mailbot_v26\config`

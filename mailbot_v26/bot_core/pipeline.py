@@ -297,16 +297,6 @@ def _extract_attachment_text(
 
         sanitize_limit = max(max_chars * 5, max_chars) if max_chars > 0 else 8000
         if name_lower.endswith(".pdf"):
-            legacy_text = extract_pdf_text(att.content, att.filename)
-            if legacy_text.strip():
-                text = sanitize_text(
-                    legacy_text,
-                    max_len=sanitize_limit,
-                )
-                text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
-                logger.info("PDF extraction: %d chars from %s", len(text), att.filename)
-                return text
-
             extracted_text, zero_reason = extract_pdf(att.content, att.filename)
             text = sanitize_text(
                 extracted_text,
