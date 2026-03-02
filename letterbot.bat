@@ -1,14 +1,14 @@
 @echo off
-setlocal enableextensions enabledelayedexpansion
+setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 
 set "REPO_ROOT=%~dp0"
+if "%REPO_ROOT:~-1%"=="\" set "REPO_ROOT=%REPO_ROOT:~0,-1%"
 set "CONFIG_DIR=%REPO_ROOT%"
-if "%CONFIG_DIR:~-1%"=="\" set "CONFIG_DIR=%CONFIG_DIR:~0,-1%"
 cd /d "%REPO_ROOT%"
 
-set "LOG_DIR=%REPO_ROOT%logs"
+set "LOG_DIR=%REPO_ROOT%\logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 set "LOG_FILE=%LOG_DIR%\letterbot.log"
 
@@ -30,7 +30,7 @@ for /f "delims=" %%I in ('where python') do (
 )
 :python_found
 
-set "VENV_DIR=%REPO_ROOT%.venv"
+set "VENV_DIR=%REPO_ROOT%\.venv"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 set "RUN_PY=%PYTHON_EXE%"
 
@@ -46,18 +46,18 @@ if exist "%VENV_PY%" (
 )
 
 echo [SETUP] Проверка зависимостей...
-"%RUN_PY%" -m pip install -r "%REPO_ROOT%requirements.txt" --quiet >>"%LOG_FILE%" 2>&1
+"%RUN_PY%" -m pip install -r "%REPO_ROOT%\requirements.txt" --quiet >>"%LOG_FILE%" 2>&1
 if ERRORLEVEL 1 (
     echo [WARN] Часть зависимостей не установилась. Продолжаем с текущим окружением.
 )
 
-if not exist "%REPO_ROOT%accounts.ini" (
+if not exist "%REPO_ROOT%\accounts.ini" (
     echo [SETUP] Создание шаблонов конфигурации...
     "%RUN_PY%" -m mailbot_v26 init-config --config-dir "%CONFIG_DIR%" >nul 2>&1
-    echo [SETUP] Заполните %REPO_ROOT%accounts.ini
+    echo [SETUP] Заполните %REPO_ROOT%\accounts.ini
     echo         Затем запустите letterbot.bat снова.
-    if exist "%REPO_ROOT%accounts.ini" (
-        start "" notepad "%REPO_ROOT%accounts.ini"
+    if exist "%REPO_ROOT%\accounts.ini" (
+        start "" notepad "%REPO_ROOT%\accounts.ini"
     )
     pause
     exit /b 2
@@ -67,7 +67,7 @@ if not exist "%REPO_ROOT%accounts.ini" (
 if ERRORLEVEL 1 (
     echo.
     echo [SETUP] Конфигурация не заполнена. Откройте accounts.ini и заполните данные.
-    echo         Путь: %REPO_ROOT%accounts.ini
+    echo         Путь: %REPO_ROOT%\accounts.ini
     echo         Затем запустите letterbot.bat снова.
     pause
     exit /b 2
