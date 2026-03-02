@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-02: P0 launcher/config hardening pass — removed unnecessary delayed expansion in root launchers, normalized ERRORLEVEL check in backup launcher, doctor dependency contract now treats optional misses as WARN with explicit "не блокирует запуск" text, removed non-runtime `telegram` from required doctor imports, and added targeted doctor dependency severity regression tests; full pytest green (925 passed).
 - 2026-03-02: Restored Windows BAT launcher path contract (normalized repo root without trailing slash + explicit path separators + quoted cd/if-exist/config-dir calls) across letterbot/update/tests/backup/open-config/build scripts; added targeted BAT path-contract regression test; pytest green in Linux env (Windows cmd execution UNCONFIRMED here).
 - 2026-03-02: Premium polish for web support surfaces: upgraded cockpit support card and footer support link styling, richer /support hero/cards/QR/empty-state UI, and copy-paste-friendly [support] INI template/bootstrap comments while preserving enabled/show_in_nav switches; web support tests refreshed and full pytest green.
 - 2026-03-02: Web support UI now falls back to settings.ini [support] when YAML support methods are missing/disabled, adds master/nav switches for /support and cockpit/footer visibility, premium cockpit support card with QR preview, and updated support INI templates/bootstrap with focused web tests.
@@ -145,20 +146,17 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Validate restored Windows launcher BAT contract via static regression + full pytest in CI/local Linux.
-- Keep P0 launchers stable while avoiding pipeline/web/support logic changes.
+- Validate launcher chain on real Windows host for Unicode/space paths (`letterbot.bat`, `update_and_run.bat`, backup/open-config helpers).
+- Keep two-file INI (`settings.ini` + `accounts.ini`) as default happy-path; avoid mandatory YAML in startup/doctor flows.
 Next:
-- Confirm launcher sanity on a real Windows host (`letterbot.bat doctor`, `letterbot.bat --help`/startup path).
-- Proceed to next P0/P1 packaging step after Windows host verification.
+- Run manual Windows smoke (`letterbot.bat` first-run bootstrap, second-run start, `update_and_run.bat`, `run_tests.bat`).
+- Proceed to next packaging gate after Windows-host confirmation.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
 - letterbot.bat
 - update_and_run.bat
-- run_tests.bat
 - backup.bat
-- open_config_folder.bat
-- build_windows_onefolder.bat
-- tests/test_windows_bat_path_contract.py
-- tests/test_launcher_warning_first.py
+- mailbot_v26/doctor.py
+- mailbot_v26/tests/test_doctor_dependencies.py
 - CONTINUITY.md
