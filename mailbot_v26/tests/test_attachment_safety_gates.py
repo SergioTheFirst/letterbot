@@ -90,8 +90,8 @@ def test_gate_total_limit(tmp_path: Path) -> None:
 def test_gate_extraction_truncation() -> None:
     with patch.object(
         core_pipeline,
-        "extract_pdf_text",
-        return_value=("Safe text " * 10_000),
+        "extract_pdf",
+        return_value=(("Safe text " * 10_000), ""),
     ):
         attachment = core_pipeline.Attachment(
             filename="sample.pdf",
