@@ -7,6 +7,7 @@
 <section class="panel">
   <h2>Поддержать разработку</h2>
   <p>Letterbot остаётся бесплатным. Если хотите поддержать развитие — выберите любой способ ниже.</p>
+  {% if support_text %}<p>{{ support_text }}</p>{% endif %}
 </section>
 
 {% for method in support_methods %}

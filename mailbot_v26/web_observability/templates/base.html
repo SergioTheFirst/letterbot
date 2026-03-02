@@ -95,7 +95,7 @@
       {% block content %}{% endblock %}
     </main>
 
-    <footer class="app-footer">Letterbot v{{ app_version }} · Powered by Letterbot Premium</footer>
+    <footer class="app-footer">Letterbot v{{ app_version }} · Powered by Letterbot Premium{% if support_nav_enabled %} · <a href="/support">Support</a>{% endif %}</footer>
   </div>
   <script>
     document.addEventListener('DOMContentLoaded', function() {

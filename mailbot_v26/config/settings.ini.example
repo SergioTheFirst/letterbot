@@ -67,15 +67,25 @@ enable_uncertainty_queue = false
 enable_commitment_chain_digest = false
 
 [support]
-; Show a support message in weekly digest (rate-limited)
+; Master switch for Web UI support page: false disables /support + nav link + cockpit card.
 enabled = false
-; If true, add support line to weekly digest footer (never to normal notifications)
-telegram = true
-; Min days between asks (hard cap: 30 by default)
-min_days_between_asks = 30
-; Link shown to the user (no raw markdown, Telegram HTML safe)
+; Visibility switch for nav link and cockpit card (when enabled=true, /support may still work).
+show_in_nav = true
+; Primary label shown on support page/cards.
+label = Поддержать Letterbot
+; Short helper text shown on support page.
+text = Поддержать проект можно по ссылке или QR-коду
+; Optional support URL (if empty, details/QR can still be shown).
 url = CHANGE_ME
-; Short message shown in footer (keep it 1-2 lines max)
+; Optional details line (for example: Boosty / СБП / личная страница).
+details = Например: Boosty / СБП / личная страница
+; Optional relative path to PNG/SVG near config dir.
+qr_image = CHANGE_ME
+; Weekly Telegram support footer switch (existing behavior, rate-limited).
+telegram = true
+; Min days between asks (hard cap: 30 by default).
+min_days_between_asks = 30
+; Short message shown in weekly digest footer.
 message = Поддержать Letterbot → {url}
 
 [premium_clarity]

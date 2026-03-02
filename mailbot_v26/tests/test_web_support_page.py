@@ -75,3 +75,38 @@ def test_support_page_hides_when_disabled(tmp_path: Path) -> None:
         body = home.get_data(as_text=True)
         assert "Support" not in body
         assert "Поддержать разработку" not in body
+
+
+def test_support_page_renders_from_ini_fallback(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    settings_path = tmp_path / "settings.ini"
+    qr_path = tmp_path / "support.png"
+    qr_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc````\x00\x00\x00\x04\x00\x01\x0b\xe7\x02\x9d\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    settings_path.write_text(
+        """
+[support]
+enabled = true
+show_in_nav = true
+label = Поддержать Letterbot
+text = Поддержать проект можно по ссылке или QR-коду
+url = https://example.com/support
+details = Boosty / СБП
+qr_image = support.png
+""",
+        encoding="utf-8",
+    )
+
+    from mailbot_v26.web_observability.app import _load_support_settings
+
+    app = _build_app(tmp_path, _load_support_settings(config_path))
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        response = client.get("/support")
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert "Поддержать Letterbot" in body
+        assert "Поддержать проект можно по ссылке или QR-коду" in body
+        assert "https://example.com/support" in body
+        assert "<img" in body
