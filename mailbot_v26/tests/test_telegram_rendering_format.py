@@ -6,6 +6,7 @@ from mailbot_v26.pipeline.tg_renderer import (
     format_subject,
 )
 from mailbot_v26.pipeline import processor
+from mailbot_v26.ui.branding import WATERMARK_LINE
 
 
 def test_subject_is_html_escaped() -> None:
@@ -74,7 +75,10 @@ def test_processor_format_drops_duplicate_subject_first_body_line_with_fw_re() -
         attachment_summary="",
     )
 
-    assert rendered.splitlines() == ["🔴 от sender@example.com — FW: Счет"]
+    assert rendered.splitlines() == [
+        "🔴 от sender@example.com — FW: Счет",
+        WATERMARK_LINE,
+    ]
 
 
 def test_signal_hints_are_single_per_type() -> None:

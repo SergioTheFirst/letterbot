@@ -12,6 +12,7 @@ from mailbot_v26.system.startup_health import (
     StartupHealthChecker,
     dispatch_launch_report,
 )
+from mailbot_v26.ui.branding import WATERMARK_LINE
 from mailbot_v26.worker import telegram_sender
 
 
@@ -119,6 +120,13 @@ def test_launch_report_deterministic() -> None:
     report_a = builder.build(results, mode=SimpleNamespace(value="FULL"))
     report_b = builder.build(list(reversed(results)), mode=SimpleNamespace(value="FULL"))
     assert report_a == report_b
+
+
+def test_startup_report_default_branding_and_watermark() -> None:
+    report = LaunchReportBuilder().build(results=[], mode=SimpleNamespace(value="FULL"))
+    assert "Letterbot Premium" in report
+    assert "MailBot Premium" not in report
+    assert WATERMARK_LINE in report
 
 
 def test_startup_report_includes_mail_account_status_ok() -> None:

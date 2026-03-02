@@ -27,7 +27,7 @@ DEFAULT_MAX_EXTRACTED_TOTAL_CHARS = 120_000
 SUPPORTED_SCHEMA_VERSION = 1
 
 SCHEMA_NEWER_MESSAGE = (
-    "Конфиг новее этой версии MailBot. Скачайте более новую версию или "
+    "Конфиг новее этой версии Letterbot. Скачайте более новую версию или "
     "используйте config.example.yaml этой версии. См. docs/UPGRADE.md"
 )
 

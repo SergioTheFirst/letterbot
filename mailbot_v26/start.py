@@ -80,6 +80,7 @@ from mailbot_v26.system.startup_health import (
 )
 from mailbot_v26.text.mime_utils import decode_mime_header
 from mailbot_v26.telegram_utils import telegram_safe
+from mailbot_v26.ui.branding import append_watermark
 from mailbot_v26.worker.telegram_sender import send_telegram
 from mailbot_v26.tools.backfill_events import maybe_backfill_events
 from mailbot_v26.version import __version__
@@ -244,6 +245,7 @@ def _build_system_payload(
     chat_id: str,
     priority: str = "🔵",
 ) -> TelegramPayload:
+    text = append_watermark(text)
     return TelegramPayload(
         html_text=telegram_safe(text),
         priority=priority,
