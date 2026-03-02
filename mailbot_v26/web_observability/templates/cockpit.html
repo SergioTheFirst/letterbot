@@ -237,14 +237,15 @@
       </div>
 
       {% if cfg.features.donate_enabled and support_nav_enabled %}
-      <div class="card golden-card">
-        <div class="section-title">
+      <div class="card golden-card support-card">
+        <div class="section-title support-card-head">
           <h2>Support Letterbot</h2>
         </div>
-        <div class="hint">Fuel premium reliability and fast improvements.</div>
+        <p class="support-card-copy">Letterbot stays free. Your support helps keep the premium experience steady and improving.</p>
         {% if support_methods and support_methods[0].qr_image_data_uri %}
-        <div style="margin-top:8px;">
-          <img src="{{ support_methods[0].qr_image_data_uri }}" alt="Support QR" style="max-width:72px; border-radius:8px; border:1px solid var(--border);">
+        <div class="support-card-qr-preview">
+          <img src="{{ support_methods[0].qr_image_data_uri }}" alt="Support QR preview">
+          <div class="support-card-qr-caption">Quick QR preview</div>
         </div>
         {% endif %}
         <div class="card-actions">

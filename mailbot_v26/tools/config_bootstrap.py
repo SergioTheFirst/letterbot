@@ -87,20 +87,20 @@ enable_uncertainty_queue = false
 enable_commitment_chain_digest = false
 
 [support]
-; Master switch for Web UI support page: false disables /support + nav link + cockpit card.
+; Master switch: false disables /support page and all web support surfaces.
 enabled = false
-; Visibility switch for nav link and cockpit card (when enabled=true, /support may still work).
+; Visibility switch: hides nav/footer/cockpit link while keeping /support available when enabled=true.
 show_in_nav = true
-; Primary label shown on support page/cards.
-label = Поддержать Letterbot
-; Short helper text shown on support page.
-text = Поддержать проект можно по ссылке или QR-коду
-; Optional support URL (if empty, details/QR can still be shown).
-url = CHANGE_ME
-; Optional details line (for example: Boosty / СБП / личная страница).
-details = Например: Boosty / СБП / личная страница
-; Optional relative path to PNG/SVG near config dir.
-qr_image = CHANGE_ME
+; Card/page title for support block.
+label = Support Letterbot
+; Calm helper text shown on support page hero.
+text = Letterbot остаётся бесплатным. Спасибо за поддержку развития.
+; Optional CTA link (example: Boosty/Donation page).
+url = https://example.com/support
+; Secondary details line (bank, SBP, context).
+details = Например: Boosty / СБП / карта
+; Optional QR image path relative to config folder (png/jpg/svg).
+qr_image = support_qr.png
 ; Weekly Telegram support footer switch (existing behavior, rate-limited).
 telegram = true
 ; Min days between asks (hard cap: 30 by default).
