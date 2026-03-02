@@ -47,6 +47,7 @@ from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
 from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.telegram_utils import telegram_safe
+from mailbot_v26.ui.branding import append_watermark
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.ini"
@@ -492,7 +493,7 @@ def _build_daily_payload(
     bot_token: str,
     data: daily_digest.DigestData,
 ) -> TelegramPayload:
-    digest_text = daily_digest._build_digest_text(data)
+    digest_text = append_watermark(daily_digest._build_digest_text(data))
     return TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",
@@ -516,6 +517,7 @@ def _build_weekly_payload(
     digest_text = weekly_digest._build_weekly_digest_text(data)
     if support_footer:
         digest_text = f"{digest_text}\n{support_footer}"
+    digest_text = append_watermark(digest_text)
     return TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",

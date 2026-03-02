@@ -12,6 +12,7 @@ from typing import Iterable, Sequence
 from mailbot_v26.config_loader import BotConfig
 from mailbot_v26.llm import router as llm_router
 from mailbot_v26.system_health import OperationalMode, SystemHealth
+from mailbot_v26.ui.branding import append_watermark
 from mailbot_v26.worker.telegram_sender import ping_telegram
 
 logger = logging.getLogger(__name__)
@@ -155,7 +156,7 @@ class StartupHealthChecker:
 
 
 class LaunchReportBuilder:
-    def __init__(self, version_label: str = "MailBot Premium v26") -> None:
+    def __init__(self, version_label: str = "Letterbot Premium v26") -> None:
         self._version_label = version_label
 
     def build(
@@ -194,7 +195,7 @@ class LaunchReportBuilder:
             f"- Operational mode: {mode.value}",
             "---",
         ]
-        return "\n".join(lines)
+        return append_watermark("\n".join(lines))
 
     def _format_mail_accounts(
         self,

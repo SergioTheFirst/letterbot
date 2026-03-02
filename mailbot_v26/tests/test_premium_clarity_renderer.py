@@ -6,6 +6,7 @@ import re
 from mailbot_v26.insights.digest import InsightDigest
 from mailbot_v26.insights.commitment_tracker import Commitment
 from mailbot_v26.pipeline import processor
+from mailbot_v26.ui.branding import WATERMARK_LINE
 
 
 def _render(
@@ -105,7 +106,12 @@ def test_premium_clarity_line_limit() -> None:
         short_explanation="Есть просрочки.",
     )
     rendered = _render(attachments=attachments, insight_digest=digest)
-    assert len(rendered.splitlines()) <= 18
+    assert len(rendered.splitlines()) <= 19
+
+
+def test_premium_clarity_contains_watermark() -> None:
+    rendered = _render()
+    assert WATERMARK_LINE in rendered
 
 
 def test_premium_clarity_extraction_failed_placeholder() -> None:
@@ -306,7 +312,7 @@ def test_premium_clarity_line_budget_with_extraction_failure_and_low_confidence(
         body_summary="",
         body_text="",
     )
-    assert len(rendered.splitlines()) <= 18
+    assert len(rendered.splitlines()) <= 19
 
 
 def test_premium_clarity_confidence_dots_never_mode() -> None:
@@ -435,7 +441,7 @@ def test_premium_clarity_line_budget_enforced_and_html_valid() -> None:
         subject="Очень длинная тема <с тегами> " * 3,
     )
     lines = rendered.splitlines()
-    assert len(lines) <= 18
+    assert len(lines) <= 19
     assert lines[0].startswith("🔵 ")
     assert any(line.startswith("От: ") for line in lines)
     assert any(line.startswith("Тема: ") for line in lines)

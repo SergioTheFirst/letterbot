@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-02: Unified watermark/branding layer across Telegram/runtime surfaces (ordinary, premium clarity, fallback, digests, startup/system/SLA notices), cockpit footer branding, and conditional cockpit support card linking to /support; targeted branding/support tests updated.
 - 2026-03-02: Final P0 release contracts closed: PDF zero-text taxonomy hardened (encrypted/broken_pdf/image_only/all_extractors_empty with backward-compatible extract_pdf_text alias), pipeline PDF zero-text reason logging aligned to existing logger style, happy-path smoke tests anchored for email→DB→TG delivery metadata contract, and Windows quickstart synchronized to current source/dist launcher-config contract with docs contract tests.
 - 2026-03-02: Hardened Windows path safety for spaces/cyrillic: quoted and trailing-backslash-safe config-dir handling in letterbot/update/open_config_folder/backup BAT launchers, resolved absolute config_dir embedding in run_stack worker/web/doctor subprocess commands, and added unicode-path regression tests; full pytest green (907 passed).
 - 2026-03-01: Unified config-dir perimeter for 2-file mode (open_config_folder.bat/backup.bat/doctor hints/Windows quickstart), added PDF zero-text taxonomy with `(text, zero_reason)` extractor contract plus compatibility alias, and added happy-path integration smoke tests for end-to-end email→DB→TG delivery metadata.
@@ -141,12 +142,10 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 Now:
-- Run full pytest --tb=short -q and confirm final P0 contract status (target 907+ passed, 0 failed).
-- Validate PDF zero-text reason telemetry in pipeline logs on empty extraction path.
+- Run requested targeted pytest for watermark/support surfaces, then full pytest --tb=short -q.
 - Keep One-Message Rule / Telegram metadata contract regressions green.
 Next:
 - Start P1 PyInstaller phase after final P0 pytest confirmation.
-- Collect production stats for PDF zero-text reasons to drive next extraction decisions.
 - Keep TG delivery dedupe + Telegram config contract invariants covered in CI regression tests.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?

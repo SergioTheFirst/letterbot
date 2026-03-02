@@ -236,6 +236,18 @@
         {% endif %}
       </div>
 
+      {% if cfg.features.donate_enabled and support_nav_enabled %}
+      <div class="card golden-card">
+        <div class="section-title">
+          <h2>Support</h2>
+        </div>
+        <div class="hint">Help keep Letterbot stable and improving.</div>
+        <div class="card-actions">
+          <a class="btn ghost" href="/support">Open support page</a>
+        </div>
+      </div>
+      {% endif %}
+
       <div class="card golden-card">
         <div class="section-title">
           <h2>Контакты</h2>

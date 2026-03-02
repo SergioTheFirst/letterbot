@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from mailbot_v26.pipeline import daily_digest
 from mailbot_v26.pipeline import digest_scheduler
 from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
+from mailbot_v26.ui.branding import WATERMARK_LINE
 
 
 def _base_digest_data() -> daily_digest.DigestData:
@@ -61,6 +62,37 @@ def test_support_telegram_not_added_to_daily_payload() -> None:
     )
 
     assert "💛" not in payload.html_text
+    assert WATERMARK_LINE in payload.html_text
+    assert "Поддержать" not in payload.html_text
+
+
+def test_weekly_payload_contains_watermark() -> None:
+    data = digest_scheduler.weekly_digest.WeeklyDigestData(
+        week_key="2026-W01",
+        total_emails=1,
+        deferred_emails=0,
+        attention_entities=[],
+        commitment_counts={},
+        overdue_commitments=[],
+        trust_deltas={},
+        anomaly_alerts=[],
+        quality_metrics=None,
+        attention_economics=None,
+        notification_sla=None,
+        previous_week_sla=None,
+        weekly_accuracy_report=None,
+        weekly_calibration_report=None,
+        weekly_accuracy_progress=None,
+    )
+    payload = digest_scheduler._build_weekly_payload(
+        account_email="account@example.com",
+        chat_id="chat",
+        bot_token="token",
+        week_key="2026-W01",
+        data=data,
+        support_footer="",
+    )
+    assert WATERMARK_LINE in payload.html_text
 
 
 def test_weekly_support_footer_rate_limited_via_runtime_overrides(tmp_path) -> None:

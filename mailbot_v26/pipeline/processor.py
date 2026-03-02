@@ -91,6 +91,7 @@ from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.observability import get_logger
 from mailbot_v26.telegram_utils import escape_tg_html
+from mailbot_v26.ui.branding import append_watermark
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.decision_trace_v1 import (
@@ -774,6 +775,7 @@ def _maybe_alert_notification_sla(
         f"{t('sla.alert.top_error', locale=_UI_LOCALE)}: {top_error}\n"
         f"{t('sla.alert.action', locale=_UI_LOCALE)}: {action_hint}"
     )
+    alert_text = append_watermark(alert_text)
     payload = TelegramPayload(
         html_text=escape_tg_html(alert_text),
         priority="\U0001F534",
@@ -1891,7 +1893,7 @@ def _build_premium_clarity_text(
         dots_text=dots_text,
     )
     deduped_lines = tg_renderer.dedup_rendered_lines(limited_lines)
-    return "\n".join(deduped_lines)
+    return append_watermark("\n".join(deduped_lines))
 
 
 def _trim_telegram_body(text: str) -> str:
@@ -1994,7 +1996,7 @@ def _build_telegram_text(
         )
     if attachment_summary:
         lines.append(attachment_summary)
-    return tg_renderer.dedup_rendered_text("\n".join(lines))
+    return append_watermark(tg_renderer.dedup_rendered_text("\n".join(lines)))
 
 
 def _normalize_action_line(action_line: str) -> str:
@@ -2086,11 +2088,13 @@ def _build_tg_fallback(
     attachment_summary: str | None = None,
 ) -> str:
     if attachment_summary is None:
-        return tg_renderer.build_tg_fallback(
+        return append_watermark(
+            tg_renderer.build_tg_fallback(
             priority=priority,
             subject=subject,
             from_email=from_email,
             attachments=attachments or [],
+            )
         )
     safe_subject = escape_tg_html(subject or "(без темы)")
     safe_sender = escape_tg_html(from_email or "неизвестно")
@@ -2107,7 +2111,7 @@ def _build_tg_fallback(
         "Основной текст не удалось безопасно отобразить.",
         attachment_summary,
     ]
-    return "\n".join(lines)
+    return append_watermark("\n".join(lines))
 
 
 def _build_tg_short_template(*, priority: str, subject: str, from_email: str) -> str:

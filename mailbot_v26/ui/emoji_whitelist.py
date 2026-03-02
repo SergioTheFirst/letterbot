@@ -16,6 +16,7 @@ ALLOWED_EMOJIS: tuple[str, ...] = (
     "⚠️",
     "📦",
     "📧",
+    "🔹",
 )
 
 _EMOJI_RANGES = (
