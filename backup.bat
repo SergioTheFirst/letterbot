@@ -1,18 +1,18 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 
 set "REPO_ROOT=%~dp0"
+if "%REPO_ROOT:~-1%"=="\" set "REPO_ROOT=%REPO_ROOT:~0,-1%"
 set "CONFIG_DIR=%REPO_ROOT%"
-if "%CONFIG_DIR:~-1%"=="\" set "CONFIG_DIR=%CONFIG_DIR:~0,-1%"
 cd /d "%REPO_ROOT%"
 
 echo =============================================
 echo   Letterbot Premium - Backup
 echo =============================================
 
-set "VENV_PY=%REPO_ROOT%.venv\Scripts\python.exe"
+set "VENV_PY=%REPO_ROOT%\.venv\Scripts\python.exe"
 set "RUN_PY=%VENV_PY%"
 
 if not exist "%RUN_PY%" (

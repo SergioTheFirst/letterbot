@@ -23,8 +23,8 @@ def test_update_and_run_propagates_start_exit_code() -> None:
     content = Path("update_and_run.bat").read_text(encoding="utf-8")
     assert 'set "RUN_EXIT=%ERRORLEVEL%"' in content
     assert "exit /b %RUN_EXIT%" in content
-    assert '-m mailbot_v26.doctor --config-dir "%REPO_ROOT%mailbot_v26\\config"' in content
-    assert '-m mailbot_v26.start --config-dir "%REPO_ROOT%mailbot_v26\\config"' in content
+    assert '-m mailbot_v26.doctor --config-dir "%REPO_ROOT%\\mailbot_v26\\config"' in content
+    assert '-m mailbot_v26.start --config-dir "%REPO_ROOT%\\mailbot_v26\\config"' in content
 
 
 def test_install_and_run_calls_migrate_doctor_and_start() -> None:

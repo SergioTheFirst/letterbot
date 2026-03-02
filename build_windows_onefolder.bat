@@ -4,15 +4,16 @@ chcp 65001 >nul
 set "PYTHONUTF8=1"
 
 set "REPO_ROOT=%~dp0"
+if "%REPO_ROOT:~-1%"=="\" set "REPO_ROOT=%REPO_ROOT:~0,-1%"
 cd /d "%REPO_ROOT%"
 
 echo =============================================
 echo   Letterbot Premium - Windows Build (one-folder)
 echo =============================================
 
-set "VENV_PY=%REPO_ROOT%.venv\Scripts\python.exe"
+set "VENV_PY=%REPO_ROOT%\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
-    echo ERROR: .venv not found. Run install_and_run.bat first.
+    echo ERROR: .venv not found. Run letterbot.bat first.
     exit /b 1
 )
 
@@ -23,54 +24,54 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-"%VENV_PY%" -m PyInstaller pyinstaller.spec --noconfirm --clean --distpath "%REPO_ROOT%dist" --workpath "%REPO_ROOT%build" --specpath "%REPO_ROOT%"
+"%VENV_PY%" -m PyInstaller pyinstaller.spec --noconfirm --clean --distpath "%REPO_ROOT%\dist" --workpath "%REPO_ROOT%\build" --specpath "%REPO_ROOT%"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: PyInstaller build failed.
     exit /b 1
 )
 
-set "DIST_DIR=%REPO_ROOT%dist\Letterbot"
+set "DIST_DIR=%REPO_ROOT%\dist\Letterbot"
 if not exist "%DIST_DIR%" (
     echo ERROR: dist\Letterbot not found after build.
     exit /b 1
 )
 
-if exist "%REPO_ROOT%mailbot_v26\config\settings.ini.example" (
-    copy /Y "%REPO_ROOT%mailbot_v26\config\settings.ini.example" "%DIST_DIR%\mailbot_v26\config\settings.ini.example" >nul
+if exist "%REPO_ROOT%\mailbot_v26\config\settings.ini.example" (
+    copy /Y "%REPO_ROOT%\mailbot_v26\config\settings.ini.example" "%DIST_DIR%\mailbot_v26\config\settings.ini.example" >nul
 ) else (
     echo WARNING: mailbot_v26\config\settings.ini.example not found.
 )
 
-if exist "%REPO_ROOT%mailbot_v26\config\accounts.ini.example" (
-    copy /Y "%REPO_ROOT%mailbot_v26\config\accounts.ini.example" "%DIST_DIR%\mailbot_v26\config\accounts.ini.example" >nul
+if exist "%REPO_ROOT%\mailbot_v26\config\accounts.ini.example" (
+    copy /Y "%REPO_ROOT%\mailbot_v26\config\accounts.ini.example" "%DIST_DIR%\mailbot_v26\config\accounts.ini.example" >nul
 ) else (
     echo WARNING: mailbot_v26\config\accounts.ini.example not found.
 )
 
-if exist "%REPO_ROOT%README_QUICKSTART_WINDOWS.md" (
-    copy /Y "%REPO_ROOT%README_QUICKSTART_WINDOWS.md" "%DIST_DIR%\README_QUICKSTART_WINDOWS.md" >nul
+if exist "%REPO_ROOT%\README_QUICKSTART_WINDOWS.md" (
+    copy /Y "%REPO_ROOT%\README_QUICKSTART_WINDOWS.md" "%DIST_DIR%\README_QUICKSTART_WINDOWS.md" >nul
 )
 
-if exist "%REPO_ROOT%run_dist.bat" (
-    copy /Y "%REPO_ROOT%run_dist.bat" "%DIST_DIR%\run.bat" >nul
+if exist "%REPO_ROOT%\run_dist.bat" (
+    copy /Y "%REPO_ROOT%\run_dist.bat" "%DIST_DIR%\run.bat" >nul
 ) else (
     echo WARNING: run_dist.bat not found.
 )
 
-if exist "%REPO_ROOT%docs\UPGRADE.md" (
-    copy /Y "%REPO_ROOT%docs\UPGRADE.md" "%DIST_DIR%\UPGRADE.md" >nul
+if exist "%REPO_ROOT%\docs\UPGRADE.md" (
+    copy /Y "%REPO_ROOT%\docs\UPGRADE.md" "%DIST_DIR%\UPGRADE.md" >nul
 ) else (
     echo WARNING: docs\UPGRADE.md not found.
 )
 
-if exist "%REPO_ROOT%docs\SMARTSCREEN.md" (
-    copy /Y "%REPO_ROOT%docs\SMARTSCREEN.md" "%DIST_DIR%\SMARTSCREEN.md" >nul
+if exist "%REPO_ROOT%\docs\SMARTSCREEN.md" (
+    copy /Y "%REPO_ROOT%\docs\SMARTSCREEN.md" "%DIST_DIR%\SMARTSCREEN.md" >nul
 ) else (
     echo WARNING: docs\SMARTSCREEN.md not found.
 )
 
-if exist "%REPO_ROOT%CHANGELOG.md" (
-    copy /Y "%REPO_ROOT%CHANGELOG.md" "%DIST_DIR%\CHANGELOG.md" >nul
+if exist "%REPO_ROOT%\CHANGELOG.md" (
+    copy /Y "%REPO_ROOT%\CHANGELOG.md" "%DIST_DIR%\CHANGELOG.md" >nul
 ) else (
     echo WARNING: CHANGELOG.md not found.
 )
@@ -81,7 +82,7 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-call "%REPO_ROOT%verify_dist.bat"
+call "%REPO_ROOT%\verify_dist.bat"
 if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
