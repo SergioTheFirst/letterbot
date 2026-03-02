@@ -4,6 +4,8 @@ chcp 65001 >nul
 set "PYTHONUTF8=1"
 
 set "REPO_ROOT=%~dp0"
+set "CONFIG_DIR=%REPO_ROOT%"
+if "%CONFIG_DIR:~-1%"=="\" set "CONFIG_DIR=%CONFIG_DIR:~0,-1%"
 cd /d "%REPO_ROOT%"
 
 echo =============================================
@@ -25,7 +27,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 "%RUN_PY%" -m mailbot_v26 backup
-set EXITCODE=%ERRORLEVEL%
+set "EXITCODE=%ERRORLEVEL%"
 
 echo =============================================
 echo   Backup completed with code %EXITCODE%

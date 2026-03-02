@@ -4,6 +4,8 @@ chcp 65001 >nul
 set "PYTHONUTF8=1"
 
 set "REPO_ROOT=%~dp0"
+set "CONFIG_DIR=%REPO_ROOT%"
+if "%CONFIG_DIR:~-1%"=="\" set "CONFIG_DIR=%CONFIG_DIR:~0,-1%"
 cd /d "%REPO_ROOT%"
 
 set "LOG_DIR=%REPO_ROOT%logs"
@@ -91,7 +93,7 @@ if exist "%VENV_PY%" (
 )
 
 call :log Running doctor checks (warning-first)...
-"%RUN_PY%" -m mailbot_v26.doctor --config-dir "%REPO_ROOT%" >>"%LOG_FILE%" 2>&1
+"%RUN_PY%" -m mailbot_v26.doctor --config-dir "%CONFIG_DIR%" >>"%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
     call :log [WARN] Doctor found issues. Startup continues in non-strict mode.
 )

@@ -25,7 +25,7 @@ class StackCommand:
 def _build_worker_command(python_exe: str, config_dir: Path | None) -> StackCommand:
     if config_dir is None:
         return StackCommand("worker", [python_exe, "-m", "mailbot_v26"])
-    config_value = str(config_dir)
+    config_value = str(Path(config_dir).resolve())
     script = (
         "from pathlib import Path; "
         "from mailbot_v26.start import main; "
@@ -47,7 +47,7 @@ def _build_web_command(
         "-m",
         "mailbot_v26.web_observability.app",
         "--config",
-        str(config_dir),
+        str(Path(config_dir).resolve()),
         "--db",
         str(db_path),
     ]
@@ -61,7 +61,7 @@ def _build_web_command(
 def _build_doctor_command(python_exe: str, config_dir: Path | None) -> StackCommand:
     if config_dir is None:
         return StackCommand("doctor", [python_exe, "-m", "mailbot_v26", "doctor"])
-    config_value = str(config_dir)
+    config_value = str(Path(config_dir).resolve())
     script = (
         "from pathlib import Path; "
         "from mailbot_v26.doctor import report_exit_code, run_doctor; "
