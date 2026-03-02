@@ -21,7 +21,7 @@ if not exist "%RUN_PY%" (
 )
 
 "%RUN_PY%" --version >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo ERROR: Python not found. Please run letterbot.bat first.
     exit /b 1
 )

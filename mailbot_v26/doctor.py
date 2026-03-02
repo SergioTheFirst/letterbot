@@ -62,7 +62,6 @@ REQUIRED_IMPORTS = [
     "docx",
     "pdfminer",
     "pyttsx3",
-    "telegram",
     "dotenv",
     "nltk",
     "langdetect",
@@ -224,14 +223,14 @@ def _check_dependencies() -> DoctorEntry:
         details = f"отсутствуют: {', '.join(sorted(missing_required))}"
         if missing_optional:
             details = (
-                f"{details}; опционально отсутствуют: {', '.join(sorted(missing_optional))}"
+                f"{details}; опционально отсутствуют: {', '.join(sorted(missing_optional))} (не блокирует запуск)"
             )
         return DoctorEntry("Dependencies", "FAIL", details)
     if missing_optional:
         return DoctorEntry(
             "Dependencies",
             "WARN",
-            f"опционально отсутствуют: {', '.join(sorted(missing_optional))}",
+            f"опционально отсутствуют: {', '.join(sorted(missing_optional))} (не блокирует запуск)",
         )
     return DoctorEntry("Dependencies", "OK", "импорты успешны")
 
