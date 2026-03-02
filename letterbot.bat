@@ -4,6 +4,8 @@ chcp 65001 >nul
 set "PYTHONUTF8=1"
 
 set "REPO_ROOT=%~dp0"
+set "CONFIG_DIR=%REPO_ROOT%"
+if "%CONFIG_DIR:~-1%"=="\" set "CONFIG_DIR=%CONFIG_DIR:~0,-1%"
 cd /d "%REPO_ROOT%"
 
 set "LOG_DIR=%REPO_ROOT%logs"
@@ -51,7 +53,7 @@ if ERRORLEVEL 1 (
 
 if not exist "%REPO_ROOT%accounts.ini" (
     echo [SETUP] Создание шаблонов конфигурации...
-    "%RUN_PY%" -m mailbot_v26 init-config --config-dir "%REPO_ROOT%" >nul 2>&1
+    "%RUN_PY%" -m mailbot_v26 init-config --config-dir "%CONFIG_DIR%" >nul 2>&1
     echo [SETUP] Заполните %REPO_ROOT%accounts.ini
     echo         Затем запустите letterbot.bat снова.
     if exist "%REPO_ROOT%accounts.ini" (
@@ -61,7 +63,7 @@ if not exist "%REPO_ROOT%accounts.ini" (
     exit /b 2
 )
 
-"%RUN_PY%" -m mailbot_v26 config-ready --config-dir "%REPO_ROOT%" --verbose
+"%RUN_PY%" -m mailbot_v26 config-ready --config-dir "%CONFIG_DIR%" --verbose
 if ERRORLEVEL 1 (
     echo.
     echo [SETUP] Конфигурация не заполнена. Откройте accounts.ini и заполните данные.
@@ -73,20 +75,20 @@ if ERRORLEVEL 1 (
 
 echo.
 echo Running doctor checks (warning-first)...
-"%RUN_PY%" -m mailbot_v26.doctor --config-dir "%REPO_ROOT%" >>"%LOG_FILE%" 2>&1
+"%RUN_PY%" -m mailbot_v26.doctor --config-dir "%CONFIG_DIR%" >>"%LOG_FILE%" 2>&1
 if ERRORLEVEL 1 (
     echo [WARN] Doctor нашёл проблемы. Запуск продолжается.
 )
 
 echo Running config validation (warning-first)...
-"%RUN_PY%" -m mailbot_v26 validate-config --config-dir "%REPO_ROOT%" >>"%LOG_FILE%" 2>&1
+"%RUN_PY%" -m mailbot_v26 validate-config --config-dir "%CONFIG_DIR%" >>"%LOG_FILE%" 2>&1
 if ERRORLEVEL 1 (
     echo [WARN] Конфигурация имеет предупреждения. Запуск продолжается.
 )
 
 echo.
 echo Starting Letterbot...
-"%RUN_PY%" -m mailbot_v26.tools.run_stack --config-dir "%REPO_ROOT%" --no-browser
+"%RUN_PY%" -m mailbot_v26.tools.run_stack --config-dir "%CONFIG_DIR%" --no-browser
 set "RUN_EXIT=%ERRORLEVEL%"
 
 if "%RUN_EXIT%"=="0" (

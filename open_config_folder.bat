@@ -2,6 +2,7 @@
 setlocal
 set "REPO_ROOT=%~dp0"
 set "CONFIG_DIR=%REPO_ROOT%"
+if "%CONFIG_DIR:~-1%"=="\" set "CONFIG_DIR=%CONFIG_DIR:~0,-1%"
 rem Конфигурационные файлы: settings.ini и accounts.ini в корне репозитория.
 
 if not exist "%CONFIG_DIR%" (
