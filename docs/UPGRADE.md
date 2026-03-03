@@ -6,7 +6,7 @@
 3. Copy only user config files from old folder:
    - `mailbot_v26/config/settings.ini`
    - `mailbot_v26/config/accounts.ini`
-4. Run `run.bat` and confirm startup checks pass.
+4. Run `run_dist.bat` and confirm startup checks pass.
 
 ## Common mistakes
 1. Do not unzip over old folder.

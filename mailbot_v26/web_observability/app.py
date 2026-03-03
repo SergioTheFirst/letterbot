@@ -928,8 +928,7 @@ def _health_timeline_block(timeline: list[dict[str, object]]) -> str:
 
 
 def _load_web_ui_settings(config_path: Path | None) -> WebUISettings:
-    if config_path is None or not config_path.exists():
-        logger.warning("config.yaml missing for web UI; using deterministic defaults")
+    def _defaults() -> WebUISettings:
         return WebUISettings(
             enabled=True,
             bind="127.0.0.1",
@@ -941,18 +940,26 @@ def _load_web_ui_settings(config_path: Path | None) -> WebUISettings:
             prod_server=False,
             require_strong_password_on_lan=True,
         )
+
+    if config_path is None or not config_path.exists():
+        logger.warning("config.yaml missing for web UI; using deterministic defaults")
+        return _defaults()
     try:
         raw = load_yaml_config(config_path)
-    except FileNotFoundError as exc:
-        raise RuntimeError(str(exc)) from exc
-    except YamlConfigError as exc:
-        raise RuntimeError(str(exc)) from exc
+    except (FileNotFoundError, YamlConfigError) as exc:
+        logger.warning("config.yaml load failed for web UI; using defaults: %s", str(exc))
+        return _defaults()
     ok, error = validate_yaml_config(raw)
     if not ok:
-        raise RuntimeError(error or "Invalid config.yaml")
+        logger.warning(
+            "config.yaml validation failed for web UI; using defaults: %s",
+            error or "Invalid config.yaml",
+        )
+        return _defaults()
     web_ui = raw.get("web_ui")
     if not isinstance(web_ui, dict):
-        raise RuntimeError("config.yaml missing web_ui section")
+        logger.warning("config.yaml missing web_ui section; using defaults")
+        return _defaults()
     enabled = bool(web_ui.get("enabled", False))
     bind = str(web_ui.get("bind", "127.0.0.1")).strip()
     port = int(web_ui.get("port", 8080))

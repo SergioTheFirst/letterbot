@@ -2,7 +2,7 @@
 
 ## Scenario 1 — First run bootstrap from INI examples
 - Preconditions: `settings.ini` and/or `accounts.ini` missing; both `*.example` files exist in `mailbot_v26/config`.
-- Action: Run `run_mailbot.bat` (source) or `run.bat` (dist).
+- Action: Run `letterbot.bat` (source) or `run_dist.bat` (dist).
 - Expected: Launcher creates missing INI files, runs `config-ready`, opens `accounts.ini` when required fields are missing.
 
 ## Scenario 2 — Config readiness gate

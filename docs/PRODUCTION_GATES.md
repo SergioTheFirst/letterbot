@@ -1,7 +1,7 @@
 # Production Gates (Windows one-folder zip)
 
 ## G1 — First-run succeeds
-- User can unpack `Letterbot.zip`, run `run.bat`, fill `accounts.ini`, and reach steady state.
+- User can unpack `Letterbot.zip`, run `run_dist.bat`, fill `accounts.ini`, and reach steady state.
 - First run must bootstrap `settings.ini` + `accounts.ini` from `*.example`.
 
 ## G2 — Config errors are actionable
@@ -18,7 +18,7 @@
 - `build_windows_onefolder.bat` produces `dist/Letterbot`.
 - Required contract files:
   - `Letterbot.exe`
-  - `run.bat`
+  - `run_dist.bat`
   - `mailbot_v26/config/settings.ini.example`
   - `mailbot_v26/config/accounts.ini.example`
   - `README_QUICKSTART_WINDOWS.md`

@@ -106,3 +106,40 @@ def test_web_module_does_not_exit_with_code_1_on_minimal_config_dir(tmp_path: Pa
     else:
         combined = (process.stdout.read() if process.stdout else "") + (process.stderr.read() if process.stderr else "")
         assert process.returncode != 1, combined
+
+
+def test_run_processes_reports_log_tail_on_child_failure(monkeypatch, tmp_path: Path, capsys) -> None:
+    from mailbot_v26.tools import run_stack
+
+    class DummyProcess:
+        _next_pid = 100
+
+        def __init__(self, _args, **_kwargs):
+            self.args = _args
+            self.pid = DummyProcess._next_pid
+            DummyProcess._next_pid += 1
+            self._calls = 0
+
+        def poll(self):
+            self._calls += 1
+            return 1 if self._calls >= 1 else None
+
+    log_file = tmp_path / "worker.log"
+    log_file.write_text("line1\nline2\n", encoding="utf-8")
+    monkeypatch.setattr(run_stack, "_prepare_log_path", lambda _name: log_file)
+    monkeypatch.setattr(subprocess, "Popen", DummyProcess)
+
+    code = run_stack._run_processes(
+        [run_stack.StackCommand("worker", [sys.executable, "-m", "mailbot_v26"])],
+        open_browser=False,
+        web_url="http://127.0.0.1:8787/login",
+        web_timeout=0.1,
+    )
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "worker exited with code 1" in out
+    assert "worker log:" in out
+    assert "worker log tail" in out
+    assert "line1" in out
+    assert "line2" in out

@@ -85,6 +85,17 @@ def _prepare_log_path(name: str) -> Path:
     return log_dir / f"{name}_{_timestamp_label()}.log"
 
 
+def _tail_log(path: Path, *, lines: int = 30) -> list[str]:
+    if lines <= 0:
+        return []
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            chunks = handle.readlines()
+    except OSError:
+        return []
+    return [line.rstrip("\n") for line in chunks[-lines:]]
+
+
 def _open_browser_when_ready(url: str, timeout_seconds: float) -> None:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
@@ -128,13 +139,16 @@ def _run_processes(
     web_url: str,
     web_timeout: float,
 ) -> int:
+    Path("runtime").mkdir(parents=True, exist_ok=True)
+    (Path("runtime") / "logs").mkdir(parents=True, exist_ok=True)
     processes: list[subprocess.Popen[str]] = []
-    log_files: list[tuple[str, object]] = []
+    process_meta: dict[int, tuple[str, Path]] = {}
+    log_files: list[object] = []
     try:
         for command in commands:
             log_path = _prepare_log_path(command.name)
             log_file = log_path.open("a", encoding="utf-8")
-            log_files.append((command.name, log_file))
+            log_files.append(log_file)
             print(f"[INFO] Starting {command.name} -> {_format_command(command.args)}")
             print(f"[INFO] Logging {command.name} output to {log_path}")
             proc = subprocess.Popen(
@@ -145,6 +159,7 @@ def _run_processes(
                 env=os.environ.copy(),
             )
             processes.append(proc)
+            process_meta[proc.pid] = (command.name, log_path)
 
         if open_browser:
             _open_browser_when_ready(web_url, web_timeout)
@@ -158,7 +173,16 @@ def _run_processes(
                 processes.remove(proc)
                 if code != 0:
                     exit_code = code
-                    print(f"[WARN] {proc.args[0]} exited with code {code}")
+                    name, log_path = process_meta.get(proc.pid, ("process", Path("unknown")))
+                    print(f"[ERROR] {name} exited with code {code}")
+                    print(f"[ERROR] {name} log: {log_path}")
+                    tail_lines = _tail_log(log_path, lines=30)
+                    if tail_lines:
+                        print(f"[ERROR] {name} log tail (last {len(tail_lines)} lines):")
+                        for line in tail_lines:
+                            print(f"[ERROR][{name}] {line}")
+                    else:
+                        print(f"[ERROR] {name} log tail unavailable")
             if processes:
                 time.sleep(0.5)
         return exit_code
@@ -167,7 +191,7 @@ def _run_processes(
         _terminate_processes(processes)
         return 0
     finally:
-        for _, handle in log_files:
+        for handle in log_files:
             try:
                 handle.close()
             except Exception:
