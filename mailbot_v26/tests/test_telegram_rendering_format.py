@@ -110,3 +110,18 @@ def test_processor_build_telegram_text_uses_mail_type_for_attachment_insight() -
 
     assert "💰 58 200 ₽ · до 28.02" in rendered
     assert "bill.pdf" not in rendered
+
+
+def test_watermark_in_full_render() -> None:
+    rendered = processor._build_telegram_text(
+        priority="🟡",
+        from_email="sender@example.com",
+        subject="Тема",
+        action_line="Ответить",
+        body_summary="Краткая сводка для проверки watermark.",
+        body_text="Текст письма",
+        attachments=[],
+        attachment_summary=None,
+    )
+
+    assert "Powered by" in rendered

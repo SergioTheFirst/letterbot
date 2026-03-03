@@ -196,3 +196,49 @@ def test_full_pipeline_excel_attachment_stays_in_full_mode() -> None:
     assert render_mode == processor.TelegramRenderMode.FULL
     assert payload_invalid is False
     assert "📎" in payload.html_text
+
+
+def test_heuristic_path_produces_full_render() -> None:
+    context = processor.TelegramBuildContext(
+        email_id=101,
+        received_at=datetime(2024, 1, 1, 12, 0),
+        priority="🟡",
+        from_email="sender@example.com",
+        subject="Тема",
+        action_line="",
+        mail_type="",
+        body_summary="",
+        body_text="Текст письма с достаточной длиной для показа в FULL режиме.",
+        attachment_summary="",
+        attachment_details=[],
+        attachment_files=[],
+        attachments_count=0,
+        extracted_text_len=120,
+        llm_failed=False,
+        signal_invalid=False,
+        insights=[],
+        insight_digest=None,
+        commitments_present=False,
+    )
+
+    payload, render_mode, payload_invalid = processor.build_telegram_payload(context)
+
+    assert render_mode == processor.TelegramRenderMode.FULL
+    assert payload_invalid is False
+    assert "Письмо получено" not in payload.html_text
+
+
+def test_heuristic_summary_extracts_body_text() -> None:
+    summary = processor._build_heuristic_summary(
+        subject="Тема",
+        body_text="Это первый абзац письма, который достаточно длинный для корректного summary.",
+    )
+
+    assert summary
+    assert len(summary) >= 12
+
+
+def test_heuristic_action_line_not_empty() -> None:
+    assert processor._build_heuristic_action_line(priority="🔴")
+    assert processor._build_heuristic_action_line(priority="🟡")
+    assert processor._build_heuristic_action_line(priority="🔵")

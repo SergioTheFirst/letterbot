@@ -10,7 +10,7 @@ from mailbot_v26.telegram.inbound import parse_callback_data
 
 
 def test_priority_keyboard_callback_data_length() -> None:
-    keyboard = build_email_actions_keyboard(email_id=42, expanded=False, prio_menu=False)
+    keyboard = build_email_actions_keyboard(email_id=42, expanded=False, prio_menu=False, initial_prio=False)
     for row in keyboard.get("inline_keyboard", []):
         for button in row:
             callback_data = button.get("callback_data")
@@ -40,7 +40,7 @@ def test_priority_menu_callbacks_parse() -> None:
 
 
 def test_email_actions_keyboard_contains_snooze_button() -> None:
-    keyboard = build_email_actions_keyboard(email_id=123, expanded=False)
+    keyboard = build_email_actions_keyboard(email_id=123, expanded=False, initial_prio=False)
     labels = [button["text"] for button in keyboard["inline_keyboard"][0]]
     assert labels == ["Приоритет", "⏰ Позже"]
     assert keyboard["inline_keyboard"][1][0]["text"] == "✓ Верно"
@@ -57,7 +57,7 @@ def test_snooze_callbacks_parse() -> None:
 
 
 def test_email_actions_keyboard_shows_trace_when_enabled() -> None:
-    keyboard = build_email_actions_keyboard(email_id=123, expanded=False, show_decision_trace=True)
+    keyboard = build_email_actions_keyboard(email_id=123, expanded=False, initial_prio=False, show_decision_trace=True)
     labels = [button["text"] for button in keyboard["inline_keyboard"][0]]
     assert labels == ["Почему так?", "Приоритет", "⏰ Позже"]
 
@@ -68,3 +68,22 @@ def test_priority_menu_labels_match_user_facing_ux() -> None:
         ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"],
         ["Назад"],
     ]
+
+
+def test_initial_keyboard_shows_priority_buttons() -> None:
+    keyboard = build_email_actions_keyboard(email_id=1, expanded=False, initial_prio=True)
+    assert [[button["text"] for button in row] for row in keyboard["inline_keyboard"]] == [[
+        "🔴 Срочно", "🟡 Важно", "🔵 Низкий"
+    ]]
+
+
+def test_initial_keyboard_no_back_button() -> None:
+    keyboard = build_email_actions_keyboard(email_id=1, expanded=False, initial_prio=True)
+    assert len(keyboard["inline_keyboard"]) == 1
+    all_labels = [button["text"] for row in keyboard["inline_keyboard"] for button in row]
+    assert "Назад" not in all_labels
+
+
+def test_prio_menu_keeps_back_button() -> None:
+    keyboard = build_email_actions_keyboard(email_id=1, expanded=False, prio_menu=True)
+    assert keyboard["inline_keyboard"][1][0]["text"] == "Назад"

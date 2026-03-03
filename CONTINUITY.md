@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-03: Restored premium Telegram fallback behavior when LLM summary is empty but body_text exists (FULL render retained), heuristic summary now extracts deterministic body text with blob guard, heuristic action line now priority-specific/non-empty, FULL render path always appends watermark, and initial notification keyboard defaults to direct priority buttons (🔴/🟡/🔵) without back row; targeted regressions + full pytest green (959 passed).
 - 2026-03-03: Telegram UX contract hardened — DecisionTrace hidden by default via settings.ini [telegram_ui] show_decision_trace=false, trace button label switched to "Почему так?" when enabled, legacy trace callbacks remain safe; Web UI password precedence now WEB_PASSWORD > config.yaml web_ui.password > settings.ini [web_ui] password with explicit warning when empty; settings/bootstrap templates and regression tests updated (targeted pytest green).
 - 2026-03-03: Fixed run_stack stop-ship startup crash by making web UI YAML optional (deterministic web defaults when config.yaml missing, deterministic local WEB_SECRET_KEY fallback), updated TG watermark to LetterBot.ru with HTML italic rendering in Telegram payload paths while preserving idempotency/plain fallback, and added run_stack/web CLI regression coverage; full pytest green (930 passed).
 - 2026-03-02: P0 launcher/config hardening pass — removed unnecessary delayed expansion in root launchers, normalized ERRORLEVEL check in backup launcher, doctor dependency contract now treats optional misses as WARN with explicit "не блокирует запуск" text, removed non-runtime `telegram` from required doctor imports, and added targeted doctor dependency severity regression tests; full pytest green (925 passed).
@@ -152,17 +153,17 @@ Done:
 - 2026-03-03: web cockpit repr-dump fix (flatten serialized/nested list values before template render), archive visibility regression tests for DB-backed emails, and priority-menu keyboard UX guardrail test; processor action fallback now normalizes "Действий не требуется" to "Проверить" for premium default TG UX.
 - 2026-03-03: premium Telegram UX cleanup (internal DecisionTrace/gate noise removed from default message, excerpt cleaning for external-mail disclaimer tails, priority-dot first line preserved, watermark added), web login fix (`next=/l` stable + legacy `/l` alias), web password precedence set to env > settings.ini [web_ui] > config.yaml, and LLM INI cleanup (single llm source, fallback defaults to primary, templates/examples de-duplicated) with full pytest green.
 Now:
-- Completed P0/P1 UX recovery patch: web repr/data-binding fixes + TG action fallback normalization + keyboard regression guardrails.
-- Full test suite green (`python -m pytest -q`).
+- Completed premium Telegram formatting restore patch (heuristic summary/action, fallback gating, watermark on FULL render, initial priority keyboard mode).
+- Full test suite green (`python -m pytest --tb=short -q`).
 Next:
-- Prepare merge for this single UX-fix PR (no scope expansion).
+- Prepare merge for this premium TG UX-fix PR (no scope expansion).
 - Run Windows host smoke gates separately as packaging follow-up.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/web_observability/app.py
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/tests/test_web_archive_forensics.py
+- mailbot_v26/telegram/decision_trace_ui.py
 - mailbot_v26/tests/test_priority_keyboard.py
-- mailbot_v26/tests/test_telegram_payload_pipeline.py
+- mailbot_v26/tests/test_telegram_render_modes.py
+- mailbot_v26/tests/test_telegram_rendering_format.py
 - CONTINUITY.md
