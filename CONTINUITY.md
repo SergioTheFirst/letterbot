@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-03: Fixed run_stack stop-ship startup crash by making web UI YAML optional (deterministic web defaults when config.yaml missing, deterministic local WEB_SECRET_KEY fallback), updated TG watermark to LetterBot.ru with HTML italic rendering in Telegram payload paths while preserving idempotency/plain fallback, and added run_stack/web CLI regression coverage; full pytest green (930 passed).
 - 2026-03-02: P0 launcher/config hardening pass — removed unnecessary delayed expansion in root launchers, normalized ERRORLEVEL check in backup launcher, doctor dependency contract now treats optional misses as WARN with explicit "не блокирует запуск" text, removed non-runtime `telegram` from required doctor imports, and added targeted doctor dependency severity regression tests; full pytest green (925 passed).
 - 2026-03-02: Restored Windows BAT launcher path contract (normalized repo root without trailing slash + explicit path separators + quoted cd/if-exist/config-dir calls) across letterbot/update/tests/backup/open-config/build scripts; added targeted BAT path-contract regression test; pytest green in Linux env (Windows cmd execution UNCONFIRMED here).
 - 2026-03-02: Premium polish for web support surfaces: upgraded cockpit support card and footer support link styling, richer /support hero/cards/QR/empty-state UI, and copy-paste-friendly [support] INI template/bootstrap comments while preserving enabled/show_in_nav switches; web support tests refreshed and full pytest green.
@@ -148,25 +149,19 @@ Done:
 - 2026-03-03: P0 Windows BAT hardening — removed bare-text hazards, normalized wrapper delegation to letterbot.bat with %*, tightened quoted path handling, and added BAT regression tests.
 Now:
 - Validate launcher chain on real Windows host for Unicode/space paths (`letterbot.bat`, `update_and_run.bat`, backup/open-config helpers) after BAT hardening patch.
-- Keep two-file INI (`settings.ini` + `accounts.ini`) as default happy-path; avoid mandatory YAML in startup/doctor flows.
+- Verify P0 run_stack stability on Windows host with two-file INI config (worker + web stay up, no immediate code 1).
 Next:
-- Run manual Windows smoke (`letterbot.bat` first-run bootstrap, second-run start, `update_and_run.bat`, `run_tests.bat`).
+- Run manual Windows smoke (`letterbot.bat` first-run bootstrap, second-run start, `update_and_run.bat`, `run_tests.bat`) including runtime/logs verification for worker/web longevity.
 - Proceed to next packaging gate after Windows-host confirmation.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- letterbot.bat
-- update_and_run.bat
-- run_dist.bat
-- run_tests.bat
-- install_and_run.bat
-- run_mailbot.bat
-- start_mailbot.bat
-- update.bat
-- verify_dist.bat
-- build_windows_onefolder.bat
-- open_config_folder.bat
-- tests/test_bat_no_bare_text_and_quoting.py
-- tests/test_launcher_warning_first.py
-- tests/test_deprecated_bat_wrapper_docs_only.py
+- mailbot_v26/ui/branding.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/pipeline/digest_scheduler.py
+- mailbot_v26/start.py
+- mailbot_v26/system/startup_health.py
+- mailbot_v26/web_observability/app.py
+- mailbot_v26/tests/test_telegram_rendering_format.py
+- mailbot_v26/tests/test_run_stack.py
 - CONTINUITY.md

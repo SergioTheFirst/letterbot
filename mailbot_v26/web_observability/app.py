@@ -927,7 +927,20 @@ def _health_timeline_block(timeline: list[dict[str, object]]) -> str:
     )
 
 
-def _load_web_ui_settings(config_path: Path) -> WebUISettings:
+def _load_web_ui_settings(config_path: Path | None) -> WebUISettings:
+    if config_path is None or not config_path.exists():
+        logger.warning("config.yaml missing for web UI; using deterministic defaults")
+        return WebUISettings(
+            enabled=True,
+            bind="127.0.0.1",
+            port=8787,
+            password="",
+            api_token="",
+            allow_lan=False,
+            allow_cidrs=[],
+            prod_server=False,
+            require_strong_password_on_lan=True,
+        )
     try:
         raw = load_yaml_config(config_path)
     except FileNotFoundError as exc:
@@ -1079,9 +1092,10 @@ def _load_web_ui_secrets(config_dir: Path) -> tuple[str, float]:
         "general", "web_secret_key", fallback=""
     )
     if not secret_key:
-        raise RuntimeError(
-            "WEB_SECRET_KEY environment variable or [general] web_secret_key is required"
+        logger.warning(
+            "WEB_SECRET_KEY missing; using deterministic local fallback key"
         )
+        secret_key = "letterbot-local-web-secret"
     try:
         attention_cost = float(
             parser.get("general", "attention_cost_per_hour", fallback="0")
@@ -1933,13 +1947,13 @@ def _is_loopback_bind(bind: str) -> bool:
         return False
 
 
-def _resolve_yaml_config_path(config_path: Path | None, config_dir: Path) -> Path:
+def _resolve_yaml_config_path(config_path: Path | None, config_dir: Path) -> Path | None:
     if config_path is not None:
         return config_path
     resolved = resolve_config_paths(config_dir)
     if resolved.yaml_path is not None:
         return resolved.yaml_path
-    raise RuntimeError(f"config.yaml not found in config dir: {resolved.config_dir}")
+    return None
 
 
 def _scrub_pii_line(line: str) -> str:

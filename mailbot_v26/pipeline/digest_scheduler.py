@@ -493,7 +493,7 @@ def _build_daily_payload(
     bot_token: str,
     data: daily_digest.DigestData,
 ) -> TelegramPayload:
-    digest_text = append_watermark(daily_digest._build_digest_text(data))
+    digest_text = append_watermark(daily_digest._build_digest_text(data), html=True)
     return TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",
@@ -517,7 +517,7 @@ def _build_weekly_payload(
     digest_text = weekly_digest._build_weekly_digest_text(data)
     if support_footer:
         digest_text = f"{digest_text}\n{support_footer}"
-    digest_text = append_watermark(digest_text)
+    digest_text = append_watermark(digest_text, html=True)
     return TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",

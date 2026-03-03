@@ -195,7 +195,7 @@ class LaunchReportBuilder:
             f"- Operational mode: {mode.value}",
             "---",
         ]
-        return append_watermark("\n".join(lines))
+        return append_watermark("\n".join(lines), html=True)
 
     def _format_mail_accounts(
         self,
