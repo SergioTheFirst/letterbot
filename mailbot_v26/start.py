@@ -245,7 +245,7 @@ def _build_system_payload(
     chat_id: str,
     priority: str = "🔵",
 ) -> TelegramPayload:
-    text = append_watermark(text)
+    text = append_watermark(text, html=True)
     return TelegramPayload(
         html_text=telegram_safe(text),
         priority=priority,

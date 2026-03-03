@@ -775,7 +775,7 @@ def _maybe_alert_notification_sla(
         f"{t('sla.alert.top_error', locale=_UI_LOCALE)}: {top_error}\n"
         f"{t('sla.alert.action', locale=_UI_LOCALE)}: {action_hint}"
     )
-    alert_text = append_watermark(alert_text)
+    alert_text = append_watermark(alert_text, html=True)
     payload = TelegramPayload(
         html_text=escape_tg_html(alert_text),
         priority="\U0001F534",
@@ -1689,7 +1689,8 @@ def _enforce_premium_clarity_line_budget(
             _build_lines(
                 spoiler_details=current_spoiler,
                 optional_details=trimmed_optional,
-            )
+            ),
+            html=True,
         ) > max_lines:
             trimmed_optional.pop()
         current_optional = trimmed_optional
@@ -1893,7 +1894,7 @@ def _build_premium_clarity_text(
         dots_text=dots_text,
     )
     deduped_lines = tg_renderer.dedup_rendered_lines(limited_lines)
-    return append_watermark("\n".join(deduped_lines))
+    return append_watermark("\n".join(deduped_lines), html=True)
 
 
 def _trim_telegram_body(text: str) -> str:
@@ -1996,7 +1997,7 @@ def _build_telegram_text(
         )
     if attachment_summary:
         lines.append(attachment_summary)
-    return append_watermark(tg_renderer.dedup_rendered_text("\n".join(lines)))
+    return append_watermark(tg_renderer.dedup_rendered_text("\n".join(lines)), html=True)
 
 
 def _normalize_action_line(action_line: str) -> str:
@@ -2094,7 +2095,8 @@ def _build_tg_fallback(
             subject=subject,
             from_email=from_email,
             attachments=attachments or [],
-            )
+            ),
+            html=True,
         )
     safe_subject = escape_tg_html(subject or "(без темы)")
     safe_sender = escape_tg_html(from_email or "неизвестно")
@@ -2111,7 +2113,7 @@ def _build_tg_fallback(
         "Основной текст не удалось безопасно отобразить.",
         attachment_summary,
     ]
-    return append_watermark("\n".join(lines))
+    return append_watermark("\n".join(lines), html=True)
 
 
 def _build_tg_short_template(*, priority: str, subject: str, from_email: str) -> str:
@@ -3799,7 +3801,8 @@ def _render_notification(
                 attachment_details=attachment_details,
                 commitments=commitments,
                 email_id=message_id,
-            )
+            ),
+            html=True,
         )
     except Exception as exc:  # pragma: no cover - safety net
         logger.error(
