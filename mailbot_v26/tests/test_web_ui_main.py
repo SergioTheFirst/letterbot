@@ -156,7 +156,7 @@ host=h
     assert captured["password"] == "env-pass"
 
 
-def test_web_main_password_precedence_yaml_then_ini(monkeypatch, tmp_path: Path) -> None:
+def test_web_main_password_precedence_ini_then_yaml(monkeypatch, tmp_path: Path) -> None:
     (tmp_path / "settings.ini").write_text("""[web]
 host=127.0.0.1
 port=8787
@@ -192,7 +192,7 @@ host=h
 
     web_app.main()
 
-    assert captured["password"] == "yaml-pass"
+    assert captured["password"] == "ini-pass"
 
 
 def test_web_main_password_falls_back_to_ini_and_warns_when_empty(monkeypatch, tmp_path: Path, caplog) -> None:

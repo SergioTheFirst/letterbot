@@ -24,11 +24,10 @@ show_decision_trace = false
 
 [web_ui]
 ; Password for Web UI login. Empty is allowed only as local fallback and logs a warning.
-password = CHANGE_ME
+password = 1
 
 [llm]
 primary = cloudflare
-fallback = cloudflare
 
 [gigachat]
 enabled = true

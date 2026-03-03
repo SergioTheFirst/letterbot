@@ -310,13 +310,7 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
     if resolved.two_file_mode:
         # 2-file mode source-of-truth: routing + secrets from accounts.ini.
         # Compatibility: if a secret is still only in legacy keys.ini, consume it when present.
-        llm_section = (
-            accounts_parser["llm"]
-            if "llm" in accounts_parser
-            else parser["llm"]
-            if "llm" in parser
-            else parser["DEFAULT"]
-        )
+        llm_section = parser["llm"] if "llm" in parser else parser["DEFAULT"]
         cloudflare_creds_section = (
             accounts_parser["cloudflare"]
             if "cloudflare" in accounts_parser
@@ -347,9 +341,12 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
     cloudflare_section = parser["cloudflare"] if "cloudflare" in parser else parser["DEFAULT"]
     safety_section = parser["llm_safety"] if "llm_safety" in parser else parser["DEFAULT"]
 
+    primary_provider = llm_section.get("primary", "cloudflare")
+    fallback_provider = llm_section.get("fallback", primary_provider)
+
     return LLMRouterConfig(
-        primary=llm_section.get("primary", "cloudflare"),
-        fallback=llm_section.get("fallback", "cloudflare"),
+        primary=primary_provider,
+        fallback=fallback_provider,
         gigachat_enabled=_get_bool(gigachat_section, "enabled", False),
         gigachat_api_key=gigachat_creds_section.get("api_key", ""),
         gigachat_base_url=gigachat_section.get(

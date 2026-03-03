@@ -149,27 +149,27 @@ Done:
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 - 2026-03-03: P0 Windows BAT hardening — removed bare-text hazards, normalized wrapper delegation to letterbot.bat with %*, tightened quoted path handling, and added BAT regression tests.
 - 2026-03-03: Launcher surface collapsed to canonical `letterbot.bat` (source) and `run_dist.bat` (dist); removed legacy BAT wrappers from root, hardened `letterbot.bat` bootstrap/preflight/run_stack flow, added run_stack child-failure log-tail diagnostics, and made web UI YAML optional fallback-safe for two-file INI startup; docs and launcher/tests aligned.
+- 2026-03-03: premium Telegram UX cleanup (internal DecisionTrace/gate noise removed from default message, excerpt cleaning for external-mail disclaimer tails, priority-dot first line preserved, watermark added), web login fix (`next=/l` stable + legacy `/l` alias), web password precedence set to env > settings.ini [web_ui] > config.yaml, and LLM INI cleanup (single llm source, fallback defaults to primary, templates/examples de-duplicated) with full pytest green.
 Now:
-- Prepare single PR for Telegram DecisionTrace UX default-hide + INI web_ui.password precedence contract changes.
-- Keep launcher-related Windows validation items queued after this UX/config contract patch.
+- Completed TG UX + web login redirect + INI/LLM contract patch and validated via full pytest -q.
+- Prepare merge/packaging follow-up only (no additional functional scope in this PR).
 Next:
-- Run full suite/Windows smoke gates on host and continue packaging readiness checks.
-- Confirm installer/operator guidance for non-empty web_ui.password defaults (UNCONFIRMED process).
+- Run Windows host smoke gates for launcher/runtime packaging readiness.
+- Confirm installer/operator guidance for rotating default web_ui.password from bootstrap value.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/telegram/decision_trace_ui.py
+- mailbot_v26/pipeline/tg_renderer.py
 - mailbot_v26/telegram/inbound.py
-- mailbot_v26/start.py
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/bot_core/pipeline.py
-- mailbot_v26/config_loader.py
 - mailbot_v26/web_observability/app.py
+- mailbot_v26/llm/router.py
 - mailbot_v26/config/settings.ini.example
+- mailbot_v26/config/accounts.ini.example
 - mailbot_v26/tools/config_bootstrap.py
-- mailbot_v26/tests/test_priority_keyboard.py
-- mailbot_v26/tests/test_telegram_inbound.py
+- mailbot_v26/tests/test_tg_renderer.py
+- mailbot_v26/tests/test_telegram_payload_pipeline.py
+- mailbot_v26/tests/test_web_login_form.py
 - mailbot_v26/tests/test_web_ui_main.py
-- mailbot_v26/tests/test_config_loader.py
+- mailbot_v26/tests/test_llm_config_loader.py
 - mailbot_v26/tests/test_config_bootstrap.py
 - CONTINUITY.md

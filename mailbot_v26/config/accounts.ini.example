@@ -17,7 +17,3 @@ api_token = CHANGE_ME
 
 [gigachat]
 api_key = CHANGE_ME
-
-[llm]
-primary = cloudflare
-fallback = cloudflare

@@ -292,3 +292,56 @@ def test_attachment_insight_does_not_hallucinate_invoice_or_act() -> None:
     assert "💰" not in rendered
     assert "Акт сверки" not in rendered
     assert "📎 Счёт" not in rendered
+
+
+def test_tg_render_premium_human_first_layout() -> None:
+    rendered = tg_renderer.render_telegram_message(
+        priority="🟡",
+        from_email="sender@example.com",
+        subject="Тема письма",
+        action_line="Ответить",
+        summary="""Первая строка
+Вторая строка
+Третья строка
+Четвертая строка""",
+        attachments=[{"filename": "invoice.pdf", "text": ""}],
+    )
+
+    assert rendered.splitlines()[0] == "🟡 от sender@example.com:"
+    assert "<b>Тема письма</b>" in rendered
+    assert "<b><i>Ответить</i></b>" in rendered
+    assert "📎 1 вложение: invoice.pdf" in rendered
+    assert "Первая строка" in rendered and "Четвертая строка" not in rendered
+    assert "<i>Powered by LetterBot.ru</i>" in rendered
+
+
+def test_tg_render_hides_internal_trace_noise_in_default_ux() -> None:
+    rendered = tg_renderer.render_telegram_message(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Subject",
+        action_line="ATTENTION_GATE Ответить",
+        summary="DecisionTraceV1\nLLM_GATE\nКоды: A1\nКонтрфакты",
+        attachments=[],
+    )
+
+    assert "DecisionTraceV1" not in rendered
+    assert "ATTENTION_GATE" not in rendered
+    assert "LLM_GATE" not in rendered
+    assert "Коды:" not in rendered
+    assert "Контрфакты" not in rendered
+
+
+def test_tg_render_strips_external_mail_warning_tail_from_excerpt() -> None:
+    rendered = tg_renderer.render_telegram_message(
+        priority="🔵",
+        from_email="sender@example.com",
+        subject="Subject",
+        action_line="Проверить",
+        summary="Полезный текст\nВНЕШНЯЯ ПОЧТА: Если отправитель почты неизвестен...\nШум",
+        attachments=[],
+    )
+
+    assert "Полезный текст" in rendered
+    assert "ВНЕШНЯЯ ПОЧТА" not in rendered
+    assert "Если отправитель почты неизвестен" not in rendered

@@ -20,3 +20,31 @@ def test_login_form_has_password_label(tmp_path: Path) -> None:
         assert 'data-testid="login-password"' in body
         assert 'name="csrf_token"' in body
         assert ">Sign in<" in body
+
+
+def test_login_next_l_redirects_to_home_alias(tmp_path: Path) -> None:
+    app = _build_app(tmp_path)
+    with app.test_client() as client:
+        login_page = client.get("/login?next=/l")
+        body = login_page.get_data(as_text=True)
+        import re
+        match = re.search(r'name="csrf_token" value="([^"]+)"', body)
+        assert match
+        response = client.post("/login?next=/l", data={"password": "pw", "csrf_token": match.group(1)})
+        assert response.status_code == 302
+        assert response.headers.get("Location", "").endswith("/")
+
+
+def test_legacy_l_alias_redirects_to_index(tmp_path: Path) -> None:
+    app = _build_app(tmp_path)
+    with app.test_client() as client:
+        login_page = client.get("/login")
+        body = login_page.get_data(as_text=True)
+        import re
+        match = re.search(r'name="csrf_token" value="([^"]+)"', body)
+        assert match
+        client.post("/login", data={"password": "pw", "csrf_token": match.group(1)})
+        response = client.get("/l")
+        assert response.status_code == 302
+        assert response.headers.get("Location", "").endswith("/")
+
