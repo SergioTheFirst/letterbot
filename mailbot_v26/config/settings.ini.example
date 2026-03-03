@@ -18,6 +18,14 @@ db_path = data/mailbot.sqlite
 host = 127.0.0.1
 port = 8787
 
+[telegram_ui]
+; Show engineering DecisionTrace in Telegram action row (false = hidden in normal UX).
+show_decision_trace = false
+
+[web_ui]
+; Password for Web UI login. Empty is allowed only as local fallback and logs a warning.
+password = CHANGE_ME
+
 [llm]
 primary = cloudflare
 fallback = cloudflare

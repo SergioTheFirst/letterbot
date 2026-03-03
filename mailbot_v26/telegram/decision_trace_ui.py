@@ -40,7 +40,7 @@ def _safe_callback(value: str) -> str:
 
 
 def _fallback_keyboard(*, email_id: int, expanded: bool) -> dict[str, Any]:
-    label = "◀ Скрыть" if expanded else "▶ Подробнее"
+    label = "◀ Скрыть" if expanded else "Почему так?"
     callback = build_decision_trace_callback(HIDE_PREFIX if expanded else DETAILS_PREFIX, email_id)
     return {"inline_keyboard": [[{"text": label, "callback_data": callback}]]}
 
@@ -50,7 +50,7 @@ def build_decision_trace_keyboard(*, email_id: int, expanded: bool) -> dict[str,
         label = "◀ Скрыть"
         callback = build_decision_trace_callback(HIDE_PREFIX, email_id)
     else:
-        label = "▶ Подробнее"
+        label = "Почему так?"
         callback = build_decision_trace_callback(DETAILS_PREFIX, email_id)
     return {"inline_keyboard": [[{"text": label, "callback_data": callback}]]}
 
@@ -61,6 +61,7 @@ def build_email_actions_keyboard(
     expanded: bool,
     prio_menu: bool = False,
     snooze_menu: bool = False,
+    show_decision_trace: bool = False,
 ) -> dict[str, Any]:
     email_id_int = int(str(email_id))
     try:
@@ -107,22 +108,27 @@ def build_email_actions_keyboard(
             ]
             return {"inline_keyboard": [snooze_row, back_row]}
 
-        trace_label = "◀ Скрыть" if expanded else "▶ Подробнее"
-        trace_callback = _safe_callback(
-            build_decision_trace_callback(
-                HIDE_PREFIX if expanded else DETAILS_PREFIX, email_id_int
-            )
-        )
         prio_callback = _safe_callback(f"{PRIO_MENU_PREFIX}{email_id_int}")
         snooze_callback = _safe_callback(f"{SNOOZE_MENU_PREFIX}{email_id_int}")
         ok_callback = _safe_callback(f"{PRIO_OK_PREFIX}{email_id_int}")
+        first_row: list[dict[str, str]] = []
+        if show_decision_trace:
+            trace_label = "◀ Скрыть" if expanded else "Почему так?"
+            trace_callback = _safe_callback(
+                build_decision_trace_callback(
+                    HIDE_PREFIX if expanded else DETAILS_PREFIX, email_id_int
+                )
+            )
+            first_row.append({"text": trace_label, "callback_data": trace_callback})
+        first_row.extend(
+            [
+                {"text": "Приоритет", "callback_data": prio_callback},
+                {"text": "⏰ Позже", "callback_data": snooze_callback},
+            ]
+        )
         return {
             "inline_keyboard": [
-                [
-                    {"text": trace_label, "callback_data": trace_callback},
-                    {"text": "Приоритет", "callback_data": prio_callback},
-                    {"text": "⏰ Позже", "callback_data": snooze_callback},
-                ],
+                first_row,
                 [
                     {"text": "✓ Верно", "callback_data": ok_callback},
                 ],

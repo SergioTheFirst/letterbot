@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-03: Telegram UX contract hardened — DecisionTrace hidden by default via settings.ini [telegram_ui] show_decision_trace=false, trace button label switched to "Почему так?" when enabled, legacy trace callbacks remain safe; Web UI password precedence now WEB_PASSWORD > config.yaml web_ui.password > settings.ini [web_ui] password with explicit warning when empty; settings/bootstrap templates and regression tests updated (targeted pytest green).
 - 2026-03-03: Fixed run_stack stop-ship startup crash by making web UI YAML optional (deterministic web defaults when config.yaml missing, deterministic local WEB_SECRET_KEY fallback), updated TG watermark to LetterBot.ru with HTML italic rendering in Telegram payload paths while preserving idempotency/plain fallback, and added run_stack/web CLI regression coverage; full pytest green (930 passed).
 - 2026-03-02: P0 launcher/config hardening pass — removed unnecessary delayed expansion in root launchers, normalized ERRORLEVEL check in backup launcher, doctor dependency contract now treats optional misses as WARN with explicit "не блокирует запуск" text, removed non-runtime `telegram` from required doctor imports, and added targeted doctor dependency severity regression tests; full pytest green (925 passed).
 - 2026-03-02: Restored Windows BAT launcher path contract (normalized repo root without trailing slash + explicit path separators + quoted cd/if-exist/config-dir calls) across letterbot/update/tests/backup/open-config/build scripts; added targeted BAT path-contract regression test; pytest green in Linux env (Windows cmd execution UNCONFIRMED here).
@@ -149,31 +150,26 @@ Done:
 - 2026-03-03: P0 Windows BAT hardening — removed bare-text hazards, normalized wrapper delegation to letterbot.bat with %*, tightened quoted path handling, and added BAT regression tests.
 - 2026-03-03: Launcher surface collapsed to canonical `letterbot.bat` (source) and `run_dist.bat` (dist); removed legacy BAT wrappers from root, hardened `letterbot.bat` bootstrap/preflight/run_stack flow, added run_stack child-failure log-tail diagnostics, and made web UI YAML optional fallback-safe for two-file INI startup; docs and launcher/tests aligned.
 Now:
-- Validate merged launcher contract on real Windows host (`letterbot.bat` source bootstrap+start, `run_dist.bat` dist bootstrap+start) with Unicode/space paths.
-- Verify runtime/log diagnostics from `mailbot_v26.tools.run_stack` on deliberate worker/web startup failure.
+- Prepare single PR for Telegram DecisionTrace UX default-hide + INI web_ui.password precedence contract changes.
+- Keep launcher-related Windows validation items queued after this UX/config contract patch.
 Next:
-- Run manual Windows smoke (`letterbot.bat` first-run bootstrap, second-run steady run, `run_dist.bat`, `run_tests.bat`) and capture operator-facing error tails.
-- Proceed to packaging gate after Windows-host confirmation.
+- Run full suite/Windows smoke gates on host and continue packaging readiness checks.
+- Confirm installer/operator guidance for non-empty web_ui.password defaults (UNCONFIRMED process).
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- letterbot.bat
-- run_dist.bat
-- mailbot_v26/tools/run_stack.py
+- mailbot_v26/telegram/decision_trace_ui.py
+- mailbot_v26/telegram/inbound.py
+- mailbot_v26/start.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/bot_core/pipeline.py
+- mailbot_v26/config_loader.py
 - mailbot_v26/web_observability/app.py
-- mailbot_v26/tests/test_run_stack.py
+- mailbot_v26/config/settings.ini.example
+- mailbot_v26/tools/config_bootstrap.py
+- mailbot_v26/tests/test_priority_keyboard.py
+- mailbot_v26/tests/test_telegram_inbound.py
 - mailbot_v26/tests/test_web_ui_main.py
-- mailbot_v26/tests/test_windows_launcher_contract.py
-- README.md
-- README_QUICKSTART_WINDOWS.md
-- WINDOWS_QUICKSTART.md
-- docs/ACCEPTANCE_CHECKLIST.md
-- docs/SMOKE_TESTS_WINDOWS.md
-- docs/WINDOWS_QUICKSTART.md
-- docs/SMARTSCREEN.md
-- docs/TROUBLESHOOTING_WINDOWS.md
-- docs/UPGRADE.md
-- docs/PRODUCTION_GATES.md
-- docs/RELEASE_ARTIFACT_CONTRACT.md
-- docs/RELEASE_CHECKLIST_WINDOWS.md
+- mailbot_v26/tests/test_config_loader.py
+- mailbot_v26/tests/test_config_bootstrap.py
 - CONTINUITY.md
