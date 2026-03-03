@@ -212,7 +212,7 @@ def test_attachment_insight_invoice_amount_due_date() -> None:
         mail_type="INVOICE",
     )
 
-    assert "💰 58 200 ₽ · до 28.02" in rendered
+    assert "📎 Счёт: 58 200 ₽ · до 28.02" in rendered
     assert "invoice.pdf" not in rendered
 
 

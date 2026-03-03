@@ -1749,6 +1749,7 @@ def _build_premium_clarity_text(
     from_email: str,
     from_name: str | None,
     subject: str,
+    mail_type: str,
     action_line: str,
     body_summary: str,
     body_text: str,
@@ -1772,26 +1773,46 @@ def _build_premium_clarity_text(
     sender_display = from_email or from_name or "неизвестно"
     safe_sender = _escape_dynamic(strip_disallowed_emojis(sender_display))
     safe_subject = _escape_dynamic(strip_disallowed_emojis(subject or "(без темы)"))
-    action_text = _resolve_action_line(action_line)
-    action_text = strip_disallowed_emojis(action_text)
+    action_text = strip_disallowed_emojis(_resolve_action_line(action_line))
+    normalized_mail_type = (mail_type or "").strip().upper()
     normalized_action = re.sub(r"[\W_]+", " ", action_text.lower()).strip()
-    if any(token in normalized_action for token in ("ответ", "reply", "напис")):
-        short_action = "Ответить"
-    elif any(token in normalized_action for token in ("оплат", "счет", "invoice", "pay")):
+    evidence_text = " ".join(
+        part
+        for part in (
+            action_text,
+            subject,
+            body_summary,
+            body_text,
+            " ".join(str(attachment.get("filename") or "") for attachment in attachments),
+            " ".join(str(item.get("summary") or "") for item in attachment_summaries),
+        )
+        if part
+    )
+    normalized_evidence = re.sub(r"[\W_]+", " ", evidence_text.lower()).strip()
+    if normalized_mail_type.startswith("INVOICE") or "PAYMENT_REMINDER" in normalized_mail_type:
         short_action = "Оплатить"
+    elif normalized_mail_type.startswith("ACT") or "RECONCILIATION" in normalized_mail_type:
+        short_action = "Сверить"
+    elif "SIGNED" in normalized_mail_type and any(
+        token in normalized_mail_type for token in ("CONTRACT", "AGREEMENT")
+    ):
+        short_action = "Зафиксировать"
+    elif any(token in normalized_evidence for token in ("signed contract", "signed agreement", "подписан договор", "подписанное соглашение")):
+        short_action = "Зафиксировать"
+    elif any(token in normalized_evidence for token in ("акт сверки", "reconciliation act", "сверки")):
+        short_action = "Сверить"
+    elif any(token in normalized_evidence for token in ("outage", "incident", "авар", "сбой", "недоступ", "technical alert")):
+        short_action = "Проверить"
+    elif any(token in normalized_evidence for token in ("к сведению", "for your information", "fyi", "информацион", "ознаком")):
+        short_action = "Ознакомиться"
+    elif any(token in normalized_action for token in ("ответ", "reply", "напис")):
+        short_action = "Ответить"
+    elif any(token in normalized_evidence for token in ("оплат", "счет", "счёт", "invoice", "pay")):
+        short_action = "Оплатить"
+    elif any(token in normalized_evidence for token in ("договор", "contract", "agreement")):
+        short_action = "Зафиксировать"
     else:
         short_action = "Проверить"
-
-    normalized_subject = re.sub(r"[\W_]+", " ", (subject or "").lower()).strip()
-    has_invoice_subject_signal = any(
-        token in normalized_subject for token in ("счет", "счёт", "invoice", "оплат")
-    )
-    has_invoice_excel_attachment = any(
-        str(attachment.get("filename") or "").lower().endswith((".xls", ".xlsx", ".xlsm", ".xlsb"))
-        for attachment in attachments
-    )
-    if short_action == "Проверить" and has_invoice_subject_signal and has_invoice_excel_attachment:
-        short_action = "Оплатить"
     safe_action = _escape_dynamic(short_action)
     excerpt_source = (body_summary or "").strip() or (body_text or "").strip()
     excerpt = tg_renderer._clean_excerpt(excerpt_source, max_lines=3)
@@ -2027,7 +2048,12 @@ def validate_tg_payload(text: str, ctx: EmailContext) -> str:
     action_line = ctx.action_line.strip() or "Действий не требуется"
     if not action_line:
         raise InvalidTelegramPayload("missing_action")
-    if ctx.attachments_count > 0 and "влож" not in text.lower() and "📎" not in text:
+    normalized_text = text.lower()
+    has_attachment_marker = any(
+        marker in normalized_text
+        for marker in ("влож", "📎", "💰", "акт сверки", "счёт")
+    )
+    if ctx.attachments_count > 0 and not has_attachment_marker:
         raise InvalidTelegramPayload("attachments missing")
     if _looks_like_subject_only(text, ctx.subject) and (
         ctx.body_text.strip() or ctx.attachments_count > 0
@@ -3778,8 +3804,7 @@ def _render_notification(
                 attachment_details=attachment_details,
                 commitments=commitments,
                 email_id=message_id,
-            ),
-            html=True,
+            )
         )
     except Exception as exc:  # pragma: no cover - safety net
         logger.error(
@@ -4803,6 +4828,7 @@ def process_message(
                     from_email=from_email,
                     from_name=from_name,
                     subject=subject,
+                    mail_type=mail_type,
                     action_line=action_line,
                     body_summary=body_summary,
                     body_text=body_text or "",
@@ -4826,6 +4852,7 @@ def process_message(
                 ),
                 priority=priority,
                 metadata=render_result.payload.metadata,
+                reply_markup=render_result.payload.reply_markup,
             )
             render_result = RenderResult(
                 payload=premium_payload,

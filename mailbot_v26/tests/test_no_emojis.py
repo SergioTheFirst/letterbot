@@ -21,6 +21,7 @@ def test_telegram_render_emoji_whitelist_premium_clarity() -> None:
         from_email="Анна 😊 <anna@example.com>",
         from_name="Анна 😊",
         subject="Срочно: счет 😊",
+        mail_type="",
         action_line="Ответить клиенту 😊",
         body_summary="Нужно оплатить счет до завтра 😊",
         body_text="Нужно оплатить счет до завтра 😊",

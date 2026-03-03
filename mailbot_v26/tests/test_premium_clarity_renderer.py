@@ -19,6 +19,7 @@ def _render(
         from_email="sender@example.com",
         from_name="Sender",
         subject="Тема письма",
+        mail_type="",
         action_line=action_line,
         body_summary=body_summary,
         body_text=body_summary,
@@ -91,6 +92,7 @@ def test_premium_clarity_invoice_with_excel_attachment_prefers_pay_action() -> N
         from_email="billing@example.com",
         from_name="Billing",
         subject="Счет на оплату №55",
+        mail_type="INVOICE",
         action_line="Проверьте вручную",
         body_summary="",
         body_text="",
@@ -109,3 +111,47 @@ def test_premium_clarity_invoice_with_excel_attachment_prefers_pay_action() -> N
         extraction_failed=False,
     )
     assert rendered.splitlines()[2] == "Оплатить"
+
+
+def test_premium_clarity_reconciliation_prefers_reconcile_action() -> None:
+    rendered = _render(
+        action_line="Проверьте вручную",
+        body_summary="Направляю акт сверки за март 2026",
+    )
+    assert rendered.splitlines()[2] == "Сверить"
+
+
+def test_premium_clarity_information_only_prefers_read_action() -> None:
+    rendered = _render(
+        action_line="Проверьте вручную",
+        body_summary="FYI: информационное письмо для ознакомления",
+    )
+    assert rendered.splitlines()[2] == "Ознакомиться"
+
+
+def test_premium_clarity_signed_contract_prefers_record_action() -> None:
+    rendered = processor._build_premium_clarity_text(
+        priority="🟡",
+        received_at=datetime(2026, 1, 1),
+        from_email="legal@example.com",
+        from_name="Legal",
+        subject="Signed agreement",
+        mail_type="SIGNED_CONTRACT",
+        action_line="Проверьте вручную",
+        body_summary="Подписан договор и отправлен контрагентом",
+        body_text="",
+        attachments=[{"filename": "signed.pdf", "text": ""}],
+        attachment_summaries=[],
+        insights=[],
+        insight_digest=None,
+        commitments=[],
+        attachments_count=1,
+        extracted_text_len=10,
+        confidence_percent=80,
+        confidence_available=True,
+        confidence_dots_mode="auto",
+        confidence_dots_threshold=75,
+        confidence_dots_scale=10,
+        extraction_failed=False,
+    )
+    assert rendered.splitlines()[2] == "Зафиксировать"
