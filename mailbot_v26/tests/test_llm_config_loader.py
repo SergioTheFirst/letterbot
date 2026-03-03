@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from mailbot_v26.llm.router import _load_llm_config
+from mailbot_v26.llm.router import _load_llm_config, _load_yaml_config
 
 
 def test_llm_loader_handles_settings_without_llm_safety(tmp_path: Path) -> None:
@@ -114,5 +114,35 @@ def test_llm_loader_fallback_defaults_to_primary_when_missing(tmp_path: Path) ->
 
     loaded = _load_llm_config(config_dir)
 
+    assert loaded.primary == "gigachat"
+    assert loaded.fallback == "gigachat"
+
+
+def test_yaml_llm_fallback_defaults_to_primary(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.yaml").write_text(
+        """telegram:
+  bot_token: tg-token
+  chat_id: "123"
+accounts:
+  - name: Account
+    email: account@example.com
+    imap_host: imap.example.com
+    imap_port: 993
+    username: account@example.com
+    password: pass
+    enabled: true
+llm:
+  provider: gigachat
+  gigachat:
+    api_token: test-token
+""",
+        encoding="utf-8",
+    )
+
+    loaded = _load_yaml_config(config_dir)
+
+    assert loaded is not None
     assert loaded.primary == "gigachat"
     assert loaded.fallback == "gigachat"

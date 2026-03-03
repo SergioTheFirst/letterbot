@@ -154,20 +154,21 @@ Done:
 - 2026-03-03: Launcher surface collapsed to canonical `letterbot.bat` (source) and `run_dist.bat` (dist); removed legacy BAT wrappers from root, hardened `letterbot.bat` bootstrap/preflight/run_stack flow, added run_stack child-failure log-tail diagnostics, and made web UI YAML optional fallback-safe for two-file INI startup; docs and launcher/tests aligned.
 - 2026-03-03: web cockpit repr-dump fix (flatten serialized/nested list values before template render), archive visibility regression tests for DB-backed emails, and priority-menu keyboard UX guardrail test; processor action fallback now normalizes "Действий не требуется" to "Проверить" for premium default TG UX.
 - 2026-03-03: premium Telegram UX cleanup (internal DecisionTrace/gate noise removed from default message, excerpt cleaning for external-mail disclaimer tails, priority-dot first line preserved, watermark added), web login fix (`next=/l` stable + legacy `/l` alias), web password precedence set to env > settings.ini [web_ui] > config.yaml, and LLM INI cleanup (single llm source, fallback defaults to primary, templates/examples de-duplicated) with full pytest green.
+- 2026-03-03: premium defaults enabled in runtime flags (processor + clarity), inline external disclaimer tails removed in excerpt cleaning, YAML LLM fallback now defaults to primary provider, and config bootstrap no longer requires redundant [llm] fallback when omitted; regression tests added/updated with full pytest green.
 Now:
-- PREMIUM Telegram notification format regression fix implemented and verified (LLM-free XLS path now FULL, fallback only when display data missing).
-- Full test suite green (`python -m pytest --tb=short -q`).
+- P0/P1 defaults/noise/config cleanup patch validated; awaiting merge.
+- Full test suite green (`python -m pytest -q`).
 Next:
-- Prepare merge for PREMIUM TG format restore patch (no scope expansion).
-- Run Windows host smoke gates separately as packaging follow-up.
+- Merge patch and run Windows host smoke gates separately as packaging follow-up.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/telegram/decision_trace_ui.py
-- mailbot_v26/tests/test_premium_format_regression.py
-- mailbot_v26/tests/test_telegram_payload_pipeline.py
-- mailbot_v26/tests/test_telegram_payload_validation.py
-- mailbot_v26/tests/test_telegram_render_modes.py
-- tests/test_tg_payload_pipeline.py
+- mailbot_v26/features/flags.py
+- mailbot_v26/text/clean_email.py
+- mailbot_v26/llm/router.py
+- mailbot_v26/tools/config_bootstrap.py
+- mailbot_v26/tests/test_feature_flags.py
+- mailbot_v26/tests/test_clean_email.py
+- mailbot_v26/tests/test_llm_config_loader.py
+- mailbot_v26/tests/test_config_bootstrap.py
 - CONTINUITY.md

@@ -61,6 +61,34 @@ def _is_disclaimer_start(line: str) -> bool:
     return any(lowered.startswith(marker) for marker in DISCLAIMER_MARKERS)
 
 
+def _is_disclaimer_prefix(text: str) -> bool:
+    lowered = text.strip().lower()
+    if not lowered:
+        return True
+    if lowered.endswith(("-", "—", "|", "•")):
+        return True
+    return any(
+        marker in lowered
+        for marker in ("re:", "fw:", "fwd:", "subject:", "тема:", "from:", "от:")
+    )
+
+
+def _strip_inline_disclaimer(line: str) -> tuple[str, bool]:
+    lowered = line.lower()
+    best_index: int | None = None
+    for marker in DISCLAIMER_MARKERS:
+        index = lowered.find(marker)
+        if index < 0:
+            continue
+        if best_index is None or index < best_index:
+            best_index = index
+    if best_index is None:
+        return line, False
+    if not _is_disclaimer_prefix(line[:best_index]):
+        return line, False
+    return line[:best_index].rstrip(), True
+
+
 def _looks_like_html(text: str) -> bool:
     lowered = text.lower()
     if any(tag in lowered for tag in ("<html", "<body", "<style", "<table", "<!doctype", "<head")):
@@ -100,7 +128,11 @@ def clean_email_body(text: Any) -> str:
             break
         if _is_disclaimer_start(line):
             break
-        cleaned.append(line)
+        stripped_line, had_inline_disclaimer = _strip_inline_disclaimer(line)
+        if stripped_line:
+            cleaned.append(stripped_line)
+        if had_inline_disclaimer:
+            break
 
     collapsed: list[str] = []
     blank = False

@@ -69,3 +69,11 @@ def test_clean_email_does_not_cut_mid_sentence_external_words():
     cleaned = clean_email_body(body)
 
     assert cleaned == body
+
+
+def test_clean_email_cuts_inline_disclaimer_after_subject_prefix():
+    body = "RE: Оплата счета ВНЕШНЯЯ ПОЧТА: Если отправитель неизвестен\nхвост"
+
+    cleaned = clean_email_body(body)
+
+    assert cleaned == "RE: Оплата счета"

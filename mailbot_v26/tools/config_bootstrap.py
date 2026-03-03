@@ -479,8 +479,6 @@ def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
         if lowered == "llm":
             if _is_placeholder(section.get("primary", "")):
                 issues.append("[llm] primary is not configured")
-            if _is_placeholder(section.get("fallback", "")):
-                issues.append("[llm] fallback is not configured")
             continue
 
         has_imap_section = True
