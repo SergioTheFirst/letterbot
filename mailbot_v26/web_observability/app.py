@@ -852,6 +852,36 @@ def _sanitize_email_preview(value: object) -> str:
     return WEB_EMAIL_REDACTED_PREVIEW
 
 
+def _flatten_render_text(value: object, *, limit: int = 240) -> str:
+    def _flatten(node: object) -> list[str]:
+        if node is None:
+            return []
+        if isinstance(node, (list, tuple, set)):
+            parts: list[str] = []
+            for item in node:
+                parts.extend(_flatten(item))
+            return parts
+        if isinstance(node, Mapping):
+            parts: list[str] = []
+            for item in node.values():
+                parts.extend(_flatten(item))
+            return parts
+        text = str(node).strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError):
+            return [text]
+        if parsed == node:
+            return [text]
+        return _flatten(parsed)
+
+    combined = " ".join(part for part in _flatten(value) if part)
+    compact = " ".join(combined.split())
+    return _clamp_text(compact, limit)
+
+
 def _sanitize_archive_row(row: Mapping[str, object]) -> dict[str, object]:
     return {
         **row,
@@ -2379,6 +2409,33 @@ def create_app(
                 stalled_threads = analytics.cockpit_stalled_threads(account_emails, days=30, limit=3)
             except Exception:
                 stalled_threads = []
+
+        top_senders = [
+            {
+                **item,
+                "display_name": _flatten_render_text(item.get("display_name")),
+            }
+            for item in top_senders
+            if isinstance(item, Mapping)
+        ]
+        silent_contacts = [
+            {
+                **item,
+                "display_name": _flatten_render_text(item.get("display_name")),
+            }
+            for item in silent_contacts
+            if isinstance(item, Mapping)
+        ]
+        stalled_threads = [
+            {
+                **item,
+                "from_email": _flatten_render_text(item.get("from_email")),
+                "subject": _flatten_render_text(item.get("subject")),
+                "snippet": _flatten_render_text(item.get("snippet")),
+            }
+            for item in stalled_threads
+            if isinstance(item, Mapping)
+        ]
 
         open_commitments = 0
         commitments_url = None

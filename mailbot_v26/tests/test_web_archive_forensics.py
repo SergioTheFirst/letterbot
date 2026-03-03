@@ -212,3 +212,77 @@ def test_email_details_timeline_sorted(tmp_path: Path) -> None:
         body = page.get_data(as_text=True)
         stages = re.findall(r'data-stage="([^"]+)"', body)
         assert stages[:3] == ["analyze", "parse", "send"]
+
+
+def test_cockpit_renders_flat_text_instead_of_serialized_repr(tmp_path: Path) -> None:
+    db_path, app = _build_app(tmp_path)
+    now = datetime.now(timezone.utc)
+    _insert_email(
+        db_path,
+        email_id=77,
+        account_email="acct@example.com",
+        from_email="sender@example.com",
+        received_at=now,
+    )
+
+    class FakeAnalytics:
+        def cockpit_summary(self, **kwargs):
+            return {
+                "status_strip": {},
+                "today_digest": {"items": []},
+                "week_digest": {"items": []},
+                "golden_signals": {},
+                "engineer": {},
+                "recent_activity": [],
+            }
+
+        def lane_activity_rows(self, **kwargs):
+            return []
+
+        def lane_counts(self, **kwargs):
+            return {"all": 1, "critical": 0, "commitments": 0, "deferred": 0, "failures": 0, "learning": 0}
+
+        def cockpit_top_senders(self, *args, **kwargs):
+            return [{"display_name": ["Alice", ["Ops"]], "count": 3}]
+
+        def cockpit_silent_contacts(self, *args, **kwargs):
+            return [{"display_name": ["Bob", ["Vendor"]], "days_silent": 10}]
+
+        def cockpit_stalled_threads(self, *args, **kwargs):
+            return [{"from_email": ["sender@example.com"], "subject": ["[\"Invoice\"]"], "snippet": [["Need action"]], "days_ago": 2}]
+
+        def commitment_status_counts(self, **kwargs):
+            return {"pending": 0}
+
+    app.config["ANALYTICS_FACTORY"] = lambda: FakeAnalytics()
+
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        page = client.get("/")
+        body = page.get_data(as_text=True)
+        assert page.status_code == 200
+        assert "Alice Ops" in body
+        assert "Invoice" in body
+        assert "[&#39;[" not in body
+
+
+def test_archive_page_shows_rows_for_existing_db_emails(tmp_path: Path) -> None:
+    db_path, app = _build_app(tmp_path)
+    now = datetime.now(timezone.utc)
+    _insert_email(
+        db_path,
+        email_id=11,
+        account_email="acct@example.com",
+        from_email="sender@example.com",
+        received_at=now,
+        action_line="Проверить",
+        body_summary="Короткий текст",
+    )
+
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        page = client.get("/archive", query_string={"account_emails": "acct@example.com"})
+        body = page.get_data(as_text=True)
+        assert page.status_code == 200
+        assert 'data-email-id="11"' in body
+        assert "Archive entries are not available" not in body

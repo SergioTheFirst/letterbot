@@ -114,7 +114,7 @@ def test_action_rendered_in_tg(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert html_text.startswith("🔵 от sender@example.com:")
-    assert "Краткое описание письма." in html_text
+    assert "<b><i>Проверить письмо</i></b>" in html_text
     assert "<i>Powered by LetterBot.ru</i>" in html_text
 
 
