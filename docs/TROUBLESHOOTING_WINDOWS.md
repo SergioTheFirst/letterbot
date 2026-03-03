@@ -54,7 +54,7 @@ Each block is one symptom, one cause, one fix.
 - Fix: Install runtime requirements in `.venv` and restart.
 
 ## 11) Dist run fails with missing `Letterbot.exe`
-- Symptom: `run.bat` or `run.bat` says `Letterbot.exe not found`.
+- Symptom: `run_dist.bat` or `run_dist.bat` says `Letterbot.exe not found`.
 - Cause: Dist folder is incomplete or wrong launch directory is used.
 - Fix: Start from `dist\Letterbot` folder that contains `Letterbot.exe`.
 

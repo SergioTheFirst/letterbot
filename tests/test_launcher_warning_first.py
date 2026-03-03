@@ -1,22 +1,21 @@
 from pathlib import Path
 
 
-def test_run_mailbot_wrapper_delegates_to_letterbot() -> None:
-    content = Path("run_mailbot.bat").read_text(encoding="utf-8")
-    assert "[DEPRECATED]" in content
-    assert 'call "%~dp0letterbot.bat" %*' in content
+def test_letterbot_is_canonical_source_launcher() -> None:
+    content = Path("letterbot.bat").read_text(encoding="utf-8")
+    assert "mailbot_v26.tools.run_stack" in content
+    assert '--config-dir "%CONFIG_DIR%" --no-browser' in content
 
 
 def test_update_and_run_propagates_start_exit_code() -> None:
     content = Path("update_and_run.bat").read_text(encoding="utf-8")
     assert 'set "RUN_EXIT=%ERRORLEVEL%"' in content
     assert "exit /b %RUN_EXIT%" in content
-    assert '--config-dir "%CONFIG_DIR%"' in content
 
 
-def test_install_and_run_calls_wrapper_and_passes_args() -> None:
-    content = Path("install_and_run.bat").read_text(encoding="utf-8")
-    assert 'call "%~dp0letterbot.bat" %*' in content
+def test_legacy_wrappers_removed() -> None:
+    for rel in ("run_mailbot.bat", "install_and_run.bat", "start_mailbot.bat"):
+        assert not Path(rel).exists(), rel
 
 
 def test_update_and_run_uses_safe_fetch_reset_and_warns_on_pip_failure() -> None:

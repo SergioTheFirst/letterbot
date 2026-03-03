@@ -15,7 +15,7 @@
 
 Current dist contract (from build scripts):
 
-- launcher: `run.bat` (copied from `run_dist.bat`)
+- launcher: `run_dist.bat`
 - executable: `Letterbot.exe`
 - config directory: `mailbot_v26\config\`
 - config files used at runtime:
@@ -27,9 +27,9 @@ Steps:
 
 1. Extract `Letterbot.zip`.
 2. Open `dist\Letterbot` contents.
-3. Run `run.bat`.
+3. Run `run_dist.bat`.
 4. Fill `mailbot_v26\config\accounts.ini`.
-5. Run `run.bat` again.
+5. Run `run_dist.bat` again.
 
 ### 3) Windows SmartScreen
 

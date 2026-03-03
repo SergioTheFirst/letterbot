@@ -29,7 +29,8 @@
    - `copy mailbot_v26\config\settings.ini.example mailbot_v26\config\settings.ini`
    - `copy mailbot_v26\config\accounts.ini.example mailbot_v26\config\accounts.ini`
 3. Откройте оба файла и заполните свои данные (email, пароль, Telegram-токен).
-4. Рекомендуемый запуск на Windows: `run_mailbot.bat`.
+4. Рекомендуемый запуск на Windows (source mode): `letterbot.bat`.
+5. Dist mode launcher: `run_dist.bat`.
 5. Ручные команды:
    - Проверка: `python -m mailbot_v26.doctor`
    - Запуск: `python -m mailbot_v26.start`

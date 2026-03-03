@@ -147,21 +147,33 @@ Done:
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
 - 2026-03-03: P0 Windows BAT hardening — removed bare-text hazards, normalized wrapper delegation to letterbot.bat with %*, tightened quoted path handling, and added BAT regression tests.
+- 2026-03-03: Launcher surface collapsed to canonical `letterbot.bat` (source) and `run_dist.bat` (dist); removed legacy BAT wrappers from root, hardened `letterbot.bat` bootstrap/preflight/run_stack flow, added run_stack child-failure log-tail diagnostics, and made web UI YAML optional fallback-safe for two-file INI startup; docs and launcher/tests aligned.
 Now:
-- Validate launcher chain on real Windows host for Unicode/space paths (`letterbot.bat`, `update_and_run.bat`, backup/open-config helpers) after BAT hardening patch.
-- Verify P0 run_stack stability on Windows host with two-file INI config (worker + web stay up, no immediate code 1).
+- Validate merged launcher contract on real Windows host (`letterbot.bat` source bootstrap+start, `run_dist.bat` dist bootstrap+start) with Unicode/space paths.
+- Verify runtime/log diagnostics from `mailbot_v26.tools.run_stack` on deliberate worker/web startup failure.
 Next:
-- Run manual Windows smoke (`letterbot.bat` first-run bootstrap, second-run start, `update_and_run.bat`, `run_tests.bat`) including runtime/logs verification for worker/web longevity.
-- Proceed to next packaging gate after Windows-host confirmation.
+- Run manual Windows smoke (`letterbot.bat` first-run bootstrap, second-run steady run, `run_dist.bat`, `run_tests.bat`) and capture operator-facing error tails.
+- Proceed to packaging gate after Windows-host confirmation.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/ui/branding.py
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/pipeline/digest_scheduler.py
-- mailbot_v26/start.py
-- mailbot_v26/system/startup_health.py
+- letterbot.bat
+- run_dist.bat
+- mailbot_v26/tools/run_stack.py
 - mailbot_v26/web_observability/app.py
-- mailbot_v26/tests/test_telegram_rendering_format.py
 - mailbot_v26/tests/test_run_stack.py
+- mailbot_v26/tests/test_web_ui_main.py
+- mailbot_v26/tests/test_windows_launcher_contract.py
+- README.md
+- README_QUICKSTART_WINDOWS.md
+- WINDOWS_QUICKSTART.md
+- docs/ACCEPTANCE_CHECKLIST.md
+- docs/SMOKE_TESTS_WINDOWS.md
+- docs/WINDOWS_QUICKSTART.md
+- docs/SMARTSCREEN.md
+- docs/TROUBLESHOOTING_WINDOWS.md
+- docs/UPGRADE.md
+- docs/PRODUCTION_GATES.md
+- docs/RELEASE_ARTIFACT_CONTRACT.md
+- docs/RELEASE_CHECKLIST_WINDOWS.md
 - CONTINUITY.md

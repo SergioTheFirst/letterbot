@@ -89,3 +89,25 @@ def test_web_main_reports_busy_port_without_traceback(monkeypatch, tmp_path: Pat
     assert isinstance(raised, SystemExit)
     assert raised.code == 1
     assert "Порт 8787 занят" in out
+
+
+def test_load_web_ui_settings_falls_back_when_yaml_missing_web_ui(tmp_path: Path) -> None:
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text("storage:\n  db_path: db.sqlite\n", encoding="utf-8")
+
+    settings = web_app._load_web_ui_settings(config_yaml)
+
+    assert settings.enabled is True
+    assert settings.bind == "127.0.0.1"
+    assert settings.port == 8787
+
+
+def test_load_web_ui_settings_falls_back_when_yaml_invalid(tmp_path: Path) -> None:
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text("web_ui: [", encoding="utf-8")
+
+    settings = web_app._load_web_ui_settings(config_yaml)
+
+    assert settings.enabled is True
+    assert settings.bind == "127.0.0.1"
+    assert settings.port == 8787

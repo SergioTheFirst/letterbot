@@ -1,7 +1,7 @@
 # Acceptance checklist
 
-1. install_and_run.bat creates `.venv`, installs deps, and starts `python -m mailbot_v26`.
-2. run_mailbot.bat starts with an existing `.venv`.
+1. letterbot.bat creates `.venv`, installs deps, and starts `python -m mailbot_v26.tools.run_stack --config-dir . --no-browser`.
+2. run_dist.bat bootstraps dist config and starts `Letterbot.exe`.
 3. run_tests.bat runs `python -m pytest -q` using `.venv`.
 4. python -m mailbot_v26 --version prints the current version.
 5. Launch report includes the version string.
