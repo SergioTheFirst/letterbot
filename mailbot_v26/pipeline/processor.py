@@ -1969,7 +1969,7 @@ def _build_telegram_text(
     attachment_summary: str | None = None,
 ) -> str:
     if attachment_summary is None:
-        return tg_renderer.render_telegram_message(
+        rendered = tg_renderer.render_telegram_message(
             priority=priority,
             from_email=from_email,
             subject=subject,
@@ -1978,6 +1978,7 @@ def _build_telegram_text(
             attachments=attachments or [],
             mail_type=mail_type,
         )
+        return append_watermark(rendered, html=True)
     fields = tg_renderer.apply_semantic_gates(
         action_line=_resolve_action_line(action_line),
         summary=body_summary,
@@ -2265,7 +2266,7 @@ def build_telegram_payload(
     fallback_reasons: list[str] = []
     telegram_text_raw = ""
     summary_valid = _is_meaningful_summary(context.body_summary)
-    if not summary_valid:
+    if not summary_valid and not (context.body_text or "").strip():
         fallback_reasons.append("summary_invalid")
         event_emitter.emit(
             type="telegram_empty_summary",
@@ -2498,6 +2499,7 @@ def build_telegram_payload(
             email_id=context.email_id,
             expanded=False,
             prio_menu=False,
+            initial_prio=True,
             show_decision_trace=load_telegram_ui_config().show_decision_trace,
         ),
     )
@@ -2590,20 +2592,35 @@ def _build_heuristic_llm_result(
 
 
 def _build_heuristic_summary(*, subject: str, body_text: str) -> str:
-    candidate = " ".join(part for part in [subject or "", body_text or ""] if part).strip()
-    candidate = re.sub(r"\s+", " ", candidate)
-    if len(candidate) >= 140:
-        candidate = candidate[:140].rsplit(" ", 1)[0]
-    if _is_meaningful_summary(candidate):
-        return candidate
-    fallback = f"Содержание письма: {subject or 'без темы'}"
-    return fallback
+    text = clean_email_body(body_text or "").strip()
+    if not text:
+        return ""
+
+    def _contains_probable_blob(value: str) -> bool:
+        for token in value.split():
+            compact = token.strip()
+            if len(compact) < 32:
+                continue
+            if re.fullmatch(r"[A-Za-z0-9+/=]+", compact):
+                return True
+        return False
+
+    for paragraph in text.split("\n"):
+        normalized = re.sub(r"\s+", " ", paragraph).strip()
+        if len(normalized) >= _MIN_SUMMARY_CHARS and not _contains_probable_blob(normalized):
+            return normalized[:200]
+    normalized_text = re.sub(r"\s+", " ", text)
+    if len(normalized_text) >= _MIN_SUMMARY_CHARS and not _contains_probable_blob(normalized_text):
+        return normalized_text[:200]
+    return ""
 
 
 def _build_heuristic_action_line(*, priority: str) -> str:
-    if priority in {"🔴", "🟡"}:
-        return "Ответить"
-    return "Действий не требуется"
+    if priority == "🔴":
+        return "Срочно требует внимания"
+    if priority == "🟡":
+        return "Требует рассмотрения"
+    return "Ознакомиться"
 
 
 def _build_heuristic_attachment_summaries(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:

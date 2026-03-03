@@ -61,6 +61,7 @@ def build_email_actions_keyboard(
     expanded: bool,
     prio_menu: bool = False,
     snooze_menu: bool = False,
+    initial_prio: bool = True,
     show_decision_trace: bool = False,
 ) -> dict[str, Any]:
     email_id_int = int(str(email_id))
@@ -107,6 +108,29 @@ def build_email_actions_keyboard(
                 }
             ]
             return {"inline_keyboard": [snooze_row, back_row]}
+
+        if initial_prio and not prio_menu and not snooze_menu:
+            priority_row = [
+                {
+                    "text": "🔴 Срочно",
+                    "callback_data": _safe_callback(
+                        f"{PRIO_SET_PREFIX}{email_id_int}:R"
+                    ),
+                },
+                {
+                    "text": "🟡 Важно",
+                    "callback_data": _safe_callback(
+                        f"{PRIO_SET_PREFIX}{email_id_int}:Y"
+                    ),
+                },
+                {
+                    "text": "🔵 Низкий",
+                    "callback_data": _safe_callback(
+                        f"{PRIO_SET_PREFIX}{email_id_int}:B"
+                    ),
+                },
+            ]
+            return {"inline_keyboard": [priority_row]}
 
         prio_callback = _safe_callback(f"{PRIO_MENU_PREFIX}{email_id_int}")
         snooze_callback = _safe_callback(f"{SNOOZE_MENU_PREFIX}{email_id_int}")
