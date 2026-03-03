@@ -1242,7 +1242,22 @@ def resolve_dashboard_vars(request, session, allow_pii: bool | None = None) -> D
         return None
 
     def _parse_accounts(raw: object) -> list[str]:
+        if isinstance(raw, list):
+            return [
+                item for item in
+                (s.strip() for s in raw if isinstance(s, str))
+                if item
+            ]
         return _parse_account_emails(str(raw)) if raw not in (None, "") else []
+
+    def _clean_email_list(emails: list[str]) -> list[str]:
+        """Remove repr-like garbage values before persisting dashboard scope."""
+        result: list[str] = []
+        for item in emails:
+            cleaned = str(item).strip()
+            if "@" in cleaned and not cleaned.startswith("[") and not cleaned.startswith('"'):
+                result.append(cleaned)
+        return result
 
     query_accounts_raw = request.args.get("account_emails")
     accounts = _parse_accounts(query_accounts_raw)
@@ -1299,7 +1314,7 @@ def resolve_dashboard_vars(request, session, allow_pii: bool | None = None) -> D
     )
     try:
         session["dashboard_vars"] = {
-            "account_emails": resolved.account_emails,
+            "account_emails": _clean_email_list(resolved.account_emails),
             "window_days": resolved.window_days,
             "limit": resolved.limit,
             "pii": resolved.pii,
@@ -2466,7 +2481,7 @@ def create_app(
             commitments_url = url_for("commitments", **commitments_params)
 
         scope_hint = None
-        if account_email:
+        if account_email and "@" in account_email and not account_email.startswith("["):
             scope_hint = f"{account_email} • last {window_days} days"
 
         def _mode_link(target: str) -> str:
