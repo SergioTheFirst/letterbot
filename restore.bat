@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 
@@ -17,7 +17,7 @@ if not exist "%REPO_ROOT%.venv\Scripts\activate.bat" (
 )
 
 call "%REPO_ROOT%.venv\Scripts\activate.bat"
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo ERROR: Failed to activate virtual environment.
     exit /b 1
 )

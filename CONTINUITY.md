@@ -145,8 +145,9 @@ Done:
 - 2026-02-16: attachment extraction XLSX policy set to OPTIONAL in tests (openpyxl-specific assertion guarded with pytest.importorskip).
 - 2026-02-16: formalized one-folder release artifact contract, added deterministic verify_dist post-build check, dist runtime missing-files self-check, and Windows docs SmartScreen/LAN/firewall updates with tests.
 - 2026-02-16: unified app version source, added CLI version command, web footer version stamp, PyInstaller Windows version resource, SmartScreen docs, Keep-a-Changelog, dist contract checks, and deterministic version plumbing tests.
+- 2026-03-03: P0 Windows BAT hardening — removed bare-text hazards, normalized wrapper delegation to letterbot.bat with %*, tightened quoted path handling, and added BAT regression tests.
 Now:
-- Validate launcher chain on real Windows host for Unicode/space paths (`letterbot.bat`, `update_and_run.bat`, backup/open-config helpers).
+- Validate launcher chain on real Windows host for Unicode/space paths (`letterbot.bat`, `update_and_run.bat`, backup/open-config helpers) after BAT hardening patch.
 - Keep two-file INI (`settings.ini` + `accounts.ini`) as default happy-path; avoid mandatory YAML in startup/doctor flows.
 Next:
 - Run manual Windows smoke (`letterbot.bat` first-run bootstrap, second-run start, `update_and_run.bat`, `run_tests.bat`).
@@ -156,7 +157,16 @@ Open questions (UNCONFIRMED if needed):
 Working set (files / tables / tests):
 - letterbot.bat
 - update_and_run.bat
-- backup.bat
-- mailbot_v26/doctor.py
-- mailbot_v26/tests/test_doctor_dependencies.py
+- run_dist.bat
+- run_tests.bat
+- install_and_run.bat
+- run_mailbot.bat
+- start_mailbot.bat
+- update.bat
+- verify_dist.bat
+- build_windows_onefolder.bat
+- open_config_folder.bat
+- tests/test_bat_no_bare_text_and_quoting.py
+- tests/test_launcher_warning_first.py
+- tests/test_deprecated_bat_wrapper_docs_only.py
 - CONTINUITY.md

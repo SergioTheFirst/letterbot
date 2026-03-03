@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 
@@ -17,22 +17,22 @@ if not exist "%REPO_ROOT%.venv\Scripts\activate.bat" (
 )
 
 call "%REPO_ROOT%.venv\Scripts\activate.bat"
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo ERROR: Failed to activate virtual environment.
     exit /b 1
 )
 
 python -m mailbot_v26 --version
-if %ERRORLEVEL% NEQ 0 goto FAIL
+if errorlevel 1 goto FAIL
 
 python -m mailbot_v26 doctor
-if %ERRORLEVEL% NEQ 0 goto FAIL
+if errorlevel 1 goto FAIL
 
 python -m mailbot_v26 validate-config
-if %ERRORLEVEL% NEQ 0 goto FAIL
+if errorlevel 1 goto FAIL
 
 python -m pytest -q
-if %ERRORLEVEL% NEQ 0 goto FAIL
+if errorlevel 1 goto FAIL
 
 echo ACCEPTANCE OK
 exit /b 0

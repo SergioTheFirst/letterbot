@@ -20,5 +20,7 @@ REM "%VENV_PY%" -m mailbot_v26 config-ready --config-dir "%REPO_ROOT%mailbot_v26
 REM print(str(web.host)+' '+str(web.port))
 
 echo [DEPRECATED] run_mailbot.bat -> letterbot.bat
-call "%REPO_ROOT%letterbot.bat"
-exit /b %ERRORLEVEL%
+echo [DEPRECATED] Use letterbot.bat instead.
+echo.
+call "%~dp0letterbot.bat" %*
+exit /b %errorlevel%

@@ -1,5 +1,5 @@
 @echo off
-setlocal enableextensions
+setlocal EnableExtensions
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 
@@ -18,14 +18,14 @@ if not exist "%VENV_PY%" (
 )
 
 "%VENV_PY%" -m PyInstaller --version >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo ERROR: PyInstaller not available in .venv.
     echo Install with: "%VENV_PY%" -m pip install -r requirements-build.txt
     exit /b 1
 )
 
 "%VENV_PY%" -m PyInstaller pyinstaller.spec --noconfirm --clean --distpath "%REPO_ROOT%\dist" --workpath "%REPO_ROOT%\build" --specpath "%REPO_ROOT%"
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo ERROR: PyInstaller build failed.
     exit /b 1
 )
@@ -77,13 +77,13 @@ if exist "%REPO_ROOT%\CHANGELOG.md" (
 )
 
 "%VENV_PY%" -c "from pathlib import Path; import json; from mailbot_v26.integrity import compute_manifest, manifest_ignore_paths; root=Path(r'%DIST_DIR%'); ignored=set(manifest_ignore_paths()) | {'manifest.sha256.json'}; manifest={k:v for k,v in compute_manifest(root).items() if k not in ignored}; (root/'manifest.sha256.json').write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding='utf-8')"
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo ERROR: Failed to write manifest.sha256.json
     exit /b 1
 )
 
 call "%REPO_ROOT%\verify_dist.bat"
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     exit /b 1
 )
 
