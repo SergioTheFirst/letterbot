@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 
 from mailbot_v26.pipeline import processor
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
@@ -110,3 +111,53 @@ def test_initial_keyboard_has_three_priority_buttons_and_no_trace() -> None:
     assert labels == ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"]
     assert "Почему так?" not in labels
     assert "◀ Скрыть" not in labels
+
+
+def test_invoice_excel_payload_validation_stays_full() -> None:
+    payload, render_mode, _ = processor.build_telegram_payload(
+        _base_context(
+            mail_type="INVOICE",
+            action_line="Проверьте вручную",
+            body_summary="",
+            body_text="",
+            attachment_files=[
+                {
+                    "filename": "invoice_77.xlsx",
+                    "text": "Итого 58200 руб. Оплатить до 28.02.2026",
+                }
+            ],
+            attachments_count=1,
+            extracted_text_len=0,
+        )
+    )
+
+    assert render_mode == processor.TelegramRenderMode.FULL
+    assert "📎" in payload.html_text
+
+
+def test_render_notification_applies_arbiter_without_runtime_error() -> None:
+    result = processor._render_notification(
+        message_id=77,
+        received_at=datetime(2024, 1, 1, 12, 0),
+        priority="🟡",
+        from_email="billing@example.com",
+        from_name="Billing",
+        subject="Счет",
+        action_line="Проверьте вручную",
+        mail_type="INVOICE",
+        body_summary="проверить письмо",
+        body_text="",
+        attachments=[{"filename": "invoice.xlsx", "text": ""}],
+        llm_result=SimpleNamespace(failed=False, error=False),
+        signal_quality=SimpleNamespace(is_usable=True),
+        aggregated_insights=[],
+        insight_digest=None,
+        telegram_chat_id="chat",
+        telegram_bot_token="token",
+        account_email="acc@example.com",
+        attachment_summaries=[],
+        commitments=[],
+        enable_premium_clarity=False,
+    )
+
+    assert "Автоматическая сводка слишком общая." in result.body_summary

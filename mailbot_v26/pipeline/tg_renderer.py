@@ -382,9 +382,9 @@ def _invoice_attachment_insight(mail_type: str, text: str, attachments_count: in
                 due_date = _compact_date(match.group(0))
                 break
     if amount and due_date:
-        return f"💰 {amount} · до {due_date}"
+        return f"📎 Счёт: {amount} · до {due_date}"
     if amount:
-        return f"💰 {amount}"
+        return f"📎 Счёт: {amount}"
     suffix = "влож." if attachments_count > 0 else "вложение"
     count = max(attachments_count, 1)
     return f"📎 Счёт · {count} {suffix}"
