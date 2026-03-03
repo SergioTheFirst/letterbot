@@ -342,3 +342,23 @@ def test_missing_config_ini_uses_deterministic_defaults(tmp_path: Path, caplog) 
     assert vip == VipSenderMatcher()
     assert "config.ini missing" in caplog.text
     assert "Windows command: copy" in caplog.text
+
+
+def test_invoice_subject_with_excel_attachment_signal_is_not_low_priority(tmp_path: Path) -> None:
+    db_path = tmp_path / "priority_v2.sqlite"
+    _init_events_db(db_path)
+    engine = _engine_for(db_path)
+    now = datetime(2024, 1, 15, tzinfo=timezone.utc)
+
+    result = engine.compute(
+        subject="Счет на оплату №42",
+        body_text="invoice_42.xlsx excel attachment",
+        from_email="finance@example.com",
+        mail_type="UNKNOWN",
+        received_at=now,
+        commitments=[],
+    )
+
+    assert result.priority in {"🟡", "🔴"}
+    assert "PRIO_INVOICE_SUBJECT" in result.reason_codes
+    assert "PRIO_INVOICE_EXCEL_ATTACHMENT" in result.reason_codes

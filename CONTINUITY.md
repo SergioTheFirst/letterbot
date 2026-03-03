@@ -156,14 +156,16 @@ Done:
 - 2026-03-03: premium Telegram UX cleanup (internal DecisionTrace/gate noise removed from default message, excerpt cleaning for external-mail disclaimer tails, priority-dot first line preserved, watermark added), web login fix (`next=/l` stable + legacy `/l` alias), web password precedence set to env > settings.ini [web_ui] > config.yaml, and LLM INI cleanup (single llm source, fallback defaults to primary, templates/examples de-duplicated) with full pytest green.
 - 2026-03-03: premium defaults enabled in runtime flags (processor + clarity), inline external disclaimer tails removed in excerpt cleaning, YAML LLM fallback now defaults to primary provider, and config bootstrap no longer requires redundant [llm] fallback when omitted; regression tests added/updated with full pytest green.
 - 2026-03-03: restored premium default Telegram Tier-1 layout (`{dot} от sender:`, subject, short action, blank line, attachment line, 1–3 excerpt lines, watermark), removed fallback-like `От:/Тема:/Подробнее` noise from default UX path, and reinforced initial priority keyboard regression coverage (`🔴 Срочно`, `🟡 Важно`, `🔵 Низкий`) with full pytest green.
+- 2026-03-03: Telegram P0 follow-up — normalized generic fallback action phrases (`Проверьте вручную` / `Attention Needed` / `Недостаточно данных для оценки`) to `Проверить` in premium Tier-1, added invoice+Excel escalation signals in real priority v2 scoring path, and reinforced renderer/priority tests with full pytest green.
 Now:
-- Telegram premium Tier-1 UX restore patch validated with full pytest green.
+- Telegram premium Tier-1 + invoice-priority follow-up patch validated with full pytest green.
 Next:
-- Merge patch and run Windows host smoke gates separately as packaging follow-up.
+- Merge patch; no additional runtime changes pending for this P0 Telegram scope.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
 - mailbot_v26/pipeline/processor.py
+- mailbot_v26/priority/priority_engine_v2.py
 - mailbot_v26/tests/test_premium_clarity_renderer.py
-- mailbot_v26/tests/test_premium_format_regression.py
+- mailbot_v26/tests/test_priority_engine_v2.py
 - CONTINUITY.md

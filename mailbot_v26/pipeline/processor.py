@@ -1781,6 +1781,17 @@ def _build_premium_clarity_text(
         short_action = "Оплатить"
     else:
         short_action = "Проверить"
+
+    normalized_subject = re.sub(r"[\W_]+", " ", (subject or "").lower()).strip()
+    has_invoice_subject_signal = any(
+        token in normalized_subject for token in ("счет", "счёт", "invoice", "оплат")
+    )
+    has_invoice_excel_attachment = any(
+        str(attachment.get("filename") or "").lower().endswith((".xls", ".xlsx", ".xlsm", ".xlsb"))
+        for attachment in attachments
+    )
+    if short_action == "Проверить" and has_invoice_subject_signal and has_invoice_excel_attachment:
+        short_action = "Оплатить"
     safe_action = _escape_dynamic(short_action)
     excerpt_source = (body_summary or "").strip() or (body_text or "").strip()
     excerpt = tg_renderer._clean_excerpt(excerpt_source, max_lines=3)
@@ -1928,9 +1939,35 @@ def _resolve_action_line(action_line: str) -> str:
     if not cleaned:
         return "Проверить"
     normalized = re.sub(r"[\W_]+", " ", cleaned.lower()).strip()
-    if normalized in {"действий не требуется", "действие не требуется"}:
+    generic_actions = {
+        "действий не требуется",
+        "действие не требуется",
+        "требует рассмотрения",
+        "проверьте вручную",
+        "attention needed",
+        "недостаточно данных для оценки",
+    }
+    if normalized in generic_actions:
         return "Проверить"
     return cleaned
+
+
+def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]]) -> str:
+    base = (body_text or "").strip()
+    if not attachments:
+        return base
+    signals: list[str] = []
+    for attachment in attachments:
+        filename = str(attachment.get("filename") or "").strip().lower()
+        if not filename:
+            continue
+        signals.append(filename)
+        if filename.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")):
+            signals.append("excel attachment")
+    if not signals:
+        return base
+    signal_text = " ".join(dict.fromkeys(signals))
+    return " ".join(part for part in (base, signal_text) if part).strip()
 
 
 def _normalize_summary_text(summary: str) -> str:
@@ -2557,13 +2594,14 @@ def _compute_heuristic_priority(
     mail_type: str | None,
     received_at: datetime,
     commitments: list[Commitment],
+    attachments: list[dict[str, Any]] | None = None,
 ) -> PriorityResultV2 | None:
     if not getattr(feature_flags, "ENABLE_PRIORITY_V2", False):
         return None
     try:
         return priority_engine_v2.compute(
             subject=subject,
-            body_text=body_text or "",
+            body_text=_build_priority_signal_text(body_text or "", attachments or []),
             from_email=from_email,
             mail_type=mail_type or "",
             received_at=received_at,
@@ -4101,12 +4139,14 @@ def process_message(
             mail_type=mail_type,
             received_at=received_at,
             commitments=commitments,
+            attachments=attachments,
         )
         heuristic_priority = priority_v2_result.priority if priority_v2_result else "🔵"
         if priority_v2_result:
+            priority_body_text = _build_priority_signal_text(body_text or "", attachments)
             priority_signals = priority_engine_v2.evaluate_signals(
                 subject=subject,
-                body_text=body_text or "",
+                body_text=priority_body_text,
                 from_email=from_email,
                 mail_type=mail_type or "",
                 received_at=received_at,
@@ -4334,9 +4374,10 @@ def process_message(
         priority_v2_enabled = bool(getattr(feature_flags, "ENABLE_PRIORITY_V2", False))
         if priority_v2_enabled:
             try:
+                priority_body_text = _build_priority_signal_text(body_text or "", attachments)
                 priority_v2_result = priority_engine_v2.compute(
                     subject=subject,
-                    body_text=body_text or "",
+                    body_text=priority_body_text,
                     from_email=from_email,
                     mail_type=mail_type or "",
                     received_at=received_at,
