@@ -98,3 +98,15 @@ def test_safe_fallback_only_when_no_display_data() -> None:
 
     assert empty_mode == processor.TelegramRenderMode.SAFE_FALLBACK
     assert full_mode != processor.TelegramRenderMode.SAFE_FALLBACK
+
+
+def test_initial_keyboard_has_three_priority_buttons_and_no_trace() -> None:
+    payload, _, _ = processor.build_telegram_payload(_base_context())
+
+    keyboard = payload.reply_markup or {}
+    rows = keyboard.get("inline_keyboard") or []
+    assert len(rows) == 1
+    labels = [button["text"] for button in rows[0]]
+    assert labels == ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"]
+    assert "Почему так?" not in labels
+    assert "◀ Скрыть" not in labels

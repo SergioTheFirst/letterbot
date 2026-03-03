@@ -1769,135 +1769,46 @@ def _build_premium_clarity_text(
     priority = strip_disallowed_emojis(priority or "")
     if priority not in {"🔴", "🟡", "🔵"}:
         priority = "🔵"
-    if from_name and from_email:
-        sender_display = f"{from_name} <{from_email}>"
-    else:
-        sender_display = from_email or from_name or "неизвестно"
+    sender_display = from_email or from_name or "неизвестно"
     safe_sender = _escape_dynamic(strip_disallowed_emojis(sender_display))
-    subject_has_numbers = _contains_numeric_fact(subject or "")
     safe_subject = _escape_dynamic(strip_disallowed_emojis(subject or "(без темы)"))
-    if subject_has_numbers:
-        safe_subject = f"{safe_subject} (тема)"
     action_text = _resolve_action_line(action_line)
     action_text = strip_disallowed_emojis(action_text)
-    action_text = _strip_numeric_facts(action_text)
-    if not action_text:
-        action_text = "Действий не требуется"
-    safe_action = _escape_dynamic(action_text)
-
-    raw_summary = (body_summary or "").strip()
-    summary_numbers_ok = _summary_numbers_supported(
-        raw_summary,
-        subject=subject or "",
-        body_text=body_text or "",
-    )
-    suppress_numeric_facts = _should_suppress_numeric_facts(
-        extraction_failed=extraction_failed,
-        confidence_available=confidence_available,
-        confidence_percent=confidence_percent,
-        confidence_dots_threshold=confidence_dots_threshold,
-    )
-    summary_has_numbers = _contains_numeric_fact(raw_summary)
-    if suppress_numeric_facts:
-        essence = "Письмо"
-    elif _is_meaningful_summary(raw_summary) and summary_numbers_ok and not summary_has_numbers:
-        essence = raw_summary
-    elif subject and not subject_has_numbers:
-        essence = subject
+    normalized_action = re.sub(r"[\W_]+", " ", action_text.lower()).strip()
+    if any(token in normalized_action for token in ("ответ", "reply", "напис")):
+        short_action = "Ответить"
+    elif any(token in normalized_action for token in ("оплат", "счет", "invoice", "pay")):
+        short_action = "Оплатить"
     else:
-        essence = "Письмо"
-    essence = _escape_dynamic(strip_disallowed_emojis(essence))
+        short_action = "Проверить"
+    safe_action = _escape_dynamic(short_action)
+    excerpt_source = (body_summary or "").strip() or (body_text or "").strip()
+    excerpt = tg_renderer._clean_excerpt(excerpt_source, max_lines=3)
+
+    if attachments:
+        first_name = _escape_dynamic(strip_disallowed_emojis(str(attachments[0].get("filename") or "вложение")))
+        if len(attachments) == 1:
+            attachment_line = f"📎 1 вложение: {first_name}"
+        else:
+            attachment_line = f"📎 {len(attachments)} вложения"
+    else:
+        attachment_line = "📎 0 вложений"
 
     lines = [
-        f"{priority} {essence}",
-        f"От: {safe_sender}",
-        f"Тема: {safe_subject}",
+        f"{priority} от {safe_sender}:",
+        safe_subject,
+        safe_action,
+        "",
+        attachment_line,
     ]
-
-    facts_line = _build_premium_clarity_facts(
-        subject=subject or "",
-        body_text=body_text or "",
-        attachments=attachments,
-        suppress_numeric_facts=suppress_numeric_facts,
-    )
-    primary_fact_line = ""
-    if facts_line:
-        primary_fact_line = _escape_dynamic(facts_line)
-    elif extracted_text_len <= 0 and attachments_count > 0:
-        primary_fact_line = "не извлечено"
-
-    attachment_lines = _build_premium_clarity_attachments(
-        attachments,
-        attachment_summaries,
-        suppress_numeric_facts=suppress_numeric_facts,
-    )
-    action_prefix = _pick_action_emoji(action_text)
-    action_line_rendered = f"{action_prefix} {safe_action}"
-
-    optional_lines: list[str] = []
-    manual_check_needed = suppress_numeric_facts or (
-        raw_summary and (not summary_numbers_ok or summary_has_numbers)
-    )
-    if manual_check_needed:
-        optional_lines.append("Проверьте вручную")
-    why_reasons: list[str] = []
-    if extraction_failed:
-        why_reasons.append("не удалось извлечь текст")
-    if _deadline_within_days(commitments, received_at=received_at, days=3):
-        why_reasons.append("срок близко")
-    if _has_high_risk(insights):
-        why_reasons.append("повышенный риск")
-    if confidence_available and confidence_percent < confidence_dots_threshold:
-        why_reasons.append("низкая уверенность")
-    if why_reasons:
-        why_text = ", ".join(why_reasons[:2])
-        optional_lines.append(f"Почему: {why_text}")
-    if priority == "🔴":
-        reason_line = ""
-        if extraction_failed:
-            reason_line = "извлечение не выполнено"
-        elif confidence_percent <= 40:
-            reason_line = "низкая уверенность"
-        else:
-            reason_line = "критический приоритет"
-        if reason_line:
-            safe_reason = _escape_dynamic(strip_disallowed_emojis(reason_line))
-            optional_lines.append(f"Причина: {safe_reason}")
-
-    spoiler_lines: list[str] = []
-    if insight_digest:
-        if insight_digest.status_label:
-            spoiler_lines.append(insight_digest.status_label)
-        if insight_digest.headline:
-            spoiler_lines.append(insight_digest.headline)
-        for detail in (insight_digest.short_explanation or "").split("\n"):
-            if detail.strip():
-                spoiler_lines.append(detail.strip())
-    if commitments:
-        spoiler_lines.append("Есть обязательства по письму")
-
-    dots_text = ""
-    if spoiler_lines and _should_show_confidence_dots(
-        mode=confidence_dots_mode,
-        threshold=confidence_dots_threshold,
-        confidence_available=confidence_available,
-        confidence_percent=confidence_percent,
-    ):
-        dots_text = _format_confidence_dots(
-            confidence_percent,
-            confidence_dots_scale,
+    if excerpt:
+        lines.extend(
+            _escape_dynamic(strip_disallowed_emojis(line))
+            for line in excerpt.splitlines()[:3]
+            if line.strip()
         )
 
-    limited_lines = _enforce_premium_clarity_line_budget(
-        base_lines=lines,
-        primary_fact_line=primary_fact_line,
-        attachment_lines=attachment_lines,
-        action_line=action_line_rendered,
-        optional_lines=optional_lines,
-        spoiler_lines=spoiler_lines,
-        dots_text=dots_text,
-    )
-    deduped_lines = tg_renderer.dedup_rendered_lines(limited_lines)
+    deduped_lines = tg_renderer.dedup_rendered_lines(lines)
     return append_watermark("\n".join(deduped_lines), html=True)
 
 
