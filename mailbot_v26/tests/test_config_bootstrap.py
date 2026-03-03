@@ -194,3 +194,26 @@ use_ssl = true
 
     for section in ("general", "features", "web", "delivery_policy"):
         assert parser.has_section(section)
+
+
+def test_validate_config_does_not_require_llm_fallback(tmp_path) -> None:
+    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval = 120\n", encoding="utf-8")
+    (tmp_path / "accounts.ini").write_text(
+        """
+[acc]
+login = u
+password = p
+host = h
+port = 993
+use_ssl = true
+
+[llm]
+primary = cloudflare
+""".strip(),
+        encoding="utf-8",
+    )
+
+    ok, issues = validate_config(tmp_path)
+
+    assert ok is False
+    assert not any("[llm] fallback is not configured" in issue for issue in issues)

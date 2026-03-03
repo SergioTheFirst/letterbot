@@ -391,7 +391,7 @@ def _load_yaml_config(base_dir: Path) -> LLMRouterConfig | None:
         cloudflare_model = DEFAULT_CLOUDFLARE_MODEL
 
     primary = str(provider).strip() or "cloudflare"
-    fallback = "cloudflare" if primary != "cloudflare" else "cloudflare"
+    fallback = primary
 
     return LLMRouterConfig(
         primary=primary,

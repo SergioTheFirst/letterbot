@@ -9,7 +9,7 @@ def write_config(tmpdir: Path, content: str) -> Path:
     return path
 
 
-def test_flags_default_to_false_when_missing(tmp_path: Path) -> None:
+def test_flags_defaults_when_missing(tmp_path: Path) -> None:
     flags = FeatureFlags(tmp_path)
     assert not flags.ENABLE_AUTO_PRIORITY
     assert not flags.ENABLE_TASK_SUGGESTIONS
@@ -17,8 +17,8 @@ def test_flags_default_to_false_when_missing(tmp_path: Path) -> None:
     assert not flags.ENABLE_SHADOW_PERSISTENCE
     assert not flags.ENABLE_CRM_DIAGNOSTICS
     assert not flags.ENABLE_ANOMALY_ALERTS
-    assert not flags.ENABLE_PREMIUM_PROCESSOR
-    assert not flags.ENABLE_PREMIUM_CLARITY_V1
+    assert flags.ENABLE_PREMIUM_PROCESSOR is True
+    assert flags.ENABLE_PREMIUM_CLARITY_V1 is True
     assert not flags.ENABLE_UNCERTAINTY_QUEUE
     assert flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD == 0.6
     assert flags.ENABLE_PRIORITY_V2 is True
