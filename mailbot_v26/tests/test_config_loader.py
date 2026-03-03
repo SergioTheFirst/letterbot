@@ -12,7 +12,9 @@ from mailbot_v26.config_loader import (
     load_storage_config,
     load_support_settings,
     validate_telegram_contract,
+    load_telegram_ui_config,
     load_web_config,
+    load_web_ui_password_from_ini,
 )
 
 
@@ -380,3 +382,48 @@ host = imap.example.com
 
     assert support.enabled is True
     assert support.frequency_days == 30
+
+
+def test_load_telegram_ui_config_defaults_to_hidden(tmp_path: Path) -> None:
+    write_file(tmp_path, "settings.ini", """[general]
+check_interval=120
+""")
+    write_file(tmp_path, "accounts.ini", """[acc]
+login=u
+password=p
+host=h
+""")
+
+    cfg = load_telegram_ui_config(tmp_path)
+
+    assert cfg.show_decision_trace is False
+
+
+def test_load_telegram_ui_config_reads_flag(tmp_path: Path) -> None:
+    write_file(tmp_path, "settings.ini", """[telegram_ui]
+show_decision_trace=true
+""")
+    write_file(tmp_path, "accounts.ini", """[acc]
+login=u
+password=p
+host=h
+""")
+
+    cfg = load_telegram_ui_config(tmp_path)
+
+    assert cfg.show_decision_trace is True
+
+
+def test_load_web_ui_password_from_ini(tmp_path: Path) -> None:
+    write_file(tmp_path, "settings.ini", """[web_ui]
+password = ini-pass
+""")
+    write_file(tmp_path, "accounts.ini", """[acc]
+login=u
+password=p
+host=h
+""")
+
+    password = load_web_ui_password_from_ini(tmp_path)
+
+    assert password == "ini-pass"

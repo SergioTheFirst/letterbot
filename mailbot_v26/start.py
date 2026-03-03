@@ -36,6 +36,7 @@ from mailbot_v26.config_loader import (
     AccountConfig,
     BotConfig,
     load_config as load_ini_config,
+    load_telegram_ui_config,
     validate_telegram_contract,
 )
 from mailbot_v26.config.paths import resolve_config_paths
@@ -771,7 +772,11 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
                 "bot_token": config.keys.telegram_bot_token,
                 "chat_id": account.telegram_chat_id,
             },
-            reply_markup=build_email_actions_keyboard(email_id=email_id, expanded=False),
+            reply_markup=build_email_actions_keyboard(
+                email_id=email_id,
+                expanded=False,
+                show_decision_trace=load_telegram_ui_config().show_decision_trace,
+            ),
         )
         result = send_telegram(payload)
         if result.delivered:
@@ -978,6 +983,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 feature_flags=processor_module.feature_flags,
                 allowed_chat_ids=frozenset(allowed_ids),
                 bot_token=current_config.keys.telegram_bot_token,
+                show_decision_trace=load_telegram_ui_config().show_decision_trace,
             )
             return client, processor, frozenset(allowed_ids)
 

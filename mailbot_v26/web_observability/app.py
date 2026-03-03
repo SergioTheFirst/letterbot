@@ -50,7 +50,12 @@ except ModuleNotFoundError:
 
     USING_FLASK_STUB = True
 
-from mailbot_v26.config_loader import CONFIG_DIR, load_storage_config, load_web_config
+from mailbot_v26.config_loader import (
+    CONFIG_DIR,
+    load_storage_config,
+    load_web_config,
+    load_web_ui_password_from_ini,
+)
 from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.config_yaml import (
@@ -4523,7 +4528,17 @@ def main() -> None:
         require_runtime_for("web_ui_prod")
 
     secret_key, attention_cost = _load_web_ui_secrets(config_dir)
-    password = os.environ.get("WEB_PASSWORD") or web_ui.password
+    env_password = str(os.environ.get("WEB_PASSWORD") or "").strip()
+    yaml_password = str(web_ui.password or "").strip()
+    ini_password = load_web_ui_password_from_ini(config_dir)
+    if env_password:
+        password = env_password
+    elif yaml_password:
+        password = yaml_password
+    else:
+        password = ini_password
+    if not password:
+        logger.warning("web_ui_password_not_configured_using_empty_password")
 
     if args.db:
         db_path = args.db

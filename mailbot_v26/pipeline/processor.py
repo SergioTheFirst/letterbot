@@ -44,7 +44,11 @@ from mailbot_v26.config.flow_protection import (
 from mailbot_v26.config.llm_queue import LLMQueueConfig, load_llm_queue_config
 from mailbot_v26.config.premium_clarity import load_premium_clarity_config
 from mailbot_v26.config.premium_clarity import PremiumClarityConfig
-from mailbot_v26.config_loader import get_account_scope, resolve_account_scope
+from mailbot_v26.config_loader import (
+    get_account_scope,
+    load_telegram_ui_config,
+    resolve_account_scope,
+)
 from mailbot_v26.facts.fact_extractor import FactExtractor
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
@@ -2491,6 +2495,7 @@ def build_telegram_payload(
             email_id=context.email_id,
             expanded=False,
             prio_menu=False,
+            show_decision_trace=load_telegram_ui_config().show_decision_trace,
         ),
     )
     assert "Сделать:" not in payload.html_text

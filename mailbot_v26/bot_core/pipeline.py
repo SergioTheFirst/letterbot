@@ -32,11 +32,12 @@ from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.worker.telegram_sender import DeliveryResult, send_telegram
 
 try:  # local import to avoid circular typing issues
-    from mailbot_v26.config_loader import AccountConfig, BotConfig
+    from mailbot_v26.config_loader import AccountConfig, BotConfig, load_telegram_ui_config
     from mailbot_v26.account_identity import normalize_login
 except Exception:  # pragma: no cover - defensive import for early boot
     AccountConfig = None  # type: ignore
     BotConfig = None  # type: ignore
+    load_telegram_ui_config = lambda: type("_TgUi", (), {"show_decision_trace": False})()  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -612,7 +613,11 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
             "bot_token": _PIPELINE_CONFIG.keys.telegram_bot_token,
             "chat_id": account.telegram_chat_id,
         },
-        reply_markup=build_email_actions_keyboard(email_id=ctx.email_id, expanded=False),
+        reply_markup=build_email_actions_keyboard(
+            email_id=ctx.email_id,
+            expanded=False,
+            show_decision_trace=load_telegram_ui_config().show_decision_trace,
+        ),
     )
     result = send_telegram(payload)
     if not result.delivered:

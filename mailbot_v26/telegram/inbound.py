@@ -503,6 +503,7 @@ class TelegramInboundProcessor:
     feature_flags: FeatureFlags
     allowed_chat_ids: frozenset[str]
     bot_token: str
+    show_decision_trace: bool = False
     support_settings: SupportSettings | None = None
 
     def handle_update(self, update: dict[str, object]) -> None:
@@ -778,7 +779,10 @@ class TelegramInboundProcessor:
         confirmation = _t("inbound.priority_ack", priority=new_priority)
         full_text = f"{full_text}\n\n{confirmation}"
         reply_markup = build_email_actions_keyboard(
-            email_id=email_id, expanded=expanded, prio_menu=False
+            email_id=email_id,
+            expanded=expanded,
+            prio_menu=False,
+            show_decision_trace=self.show_decision_trace,
         )
         try:
             edit_telegram_message(
@@ -841,7 +845,10 @@ class TelegramInboundProcessor:
         else:
             full_text = tier1_text
         reply_markup = build_email_actions_keyboard(
-            email_id=email_id, expanded=expanded, prio_menu=True
+            email_id=email_id,
+            expanded=expanded,
+            prio_menu=True,
+            show_decision_trace=self.show_decision_trace,
         )
         try:
             edit_telegram_message(
@@ -904,7 +911,10 @@ class TelegramInboundProcessor:
         else:
             full_text = tier1_text
         reply_markup = build_email_actions_keyboard(
-            email_id=email_id, expanded=expanded, prio_menu=False
+            email_id=email_id,
+            expanded=expanded,
+            prio_menu=False,
+            show_decision_trace=self.show_decision_trace,
         )
         try:
             edit_telegram_message(
@@ -1037,6 +1047,7 @@ class TelegramInboundProcessor:
             email_id=email_id,
             expanded=expanded,
             snooze_menu=snooze_menu,
+            show_decision_trace=self.show_decision_trace,
         )
         try:
             edit_telegram_message(
@@ -1100,7 +1111,10 @@ class TelegramInboundProcessor:
         else:
             full_text = tier1_text
         reply_markup = build_email_actions_keyboard(
-            email_id=email_id, expanded=expanded, prio_menu=False
+            email_id=email_id,
+            expanded=expanded,
+            prio_menu=False,
+            show_decision_trace=self.show_decision_trace,
         )
         try:
             edit_telegram_message(

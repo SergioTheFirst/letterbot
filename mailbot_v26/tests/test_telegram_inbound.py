@@ -120,6 +120,39 @@ def test_decision_trace_callback_length() -> None:
     assert len(callback.encode("utf-8")) <= 64
 
 
+
+
+def test_legacy_trace_callback_does_not_crash_when_hidden_by_default(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    edited: list[dict[str, object]] = []
+
+    def _fake_edit(**kwargs):
+        edited.append(kwargs)
+
+    monkeypatch.setattr("mailbot_v26.telegram.inbound.edit_telegram_message", _fake_edit)
+
+    callback = {
+        "id": "cb-1",
+        "data": f"mb:d:{email_id}",
+        "message": {"message_id": 55, "chat": {"id": "chat"}},
+    }
+    processor.handle_callback_query(callback)
+
+    assert edited
+    assert "trace not available" in str(edited[0]["html_text"])
+
 def test_parse_command_tolerates_spaces() -> None:
     command, args = parse_command("  /digest   on ")
     assert command == "/digest"

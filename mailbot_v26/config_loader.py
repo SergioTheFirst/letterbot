@@ -85,6 +85,13 @@ class WebConfig:
     port: int
 
 
+@dataclass
+class TelegramUIConfig:
+    """Telegram UX toggles from settings.ini."""
+
+    show_decision_trace: bool
+
+
 
 
 @dataclass
@@ -571,6 +578,28 @@ def load_web_config(base_dir: Path = CONFIG_DIR) -> WebConfig:
     return WebConfig(host=host, port=port)
 
 
+def load_telegram_ui_config(base_dir: Path = CONFIG_DIR) -> TelegramUIConfig:
+    parser = _read_settings_with_legacy_fallback(base_dir, section="telegram_ui")
+    show_decision_trace = False
+    if "telegram_ui" in parser:
+        section = parser["telegram_ui"]
+        try:
+            show_decision_trace = section.getboolean("show_decision_trace", fallback=False)
+        except ValueError as exc:
+            _LOGGER.warning(
+                "Invalid [telegram_ui] show_decision_trace value, using default false: %s",
+                exc,
+            )
+    return TelegramUIConfig(show_decision_trace=show_decision_trace)
+
+
+def load_web_ui_password_from_ini(base_dir: Path = CONFIG_DIR) -> str:
+    parser = _read_settings_with_legacy_fallback(base_dir, section="web_ui")
+    if "web_ui" not in parser:
+        return ""
+    return str(parser["web_ui"].get("password", fallback="")).strip()
+
+
 def load_config(base_dir: Path = CONFIG_DIR) -> BotConfig:
     """Load and validate all configuration files.
 
@@ -606,6 +635,7 @@ __all__ = [
     "GeneralConfig",
     "IngestConfig",
     "MaintenanceConfig",
+    "TelegramUIConfig",
     "WebConfig",
     "InvalidAccountIdError",
     "KeysConfig",
@@ -617,7 +647,9 @@ __all__ = [
     "load_general_config",
     "load_ingest_config",
     "load_maintenance_config",
+    "load_telegram_ui_config",
     "load_web_config",
+    "load_web_ui_password_from_ini",
     "load_keys_config",
     "load_storage_config",
     "load_support_settings",
