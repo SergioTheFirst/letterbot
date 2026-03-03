@@ -1,12 +1,14 @@
 @echo off
-setlocal enableextensions enabledelayedexpansion
+setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 
-cd /d "%~dp0"
+set "REPO_ROOT=%~dp0"
+if "%REPO_ROOT:~-1%"=="\" set "REPO_ROOT=%REPO_ROOT:~0,-1%"
+set "CONFIG_DIR=%REPO_ROOT%\mailbot_v26\config"
+cd /d "%REPO_ROOT%"
 
-set "EXE_PATH=%~dp0Letterbot.exe"
-set "CONFIG_DIR=%~dp0mailbot_v26\config"
+set "EXE_PATH=%REPO_ROOT%\Letterbot.exe"
 set "SETTINGS_FILE=%CONFIG_DIR%\settings.ini"
 set "ACCOUNTS_FILE=%CONFIG_DIR%\accounts.ini"
 set "SETTINGS_EXAMPLE=%CONFIG_DIR%\settings.ini.example"
@@ -44,7 +46,8 @@ if "%FIRST_RUN%"=="1" (
 )
 
 "%EXE_PATH%" config-ready --config-dir "%CONFIG_DIR%" --verbose
-if %ERRORLEVEL% EQU 2 (
+set "CONFIG_READY_RC=%ERRORLEVEL%"
+if "%CONFIG_READY_RC%"=="2" (
     echo.
     echo =============================================
     echo   LETTERBOT — ТРЕБУЕТСЯ НАСТРОЙКА
@@ -63,7 +66,8 @@ if %ERRORLEVEL% EQU 2 (
 
     start /wait notepad.exe "%ACCOUNTS_FILE%"
     "%EXE_PATH%" config-ready --config-dir "%CONFIG_DIR%" --verbose
-    if %ERRORLEVEL% EQU 2 (
+    set "CONFIG_READY_RC=%ERRORLEVEL%"
+    if "!CONFIG_READY_RC!"=="2" (
         echo [WARN] Попытка !CONFIG_READY_ATTEMPTS! из 20: обязательные поля ещё не заполнены.
         goto :CONFIG_READY_LOOP
     )
@@ -71,10 +75,11 @@ if %ERRORLEVEL% EQU 2 (
 
 echo Running doctor checks ^(warning-first^)...
 "%EXE_PATH%" doctor --config-dir "%CONFIG_DIR%"
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo [WARN] Doctor found issues. Startup continues in non-strict mode.
 )
 
 echo Starting Letterbot...
 "%EXE_PATH%" --config-dir "%CONFIG_DIR%"
-exit /b %ERRORLEVEL%
+set "RUN_EXIT=%ERRORLEVEL%"
+exit /b %RUN_EXIT%

@@ -7,5 +7,7 @@ set "REPO_ROOT=%~dp0"
 cd /d "%REPO_ROOT%"
 
 echo [DEPRECATED] start_mailbot.bat -> letterbot.bat
-call "%REPO_ROOT%letterbot.bat"
-exit /b %ERRORLEVEL%
+echo [DEPRECATED] Use letterbot.bat instead.
+echo.
+call "%~dp0letterbot.bat" %*
+exit /b %errorlevel%

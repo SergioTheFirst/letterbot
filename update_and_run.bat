@@ -101,7 +101,7 @@ if errorlevel 1 (
 call :log Starting Letterbot stack via letterbot.bat...
 REM "%RUN_PY%" -m mailbot_v26.doctor --config-dir "%REPO_ROOT%\mailbot_v26\config"
 REM "%RUN_PY%" -m mailbot_v26.start --config-dir "%REPO_ROOT%\mailbot_v26\config"
-call "%REPO_ROOT%\letterbot.bat" >>"%LOG_FILE%" 2>&1
+call "%REPO_ROOT%\letterbot.bat" %* >>"%LOG_FILE%" 2>&1
 set "RUN_EXIT=%ERRORLEVEL%"
 if "%RUN_EXIT%"=="0" (
     call :log Letterbot finished.
