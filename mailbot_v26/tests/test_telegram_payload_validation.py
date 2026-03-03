@@ -275,7 +275,7 @@ def test_attachment_visibility(monkeypatch) -> None:
     )
 
     telegram_text = sent["payload"].html_text
-    assert "Вложения: 1 (PDF×1)" in telegram_text
+    assert "📎" in telegram_text
     assert "report.pdf" in telegram_text
     assert "Manual Review" not in telegram_text
 

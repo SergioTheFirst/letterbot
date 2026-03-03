@@ -2073,7 +2073,8 @@ def validate_tg_payload(text: str, ctx: EmailContext) -> str:
     if not ctx.from_email.strip():
         raise InvalidTelegramPayload("missing_sender")
     summary = ctx.summary if ctx.summary.strip() else ctx.body_text
-    if not _is_meaningful_summary(summary):
+    has_attachments = ctx.attachments_count > 0
+    if not _is_meaningful_summary(summary) and not has_attachments:
         raise InvalidTelegramPayload("summary_invalid")
     action_line = ctx.action_line.strip() or "Действий не требуется"
     if not action_line:
@@ -2266,20 +2267,22 @@ def build_telegram_payload(
     fallback_reasons: list[str] = []
     telegram_text_raw = ""
     summary_valid = _is_meaningful_summary(context.body_summary)
-    if not summary_valid and not (context.body_text or "").strip():
-        fallback_reasons.append("summary_invalid")
+    if not summary_valid:
         event_emitter.emit(
             type="telegram_empty_summary",
             timestamp=context.received_at,
             email_id=context.email_id,
             payload={"summary": context.body_summary},
         )
-    if context.attachments_count > 0 and context.extracted_text_len == 0:
-        fallback_reasons.append("attachments_without_text")
-    if context.llm_failed:
-        fallback_reasons.append("llm_failed")
-    if context.signal_invalid:
-        fallback_reasons.append("signal_invalid")
+
+    has_minimal_display_data = bool(
+        (context.from_email or "").strip() and (context.subject or "").strip()
+    )
+    if context.signal_invalid and not has_minimal_display_data:
+        fallback_reasons.append("signal_invalid_no_data")
+    if not has_minimal_display_data:
+        fallback_reasons.append("no_display_data")
+
     if summary_valid and render_mode == TelegramRenderMode.SHORT_TEMPLATE:
         render_mode = TelegramRenderMode.FULL
     if fallback_reasons:
