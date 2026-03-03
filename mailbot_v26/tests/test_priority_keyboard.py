@@ -60,3 +60,11 @@ def test_email_actions_keyboard_shows_trace_when_enabled() -> None:
     keyboard = build_email_actions_keyboard(email_id=123, expanded=False, show_decision_trace=True)
     labels = [button["text"] for button in keyboard["inline_keyboard"][0]]
     assert labels == ["Почему так?", "Приоритет", "⏰ Позже"]
+
+
+def test_priority_menu_labels_match_user_facing_ux() -> None:
+    keyboard = build_email_actions_keyboard(email_id=555, expanded=False, prio_menu=True)
+    assert [[button["text"] for button in row] for row in keyboard["inline_keyboard"]] == [
+        ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"],
+        ["Назад"],
+    ]

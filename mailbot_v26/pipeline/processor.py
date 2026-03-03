@@ -2013,9 +2013,12 @@ def _normalize_action_line(action_line: str) -> str:
 
 def _resolve_action_line(action_line: str) -> str:
     cleaned = _normalize_action_line(action_line)
-    if cleaned:
-        return cleaned
-    return "Действий не требуется"
+    if not cleaned:
+        return "Проверить"
+    normalized = re.sub(r"[\W_]+", " ", cleaned.lower()).strip()
+    if normalized in {"действий не требуется", "действие не требуется"}:
+        return "Проверить"
+    return cleaned
 
 
 def _normalize_summary_text(summary: str) -> str:
