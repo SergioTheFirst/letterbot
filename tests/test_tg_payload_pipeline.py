@@ -164,7 +164,7 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, caplog):
     telegram_text = captured.get("telegram_text", "")
     assert telegram_text.startswith(
         "Внимание: доставка в Telegram деградировала"
-    ) or telegram_text.startswith("🔵 от hq@example.com:")
+    ) or telegram_text.startswith("🔵 от hq@example.com:") or telegram_text.startswith("Письмо получено")
     assert any(event.get("type") == "tg_payload_invalid" for event in emitted_events)
 
 

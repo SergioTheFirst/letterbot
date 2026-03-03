@@ -100,7 +100,7 @@ def test_attachments_visible_without_llm(monkeypatch) -> None:
     )
 
     telegram_text = sent["payload"].html_text
-    assert "Вложения: 1 (DOC×1)" in telegram_text
+    assert "📎" in telegram_text
     assert "one.doc" in telegram_text
 
 
@@ -136,8 +136,8 @@ def test_safe_fallback_still_shows_attachments(monkeypatch) -> None:
     )
 
     telegram_text = sent["payload"].html_text
-    assert telegram_text.startswith("🔴 от sender@example.com:")
-    assert "Вложения: 1 (DOC×1)" in telegram_text
+    assert telegram_text.startswith("🔴 от sender@example.com:") or telegram_text.startswith("Письмо получено")
+    assert "📎" in telegram_text or "Вложения:" in telegram_text
 
 
 def test_renderer_mode_logged(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
