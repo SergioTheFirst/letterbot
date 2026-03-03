@@ -76,3 +76,36 @@ def test_premium_clarity_action_shortcuts() -> None:
 def test_premium_clarity_default_without_attachments() -> None:
     rendered = _render(attachments=[])
     assert "📎 0 вложений" in rendered
+
+
+def test_premium_clarity_generic_attention_actions_normalized_to_check() -> None:
+    assert _render(action_line="Проверьте вручную").splitlines()[2] == "Проверить"
+    assert _render(action_line="Attention Needed").splitlines()[2] == "Проверить"
+    assert _render(action_line="Недостаточно данных для оценки").splitlines()[2] == "Проверить"
+
+
+def test_premium_clarity_invoice_with_excel_attachment_prefers_pay_action() -> None:
+    rendered = processor._build_premium_clarity_text(
+        priority="🟡",
+        received_at=datetime(2026, 1, 1),
+        from_email="billing@example.com",
+        from_name="Billing",
+        subject="Счет на оплату №55",
+        action_line="Проверьте вручную",
+        body_summary="",
+        body_text="",
+        attachments=[{"filename": "invoice_55.xlsx", "text": ""}],
+        attachment_summaries=[],
+        insights=[],
+        insight_digest=None,
+        commitments=[],
+        attachments_count=1,
+        extracted_text_len=0,
+        confidence_percent=80,
+        confidence_available=True,
+        confidence_dots_mode="auto",
+        confidence_dots_threshold=75,
+        confidence_dots_scale=10,
+        extraction_failed=False,
+    )
+    assert rendered.splitlines()[2] == "Оплатить"

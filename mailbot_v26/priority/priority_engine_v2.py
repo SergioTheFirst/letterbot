@@ -173,6 +173,8 @@ class PriorityEngineV2:
         "срочн",
     }
     _FYI_MARKERS = {"fyi", "к сведению", "для сведения"}
+    _INVOICE_KEYWORDS = {"счет", "счёт", "invoice", "оплат"}
+    _EXCEL_ATTACHMENT_MARKERS = {".xls", ".xlsx", ".xlsm", ".xlsb", "excel attachment"}
     _COMMITMENT_TYPES = {
         "INVOICE",
         "INVOICE_FINAL",
@@ -255,6 +257,29 @@ class PriorityEngineV2:
                     "urgency_weighted",
                     detail=normalized_mail_type,
                 )
+
+        has_invoice_subject = self._contains_invoice_keyword(normalized_subject)
+        has_excel_attachment = self._contains_excel_attachment_marker(combined_text)
+        invoice_subject_boost_allowed = not (
+            normalized_mail_type.startswith("INVOICE")
+            or normalized_mail_type.startswith("PAYMENT_REMINDER")
+            or normalized_mail_type.startswith("REMINDER")
+            or normalized_mail_type.startswith("CLAIM")
+        )
+        if invoice_subject_boost_allowed and has_invoice_subject:
+            add_points(
+                18,
+                "PRIO_INVOICE_SUBJECT",
+                "invoice_subject",
+                detail=normalized_subject[:60],
+            )
+        if invoice_subject_boost_allowed and has_invoice_subject and has_excel_attachment:
+            add_points(
+                20,
+                "PRIO_INVOICE_EXCEL_ATTACHMENT",
+                "invoice_attachment",
+                detail="excel",
+            )
 
         amount_value = self._max_amount_value(combined_text)
         if amount_value is not None:
@@ -571,6 +596,14 @@ class PriorityEngineV2:
             or mail_type.startswith("PAYMENT_REMINDER")
             or mail_type.startswith("CLAIM")
         )
+
+    def _contains_invoice_keyword(self, text: str) -> bool:
+        normalized = (text or "").lower()
+        return any(keyword in normalized for keyword in self._INVOICE_KEYWORDS)
+
+    def _contains_excel_attachment_marker(self, text: str) -> bool:
+        normalized = (text or "").lower()
+        return any(marker in normalized for marker in self._EXCEL_ATTACHMENT_MARKERS)
 
     def _max_amount_value(self, text: str) -> float | None:
         if not text:
