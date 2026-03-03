@@ -216,15 +216,14 @@ def _render_tier1_message(snapshot: dict[str, object]) -> str:
     action_line = str(snapshot.get("action_line") or "")
     body_summary = str(snapshot.get("body_summary") or "")
     attachments = snapshot.get("attachments") or []
-    base_text = tg_renderer.build_telegram_text(
+    base_text = tg_renderer.render_telegram_message(
         priority=priority,
         from_email=from_email,
         subject=subject,
         action_line=action_line,
+        summary=body_summary,
         attachments=attachments if isinstance(attachments, list) else [],
     )
-    if body_summary.strip():
-        base_text = f"{base_text}\n<b><i>{escape_tg_html(body_summary)}</i></b>"
     return telegram_safe(base_text)
 
 

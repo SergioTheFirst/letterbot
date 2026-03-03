@@ -44,11 +44,10 @@ show_decision_trace = false
 
 [web_ui]
 ; Password for Web UI login. Empty is allowed only as local fallback and logs a warning.
-password = CHANGE_ME
+password = 1
 
 [llm]
 primary = cloudflare
-fallback = cloudflare
 
 [gigachat]
 enabled = true
@@ -212,7 +211,7 @@ ACCOUNTS_TEMPLATE = """[example_account]
 ; account_id rules: lowercase, [a-z0-9_], no spaces.
 ; For Windows login use domain\\user without quotes (example: HQ\\MedvedevSS).
 login = user@example.com
-password = CHANGE_ME
+password = 1
 host = imap.example.com
 port = 993
 use_ssl = true
@@ -228,10 +227,6 @@ api_token = CHANGE_ME
 
 [gigachat]
 api_key = CHANGE_ME
-
-[llm]
-primary = cloudflare
-fallback = cloudflare
 """
 
 

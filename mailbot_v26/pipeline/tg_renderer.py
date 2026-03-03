@@ -5,6 +5,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from mailbot_v26.text.clean_email import clean_email_body
 from mailbot_v26.telegram_utils import escape_tg_html
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.text.sanitize import is_binaryish
@@ -53,6 +54,14 @@ _PERIOD_RE = re.compile(
 _COUNTERPARTY_RE = re.compile(r"\b(ООО|АО|ПАО|ИП)\s+[A-Za-zА-Яа-яЁё0-9\-«»\"]{2,}")
 _TOKEN_CLEAN_RE = re.compile(r"[^A-Za-zА-Яа-яЁё0-9_\-]+")
 _INSIGHT_SUFFIX_LIMIT = 60
+_INTERNAL_NOISE_MARKERS = (
+    "DecisionTraceV1",
+    "ATTENTION_GATE",
+    "LLM_GATE",
+    "Коды:",
+    "Контрфакты",
+)
+_WATERMARK_LINE = "<i>Powered by LetterBot.ru</i>"
 
 
 @dataclass(frozen=True)
@@ -66,6 +75,26 @@ class TelegramRenderFields:
 def _escape_dynamic(text: str | None) -> str:
     cleaned = strip_disallowed_emojis(str(text or ""))
     return escape_tg_html(cleaned)
+
+
+def _strip_internal_noise(text: str | None) -> str:
+    value = str(text or "")
+    for marker in _INTERNAL_NOISE_MARKERS:
+        value = value.replace(marker, "")
+    cleaned_lines = [re.sub(r"[ 	]+", " ", line).strip() for line in value.splitlines()]
+    return "\n".join(line for line in cleaned_lines if line).strip()
+
+
+def _clean_excerpt(text: str | None, max_lines: int = 3) -> str:
+    cleaned = clean_email_body(_strip_internal_noise(text))
+    if not cleaned:
+        return ""
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    if len(lines) == 1 and _is_trivial_sentence(lines[0]):
+        return ""
+    return "\n".join(lines[: max(1, max_lines)])
 
 
 def normalize_sentence(text: str | None) -> str:
@@ -235,7 +264,7 @@ def apply_semantic_gates(
     insights: Iterable[str] | None = None,
     commitments: Iterable[str] | None = None,
 ) -> TelegramRenderFields:
-    resolved_action = dedup_text_by_sentence(action_line)
+    resolved_action = _strip_internal_noise(action_line)
     resolved_summary = dedup_text_by_sentence(summary)
     if _is_trivial_sentence(resolved_summary):
         resolved_summary = ""
@@ -537,7 +566,7 @@ def format_subject(subject: str) -> str:
 
 
 def format_main_action(action_line: str | None) -> str:
-    cleaned = (action_line or "").strip()
+    cleaned = _strip_internal_noise(action_line)
     if not cleaned:
         cleaned = "Действий не требуется"
     safe_action = _escape_dynamic(cleaned)
@@ -633,6 +662,7 @@ def render_telegram_message(
         insights=insights,
         commitments=commitments,
     )
+    summary_excerpt = _clean_excerpt(summary, max_lines=3)
     base_text = build_telegram_text(
         priority=priority,
         from_email=from_email,
@@ -640,12 +670,12 @@ def render_telegram_message(
         action_line=_resolve_action_line(fields.action_line),
         attachments=attachments or [],
         mail_type=mail_type,
-        summary=fields.summary,
+        summary=summary_excerpt,
     )
-    if fields.summary:
-        safe_summary = _escape_dynamic(fields.summary)
-        return dedup_rendered_text(f"{base_text}\n<b><i>{safe_summary}</i></b>")
-    return dedup_rendered_text(base_text)
+    if summary_excerpt:
+        safe_summary = _escape_dynamic(summary_excerpt)
+        return dedup_rendered_text(f"{base_text}\n\n{safe_summary}\n{_WATERMARK_LINE}")
+    return dedup_rendered_text(f"{base_text}\n{_WATERMARK_LINE}")
 
 
 def _resolve_action_line(action_line: str | None) -> str:

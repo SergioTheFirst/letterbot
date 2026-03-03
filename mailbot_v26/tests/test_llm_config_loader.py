@@ -46,7 +46,7 @@ def test_llm_loader_reads_cloudflare_secrets_from_accounts_in_two_file_mode(tmp_
     assert "keys.ini missing" not in caplog.text
 
 
-def test_llm_loader_uses_accounts_llm_mapping_in_two_file_mode(tmp_path: Path) -> None:
+def test_llm_loader_uses_settings_llm_mapping_in_two_file_mode(tmp_path: Path) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True)
     (config_dir / "settings.ini").write_text(
@@ -60,7 +60,7 @@ def test_llm_loader_uses_accounts_llm_mapping_in_two_file_mode(tmp_path: Path) -
 
     loaded = _load_llm_config(config_dir)
 
-    assert loaded.primary == "gigachat"
+    assert loaded.primary == "cloudflare"
     assert loaded.fallback == "cloudflare"
     assert loaded.gigachat_api_key == "from_accounts"
 
@@ -104,3 +104,15 @@ def test_llm_loader_two_file_mode_uses_legacy_keys_if_accounts_missing_secret(tm
 
     assert loaded.cloudflare_account_id == "legacy_acc"
     assert loaded.cloudflare_api_key == "legacy_token"
+
+
+def test_llm_loader_fallback_defaults_to_primary_when_missing(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "settings.ini").write_text("[llm]\nprimary=gigachat\n", encoding="utf-8")
+    (config_dir / "accounts.ini").write_text("[gigachat]\napi_key=from_accounts\n", encoding="utf-8")
+
+    loaded = _load_llm_config(config_dir)
+
+    assert loaded.primary == "gigachat"
+    assert loaded.fallback == "gigachat"

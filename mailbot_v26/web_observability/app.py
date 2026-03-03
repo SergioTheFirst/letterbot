@@ -989,6 +989,15 @@ def _load_web_ui_settings(config_path: Path | None) -> WebUISettings:
     )
 
 
+def _resolve_login_next_target(next_path: str | None) -> str:
+    candidate = str(next_path or "").strip()
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return url_for("index")
+    if candidate == "/l":
+        return url_for("index")
+    return candidate
+
+
 def _image_data_uri(path: Path) -> str:
     if not path.exists() or not path.is_file():
         return ""
@@ -2143,7 +2152,7 @@ def create_app(
                 session["auth_user"] = _request_remote_addr() or "local"
                 session.permanent = False
                 next_path = request.args.get("next")
-                return redirect(next_path or url_for("index"))
+                return redirect(_resolve_login_next_target(next_path))
             error = "Incorrect password. Please try again."
         return _render_template(
             app,
@@ -2479,6 +2488,10 @@ def create_app(
 
     @app.route("/cockpit")
     def cockpit_redirect():
+        return redirect(url_for("index"))
+
+    @app.route("/l")
+    def legacy_home_redirect():
         return redirect(url_for("index"))
 
     @app.route("/archive")
@@ -4533,10 +4546,10 @@ def main() -> None:
     ini_password = load_web_ui_password_from_ini(config_dir)
     if env_password:
         password = env_password
-    elif yaml_password:
-        password = yaml_password
-    else:
+    elif ini_password:
         password = ini_password
+    else:
+        password = yaml_password
     if not password:
         logger.warning("web_ui_password_not_configured_using_empty_password")
 
