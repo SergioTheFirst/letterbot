@@ -155,20 +155,15 @@ Done:
 - 2026-03-03: web cockpit repr-dump fix (flatten serialized/nested list values before template render), archive visibility regression tests for DB-backed emails, and priority-menu keyboard UX guardrail test; processor action fallback now normalizes "Действий не требуется" to "Проверить" for premium default TG UX.
 - 2026-03-03: premium Telegram UX cleanup (internal DecisionTrace/gate noise removed from default message, excerpt cleaning for external-mail disclaimer tails, priority-dot first line preserved, watermark added), web login fix (`next=/l` stable + legacy `/l` alias), web password precedence set to env > settings.ini [web_ui] > config.yaml, and LLM INI cleanup (single llm source, fallback defaults to primary, templates/examples de-duplicated) with full pytest green.
 - 2026-03-03: premium defaults enabled in runtime flags (processor + clarity), inline external disclaimer tails removed in excerpt cleaning, YAML LLM fallback now defaults to primary provider, and config bootstrap no longer requires redundant [llm] fallback when omitted; regression tests added/updated with full pytest green.
+- 2026-03-03: restored premium default Telegram Tier-1 layout (`{dot} от sender:`, subject, short action, blank line, attachment line, 1–3 excerpt lines, watermark), removed fallback-like `От:/Тема:/Подробнее` noise from default UX path, and reinforced initial priority keyboard regression coverage (`🔴 Срочно`, `🟡 Важно`, `🔵 Низкий`) with full pytest green.
 Now:
-- P0/P1 defaults/noise/config cleanup patch validated; awaiting merge.
-- Full test suite green (`python -m pytest -q`).
+- Telegram premium Tier-1 UX restore patch validated with full pytest green.
 Next:
 - Merge patch and run Windows host smoke gates separately as packaging follow-up.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/features/flags.py
-- mailbot_v26/text/clean_email.py
-- mailbot_v26/llm/router.py
-- mailbot_v26/tools/config_bootstrap.py
-- mailbot_v26/tests/test_feature_flags.py
-- mailbot_v26/tests/test_clean_email.py
-- mailbot_v26/tests/test_llm_config_loader.py
-- mailbot_v26/tests/test_config_bootstrap.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/tests/test_premium_clarity_renderer.py
+- mailbot_v26/tests/test_premium_format_regression.py
 - CONTINUITY.md
