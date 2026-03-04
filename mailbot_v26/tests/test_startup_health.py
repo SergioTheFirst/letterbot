@@ -93,6 +93,7 @@ def test_startup_health_checker_never_raises(tmp_path, monkeypatch) -> None:
         "Telegram",
         "GigaChat",
         "Cloudflare",
+        "LLM Direct",
     }
 
 
@@ -134,8 +135,8 @@ def test_launch_report_includes_honest_llm_delivery_mode(tmp_path) -> None:
                 "[cloudflare]",
                 "enabled = true",
                 "",
-                "[threading]",
-                "llm_request_queue_enabled = true",
+                "[llm_queue]",
+                "llm_request_queue_enabled = false",
                 "max_concurrent_llm_calls = 1",
             ]
         ),
@@ -153,13 +154,20 @@ def test_launch_report_includes_honest_llm_delivery_mode(tmp_path) -> None:
     )
 
     report = LaunchReportBuilder(config_dir=config_dir).build(
-        results=[],
+        results=[
+            {
+                "component": "LLM Direct",
+                "status": HealthStatus.FAILED,
+                "details": "configured + direct test failed",
+            }
+        ],
         mode=SimpleNamespace(value="FULL"),
     )
 
-    assert "LLM delivery mode: QUEUED_HEURISTIC_IMMEDIATE" in report
+    assert "LLM delivery mode: HEURISTIC_FALLBACK" in report
     assert "immediate TG summaries: heuristic" in report
-    assert "background queue: enabled" in report
+    assert "background queue: disabled" in report
+    assert "direct path check: configured + direct test failed" in report
 
 
 def test_startup_report_default_branding_and_watermark() -> None:

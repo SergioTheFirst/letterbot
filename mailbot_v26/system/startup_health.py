@@ -49,6 +49,7 @@ class StartupHealthChecker:
         ]
         results.extend(self._safe_check(self._check_gigachat, fallback=[]) or [])
         results.extend(self._safe_check(self._check_cloudflare, fallback=[]) or [])
+        results.append(self._safe_check(self._check_llm_direct_path))
         return [result.as_dict() for result in results]
 
     def evaluate_mode(self, results: Sequence[dict[str, str]]) -> OperationalMode:
@@ -155,6 +156,36 @@ class StartupHealthChecker:
         details = "active" if ok else "healthcheck failed"
         return [HealthCheckResult("Cloudflare", status, details)]
 
+    def _check_llm_direct_path(self) -> HealthCheckResult:
+        llm_config = llm_router._load_llm_config(self._config_dir)
+        router = llm_router.LLMRouter(llm_config)
+        provider_name = llm_config.primary
+        provider = router._providers.get(provider_name)
+        if provider is None and llm_config.fallback:
+            provider_name = llm_config.fallback
+            provider = router._providers.get(provider_name)
+        if provider is None:
+            return HealthCheckResult("LLM Direct", HealthStatus.DEGRADED, "disabled")
+        if not provider.healthcheck():
+            return HealthCheckResult(
+                "LLM Direct",
+                HealthStatus.FAILED,
+                "configured + direct test failed",
+            )
+        try:
+            provider.complete(
+                [{"role": "user", "content": "ping"}],
+                max_tokens=2,
+                temperature=0,
+            )
+        except Exception:
+            return HealthCheckResult(
+                "LLM Direct",
+                HealthStatus.FAILED,
+                "configured + direct test failed",
+            )
+        return HealthCheckResult("LLM Direct", HealthStatus.OK, "configured + direct test passed")
+
 
 class LaunchReportBuilder:
     def __init__(
@@ -179,8 +210,9 @@ class LaunchReportBuilder:
             mail_accounts=mail_accounts,
             unavailable_reason=mail_check_unavailable_reason,
         )
-        llm_delivery_mode = self._get_llm_delivery_mode()
+        llm_delivery_mode = self._get_llm_delivery_mode(index)
         background_queue_mode = self._get_background_queue_mode()
+        llm_direct_check = self._get_llm_direct_check(index)
         lines = [
             "---",
             f"{self._version_label} started",
@@ -193,6 +225,7 @@ class LaunchReportBuilder:
             "LLM:",
             self._format_line("GigaChat", index.get("GigaChat")),
             self._format_line("Cloudflare", index.get("Cloudflare")),
+            f"- direct path check: {llm_direct_check}",
             f"- LLM delivery mode: {llm_delivery_mode}",
             f"- immediate TG summaries: {self._get_immediate_summary_mode(llm_delivery_mode)}",
             f"- background queue: {background_queue_mode}",
@@ -243,7 +276,7 @@ class LaunchReportBuilder:
         sanitized = " ".join((details or "").split())
         return sanitized[:180]
 
-    def _get_llm_delivery_mode(self) -> str:
+    def _get_llm_delivery_mode(self, index: dict[str, dict[str, str]]) -> str:
         llm_config = llm_router._load_llm_config(self._config_dir)
         has_direct_provider = (
             bool(llm_config.cloudflare_enabled)
@@ -256,10 +289,16 @@ class LaunchReportBuilder:
         if not has_direct_provider:
             return "DISABLED"
 
-        queue_config = load_llm_queue_config(self._config_dir)
-        if queue_config.llm_request_queue_enabled and queue_config.max_concurrent_llm_calls == 1:
-            return "QUEUED_HEURISTIC_IMMEDIATE"
-        return "DIRECT"
+        llm_direct_status = index.get("LLM Direct", {}).get("status")
+        if llm_direct_status == HealthStatus.OK:
+            return "DIRECT"
+        return "HEURISTIC_FALLBACK"
+
+    def _get_llm_direct_check(self, index: dict[str, dict[str, str]]) -> str:
+        direct_entry = index.get("LLM Direct")
+        if direct_entry:
+            return direct_entry.get("details", "unknown")
+        return "disabled"
 
     def _get_immediate_summary_mode(self, llm_delivery_mode: str) -> str:
         return "heuristic" if llm_delivery_mode != "DIRECT" else "direct"
