@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -87,6 +88,18 @@ class WeeklyDigestData:
     weekly_accuracy_report: dict[str, object] | None = None
     weekly_calibration_report: dict[str, object] | None = None
     weekly_accuracy_progress: WeeklyAccuracyProgress | None = None
+    invoice_count: int = 0
+    invoice_total_rub: int | None = None
+    contract_count: int = 0
+    silence_risk: dict[str, object] | None = None
+
+
+_INVOICE_RE = re.compile(r"(сч[её]т|invoice|оплат)", re.IGNORECASE)
+_CONTRACT_RE = re.compile(r"(договор|contract|подпис|signature|sign)", re.IGNORECASE)
+_RUB_AMOUNT_RE = re.compile(
+    r"(?<!\d)(\d{1,3}(?:[\s\u00A0]\d{3})+|\d{4,9})\s*(?:₽|руб\.?|рубл[еяи]|rub|rur)",
+    re.IGNORECASE,
+)
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -207,23 +220,65 @@ def _format_weekly_accuracy_progress(
         return None
     if float(progress.current_surprise_rate_pp) > 20:
         return None
+    accuracy_pct = max(0, min(100, int(round(100 - float(progress.current_surprise_rate_pp)))))
     delta = int(progress.delta_pp)
     if abs(delta) < 2:
         return None
-    prev_rate = int(progress.prev_surprise_rate_pp)
-    current_rate = int(progress.current_surprise_rate_pp)
-    corrections = int(progress.current_corrections)
     if delta > 0:
         return (
-            f"Рост точности: +{delta} п.п. "
-            f"(сюрпризы {prev_rate}% → {current_rate}%), "
-            f"коррекции: {corrections} за период"
+            "Твой прогресс: "
+            f"точность бота выросла до {accuracy_pct}% "
+            f"благодаря твоим {corrections} коррекциям."
         )
     return (
-        f"Падение точности: {abs(delta)} п.п. "
-        f"(сюрпризы {prev_rate}% → {current_rate}%), "
-        f"коррекции: {corrections} за период"
+        "Твой прогресс: "
+        f"точность бота снизилась до {accuracy_pct}% "
+        f"при {corrections} коррекциях за неделю."
     )
+
+
+def _collect_weekly_human_signals(
+    *,
+    analytics: KnowledgeAnalytics,
+    account_email: str,
+    account_emails: Sequence[str] | None,
+) -> tuple[int, int | None, int]:
+    try:
+        account_ids = analytics._normalize_account_scope(account_email, account_emails)
+        if not account_ids:
+            return 0, None, 0
+        rows = analytics._event_rows_scoped(
+            account_ids=account_ids,
+            event_type="email_received",
+            since_ts=analytics._window_start_ts(7),
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("weekly_human_signals_failed", error=str(exc))
+        return 0, None, 0
+
+    invoice_count = 0
+    contract_count = 0
+    invoice_total_rub = 0
+    has_invoice_amount = False
+    for row in rows:
+        payload = analytics._event_payload(row)
+        text = " ".join(
+            str(payload.get(key) or "")
+            for key in ("subject", "body_summary")
+        )
+        if _INVOICE_RE.search(text):
+            invoice_count += 1
+            for match in _RUB_AMOUNT_RE.finditer(text):
+                amount_raw = match.group(1).replace(" ", "").replace("\u00A0", "")
+                try:
+                    invoice_total_rub += int(amount_raw)
+                    has_invoice_amount = True
+                except ValueError:
+                    continue
+        if _CONTRACT_RE.search(text):
+            contract_count += 1
+
+    return invoice_count, (invoice_total_rub if has_invoice_amount else None), contract_count
 
 
 def _collect_anomaly_alerts(
@@ -510,6 +565,28 @@ def _collect_weekly_data(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("weekly_accuracy_progress_failed", error=str(exc))
 
+    invoice_count, invoice_total_rub, contract_count = _collect_weekly_human_signals(
+        analytics=analytics,
+        account_email=account_email,
+        account_emails=account_emails,
+    )
+    silence_risk = None
+    try:
+        silence_rows = analytics.get_silence_insights(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=7,
+            limit=1,
+        )
+        if silence_rows:
+            top = silence_rows[0]
+            silence_risk = {
+                "contact": str(top.get("contact") or "").strip(),
+                "days_silent": int(top.get("days_silent") or 0),
+            }
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("weekly_silence_insights_failed", error=str(exc))
+
     return WeeklyDigestData(
         week_key=week_key,
         total_emails=int(volume.get("total") or 0),
@@ -526,114 +603,42 @@ def _collect_weekly_data(
         weekly_accuracy_report=weekly_accuracy_report,
         weekly_calibration_report=weekly_calibration_report,
         weekly_accuracy_progress=weekly_accuracy_progress,
+        invoice_count=invoice_count,
+        invoice_total_rub=invoice_total_rub,
+        contract_count=contract_count,
+        silence_risk=silence_risk,
     )
 
 
 def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
-    lines = [t("digest.weekly", locale=DEFAULT_LOCALE)]
-    lines.append(
-        "• Объём: "
-        f"всего {data.total_emails}, "
-        f"в дайджест {data.deferred_emails}"
-    )
-    if data.attention_economics is None:
-        lines.append(
-            "• Внимание: "
-            f"{_attention_summary(data.attention_entities)}"
-        )
-    commitments = data.commitment_counts
-    lines.append(
-        "• Обязательства: "
-        f"создано {int(commitments.get('created') or 0)}, "
-        f"выполнено {int(commitments.get('fulfilled') or 0)}, "
-        f"просрочено {int(commitments.get('overdue') or 0)}"
-    )
-    lines.append(
-        "• Просроченные (топ-5): "
-        f"{_overdue_summary(data.overdue_commitments)}"
-    )
-    lines.append(
-        "• Уровень доверия: "
-        f"{_trust_summary(data.trust_deltas)}"
-    )
-    if data.quality_metrics is not None:
-        qm = data.quality_metrics
-        rate_text = (
-            f" ({qm.correction_rate * 100:.1f}% писем)"
-            if qm.correction_rate is not None
-            else ""
-        )
-        lines.append(
-            "• Качество: "
-            f"исправлений {qm.corrections_total}{rate_text} (7 дней)"
-        )
-        if qm.by_new_priority:
-            breakdown = ", ".join(
-                f"{escape_tg_html(item.key)}: {item.count}" for item in qm.by_new_priority
-            )
-            lines.append("• Исправления по приоритету: " + breakdown)
-        if qm.by_engine:
-            breakdown = ", ".join(
-                f"{escape_tg_html(item.key)}: {item.count}" for item in qm.by_engine
-            )
-            lines.append("• Источник оценки: " + breakdown)
-    if data.weekly_accuracy_report is not None:
-        report = data.weekly_accuracy_report
-        corrections = int(report.get("priority_corrections") or 0)
-        accuracy_raw = report.get("accuracy_pct")
-        accuracy_pct = int(accuracy_raw) if accuracy_raw is not None else None
-        if corrections >= 3 and accuracy_pct is not None and accuracy_pct >= 80:
-            emails = int(report.get("emails_received") or 0)
-            lines.append(
-                f"📊 Неделя: {emails} писем · {corrections} коррекции · точность {accuracy_pct}%"
-            )
-    if data.weekly_calibration_report is not None:
-        report = data.weekly_calibration_report
-        corrections = int(report.get("corrections") or 0)
-        surprises = int(report.get("surprises") or 0)
-        window_days = int(report.get("window_days") or 7)
-        accuracy_pct = report.get("accuracy_pct")
-        if corrections > 0:
-            accuracy_pct = int(accuracy_pct or 0)
-            lines.append(f"<b>Отчёт точности ({window_days} дней)</b>")
-            lines.append(f"• Коррекции приоритета: {corrections}")
-            lines.append(f"• Сюрпризы: {surprises} (точность: {accuracy_pct}%)")
-            top_items = report.get("top") or []
-            if top_items:
-                lines.append("• Где чаще всего случалось:")
-                for item in top_items:
-                    label = escape_tg_html(str(item.get("label") or ""))
-                    count = int(item.get("count") or 0)
-                    lines.append(f"  - {label} — {count}")
-            proposals = report.get("proposals") or []
-            if proposals:
-                lines.append("• Предложения к калибровке (shadow):")
-                for item in proposals[:3]:
-                    label = escape_tg_html(str(item.get("label") or ""))
-                    transition = escape_tg_html(str(item.get("transition") or ""))
-                    count = int(item.get("count") or 0)
-                    hint = escape_tg_html(str(item.get("hint") or ""))
-                    lines.append(f"  - {label}: {transition} ×{count} — {hint}")
-    if data.weekly_accuracy_report is not None or data.weekly_calibration_report is not None:
-        progress_line = _format_weekly_accuracy_progress(data.weekly_accuracy_progress)
-        if progress_line:
-            lines.append(f"• {progress_line}")
-    if data.notification_sla is not None:
-        current = data.notification_sla
-        prev = data.previous_week_sla
-        p90 = current.p90_latency_7d or 0
-        p99 = current.p99_latency_7d or 0
-        trend = ""
-        if prev and prev.p90_latency_7d is not None:
-            delta = p90 - prev.p90_latency_7d
-            trend = f" (Δ {delta:+.0f}с)"
-        lines.append(
-            "• Надёжность уведомлений: "
-            f"p90 {p90:.0f}с{trend}, p99 {p99:.0f}с"
-        )
-    if data.anomaly_alerts:
-        lines.append(t("digest.anomalies", locale=DEFAULT_LOCALE))
-        lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:8])
+    lines = [f"За неделю {data.total_emails} писем. Главное:"]
+    highlights: list[str] = []
+    if data.invoice_count > 0:
+        if data.invoice_total_rub is not None and data.invoice_total_rub > 0:
+            total = f"{data.invoice_total_rub:,}".replace(",", " ")
+            highlights.append(f"• {data.invoice_count} счёта на оплату (общая сумма {total} ₽)")
+        else:
+            highlights.append(f"• {data.invoice_count} счёта на оплату")
+    if data.contract_count > 0:
+        highlights.append(f"• {data.contract_count} договора ждут подписи")
+    overdue_count = int(data.commitment_counts.get("overdue") or 0)
+    if overdue_count > 0:
+        highlights.append(f"• {overdue_count} обязательства просрочены")
+    if data.silence_risk:
+        contact = _safe_text(str(data.silence_risk.get("contact") or "контакт"), max_len=40)
+        days = int(data.silence_risk.get("days_silent") or 0)
+        if days > 0:
+            highlights.append(f"• От {contact} — молчание {days} дней (риск)")
+
+    if not highlights:
+        highlights.append("• Спокойная неделя: критичных сигналов не было.")
+    lines.extend(highlights[:4])
+
+    progress_line = _format_weekly_accuracy_progress(data.weekly_accuracy_progress)
+    if progress_line:
+        lines.append("")
+        lines.append(progress_line)
+
     if data.attention_economics is not None:
         lines.append("")
         lines.extend(format_attention_block(data.attention_economics))

@@ -238,7 +238,6 @@ def test_weekly_digest_includes_quality_block_when_flag_on(tmp_path) -> None:
     )
     text_without = weekly_digest._build_weekly_digest_text(data_without_block)
 
-    assert "Качество" in text_with
-    assert "Исправления по приоритету" in text_with
-    assert "исправлений 2" in text_with
+    assert "Качество" not in text_with
+    assert "Исправления по приоритету" not in text_with
     assert "Качество" not in text_without

@@ -115,8 +115,8 @@ hour = 9
 minute = 0
 
 [weekly_digest]
-weekday = mon
-hour = 9
+weekday = fri
+hour = 19
 minute = 0
 
 [weekly_accuracy_report]

@@ -212,4 +212,4 @@ def test_digest_blocks_include_notification_sla() -> None:
             previous_week_sla=sla,
         )
     )
-    assert "Надёжность уведомлений" in weekly_data
+    assert "Надёжность уведомлений" not in weekly_data
