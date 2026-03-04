@@ -237,7 +237,23 @@ def _render_stub_html(
         f'<input type="hidden" name="account_email" value="{account_email}">' if account_email else ""
     )
     lane_hidden = f'<input type="hidden" name="lane" value="{lane_value}">' if lane_value else ""
+    cfg = context.get("cfg") if isinstance(context, Mapping) else {}
+    features = cfg.get("features") if isinstance(cfg, Mapping) else {}
+    donate_enabled = bool(features.get("donate_enabled")) if isinstance(features, Mapping) else False
+    support_enabled = (
+        bool(context.get("support_nav_enabled")) if isinstance(context, Mapping) else False
+    ) and donate_enabled
+    nav_links = [
+        '<a href="/" class="nav-link">Cockpit</a>',
+        '<a href="/archive" class="nav-link">Archive</a>',
+        '<a href="/health" class="nav-link">Health</a>',
+        '<a href="/events" class="nav-link">Events</a>',
+        '<a href="/doctor" class="nav-link">Doctor</a>',
+    ]
+    if support_enabled:
+        nav_links.append('<a href="/support" class="nav-link">Support</a>')
     header = (
+        f"<nav>{''.join(nav_links)}</nav>"
         "<div class=\"dashboard-vars\">"
         f'<input id="account_emails" name="account_emails" value="{html.escape(account_scope)}">'
         f'<select name="window_days">{_options([7, 30, 90], int(window_val))}</select>'
@@ -299,7 +315,6 @@ def _render_stub_html(
             else ""
         )
         support_card = ""
-        support_enabled = bool(context.get("support_nav_enabled")) if isinstance(context, Mapping) else False
         if support_enabled:
             support_preview = ""
             methods = context.get("support_methods") if isinstance(context, Mapping) else []
@@ -308,9 +323,26 @@ def _render_stub_html(
                 if qr_uri:
                     support_preview = '<img alt="Support QR" src="%s">' % html.escape(qr_uri)
             support_card = f"<h2>Support Letterbot</h2><a href=\"/support\">/support</a>{support_preview}"
+        quality_summary = context.get("quality_summary") if isinstance(context, Mapping) else {}
+        quality_summary = quality_summary if isinstance(quality_summary, Mapping) else {}
+        quality_block = ""
+        if bool(quality_summary.get("available")):
+            quality_block = (
+                '<div data-testid="quality-summary">'
+                f'<div>{html.escape(str(quality_summary.get("corrections") or "0"))}</div>'
+                f'<div>{html.escape(str(quality_summary.get("surprise_rate") or "—"))}</div>'
+                f'<div>{html.escape(str(quality_summary.get("trust_hint") or ""))}</div>'
+                "</div>"
+            )
+        else:
+            quality_block = (
+                '<div data-testid="quality-summary">'
+                "Not enough feedback yet."
+                "</div>"
+            )
         return (
             f"<html><body>{header}<h2>Today Digest</h2>{digest_today_block}<h2>Week Digest</h2>{digest_week_block}"
-            f"<h2>Recent Activity</h2>{lane_html}{engineer_block}{support_card}<table>{activity_body}</table></body></html>"
+            f"<h2>Recent Activity</h2>{lane_html}{quality_block}{engineer_block}{support_card}<table>{activity_body}</table></body></html>"
         )
 
     if template_name in {"health.html", "partials/health_overview.html"}:
@@ -1460,13 +1492,86 @@ def _golden_signals_view(golden_signals: Mapping[str, object] | None) -> dict[st
     saturation_parts = [part for part in [db_size, f"{traffic_volume} spans"] if part != "–"]
     saturation = " • ".join(saturation_parts) if saturation_parts else "–"
     return {
-        "latency_p50": f"{latency_p50} ms" if latency_p50 != "–" else "–",
+        "latency_p50": f"{latency_p50} ms" if latency_p50 != "—" else "—",
         "latency_p95": f"{latency_p95} ms" if latency_p95 != "–" else "–",
         "error_rate": f"{error_rate}%" if error_rate != "–" else "–",
         "fallback_rate": f"{fallback_rate}%" if fallback_rate != "–" else "–",
         "tg_failure_rate": f"{tg_failure_rate}%" if tg_failure_rate != "–" else "–",
         "traffic_volume": traffic_volume if traffic_volume != "–" else "–",
         "saturation": saturation,
+    }
+
+
+def _home_quality_summary(
+    *,
+    analytics: KnowledgeAnalytics,
+    db_path: Path,
+    account_email: str,
+    account_emails: list[str],
+    window_days: int,
+) -> dict[str, object]:
+    safe = {
+        "available": False,
+        "corrections": "0",
+        "surprise_rate": "—",
+        "trust_hint": "Качество стабильно в базовом режиме.",
+    }
+    if not account_email:
+        return safe
+    now_ts = datetime.now(timezone.utc).timestamp()
+    since_ts = now_ts - max(1, int(window_days)) * 24 * 60 * 60
+    corrections = 0
+    surprise_rate = "—"
+    try:
+        breakdown = analytics.weekly_surprise_breakdown(
+            account_email=account_email,
+            account_emails=account_emails,
+            since_ts=since_ts,
+            top_n=3,
+            min_corrections=1,
+        )
+    except Exception:
+        breakdown = None
+    if isinstance(breakdown, Mapping):
+        corrections = int(breakdown.get("corrections") or 0)
+        surprises = int(breakdown.get("surprises") or 0)
+        if corrections > 0:
+            surprise_rate = f"{(surprises / corrections) * 100:.0f}%"
+    if not corrections:
+        try:
+            calibration = compute_priority_calibration_report(
+                db_path=db_path,
+                days=max(1, int(window_days)),
+                max_rows=500,
+                now_ts_utc=now_ts,
+            )
+        except Exception:
+            calibration = {}
+        totals = calibration.get("totals") if isinstance(calibration, Mapping) else {}
+        if isinstance(totals, Mapping):
+            corrections = int(totals.get("decisions_corrected") or 0)
+        drift = calibration.get("drift") if isinstance(calibration, Mapping) else {}
+        if isinstance(drift, Mapping):
+            drift_rate = _safe_float(drift.get("surprise_rate_last_7d"))
+            if drift_rate is not None:
+                surprise_rate = f"{drift_rate * 100:.0f}%"
+    trust_hint = "Качество стабильно в базовом режиме."
+    try:
+        trust_delta = analytics.latest_trust_score_delta(limit=100)
+    except Exception:
+        trust_delta = None
+    if isinstance(trust_delta, Mapping):
+        delta_value = _safe_float(trust_delta.get("delta"))
+        if delta_value is not None:
+            if delta_value <= -0.1:
+                trust_hint = "Внимание: доверие снижается, проверьте последние правки."
+            elif delta_value >= 0.1:
+                trust_hint = "Доверие растет, текущая автоматизация работает ровнее."
+    return {
+        "available": corrections > 0,
+        "corrections": str(corrections),
+        "surprise_rate": surprise_rate,
+        "trust_hint": trust_hint,
     }
 
 
@@ -2518,6 +2623,13 @@ def create_app(
             base_params=lane_params,
             endpoint="index",
         )
+        quality_summary = _home_quality_summary(
+            analytics=analytics,
+            db_path=app.config["DB_PATH"],
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=window_days,
+        )
 
         return _render_template(
             app,
@@ -2552,6 +2664,7 @@ def create_app(
             top_senders=top_senders,
             silent_contacts=silent_contacts,
             stalled_threads=stalled_threads,
+            quality_summary=quality_summary,
             support_methods=app.config["SUPPORT_SETTINGS"].methods[:1],
             hide_limit=True,
             status_refresh_ms=STATUS_STRIP_REFRESH_MS,

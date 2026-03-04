@@ -16,78 +16,12 @@
     <div class="status-strip-offline" id="status-strip-offline">offline</div>
   </div>
 
-  <div class="cockpit-grid">
-    <div class="cockpit-left">
-      <div class="card digest-card">
-        <div class="section-title">
-          <h2>Today Digest</h2>
-          <div class="hint">Highlights across the last 24h</div>
-        </div>
-        {% if digest_today_counts %}
-        <div class="digest-counts">
-          {% for item in digest_today_counts %}
-          <span class="badge muted">{{ item.label }} {{ item.count }}</span>
-          {% endfor %}
-        </div>
-        {% endif %}
-        {% if digest_today %}
-        <div class="digest-items">
-          {% for item in digest_today %}
-          <div class="digest-item">
-            <div class="digest-body">
-              <div class="title">{{ item.title }}</div>
-              <div class="preview">{{ item.from_label }}</div>
-            </div>
-            <div class="digest-meta">
-              <div class="time">{{ item.time }}</div>
-              <div><span class="badge {% if item.status.lower() == 'delivered' %}success{% elif item.status.lower() == 'failed' %}danger{% else %}muted{% endif %}">{{ item.status }}</span></div>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="hint">Expand window or scope to surface today signals.</div>
-        {% endif %}
-      </div>
-
-      <div class="card digest-card">
-        <div class="section-title">
-          <h2>Week Digest</h2>
-          <div class="hint">Condensed week-to-date stream</div>
-        </div>
-        {% if digest_week_counts %}
-        <div class="digest-counts">
-          {% for item in digest_week_counts %}
-          <span class="badge muted">{{ item.label }} {{ item.count }}</span>
-          {% endfor %}
-        </div>
-        {% endif %}
-        {% if digest_week %}
-        <div class="digest-items">
-          {% for item in digest_week %}
-          <div class="digest-item">
-            <div class="digest-body">
-              <div class="title">{{ item.title }}</div>
-              <div class="preview">{{ item.from_label }}</div>
-            </div>
-            <div class="digest-meta">
-              <div class="time">{{ item.time }}</div>
-              <div><span class="badge {% if item.status.lower() == 'delivered' %}success{% elif item.status.lower() == 'failed' %}danger{% else %}muted{% endif %}">{{ item.status }}</span></div>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="hint">Expand window to highlight weekly flow.</div>
-        {% endif %}
-      </div>
-    </div>
-
-    <div class="cockpit-center">
+  <div class="cockpit-grid cockpit-grid--home">
+    <div class="cockpit-main">
       <div class="card activity-card">
         <div class="section-title">
-          <h2>Recent Activity</h2>
-          <div class="hint">Email content masked in web view.</div>
+          <h2>Что требует внимания сейчас</h2>
+          <div class="hint">Recent Activity with lane focus.</div>
         </div>
         {% if lane_pills %}
         <div class="lane-pills" aria-label="Lane filters">
@@ -129,6 +63,72 @@
         {% else %}
         <div class="hint">Adjust scope or window to populate the stream.</div>
         {% endif %}
+      </div>
+
+      <div class="card digest-card">
+        <div class="section-title">
+          <h2>Последние сводки</h2>
+          <div class="hint">Today and week digests in one place.</div>
+        </div>
+        <div class="digest-stack">
+          <div class="digest-slice">
+            <h3>Today Digest</h3>
+            {% if digest_today_counts %}
+            <div class="digest-counts">
+              {% for item in digest_today_counts %}
+              <span class="badge muted">{{ item.label }} {{ item.count }}</span>
+              {% endfor %}
+            </div>
+            {% endif %}
+            {% if digest_today %}
+            <div class="digest-items">
+              {% for item in digest_today %}
+              <div class="digest-item">
+                <div class="digest-body">
+                  <div class="title">{{ item.title }}</div>
+                  <div class="preview">{{ item.from_label }}</div>
+                </div>
+                <div class="digest-meta">
+                  <div class="time">{{ item.time }}</div>
+                  <div><span class="badge {% if item.status.lower() == 'delivered' %}success{% elif item.status.lower() == 'failed' %}danger{% else %}muted{% endif %}">{{ item.status }}</span></div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="hint">Expand window or scope to surface today signals.</div>
+            {% endif %}
+          </div>
+
+          <div class="digest-slice">
+            <h3>Week Digest</h3>
+            {% if digest_week_counts %}
+            <div class="digest-counts">
+              {% for item in digest_week_counts %}
+              <span class="badge muted">{{ item.label }} {{ item.count }}</span>
+              {% endfor %}
+            </div>
+            {% endif %}
+            {% if digest_week %}
+            <div class="digest-items">
+              {% for item in digest_week %}
+              <div class="digest-item">
+                <div class="digest-body">
+                  <div class="title">{{ item.title }}</div>
+                  <div class="preview">{{ item.from_label }}</div>
+                </div>
+                <div class="digest-meta">
+                  <div class="time">{{ item.time }}</div>
+                  <div><span class="badge {% if item.status.lower() == 'delivered' %}success{% elif item.status.lower() == 'failed' %}danger{% else %}muted{% endif %}">{{ item.status }}</span></div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="hint">Expand window to highlight weekly flow.</div>
+            {% endif %}
+          </div>
+        </div>
       </div>
 
       {% if engineer_mode %}
@@ -217,22 +217,37 @@
       {% endif %}
     </div>
 
-    <div class="cockpit-right">
+    <div class="cockpit-side">
       <div class="card golden-card">
         <div class="section-title">
-          <h2>Commitments</h2>
-          <div class="hint">Follow-up ledger snapshot</div>
+          <h2>Состояние системы</h2>
+          <div class="hint">Golden signals at a glance</div>
         </div>
+        {% if golden_signals %}
         <div class="signal-grid">
-          <div class="signal-item">
-            <div class="label">Open commitments</div>
-            <div class="value">{{ open_commitments }}</div>
-          </div>
+          <div class="signal-item"><div class="label">Latency p50</div><div class="value">{{ golden_signals.latency_p50 }}</div></div>
+          <div class="signal-item"><div class="label">Latency p95</div><div class="value">{{ golden_signals.latency_p95 }}</div></div>
+          <div class="signal-item"><div class="label">Error rate</div><div class="value">{{ golden_signals.error_rate }}</div></div>
+          <div class="signal-item"><div class="label">Fallback rate</div><div class="value">{{ golden_signals.fallback_rate }}</div></div>
+          <div class="signal-item"><div class="label">TG failure</div><div class="value">{{ golden_signals.tg_failure_rate }}</div></div>
+          <div class="signal-item"><div class="label">Traffic</div><div class="value">{{ golden_signals.traffic_volume }}</div></div>
+          <div class="signal-item"><div class="label">Saturation</div><div class="value">{{ golden_signals.saturation }}</div></div>
         </div>
-        {% if commitments_url %}
-        <div class="card-actions">
-          <a class="btn ghost" href="{{ commitments_url }}">View ledger</a>
+        {% else %}
+        <div class="hint">Adjust scope to surface system signals.</div>
+        {% endif %}
+      </div>
+
+      <div class="card golden-card quality-card" data-testid="quality-summary">
+        <div class="section-title">
+          <h2>Качество автоматизации</h2>
         </div>
+        {% if quality_summary.available %}
+        <div class="quality-metric"><span class="label">Corrections</span><span class="value">{{ quality_summary.corrections }}</span></div>
+        <div class="quality-metric"><span class="label">Surprise rate</span><span class="value">{{ quality_summary.surprise_rate }}</span></div>
+        <div class="hint">{{ quality_summary.trust_hint }}</div>
+        {% else %}
+        <div class="hint">Not enough feedback yet. Quality summary will appear when corrections are recorded.</div>
         {% endif %}
       </div>
 
@@ -256,8 +271,7 @@
 
       <div class="card golden-card">
         <div class="section-title">
-          <h2>Контакты</h2>
-          <div class="hint">30–90 дней</div>
+          <h2>Контакты и диалоги</h2>
         </div>
         <div class="hint"><b>🔝 Топ по трафику</b></div>
         {% if lane == "all" and top_senders %}
@@ -285,45 +299,17 @@
         {% endif %}
       </div>
 
-      <div class="card golden-card">
+      <div class="card golden-card useful-links-card">
         <div class="section-title">
-          <h2>Golden signals</h2>
-          <div class="hint">Windowed aggregates</div>
+          <h2>Полезные ссылки</h2>
         </div>
-        {% if golden_signals %}
-        <div class="signal-grid">
-          <div class="signal-item">
-            <div class="label">Latency p50</div>
-            <div class="value">{{ golden_signals.latency_p50 }}</div>
-          </div>
-          <div class="signal-item">
-            <div class="label">Latency p95</div>
-            <div class="value">{{ golden_signals.latency_p95 }}</div>
-          </div>
-          <div class="signal-item">
-            <div class="label">Error rate</div>
-            <div class="value">{{ golden_signals.error_rate }}</div>
-          </div>
-          <div class="signal-item">
-            <div class="label">Fallback rate</div>
-            <div class="value">{{ golden_signals.fallback_rate }}</div>
-          </div>
-          <div class="signal-item">
-            <div class="label">TG failure</div>
-            <div class="value">{{ golden_signals.tg_failure_rate }}</div>
-          </div>
-          <div class="signal-item">
-            <div class="label">Traffic</div>
-            <div class="value">{{ golden_signals.traffic_volume }}</div>
-          </div>
-          <div class="signal-item">
-            <div class="label">Saturation</div>
-            <div class="value">{{ golden_signals.saturation }}</div>
-          </div>
-        </div>
-        {% else %}
-        <div class="hint">Adjust scope to surface system signals.</div>
-        {% endif %}
+        <ul class="simple-links">
+          <li><a href="{{ url_for('archive') }}">Archive</a></li>
+          <li><a href="{{ url_for('health') }}">Health</a></li>
+          <li><a href="{{ url_for('events') }}">Events</a></li>
+          <li><a href="{{ url_for('doctor') }}">Doctor / Diagnostics export</a></li>
+          {% if commitments_url %}<li><a href="{{ commitments_url }}">Commitments</a></li>{% endif %}
+        </ul>
       </div>
     </div>
   </div>

@@ -1013,6 +1013,17 @@ small {
   align-items: start;
 }
 
+.cockpit-grid--home {
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+}
+
+.cockpit-main,
+.cockpit-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .cockpit-table .table.fixed,
 .table.fixed {
   table-layout: fixed;
@@ -1184,6 +1195,41 @@ small {
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 10px;
+}
+
+.digest-slice h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.quality-card {
+  gap: 10px;
+}
+
+.quality-metric {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quality-metric .value {
+  font-weight: 700;
+}
+
+.simple-links {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.simple-links a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.simple-links a:hover {
+  text-decoration: underline;
 }
 
 .evidence-meta {

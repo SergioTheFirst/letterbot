@@ -18,13 +18,8 @@
         <nav class="nav">
           <a href="{{ url_for('index') }}" class="nav-link {% if request.path in ['/', '/cockpit'] %}active{% endif %}">Cockpit</a>
           <a href="{{ url_for('archive') }}" class="nav-link {% if request.path.startswith('/archive') %}active{% endif %}">Archive</a>
-          <a href="{{ url_for('commitments') }}" class="nav-link {% if request.path.startswith('/commitments') %}active{% endif %}">Commitments</a>
-          <a href="{{ url_for('latency') }}" class="nav-link {% if request.path == '/latency' %}active{% endif %}">Latency</a>
           <a href="{{ url_for('health') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">Health</a>
-          <a href="{{ url_for('attention') }}" class="nav-link {% if request.path == '/attention' %}active{% endif %}">Attention</a>
-          <a href="{{ url_for('learning') }}" class="nav-link {% if request.path == '/learning' %}active{% endif %}">Learning</a>
           <a href="{{ url_for('events') }}" class="nav-link {% if request.path == '/events' %}active{% endif %}">Events</a>
-          <a href="{{ url_for('relationships') }}" class="nav-link {% if request.path.startswith('/relationships') %}active{% endif %}">Relationships</a>
           <a href="{{ url_for('doctor') }}" class="nav-link {% if request.path.startswith('/doctor') %}active{% endif %}">Doctor</a>
           {% if cfg.features.donate_enabled and support_nav_enabled %}<a href="{{ url_for('support') }}" class="nav-link {% if request.path.startswith('/support') %}active{% endif %}">Support</a>{% endif %}
         </nav>

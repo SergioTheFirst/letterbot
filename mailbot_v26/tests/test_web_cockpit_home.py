@@ -50,6 +50,20 @@ class FakeAnalytics:
     def cockpit_stalled_threads(self, account_emails, days=30, limit=3):
         return []
 
+    def weekly_surprise_breakdown(
+        self,
+        account_email,
+        *,
+        since_ts,
+        top_n,
+        min_corrections,
+        account_emails=None,
+    ):
+        return None
+
+    def latest_trust_score_delta(self, *, limit=50):
+        return None
+
 
 
 def _build_app_with_email(tmp_path: Path, *, allow_pii: bool = False):
@@ -108,7 +122,7 @@ def test_cockpit_pii_default_and_override(tmp_path: Path) -> None:
 
 
 
-def test_cockpit_contacts_cards_survive_analytics_exceptions(tmp_path: Path) -> None:
+def test_cockpit_home_survives_contacts_analytics_exceptions(tmp_path: Path) -> None:
     db_path = tmp_path / "errors.sqlite"
     KnowledgeDB(db_path)
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
@@ -129,8 +143,7 @@ def test_cockpit_contacts_cards_survive_analytics_exceptions(tmp_path: Path) -> 
         resp = client.get("/")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "Контакты" in body
-        assert "— нет данных —" in body
+        assert "Полезные ссылки" in body
 
 
 def test_cockpit_home_shows_premium_support_card_when_enabled(tmp_path: Path) -> None:
@@ -153,6 +166,69 @@ def test_cockpit_home_shows_premium_support_card_when_enabled(tmp_path: Path) ->
         body = resp.get_data(as_text=True)
         assert 'href="/support"' in body
         assert "Support Letterbot" in body
+
+
+def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
+    db_path = tmp_path / "nav.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        body = client.get("/").get_data(as_text=True)
+
+    assert ">Cockpit<" in body
+    assert ">Archive<" in body
+    assert ">Health<" in body
+    assert ">Events<" in body
+    assert ">Doctor<" in body
+    assert ">Commitments<" not in body
+    assert ">Latency<" not in body
+    assert ">Attention<" not in body
+    assert ">Learning<" not in body
+    assert ">Relationships<" not in body
+
+
+def test_cockpit_home_quality_summary_safe_empty_state(tmp_path: Path) -> None:
+    db_path = tmp_path / "quality-empty.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    app.config["ANALYTICS_FACTORY"] = lambda: FakeAnalytics()
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        body = client.get("/").get_data(as_text=True)
+    assert "Качество автоматизации" in body
+    assert "Not enough feedback yet." in body
+
+
+def test_cockpit_home_quality_summary_with_data(tmp_path: Path) -> None:
+    db_path = tmp_path / "quality-data.sqlite"
+    KnowledgeDB(db_path)
+
+    class QualityAnalytics(FakeAnalytics):
+        def weekly_surprise_breakdown(
+            self,
+            account_email,
+            *,
+            since_ts,
+            top_n,
+            min_corrections,
+            account_emails=None,
+        ):
+            return {"corrections": 4, "surprises": 1}
+
+        def latest_trust_score_delta(self, *, limit=50):
+            return {"delta": 0.2}
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    app.config["ANALYTICS_FACTORY"] = lambda: QualityAnalytics()
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        body = client.get("/?account_emails=primary@example.com").get_data(as_text=True)
+
+    assert "Качество автоматизации" in body
+    assert "Corrections" in body
+    assert ">4<" in body
+    assert "25%" in body
 
 
 def test_cockpit_home_shows_support_qr_preview_when_available(tmp_path: Path) -> None:
