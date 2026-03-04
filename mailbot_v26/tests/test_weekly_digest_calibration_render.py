@@ -21,106 +21,71 @@ def _base_weekly_kwargs() -> dict[str, object]:
         weekly_accuracy_report=None,
         weekly_calibration_report=None,
         weekly_accuracy_progress=None,
+        invoice_count=0,
+        invoice_total_rub=None,
+        contract_count=0,
+        silence_risk=None,
     )
 
 
-def test_weekly_calibration_report_block_hidden_when_flag_off() -> None:
+def test_weekly_digest_empty_state_is_human_and_short() -> None:
     data = weekly_digest.WeeklyDigestData(**_base_weekly_kwargs())
     text = weekly_digest._build_weekly_digest_text(data)
-    assert "Где чаще всего случалось" not in text
+    assert text.splitlines()[0] == "За неделю 0 писем. Главное:"
+    assert "• Спокойная неделя: критичных сигналов не было." in text
+    assert "Предложения к калибровке" not in text
 
 
-def test_weekly_calibration_report_block_renders_when_enabled() -> None:
+def test_weekly_digest_renders_invoice_highlight_with_amount() -> None:
     data = weekly_digest.WeeklyDigestData(
         **{
             **_base_weekly_kwargs(),
-            "weekly_calibration_report": {
-                "window_days": 7,
-                "corrections": 12,
-                "surprises": 6,
-                "accuracy_pct": 50,
-                "top": [
-                    {"label": "entity-a", "count": 3},
-                    {"label": "entity-b", "count": 2},
-                ],
-                "proposals": [
-                    {
-                        "label": "entity-a",
-                        "transition": "🔴→🟡",
-                        "count": 5,
-                        "hint": "вероятно, завышаем срочность",
-                    }
-                ],
-            },
+            "invoice_count": 3,
+            "invoice_total_rub": 387000,
+        }
+    )
+    text = weekly_digest._build_weekly_digest_text(data)
+    assert "• 3 счёта на оплату (общая сумма 387 000 ₽)" in text
+
+
+def test_weekly_digest_renders_contract_highlight() -> None:
+    data = weekly_digest.WeeklyDigestData(
+        **{
+            **_base_weekly_kwargs(),
+            "contract_count": 2,
+        }
+    )
+    text = weekly_digest._build_weekly_digest_text(data)
+    assert "• 2 договора ждут подписи" in text
+
+
+def test_weekly_digest_renders_silence_risk_highlight() -> None:
+    data = weekly_digest.WeeklyDigestData(
+        **{
+            **_base_weekly_kwargs(),
+            "silence_risk": {"contact": "Ивановой", "days_silent": 9},
+        }
+    )
+    text = weekly_digest._build_weekly_digest_text(data)
+    assert "• От Ивановой — молчание 9 дней (риск)" in text
+
+
+def test_weekly_digest_progress_does_not_render_without_signal() -> None:
+    data = weekly_digest.WeeklyDigestData(
+        **{
+            **_base_weekly_kwargs(),
             "weekly_accuracy_progress": WeeklyAccuracyProgress(
-                current_surprise_rate_pp=10,
-                prev_surprise_rate_pp=20,
-                delta_pp=10,
+                current_surprise_rate_pp=11,
+                prev_surprise_rate_pp=12,
+                delta_pp=1,
                 current_decisions=30,
-                prev_decisions=30,
-                current_corrections=5,
+                prev_decisions=35,
+                current_corrections=7,
             ),
         }
     )
     text = weekly_digest._build_weekly_digest_text(data)
-    assert "<b>Отчёт точности (7 дней)</b>" in text
-    assert "• Коррекции приоритета: 12" in text
-    assert "• Сюрпризы: 6 (точность: 50%)" in text
-    assert "• Где чаще всего случалось:" in text
-    assert "  - entity-a — 3" in text
-    assert "  - entity-b — 2" in text
-    assert "• Предложения к калибровке (shadow):" in text
-    assert "  - entity-a: 🔴→🟡 ×5 — вероятно, завышаем срочность" in text
-    assert "Рост точности: +10 п.п. (сюрпризы 20% → 10%), коррекции: 5 за период" in text
-
-
-def test_weekly_calibration_report_progress_hidden_without_data() -> None:
-    data = weekly_digest.WeeklyDigestData(
-        **{
-            **_base_weekly_kwargs(),
-            "weekly_calibration_report": {
-                "window_days": 7,
-                "corrections": 12,
-                "surprises": 6,
-                "accuracy_pct": 50,
-                "top": [],
-            },
-            "weekly_accuracy_progress": None,
-        }
-    )
-    text = weekly_digest._build_weekly_digest_text(data)
-    assert "Рост точности:" not in text
-    assert "Падение точности:" not in text
-
-
-def test_weekly_calibration_proposals_limited_to_three_lines() -> None:
-    data = weekly_digest.WeeklyDigestData(
-        **{
-            **_base_weekly_kwargs(),
-            "weekly_calibration_report": {
-                "window_days": 7,
-                "corrections": 12,
-                "surprises": 6,
-                "accuracy_pct": 50,
-                "top": [],
-                "proposals": [
-                    {"label": "entity-a", "transition": "🔴→🟡", "count": 5, "hint": "hint-a"},
-                    {"label": "entity-b", "transition": "🔵→🔴", "count": 4, "hint": "hint-b"},
-                    {"label": "entity-c", "transition": "🟡→🔴", "count": 3, "hint": "hint-c"},
-                    {"label": "entity-d", "transition": "🔴→🔵", "count": 3, "hint": "hint-d"},
-                ],
-            },
-        }
-    )
-    text = weekly_digest._build_weekly_digest_text(data)
-    lines = text.splitlines()
-    header_index = lines.index("• Предложения к калибровке (shadow):")
-    proposal_lines = []
-    for line in lines[header_index + 1 :]:
-        if not line.startswith("  - "):
-            break
-        proposal_lines.append(line)
-    assert len(proposal_lines) == 3
+    assert "Твой прогресс:" not in text
 
 
 def test_collect_weekly_data_accepts_account_emails() -> None:
@@ -182,17 +147,6 @@ def test_collect_weekly_data_accepts_account_emails() -> None:
             self.seen["accuracy"] = account_emails
             return {"emails_received": 0, "priority_corrections": 0, "surprises": 0}
 
-        def weekly_surprise_breakdown(
-            self,
-            account_email: str,
-            *,
-            since_ts: float,
-            top_n: int,
-            min_corrections: int,
-            account_emails: list[str] | None = None,
-        ) -> dict[str, object]:
-            raise AssertionError("weekly_surprise_breakdown should not be called")
-
         def weekly_calibration_proposals(
             self,
             account_email: str,
@@ -216,6 +170,34 @@ def test_collect_weekly_data_accepts_account_emails() -> None:
             self.seen["progress"] = account_emails
             return None
 
+        def _normalize_account_scope(
+            self,
+            account_email: str,
+            account_emails: list[str] | None,
+        ) -> list[str]:
+            return account_emails or [account_email]
+
+        def _window_start_ts(self, days: int) -> float:
+            return 0.0
+
+        def _event_rows_scoped(self, *, account_ids: list[str], event_type: str, since_ts: float):
+            self.seen["event_rows"] = account_ids
+            return []
+
+        def _event_payload(self, row: object) -> dict[str, object]:
+            return {}
+
+        def get_silence_insights(
+            self,
+            *,
+            account_email: str,
+            account_emails: list[str] | None,
+            window_days: int,
+            limit: int,
+        ) -> list[dict[str, object]]:
+            self.seen["silence"] = account_emails
+            return []
+
     analytics = DummyAnalytics()
     account_emails = ["acc@example.com", "alt@example.com"]
 
@@ -236,3 +218,5 @@ def test_collect_weekly_data_accepts_account_emails() -> None:
     assert analytics.seen["attention"] == account_emails
     assert analytics.seen["commitments"] == account_emails
     assert analytics.seen["overdue"] == account_emails
+    assert analytics.seen["event_rows"] == account_emails
+    assert analytics.seen["silence"] == account_emails

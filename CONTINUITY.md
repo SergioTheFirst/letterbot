@@ -176,16 +176,22 @@ Done:
 - 2026-03-04: dashboard recent-events stream added to `/api/dashboard` from `events_v1` (LIMIT 20, newest-first, safe empty fallback on table/query errors), `/dashboard` now renders live "Recent events" list with time+text formatting, and dashboard API/template tests expanded; full pytest green.
 - 2026-03-04: `/api/dashboard` now uses a 10s in-memory TTL payload cache (cache hit returns full cached JSON without DB work; cache writes only on successful payload build), and cockpit preview polling was relaxed to 20s while `/dashboard` stays 5s live.
 - 2026-03-04: dashboard SQL perf pass — added explicit SQLite indexes for dashboard hot paths in `schema.sql` (emails/events_v1/priority_feedback), verified `_dashboard_payload` hot query plans via `EXPLAIN QUERY PLAN` show indexed SEARCH paths (no SCAN) for scoped dashboard requests, and ran full pytest green (1004 passed).
+- 2026-03-04: weekly digest UX shifted to calm human-first format ("За неделю N писем. Главное:" + prioritized invoice/contract/overdue/silence bullets + optional human progress line), weekly technical dumps removed from user-facing render, support footer/watermark/send contract preserved, Friday 19:00 weekly defaults set in settings/bootstrap templates, and weekly digest regressions updated; full pytest green (1003 passed).
 Now:
-- Dashboard hot-query indexing implemented in SQLite schema; `/api/dashboard` payload logic/API unchanged.
-- Query plans for email counts/priority/llm usage/events stream now resolve via indexed SEARCH for account-scoped dashboard requests.
+- Weekly digest render uses human-first executive summary blocks with prioritized highlights from existing weekly primitives/events.
+- Weekly scheduler send path still appends rate-limited support footer and watermark through existing payload path.
 Next:
-- Await reviewer validation on production-like dataset for dashboard latency improvement after index rollout.
+- Await product review of phrasing thresholds (invoice/contract keyword coverage) before deeper analytics refinements.
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: Should dashboard priority counts remain 24h-scoped or become all-time totals in a follow-up?
+- UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):
-- mailbot_v26/storage/schema.sql
-- mailbot_v26/web_observability/app.py
+- mailbot_v26/pipeline/weekly_digest.py
+- mailbot_v26/config/settings.ini.example
+- mailbot_v26/tools/config_bootstrap.py
+- mailbot_v26/tests/test_weekly_digest.py
+- mailbot_v26/tests/test_weekly_digest_accuracy_render.py
+- mailbot_v26/tests/test_weekly_digest_calibration_render.py
+- mailbot_v26/tests/test_notification_sla.py
+- mailbot_v26/tests/test_quality_metrics.py
 - CONTINUITY.md
 - python -m pytest -q
-- EXPLAIN QUERY PLAN checks for `_dashboard_payload` SQL (emails/events_v1/priority_feedback)
