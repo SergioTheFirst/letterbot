@@ -840,6 +840,7 @@ class MessageDecision:
     doc_kind: str
     amount: str
     due_date: str
+    confidence: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -2026,6 +2027,9 @@ def _build_premium_clarity_text(
         action_line=short_action,
         summary=body_summary,
         message_facts=message_facts,
+        subject=subject,
+        body_text=body_text,
+        attachments=attachments,
     )
     short_action = decision.action
     body_summary = decision.summary
@@ -2275,6 +2279,61 @@ _FACT_INCIDENT_MARKERS = (
     "инцидент",
     "сбой",
 )
+_FACT_DECISION_SIGNAL_MARKERS = {
+    "invoice": _FACT_INVOICE_MARKERS,
+    "contract": _FACT_CONTRACT_MARKERS,
+    "incident": _FACT_INCIDENT_MARKERS,
+}
+
+
+def _compute_decision_confidence(
+    *,
+    message_facts: dict[str, Any],
+    subject: str,
+    body_text: str,
+    attachments: list[dict[str, Any]],
+) -> float:
+    amount = str(message_facts.get("amount") or "").strip()
+    due_date = str(message_facts.get("due_date") or "").strip()
+    doc_number = str(message_facts.get("doc_number") or "").strip()
+    attachment_facts = [
+        str(item).strip() for item in (message_facts.get("attachment_facts") or []) if str(item).strip()
+    ]
+    evidence_facts = sum(bool(value) for value in (amount, due_date, doc_number)) + min(len(attachment_facts), 2)
+
+    doc_kind = str(message_facts.get("doc_kind") or "").strip().lower()
+    lowered_body = " ".join(part for part in (subject, body_text) if part).lower()
+    attachment_text = " ".join(str(item.get("text") or "") for item in attachments).lower()
+    filename_text = " ".join(str(item.get("filename") or "") for item in attachments).lower()
+    markers = _FACT_DECISION_SIGNAL_MARKERS.get(doc_kind, ())
+    body_signal = bool(markers) and any(marker in lowered_body for marker in markers)
+    attachment_signal = bool(markers) and any(marker in attachment_text for marker in markers)
+    filename_signal = bool(markers) and any(marker in filename_text for marker in markers)
+    signal_count = sum(
+        bool(message_facts.get(key))
+        for key in ("invoice_signal", "contract_signal", "incident_signal")
+    )
+
+    confidence = 0.1
+    confidence += min(evidence_facts, 3) * 0.2
+    confidence += min(signal_count, 2) * 0.1
+    if body_signal:
+        confidence += 0.25
+    if attachment_signal:
+        confidence += 0.15
+    if message_facts.get("incident_signal"):
+        confidence += 0.35
+
+    if (
+        doc_kind == "invoice"
+        and filename_signal
+        and not body_signal
+        and not attachment_signal
+        and evidence_facts == 0
+    ):
+        confidence = min(confidence, 0.3)
+
+    return max(0.0, min(confidence, 1.0))
 
 
 def _collect_message_facts(
@@ -2952,6 +3011,9 @@ def _build_heuristic_llm_result(
         action_line=action_line,
         summary=summary,
         message_facts=message_facts,
+        subject=subject,
+        body_text=body_text,
+        attachments=attachments,
     )
     return SimpleNamespace(
         priority=decision.priority,
@@ -3030,8 +3092,17 @@ def _build_message_decision(
     action_line: str,
     summary: str,
     message_facts: dict[str, Any],
+    subject: str = "",
+    body_text: str = "",
+    attachments: list[dict[str, Any]] | None = None,
 ) -> MessageDecision:
     doc_kind = str(message_facts.get("doc_kind") or "")
+    confidence = _compute_decision_confidence(
+        message_facts=message_facts,
+        subject=subject,
+        body_text=body_text,
+        attachments=attachments or [],
+    )
     resolved_action = (action_line or "").strip() or _build_heuristic_action_line(
         priority=priority,
         message_facts=message_facts,
@@ -3042,6 +3113,9 @@ def _build_message_decision(
         resolved_action = "Проверить договор"
     if doc_kind == "incident" and "оплат" in resolved_action.lower():
         resolved_action = "Зафиксировать"
+    payment_action_hits = _count_marker_hits((action_line or "").lower(), ("оплат", "счет", "счёт", "invoice"))
+    if doc_kind == "invoice" and confidence < 0.45 and resolved_action == "Оплатить" and payment_action_hits < 2:
+        resolved_action = "Проверить"
 
     resolved_summary = summary
     if doc_kind == "invoice":
@@ -3061,6 +3135,7 @@ def _build_message_decision(
         doc_kind=doc_kind,
         amount=str(message_facts.get("amount") or ""),
         due_date=str(message_facts.get("due_date") or ""),
+        confidence=confidence,
     )
 
 
@@ -5032,6 +5107,9 @@ def process_message(
             action_line=action_line,
             summary=body_summary,
             message_facts=message_facts,
+            subject=subject,
+            body_text=body_text,
+            attachments=attachments,
         )
         action_line = decision.action
         body_summary = decision.summary

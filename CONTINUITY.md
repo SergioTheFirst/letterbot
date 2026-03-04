@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-04: decision confidence guard layer added in processor MessageDecision (0..1 confidence from facts/signals/body/attachment evidence), low-confidence invoice payment actions now softened to safe "Проверить", and targeted confidence regressions added (`test_confidence_high_for_invoice_facts`, `test_confidence_low_for_filename_only_invoice`, `test_low_confidence_softens_action`, `test_incident_confidence_high`); full pytest green (1029 passed).
 - 2026-03-04: Telegram priority correction callbacks (`mb:prio:*` + `prio_set:*`) now edit the original message in-place without sending separate ack chat messages, preserve action keyboard after edit, keep priority feedback/events recording, add safe callback ack on edit failure, and extend inbound regressions for in-place edit/failure safety; full pytest green (994 passed).
 - 2026-03-04: PR4C web auth/CIDR smoke safety — added explicit `[web_ui] allow_local_smoke_bypass=false` template/bootstrap flag, implemented narrow local-only bypass path (loopback or trusted forwarded loopback in loopback-bind dev context) without changing default auth/CIDR behavior, added operator-visible startup/request logging for active bypass, and expanded web auth/CIDR/main/bootstrap regressions; full pytest green (993 passed).
 - 2026-03-04: restored direct inline priority correction buttons for initial Telegram payload via new `telegram/keyboard.py` (`mb:prio:R|Y|B` callback format per email), wired render payload to this keyboard without changing menu/snooze keyboards, and added callback regression test; full pytest green (971 passed).
@@ -182,10 +183,10 @@ Done:
 - 2026-03-04: message-understanding hardening in processor/tg path — added unified message-fact helper (body + attachment text/facts) for action/priority/fallback bridging, improved heuristic no-LLM action+summary from attachment evidence, and enabled invoice attachment insight even when mail_type is unknown; added targeted regressions (invoice body-only, invoice attachment-only, contract signature, attachment-derived priority, fallback summary from attachments, direct LLM path guard) and full pytest green (1020 passed).
 - 2026-03-04: unified decision layer added in processor for priority/action/summary/doc facts consistency (MessageDecision internal object + guards), telegram attachment insight now consumes decision facts, and regressions added for invoice/incident consistency + summary/attachment-facts usage; full pytest green (1025 passed).
 Now:
-- Decision consistency layer is active for priority/action/summary and attachment insight paths.
-- Full test suite green after consistency changes (1025 passed).
+- Decision confidence guard layer is active for priority/action/summary safety in MessageDecision.
+- Full test suite green after confidence layer changes (1029 passed).
 Next:
-- Collect product feedback on stricter action guards for invoice/incident/contract cases before extending dictionaries.
+- Collect product feedback on confidence thresholds and safe-action fallback wording before tuning marker weights.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):
@@ -195,6 +196,8 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_priority_engine_v2.py
 - mailbot_v26/tests/test_tg_renderer.py
 - mailbot_v26/tests/test_telegram_render_modes.py
+- mailbot_v26/tests/test_premium_clarity_renderer.py
+- mailbot_v26/tests/test_telegram_payload_pipeline.py
 - CONTINUITY.md
 - python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "invoice_body_only or invoice_attachment_only or contract_signature_case or action_selection_avoids_payment_for_incident_signals or heuristic_attachment_summary_uses_extracted_text or priority_signal_includes_attachment_content_and_facts"
 - python -m pytest -q mailbot_v26/tests/test_tg_renderer.py -k "attachment_insight_invoice_from_attachment_text_without_mail_type or attachment_insight_invoice_excel_number_amount_due_date or attachment_insight_does_not_hallucinate_invoice_or_act"

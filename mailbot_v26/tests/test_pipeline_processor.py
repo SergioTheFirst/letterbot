@@ -716,6 +716,98 @@ def test_incident_decision_never_returns_payment_action() -> None:
     assert decision.action == "Зафиксировать"
 
 
+def test_confidence_high_for_invoice_facts() -> None:
+    attachments: list[dict[str, object]] = []
+    facts = _collect_message_facts(
+        subject="Счет №445",
+        body_text="Итого 87 500 руб. Оплатить до 15.04.2026",
+        attachments=attachments,
+        mail_type="",
+    )
+
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Проверить",
+        summary="",
+        message_facts=facts,
+        subject="Счет №445",
+        body_text="Итого 87 500 руб. Оплатить до 15.04.2026",
+        attachments=attachments,
+    )
+
+    assert decision.confidence >= 0.75
+    assert decision.action == "Оплатить"
+
+
+def test_confidence_low_for_filename_only_invoice() -> None:
+    attachments = [{"filename": "invoice_april.pdf", "text": ""}]
+    facts = _collect_message_facts(
+        subject="Документы",
+        body_text="См. вложение",
+        attachments=attachments,
+        mail_type="INVOICE",
+    )
+
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Проверить",
+        summary="",
+        message_facts=facts,
+        subject="Документы",
+        body_text="См. вложение",
+        attachments=attachments,
+    )
+
+    assert decision.doc_kind == "invoice"
+    assert decision.confidence < 0.45
+
+
+def test_low_confidence_softens_action() -> None:
+    attachments = [{"filename": "invoice_april.pdf", "text": ""}]
+    facts = _collect_message_facts(
+        subject="Документы",
+        body_text="См. вложение",
+        attachments=attachments,
+        mail_type="INVOICE",
+    )
+
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Оплатить",
+        summary="",
+        message_facts=facts,
+        subject="Документы",
+        body_text="См. вложение",
+        attachments=attachments,
+    )
+
+    assert decision.confidence < 0.45
+    assert decision.action == "Проверить"
+
+
+def test_incident_confidence_high() -> None:
+    attachments: list[dict[str, object]] = []
+    facts = _collect_message_facts(
+        subject="Security alert",
+        body_text="Подозрительный вход и offline сервисов",
+        attachments=attachments,
+        mail_type="INCIDENT",
+    )
+
+    decision = _build_message_decision(
+        priority="🔴",
+        action_line="Оплатить",
+        summary="",
+        message_facts=facts,
+        subject="Security alert",
+        body_text="Подозрительный вход и offline сервисов",
+        attachments=attachments,
+    )
+
+    assert decision.confidence >= 0.7
+    assert decision.action == "Зафиксировать"
+
+
 def test_summary_uses_decision_facts() -> None:
     facts = _collect_message_facts(
         subject="Счет",
