@@ -63,6 +63,7 @@ def _setup_runtime(monkeypatch) -> None:
 def test_direct_llm_preferred_over_queue_heuristic(monkeypatch) -> None:
     _setup_runtime(monkeypatch)
     calls = {"direct": 0}
+    captured = {"payload": None}
 
     def _direct_llm(**kwargs):
         calls["direct"] += 1
@@ -80,11 +81,11 @@ def test_direct_llm_preferred_over_queue_heuristic(monkeypatch) -> None:
         "get_llm_queue_config",
         lambda: LLMQueueConfig(llm_request_queue_enabled=True, max_concurrent_llm_calls=1),
     )
-    monkeypatch.setattr(
-        processor,
-        "enqueue_tg",
-        lambda **kwargs: DeliveryResult(delivered=True, retryable=False),
-    )
+    def _enqueue(*, email_id: int, payload):
+        captured["payload"] = payload
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue)
 
     processor.process_message(
         account_email="account@example.com",
@@ -98,6 +99,9 @@ def test_direct_llm_preferred_over_queue_heuristic(monkeypatch) -> None:
     )
 
     assert calls["direct"] == 1
+    assert captured["payload"] is not None
+    assert captured["payload"].reply_markup
+    assert "inline_keyboard" in captured["payload"].reply_markup
 
 
 def test_heuristic_fallback_used_when_direct_llm_fails(monkeypatch) -> None:
