@@ -2876,6 +2876,138 @@ def _compute_heuristic_priority(
         return None
 
 
+_PRIORITY_LEVEL_TO_SCORE = {"🔵": 25, "🟡": 45, "🔴": 80}
+_PRIORITY_SCORE_TO_LEVEL = ((70, "🔴"), (35, "🟡"), (0, "🔵"))
+_SENDER_MEMORY_WINDOW_DAYS = 45
+_SENDER_MEMORY_MIN_CORRECTIONS = 3
+_SENDER_MEMORY_MAX_ABS_BIAS = 12
+_SENDER_MEMORY_STEP = 4
+_SENDER_MEMORY_CORRECTION_SCORES = {"🔵": -1, "🟡": 0, "🔴": 1}
+
+
+def _sender_memory_bias_for_priority(*, sender_email: str) -> tuple[int, int]:
+    normalized_sender = str(sender_email or "").strip().lower()
+    if not normalized_sender:
+        return 0, 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=_SENDER_MEMORY_WINDOW_DAYS)
+    try:
+        with sqlite3.connect(knowledge_db.path) as conn:
+            rows = conn.execute(
+                """
+                SELECT value
+                FROM priority_feedback
+                WHERE kind = 'priority_correction'
+                    AND sender_email = ?
+                    AND datetime(created_at) >= datetime(?)
+                ORDER BY datetime(created_at) DESC, id DESC
+                LIMIT 40
+                """,
+                (normalized_sender, cutoff.isoformat()),
+            ).fetchall()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("sender_memory_lookup_failed", sender_email=normalized_sender, error=str(exc))
+        return 0, 0
+
+    corrections: list[int] = []
+    for row in rows:
+        token = str(row[0] or "").strip()
+        if token not in _SENDER_MEMORY_CORRECTION_SCORES:
+            continue
+        score = _SENDER_MEMORY_CORRECTION_SCORES[token]
+        if score:
+            corrections.append(score)
+    sample_count = len(corrections)
+    if sample_count < _SENDER_MEMORY_MIN_CORRECTIONS:
+        return 0, sample_count
+
+    drift = sum(corrections)
+    if drift == 0:
+        return 0, sample_count
+    bias = max(
+        -_SENDER_MEMORY_MAX_ABS_BIAS,
+        min(_SENDER_MEMORY_MAX_ABS_BIAS, drift * _SENDER_MEMORY_STEP),
+    )
+    return bias, sample_count
+
+
+def _is_dampening_protected_high_signal(
+    *,
+    mail_type: str | None,
+    priority_v2_result: PriorityResultV2 | None,
+) -> bool:
+    normalized_mail_type = str(mail_type or "").strip().upper()
+    if any(
+        marker in normalized_mail_type
+        for marker in ("INVOICE", "INCIDENT", "SECURITY", "CONTRACT", "CLAIM")
+    ):
+        return True
+    if not priority_v2_result:
+        return False
+    joined = " ".join(priority_v2_result.reason_codes).upper()
+    return any(marker in joined for marker in ("INVOICE", "SECURITY", "ALERT", "CLAIM", "DEADLINE"))
+
+
+def _apply_sender_memory_to_priority(
+    *,
+    priority: str,
+    sender_email: str,
+    mail_type: str | None,
+    priority_v2_result: PriorityResultV2 | None,
+    email_id: int,
+) -> str:
+    if priority not in _PRIORITY_LEVEL_TO_SCORE:
+        return priority
+    bias, sample_count = _sender_memory_bias_for_priority(sender_email=sender_email)
+    if bias == 0:
+        return priority
+    if bias < 0 and _is_dampening_protected_high_signal(
+        mail_type=mail_type,
+        priority_v2_result=priority_v2_result,
+    ):
+        logger.info(
+            "sender_memory_skipped_high_signal",
+            email_id=email_id,
+            sender_email=(sender_email or "").strip().lower(),
+            base_priority=priority,
+            bias=bias,
+            samples=sample_count,
+            mail_type=str(mail_type or ""),
+        )
+        return priority
+
+    base_score = _PRIORITY_LEVEL_TO_SCORE[priority]
+    adjusted_score = max(0, min(100, base_score + bias))
+    adjusted_priority = priority
+    for threshold, level in _PRIORITY_SCORE_TO_LEVEL:
+        if adjusted_score >= threshold:
+            adjusted_priority = level
+            break
+
+    if priority != "🔴" and adjusted_priority == "🔴":
+        adjusted_priority = "🟡"
+
+    if adjusted_priority != priority:
+        logger.info(
+            "sender_memory_applied",
+            email_id=email_id,
+            sender_email=(sender_email or "").strip().lower(),
+            base_priority=priority,
+            final_priority=adjusted_priority,
+            bias=bias,
+            samples=sample_count,
+        )
+    else:
+        logger.info(
+            "sender_memory_no_effect",
+            email_id=email_id,
+            sender_email=(sender_email or "").strip().lower(),
+            base_priority=priority,
+            bias=bias,
+            samples=sample_count,
+        )
+    return adjusted_priority
+
+
 def _process_llm_queue_request(request: LLMRequest) -> None:
     try:
         llm_ctx = SimpleNamespace(
@@ -4760,6 +4892,14 @@ def process_message(
             priority_engine_label = "priority_v2_auto"
         elif auto_priority_outcome.confidence_decision:
             confidence_decision = auto_priority_outcome.confidence_decision
+
+        priority = _apply_sender_memory_to_priority(
+            priority=priority,
+            sender_email=from_email,
+            mail_type=mail_type,
+            priority_v2_result=priority_v2_result,
+            email_id=message_id,
+        )
     
         if policy_decision.allow_auto_priority and should_score_confidence:
             logger.info(
