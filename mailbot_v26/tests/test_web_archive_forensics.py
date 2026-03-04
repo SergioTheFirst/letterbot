@@ -285,4 +285,15 @@ def test_archive_page_shows_rows_for_existing_db_emails(tmp_path: Path) -> None:
         body = page.get_data(as_text=True)
         assert page.status_code == 200
         assert 'data-email-id="11"' in body
-        assert "Archive entries are not available" not in body
+        assert "No archive entries found." not in body
+
+
+def test_archive_empty_state_human_readable(tmp_path: Path) -> None:
+    _, app = _build_app(tmp_path)
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        page = client.get("/archive", query_string={"account_emails": "unknown@example.com"})
+        body = page.get_data(as_text=True)
+        assert page.status_code == 200
+        assert "No archive entries found." in body
+        assert "Try a wider window or remove account/status filters." in body

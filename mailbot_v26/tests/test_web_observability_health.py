@@ -152,7 +152,7 @@ def test_health_page_component_matrix(tmp_path: Path) -> None:
         )
         assert page.status_code == 200
         body = page.get_data(as_text=True)
-        assert "Component matrix" in body
+        assert "System health" in body
         assert "data-testid=\"health-component-matrix\"" in body
 
 
@@ -211,3 +211,14 @@ def test_health_trend_order_deterministic(tmp_path: Path) -> None:
         third = body.find('data-snapshot="snap-c"')
         assert first != -1 and second != -1 and third != -1
         assert first < second < third
+
+
+def test_health_basic_mode_hides_engineer_dump(tmp_path: Path) -> None:
+    _, app = _build_app_with_health_data(tmp_path)
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        page = client.get("/health?mode=basic")
+        body = page.get_data(as_text=True)
+        assert page.status_code == 200
+        assert "Health timeline" not in body
+        assert "data-testid=\"health-engineer-block\"" not in body

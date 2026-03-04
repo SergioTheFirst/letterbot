@@ -166,17 +166,21 @@ Done:
 - 2026-03-04: PR2 direct-delivery restore — final Telegram summary now prefers direct `run_llm_stage` whenever budget/gate allows, empty direct responses fall back to deterministic heuristic (no user-facing drop), startup LLM direct check switched to lightweight capability probe (non-blocking), and startup report strings now explicitly show `LLM delivery mode` + `Immediate TG summaries`; targeted + full pytest green (976 passed).
 - 2026-03-04: PR3 visible feedback quality loop — added Telegram `/stats` with human-friendly quality summary (corrections, surprise rate, correction coverage, top priority transitions), appended same quality block to `/week`, reused existing analytics + calibration report paths with defensive non-blocking fallbacks, and added inbound regressions; targeted + full pytest green (978 passed).
 - 2026-03-04: PR4A cockpit polish — simplified top nav to Cockpit/Archive/Health/Events/Doctor(+conditional Support), repacked `/` cockpit into calmer two-column home (attention + digests + system state + compact quality + support + useful links), added defensive home-only `quality_summary` in `index()`, and expanded web cockpit tests; full pytest green (981 passed).
+- 2026-03-04: PR4B web surfaces polish — refined existing Archive/Health/Events/Doctor templates for calmer UX, improved safe empty states and compact explanatory copy, kept engineer-only blocks mode-gated, added CSS panel/readability polish, and expanded web UI behavior tests; full pytest green (987 passed).
 Now:
-- PR4A cockpit polish completed and validated locally; preparing commit + PR.
+- PR4B archive/health/events/doctor polish completed and validated locally; preparing commit + PR.
 Next:
-- Monitor home quality summary in low-feedback environments and confirm compact cockpit layout remains stable with production data.
+- Validate polished surfaces on production-like datasets and monitor readability feedback in both basic and engineer modes.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/web_observability/app.py
-- mailbot_v26/web_observability/templates/base.html
-- mailbot_v26/web_observability/templates/cockpit.html
+- mailbot_v26/web_observability/templates/archive.html
+- mailbot_v26/web_observability/templates/health.html
+- mailbot_v26/web_observability/templates/events.html
+- mailbot_v26/web_observability/templates/doctor.html
 - mailbot_v26/web_observability/static/style.css
-- mailbot_v26/tests/test_web_cockpit_home.py
-- tests/test_web_session_account_emails.py
+- mailbot_v26/tests/test_web_archive_forensics.py
+- mailbot_v26/tests/test_web_observability_health.py
+- mailbot_v26/tests/test_web_events_timeline.py
+- mailbot_v26/tests/test_web_doctor_export.py
 - CONTINUITY.md

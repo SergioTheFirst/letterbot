@@ -1,19 +1,34 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="card">
-  <h2>Diagnostics</h2>
-  <dl>
-    <dt>Version</dt>
-    <dd>{{ app_version }}</dd>
-    <dt>Manifest status</dt>
-    <dd>{{ manifest_status }}</dd>
-    <dt>Log file</dt>
-    <dd>{{ log_path }}</dd>
-  </dl>
-  <form method="post" action="{{ url_for('doctor_export') }}">
+<section class="card doctor-card surface-panel">
+  <div class="section-title">
+    <h2>Diagnostics export</h2>
+    <div class="hint">Create a safe support bundle with redacted config and recent health artifacts.</div>
+  </div>
+
+  <div class="doctor-meta-grid">
+    <div class="doctor-meta-item">
+      <div class="label">Version</div>
+      <div class="value mono">{{ app_version }}</div>
+    </div>
+    <div class="doctor-meta-item">
+      <div class="label">Manifest</div>
+      <div class="value"><span class="badge">{{ manifest_status }}</span></div>
+    </div>
+    <div class="doctor-meta-item">
+      <div class="label">Log path</div>
+      <div class="value mono truncate">{{ log_path }}</div>
+    </div>
+  </div>
+
+  <form method="post" action="{{ url_for('doctor_export') }}" class="doctor-export-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit">Export diagnostics.zip</button>
   </form>
+
+  {% if manifest_status == 'NO_MANIFEST' %}
+  <div class="hint">Integrity manifest is unavailable. Export still includes diagnostics and logs.</div>
+  {% endif %}
 </section>
 {% endblock %}

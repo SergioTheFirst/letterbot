@@ -3,7 +3,7 @@
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
-  <div class="card detail-card">
+  <div class="card detail-card surface-panel events-filters">
     <form method="get" action="{{ url_for('events') }}" class="filters-form">
       <div class="filter-group">
         <label for="type">Type</label>
@@ -39,6 +39,7 @@
       <div class="filter-meta muted">
         Groups: {{ total_groups }} • Page {{ page }} / {{ total_pages }}
       </div>
+      <div class="hint filter-hint">Grouped timeline keeps related events together for easier review.</div>
     </form>
   </div>
 
@@ -56,7 +57,7 @@
   <div class="events-stack">
     {% if groups %}
       {% for group in groups %}
-        <details class="event-group">
+        <details class="event-group" open>
           <summary>
             <div class="event-group-header">
               <div class="event-group-title">
@@ -71,8 +72,8 @@
                 {% endif %}
               </div>
               <div class="event-group-meta">
-                <div>{{ group.ts_first }} → {{ group.ts_last }}</div>
-                <div>{{ group.event_count }} events</div>
+                <div><span class="muted">Window</span> {{ group.ts_first }} → {{ group.ts_last }}</div>
+                <div><span class="muted">Entries</span> {{ group.event_count }}</div>
               </div>
             </div>
             {% if group.group_kind == 'email' %}
@@ -120,13 +121,16 @@
                 </table>
               </div>
             {% else %}
-              <div class="hint">Adjust window_days or account scope.</div>
+              <div class="hint">No entries in this group for the current scope.</div>
             {% endif %}
           </div>
         </details>
       {% endfor %}
     {% else %}
-      <div class="hint">Adjust window_days or account scope.</div>
+      <div class="empty-state card">
+        <strong>No events found.</strong>
+        <div class="hint">Try a wider window or include more accounts.</div>
+      </div>
     {% endif %}
   </div>
 {% endblock %}

@@ -119,3 +119,32 @@ def test_doctor_export_csrf_allows_with_valid_token(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.headers.get("Content-Type") == "application/zip"
+
+
+def test_doctor_page_renders_export_cta(tmp_path: Path) -> None:
+    db_path = tmp_path / "mailbot.sqlite"
+    db_path.write_bytes(b"")
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        response = client.get("/doctor")
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Diagnostics export" in body
+    assert "Export diagnostics.zip" in body
+    assert "Log path" in body
+
+
+def test_doctor_page_safe_state_without_manifest(tmp_path: Path) -> None:
+    db_path = tmp_path / "mailbot.sqlite"
+    db_path.write_bytes(b"")
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        response = client.get("/doctor")
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "NO_MANIFEST" in body
+    assert "Integrity manifest is unavailable." in body
