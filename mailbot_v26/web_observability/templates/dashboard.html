@@ -62,6 +62,11 @@
       <h2>Recent events</h2>
       <ul id="events-list" class="events-list"><li class="hint">Waiting for live events…</li></ul>
     </section>
+
+    <section class="card live-card" id="card-top-contacts">
+      <h2>Top contacts</h2>
+      <ul id="top-contacts-list" class="events-list"><li class="hint">Waiting for profile data…</li></ul>
+    </section>
   </div>
 
   <script>
@@ -69,6 +74,7 @@
       const strip = document.getElementById('status-strip-content');
       const offline = document.getElementById('status-strip-offline');
       const eventsList = document.getElementById('events-list');
+      const topContactsList = document.getElementById('top-contacts-list');
       const setText = (id, value) => {
         const node = document.getElementById(id);
         if (node) node.textContent = String(value);
@@ -106,6 +112,19 @@
                 const text = item.text || item.type || 'event';
                 return `<li><span class="mono">${ts}</span> ${text}</li>`;
               }).join('');
+            }
+            if (topContactsList) {
+              const topContacts = Array.isArray(data.top_contacts) ? data.top_contacts : [];
+              if (!topContacts.length) {
+                topContactsList.innerHTML = '<li class="hint">No contacts yet.</li>';
+              } else {
+                topContactsList.innerHTML = topContacts.map((item) => {
+                  const sender = item.sender_email || 'contact';
+                  const emails = item.emails_count ?? 0;
+                  const overdue = item.overdue_count ?? 0;
+                  return `<li>${sender} — ${emails} emails, overdue ${overdue}</li>`;
+                }).join('');
+              }
             }
           })
           .catch(() => {});
