@@ -171,14 +171,18 @@ Done:
 - 2026-03-04: PR4B web surfaces polish — refined existing Archive/Health/Events/Doctor templates for calmer UX, improved safe empty states and compact explanatory copy, kept engineer-only blocks mode-gated, added CSS panel/readability polish, and expanded web UI behavior tests; full pytest green (987 passed).
 - 2026-03-04: PR5 safe cleanup — removed duplicate root config template (`config.yaml.example`) in favor of canonical `config.example.yaml`, removed stale root `patch.diff` artifact, expanded `.gitignore` runtime-artifact guards (`*.sqlite3`, `*.db`, `runtime/logs/`), and verified no behavior changes with full pytest green (993 passed).
 - 2026-03-04: processor pipeline hardening — cold-start percentile path now allows LLM candidate when prior history is insufficient (with explicit info marker), heuristic attachment summaries consume extracted attachment text/facts, priority signal text now includes bounded attachment content facts, and MessageProcessor short-action selection now uses subject+body+attachment text with incident/promo guardrails; targeted regressions added.
+- 2026-03-04: web cockpit upgraded to live premium dashboard: added defensive `/api/dashboard` aggregate endpoint (emails/LLM/priority/learning/recent events), rebuilt cockpit into card-based live grid with 5s auto-refresh, switched to premium dark theme tokens, and added dashboard API/web regression tests; targeted web pytest green.
 Now:
-- Processor pipeline fixes implemented and verified locally (targeted + full pytest green); preparing commit + PR metadata.
+- Live dashboard/API/theme/tests implemented and verified locally; preparing commit + PR metadata.
 Next:
-- Await reviewer validation for cold-start LLM gate behavior and invoice attachment prioritization in production traffic.
+- Await reviewer validation for live dashboard metrics fidelity on production-like event volume.
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
+- UNCONFIRMED: Should dashboard priority counts remain 24h-scoped or become all-time totals in a follow-up?
 Working set (files / tables / tests):
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/tests/test_pipeline_processor.py
-- mailbot_v26/tests/test_budget_percentile_anchor.py
+- mailbot_v26/web_observability/app.py
+- mailbot_v26/web_observability/templates/cockpit.html
+- mailbot_v26/web_observability/static/style.css
+- mailbot_v26/tests/test_web_dashboard_api.py
+- mailbot_v26/tests/test_web_cockpit_home.py
+- mailbot_v26/tests/test_web_observability_bridge.py
 - CONTINUITY.md

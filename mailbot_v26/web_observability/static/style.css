@@ -1,38 +1,19 @@
 :root {
-  color-scheme: light;
-  --bg: #f7f7fb;
-  --surface: #ffffff;
-  --surface-muted: #f1f5f9;
-  --text: #0f172a;
-  --muted: #5b6475;
-  --border: #e2e8f0;
-  --accent: #1d4ed8;
-  --accent-contrast: #eef2ff;
-  --success: #0f766e;
-  --warn: #b45309;
-  --danger: #b91c1c;
-  --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-  --radius: 14px;
-  --focus: 0 0 0 3px rgba(37, 99, 235, 0.25);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --bg: #0b1220;
-    --surface: #111827;
-    --surface-muted: #1f2937;
-    --text: #e5e7eb;
-    --muted: #9ca3af;
-    --border: #1f2937;
-    --accent: #60a5fa;
-    --accent-contrast: #0b172c;
-    --success: #14b8a6;
-    --warn: #f59e0b;
-    --danger: #f87171;
-    --shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-    --focus: 0 0 0 3px rgba(96, 165, 250, 0.35);
-  }
+  color-scheme: dark;
+  --bg: #0f1115;
+  --surface: #171a21;
+  --surface-muted: #1f2430;
+  --text: #e6e8ee;
+  --muted: #9aa3b7;
+  --border: #252b36;
+  --accent: #5c8df6;
+  --accent-contrast: #1f2d4f;
+  --success: #39c88b;
+  --warn: #f5ba4d;
+  --danger: #ff6f6f;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --radius: 10px;
+  --focus: 0 0 0 3px rgba(92, 141, 246, 0.35);
 }
 
 * {
@@ -223,7 +204,61 @@ input:focus-visible {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 18px;
+  padding: 16px;
+}
+
+.live-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.live-card h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.metric strong {
+  font-size: 22px;
+  color: var(--accent);
+}
+
+.live-events {
+  grid-column: span 2;
+}
+
+.events-list {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 1000px) {
+  .live-dashboard-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .live-events {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 700px) {
+  .live-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .live-events {
+    grid-column: span 1;
+  }
 }
 
 .muted {

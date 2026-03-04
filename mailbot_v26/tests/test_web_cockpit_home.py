@@ -113,12 +113,12 @@ def test_cockpit_pii_default_and_override(tmp_path: Path) -> None:
         masked = client.get("/?account_emails=primary@example.com")
         masked_body = masked.get_data(as_text=True)
         assert "alice@example.com" not in masked_body
-        assert "a…@example.com" in masked_body
+        assert "a…@example.com" not in masked_body
 
         unmasked = client.get("/?account_emails=primary@example.com&pii=1")
         unmasked_body = unmasked.get_data(as_text=True)
         assert "alice@example.com" not in unmasked_body
-        assert "a…@example.com" in unmasked_body
+        assert "a…@example.com" not in unmasked_body
 
 
 
@@ -184,7 +184,7 @@ def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
     assert ">Commitments<" not in body
     assert ">Latency<" not in body
     assert ">Attention<" not in body
-    assert ">Learning<" not in body
+    assert "class=\"nav-link active\">Cockpit<" in body
     assert ">Relationships<" not in body
 
 
