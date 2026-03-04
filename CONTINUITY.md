@@ -168,17 +168,15 @@ Done:
 - 2026-03-04: PR3 visible feedback quality loop — added Telegram `/stats` with human-friendly quality summary (corrections, surprise rate, correction coverage, top priority transitions), appended same quality block to `/week`, reused existing analytics + calibration report paths with defensive non-blocking fallbacks, and added inbound regressions; targeted + full pytest green (978 passed).
 - 2026-03-04: PR4A cockpit polish — simplified top nav to Cockpit/Archive/Health/Events/Doctor(+conditional Support), repacked `/` cockpit into calmer two-column home (attention + digests + system state + compact quality + support + useful links), added defensive home-only `quality_summary` in `index()`, and expanded web cockpit tests; full pytest green (981 passed).
 - 2026-03-04: PR4B web surfaces polish — refined existing Archive/Health/Events/Doctor templates for calmer UX, improved safe empty states and compact explanatory copy, kept engineer-only blocks mode-gated, added CSS panel/readability polish, and expanded web UI behavior tests; full pytest green (987 passed).
+- 2026-03-04: PR5 safe cleanup — removed duplicate root config template (`config.yaml.example`) in favor of canonical `config.example.yaml`, removed stale root `patch.diff` artifact, expanded `.gitignore` runtime-artifact guards (`*.sqlite3`, `*.db`, `runtime/logs/`), and verified no behavior changes with full pytest green (993 passed).
 Now:
-- PR4C local smoke bypass for Web UI auth/CIDR implemented and validated locally; preparing commit + PR.
+- PR5 safe repository cleanup completed locally (only unambiguous junk/duplicate artifacts), full test suite green; preparing commit + PR.
 Next:
-- Validate browser-container smoke checks with explicit bypass enabled in local/dev config and keep default production posture unchanged.
+- Await reviewer confirmation for any additional cleanup candidates that require stronger usage-proof beyond safe-now scope.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/web_observability/app.py
-- mailbot_v26/config/settings.ini.example
-- mailbot_v26/tools/config_bootstrap.py
-- mailbot_v26/tests/test_web_login_form.py
-- mailbot_v26/tests/test_web_ui_main.py
-- mailbot_v26/tests/test_config_bootstrap.py
+- .gitignore
+- config.yaml.example (deleted)
+- patch.diff (deleted)
 - CONTINUITY.md

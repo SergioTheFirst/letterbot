@@ -24,3 +24,8 @@ mailbot_v26/venv/
 database.sqlite
 mailbot_v26/database.sqlite
 data/
+
+# runtime artifacts
+*.sqlite3
+*.db
+runtime/logs/
