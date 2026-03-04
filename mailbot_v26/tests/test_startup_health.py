@@ -122,6 +122,46 @@ def test_launch_report_deterministic() -> None:
     assert report_a == report_b
 
 
+def test_launch_report_includes_honest_llm_delivery_mode(tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.ini").write_text(
+        "\n".join(
+            [
+                "[llm]",
+                "primary = cloudflare",
+                "",
+                "[cloudflare]",
+                "enabled = true",
+                "",
+                "[threading]",
+                "llm_request_queue_enabled = true",
+                "max_concurrent_llm_calls = 1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text(
+        "\n".join(
+            [
+                "[cloudflare]",
+                "account_id = account",
+                "api_token = token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = LaunchReportBuilder(config_dir=config_dir).build(
+        results=[],
+        mode=SimpleNamespace(value="FULL"),
+    )
+
+    assert "LLM delivery mode: QUEUED_HEURISTIC_IMMEDIATE" in report
+    assert "immediate TG summaries: heuristic" in report
+    assert "background queue: enabled" in report
+
+
 def test_startup_report_default_branding_and_watermark() -> None:
     report = LaunchReportBuilder().build(results=[], mode=SimpleNamespace(value="FULL"))
     assert "Letterbot Premium" in report

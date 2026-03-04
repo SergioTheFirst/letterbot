@@ -4,7 +4,8 @@ import pytest
 
 from mailbot_v26.config_loader import (
     BotConfig,
-            load_accounts_config,
+    load_accounts_config,
+    load_branding_config,
     load_config,
     load_general_config,
     load_keys_config,
@@ -412,6 +413,24 @@ host=h
     cfg = load_telegram_ui_config(tmp_path)
 
     assert cfg.show_decision_trace is True
+
+
+def test_load_branding_config_defaults_to_enabled(tmp_path: Path) -> None:
+    write_file(tmp_path, "settings.ini", """[general]\ncheck_interval=120\n""")
+    write_file(tmp_path, "accounts.ini", """[acc]\nlogin=u\npassword=p\nhost=h\n""")
+
+    cfg = load_branding_config(tmp_path)
+
+    assert cfg.show_watermark is True
+
+
+def test_load_branding_config_reads_flag(tmp_path: Path) -> None:
+    write_file(tmp_path, "settings.ini", """[branding]\nshow_watermark=false\n""")
+    write_file(tmp_path, "accounts.ini", """[acc]\nlogin=u\npassword=p\nhost=h\n""")
+
+    cfg = load_branding_config(tmp_path)
+
+    assert cfg.show_watermark is False
 
 
 def test_load_web_ui_password_from_ini(tmp_path: Path) -> None:

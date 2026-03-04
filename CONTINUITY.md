@@ -159,18 +159,22 @@ Done:
 - 2026-03-03: restored premium default Telegram Tier-1 layout (`{dot} от sender:`, subject, short action, blank line, attachment line, 1–3 excerpt lines, watermark), removed fallback-like `От:/Тема:/Подробнее` noise from default UX path, and reinforced initial priority keyboard regression coverage (`🔴 Срочно`, `🟡 Важно`, `🔵 Низкий`) with full pytest green.
 - 2026-03-03: Telegram P0 follow-up — normalized generic fallback action phrases (`Проверьте вручную` / `Attention Needed` / `Недостаточно данных для оценки`) to `Проверить` in premium Tier-1, added invoice+Excel escalation signals in real priority v2 scoring path, and reinforced renderer/priority tests with full pytest green.
 - 2026-03-03: Telegram P0 final-path fix — restored premium reply_markup propagation (priority buttons preserved), removed stale `html=True` arbiter call mismatch on render path, prevented false `attachments missing` fallback for invoice/excel attachment insights, and expanded deterministic premium short-action selection (`Оплатить`/`Сверить`/`Зафиксировать`/`Ознакомиться`) with regression tests and full pytest green.
+- 2026-03-04: startup report now shows honest LLM delivery mode (`DIRECT`/`QUEUED_HEURISTIC_IMMEDIATE`/`DISABLED`) plus immediate-summary and background-queue state; added `[branding] show_watermark` INI toggle through loader/bootstrap/templates, and removed noisy `Учту в качестве.` suffix from inbound priority ack; targeted + full pytest green.
 Now:
-- Telegram P0/P1 user-facing fix implemented and verified (targeted suites + full pytest green); ready to merge.
+- Startup-report honesty + watermark toggle + priority-ack cleanup implemented and verified (targeted suites + full pytest green); ready to merge.
 Next:
-- Monitor post-merge Telegram logs for action distribution (`Оплатить`/`Проверить`/`Ознакомиться`) and priority uplift behavior on outage/security alerts.
+- Monitor startup Telegram reports in worker logs to confirm delivery mode lines match real `llm_provider`/`latency_ms` behavior across direct and queued deployments.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/pipeline/tg_renderer.py
-- mailbot_v26/priority/priority_engine_v2.py
-- mailbot_v26/tests/test_premium_clarity_renderer.py
-- mailbot_v26/tests/test_tg_renderer.py
-- mailbot_v26/tests/test_priority_engine_v2.py
-- mailbot_v26/tests/test_telegram_rendering_format.py
+- mailbot_v26/ui/i18n.py
+- mailbot_v26/ui/branding.py
+- mailbot_v26/config_loader.py
+- mailbot_v26/system/startup_health.py
+- mailbot_v26/start.py
+- mailbot_v26/config/settings.ini.example
+- mailbot_v26/tools/config_bootstrap.py
+- mailbot_v26/tests/test_branding_and_i18n.py
+- mailbot_v26/tests/test_startup_health.py
+- mailbot_v26/tests/test_config_loader.py
 - CONTINUITY.md

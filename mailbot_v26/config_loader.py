@@ -92,6 +92,13 @@ class TelegramUIConfig:
     show_decision_trace: bool
 
 
+@dataclass
+class BrandingConfig:
+    """Telegram branding toggles from settings.ini."""
+
+    show_watermark: bool = True
+
+
 
 
 @dataclass
@@ -593,6 +600,21 @@ def load_telegram_ui_config(base_dir: Path = CONFIG_DIR) -> TelegramUIConfig:
     return TelegramUIConfig(show_decision_trace=show_decision_trace)
 
 
+def load_branding_config(base_dir: Path = CONFIG_DIR) -> BrandingConfig:
+    parser = _read_settings_with_legacy_fallback(base_dir, section="branding")
+    show_watermark = True
+    if "branding" in parser:
+        section = parser["branding"]
+        try:
+            show_watermark = section.getboolean("show_watermark", fallback=True)
+        except ValueError as exc:
+            _LOGGER.warning(
+                "Invalid [branding] show_watermark value, using default true: %s",
+                exc,
+            )
+    return BrandingConfig(show_watermark=show_watermark)
+
+
 def load_web_ui_password_from_ini(base_dir: Path = CONFIG_DIR) -> str:
     parser = _read_settings_with_legacy_fallback(base_dir, section="web_ui")
     if "web_ui" not in parser:
@@ -631,6 +653,7 @@ __all__ = [
     "AccountConfig",
     "AccountScope",
     "BotConfig",
+    "BrandingConfig",
     "ConfigError",
     "GeneralConfig",
     "IngestConfig",
@@ -647,6 +670,7 @@ __all__ = [
     "load_general_config",
     "load_ingest_config",
     "load_maintenance_config",
+    "load_branding_config",
     "load_telegram_ui_config",
     "load_web_config",
     "load_web_ui_password_from_ini",
