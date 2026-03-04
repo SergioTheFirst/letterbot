@@ -165,14 +165,18 @@ Done:
 - 2026-03-04: PR1 restore path — startup now toggles premium processor by LLM health (any provider/direct check OK => enabled, degraded => legacy fallback), ordinary stage_tg now propagates computed priority and appends tg_renderer attachment insight, no-LLM summary builder now returns deterministic non-empty body-based summary, and regressions added for startup toggle + no-LLM summary + ordinary priority/attachment/reply_markup; full pytest green (974 passed).
 - 2026-03-04: PR2 direct-delivery restore — final Telegram summary now prefers direct `run_llm_stage` whenever budget/gate allows, empty direct responses fall back to deterministic heuristic (no user-facing drop), startup LLM direct check switched to lightweight capability probe (non-blocking), and startup report strings now explicitly show `LLM delivery mode` + `Immediate TG summaries`; targeted + full pytest green (976 passed).
 - 2026-03-04: PR3 visible feedback quality loop — added Telegram `/stats` with human-friendly quality summary (corrections, surprise rate, correction coverage, top priority transitions), appended same quality block to `/week`, reused existing analytics + calibration report paths with defensive non-blocking fallbacks, and added inbound regressions; targeted + full pytest green (978 passed).
+- 2026-03-04: PR4A cockpit polish — simplified top nav to Cockpit/Archive/Health/Events/Doctor(+conditional Support), repacked `/` cockpit into calmer two-column home (attention + digests + system state + compact quality + support + useful links), added defensive home-only `quality_summary` in `index()`, and expanded web cockpit tests; full pytest green (981 passed).
 Now:
-- PR3 visible feedback quality loop completed and validated locally; preparing commit + PR.
+- PR4A cockpit polish completed and validated locally; preparing commit + PR.
 Next:
-- Monitor `/stats` usage and verify production quality summaries remain honest when feedback history is sparse or analytics paths degrade.
+- Monitor home quality summary in low-feedback environments and confirm compact cockpit layout remains stable with production data.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/telegram/inbound.py
-- mailbot_v26/ui/i18n.py
-- mailbot_v26/tests/test_telegram_inbound.py
+- mailbot_v26/web_observability/app.py
+- mailbot_v26/web_observability/templates/base.html
+- mailbot_v26/web_observability/templates/cockpit.html
+- mailbot_v26/web_observability/static/style.css
+- mailbot_v26/tests/test_web_cockpit_home.py
+- tests/test_web_session_account_emails.py
 - CONTINUITY.md
