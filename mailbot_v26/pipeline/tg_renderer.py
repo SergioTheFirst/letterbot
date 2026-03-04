@@ -361,7 +361,12 @@ def _compact_date(date_value: str) -> str:
     return f"{day}.{month}"
 
 
-def _invoice_attachment_insight(mail_type: str, text: str, attachments_count: int) -> str | None:
+def _invoice_attachment_insight(
+    mail_type: str,
+    text: str,
+    attachments_count: int,
+    message_facts: dict[str, Any] | None = None,
+) -> str | None:
     invoice_types = {"INVOICE", "PAYMENT_REMINDER", "INVOICE_OVERDUE", "OVERDUE_INVOICE"}
     lowered = text.lower()
     invoice_text_signal = any(
@@ -372,15 +377,20 @@ def _invoice_attachment_insight(mail_type: str, text: str, attachments_count: in
         marker in lowered
         for marker in ("offline", "outage", "security alert", "подозрительный вход", "недоступ")
     )
-    if mail_type not in invoice_types and (not invoice_text_signal or incident_text_signal):
+    facts = message_facts or {}
+    decision_invoice = str(facts.get("doc_kind") or "") == "invoice"
+    if mail_type not in invoice_types and not decision_invoice and (not invoice_text_signal or incident_text_signal):
         return None
+    if facts.get("doc_kind") and facts.get("doc_kind") != "invoice":
+        return None
+
     invoice_number = ""
     number_match = _INVOICE_NUMBER_RE.search(text)
     if number_match:
         candidate = (number_match.group(1) or "").strip(" -.:;,")
         if candidate:
             invoice_number = f"Счет №{candidate}"
-    amount = ""
+    amount = _normalize_amount(str(facts.get("amount") or ""))
     for match in _RUB_AMOUNT_RE.finditer(text):
         if (match.start() > 0 and text[match.start() - 1] == ".") or (
             match.end() < len(text) and text[match.end() : match.end() + 1] == "."
@@ -404,8 +414,10 @@ def _invoice_attachment_insight(mail_type: str, text: str, attachments_count: in
             if "₽" in chunk or "руб" in context:
                 amount = _normalize_amount(chunk)
                 break
+    due_date = _compact_date(str(facts.get("due_date") or ""))
     due_match = _PAYMENT_DUE_CONTEXT_RE.search(text)
-    due_date = _compact_date(due_match.group(1)) if due_match else ""
+    if not due_date:
+        due_date = _compact_date(due_match.group(1)) if due_match else ""
     if not due_date:
         for match in _DATE_RE.finditer(text):
             start = max(0, match.start() - 24)
@@ -478,6 +490,7 @@ def build_attachment_insight(
     attachments: list[dict[str, Any]],
     subject: str = "",
     summary: str = "",
+    message_facts: dict[str, Any] | None = None,
 ) -> str | None:
     if not attachments:
         return None
@@ -487,6 +500,7 @@ def build_attachment_insight(
         normalized_mail_type,
         source_text,
         len(attachments),
+        message_facts=message_facts,
     )
     if invoice_line:
         return invoice_line
@@ -662,6 +676,7 @@ def build_telegram_text(
     attachments: list[dict[str, Any]],
     mail_type: str | None = None,
     summary: str = "",
+    message_facts: dict[str, Any] | None = None,
 ) -> str:
     body_lines = _maybe_drop_duplicate_subject_line(subject, [format_main_action(action_line)])
     lines = [
@@ -674,6 +689,7 @@ def build_telegram_text(
         attachments=attachments,
         subject=subject,
         summary=summary,
+        message_facts=message_facts,
     )
     if attachment_line:
         lines.append("")
@@ -692,6 +708,7 @@ def render_telegram_message(
     commitments: Iterable[str] | None = None,
     attachments: list[dict[str, Any]] | None = None,
     mail_type: str | None = None,
+    message_facts: dict[str, Any] | None = None,
 ) -> str:
     fields = apply_semantic_gates(
         action_line=action_line,
@@ -708,6 +725,7 @@ def render_telegram_message(
         attachments=attachments or [],
         mail_type=mail_type,
         summary=summary_excerpt,
+        message_facts=message_facts,
     )
     if summary_excerpt:
         safe_summary = _escape_dynamic(summary_excerpt)
