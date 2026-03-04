@@ -175,19 +175,17 @@ Done:
 - 2026-03-04: restored legacy cockpit contract on `/` (recent summaries/system status/useful links + required nav/DOM hooks), moved live card dashboard to new `/dashboard` page while keeping `/api/dashboard`, added dedicated `dashboard.html` route wiring, and updated dashboard template test to target `/dashboard`; full pytest green (1003 passed).
 - 2026-03-04: dashboard recent-events stream added to `/api/dashboard` from `events_v1` (LIMIT 20, newest-first, safe empty fallback on table/query errors), `/dashboard` now renders live "Recent events" list with time+text formatting, and dashboard API/template tests expanded; full pytest green.
 - 2026-03-04: `/api/dashboard` now uses a 10s in-memory TTL payload cache (cache hit returns full cached JSON without DB work; cache writes only on successful payload build), and cockpit preview polling was relaxed to 20s while `/dashboard` stays 5s live.
+- 2026-03-04: dashboard SQL perf pass — added explicit SQLite indexes for dashboard hot paths in `schema.sql` (emails/events_v1/priority_feedback), verified `_dashboard_payload` hot query plans via `EXPLAIN QUERY PLAN` show indexed SEARCH paths (no SCAN) for scoped dashboard requests, and ran full pytest green (1004 passed).
 Now:
-- Implemented dashboard API perf hardening: `_dashboard_payload` now serves a full payload snapshot from a 10s in-memory TTL cache (all sections including `recent_events`) to avoid repeated SQLite aggregation across concurrent tabs.
-- Cockpit home preview polling was reduced from 5s to 20s while `/dashboard` live polling remains at 5s.
+- Dashboard hot-query indexing implemented in SQLite schema; `/api/dashboard` payload logic/API unchanged.
+- Query plans for email counts/priority/llm usage/events stream now resolve via indexed SEARCH for account-scoped dashboard requests.
 Next:
-- Await reviewer validation for dashboard cache TTL (10s) and cockpit preview refresh cadence (20s) under real usage.
+- Await reviewer validation on production-like dataset for dashboard latency improvement after index rollout.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should dashboard priority counts remain 24h-scoped or become all-time totals in a follow-up?
 Working set (files / tables / tests):
+- mailbot_v26/storage/schema.sql
 - mailbot_v26/web_observability/app.py
-- mailbot_v26/web_observability/templates/cockpit.html
-- mailbot_v26/web_observability/templates/dashboard.html
-- mailbot_v26/tests/test_web_dashboard_api.py
-- mailbot_v26/tests/test_web_cockpit_home.py
-- mailbot_v26/tests/test_web_ui_main.py
-- mailbot_v26/tests/test_web_observability_bridge.py
 - CONTINUITY.md
+- python -m pytest -q
+- EXPLAIN QUERY PLAN checks for `_dashboard_payload` SQL (emails/events_v1/priority_feedback)
