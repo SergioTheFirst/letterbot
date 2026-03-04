@@ -579,8 +579,11 @@ class TelegramInboundProcessor:
 
         action, payload = parsed
         if action == "priority":
-            self._apply_priority(chat_id, payload)
-            self._answer_callback(callback_id, _t("inbound.priority_ack", priority=payload.get("priority") or "🔵"))
+            if isinstance(message, dict) and message.get("message_id") is not None:
+                self._apply_priority_edit(chat_id, message, payload)
+            else:
+                self._apply_priority(chat_id, payload, send_ack=False)
+            self._answer_callback(callback_id, "Приоритет обновлён")
         elif action == "toggle":
             self._apply_toggle(chat_id, payload)
             self._answer_callback(callback_id, _t("inbound.ok"))
@@ -598,10 +601,7 @@ class TelegramInboundProcessor:
             self._answer_callback(callback_id, _t("inbound.ok"))
         elif action == "prio_set":
             self._apply_priority_edit(chat_id, message, payload)
-            self._answer_callback(
-                callback_id,
-                _t("inbound.priority_ack", priority=payload.get("priority") or "🔵"),
-            )
+            self._answer_callback(callback_id, "Приоритет обновлён")
         elif action == "snooze_menu":
             self._open_snooze_menu(chat_id, message, payload)
             self._answer_callback(callback_id, _t("inbound.ok"))
@@ -720,7 +720,7 @@ class TelegramInboundProcessor:
             return False
         return True
 
-    def _apply_priority(self, chat_id: str, payload: dict[str, str]) -> None:
+    def _apply_priority(self, chat_id: str, payload: dict[str, str], *, send_ack: bool = True) -> None:
         email_id_raw = payload.get("email_id")
         if not email_id_raw or not email_id_raw.isdigit():
             self._reply(chat_id, _t("inbound.bad_email_id"))
@@ -745,11 +745,12 @@ class TelegramInboundProcessor:
             source="telegram_inbound",
             surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
         )
-        priority = payload.get("priority") or "🔵"
-        self._reply(
-            chat_id,
-            _t("inbound.priority_ack", priority=priority),
-        )
+        if send_ack:
+            priority = payload.get("priority") or "🔵"
+            self._reply(
+                chat_id,
+                _t("inbound.priority_ack", priority=priority),
+            )
 
     def _apply_priority_edit(
         self,
@@ -791,6 +792,7 @@ class TelegramInboundProcessor:
             source="telegram_inbound",
             surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
         )
+        snapshot["priority"] = new_priority
         tier1_text = _render_tier1_message(snapshot)
         expanded = _is_trace_expanded(message)
         if expanded:
@@ -819,12 +821,11 @@ class TelegramInboundProcessor:
             full_text = f"{tier1_text}\n\n{details_text}"
         else:
             full_text = tier1_text
-        confirmation = _t("inbound.priority_ack", priority=new_priority)
-        full_text = f"{full_text}\n\n{confirmation}"
         reply_markup = build_email_actions_keyboard(
             email_id=email_id,
             expanded=expanded,
             prio_menu=False,
+            initial_prio=False,
             show_decision_trace=self.show_decision_trace,
         )
         try:
