@@ -3360,6 +3360,187 @@ def create_app(
             resolved = [default_account]
         return sorted({email for email in resolved if email})
 
+    def _dashboard_payload() -> dict[str, object]:
+        now_ts = datetime.now(timezone.utc).timestamp()
+        day_ago_ts = now_ts - 86_400
+        hour_ago_ts = now_ts - 3_600
+        week_ago_ts = now_ts - 7 * 86_400
+        payload: dict[str, object] = {
+            "emails_today": 0,
+            "emails_last_hour": 0,
+            "llm_calls_today": 0,
+            "llm_fallback_today": 0,
+            "priority": {"red": 0, "yellow": 0, "blue": 0},
+            "corrections_week": 0,
+            "surprise_rate": 0.0,
+            "recent_events": [],
+        }
+        try:
+            dashboard_vars = _dashboard_vars()
+            account_scope = _resolve_account_scope(dashboard_vars)
+        except Exception:
+            account_scope = []
+
+        account_clause = ""
+        account_params: list[object] = []
+        if account_scope:
+            placeholders = ", ".join(["?"] * len(account_scope))
+            account_clause = f" AND account_email IN ({placeholders})"
+            account_params.extend(account_scope)
+
+        account_event_clause = ""
+        account_event_params: list[object] = []
+        if account_scope:
+            placeholders = ", ".join(["?"] * len(account_scope))
+            account_event_clause = f" AND account_id IN ({placeholders})"
+            account_event_params.extend(account_scope)
+
+        try:
+            with _open_readonly_connection(app.config["DB_PATH"]) as conn:
+                conn.row_factory = sqlite3.Row
+
+                row = conn.execute(
+                    (
+                        "SELECT "
+                        "COUNT(*) AS emails_today, "
+                        "SUM(CASE WHEN ("
+                        "COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                        ") THEN 1 ELSE 0 END) AS emails_last_hour "
+                        "FROM emails "
+                        "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                        f"{account_clause}"
+                    ),
+                    (hour_ago_ts, day_ago_ts, *account_params),
+                ).fetchone()
+                if row:
+                    payload["emails_today"] = int(row["emails_today"] or 0)
+                    payload["emails_last_hour"] = int(row["emails_last_hour"] or 0)
+
+                llm_row = conn.execute(
+                    (
+                        "SELECT COUNT(*) AS llm_calls_today "
+                        "FROM emails "
+                        "WHERE llm_provider IS NOT NULL "
+                        "AND TRIM(llm_provider) != '' "
+                        "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                        f"{account_clause}"
+                    ),
+                    (day_ago_ts, *account_params),
+                ).fetchone()
+                if llm_row:
+                    payload["llm_calls_today"] = int(llm_row["llm_calls_today"] or 0)
+
+                fallback_row = conn.execute(
+                    (
+                        "SELECT COUNT(*) AS llm_fallback_today "
+                        "FROM events_v1 "
+                        "WHERE ts_utc >= ? "
+                        f"{account_event_clause} "
+                        "AND ("
+                        "event_type IN ('llm_fallback', 'llm_fallback_used', 'pipeline_error') "
+                        "OR LOWER(event_type) LIKE '%fallback%'"
+                        ")"
+                    ),
+                    (day_ago_ts, *account_event_params),
+                ).fetchone()
+                if fallback_row:
+                    payload["llm_fallback_today"] = int(fallback_row["llm_fallback_today"] or 0)
+
+                pr_row = conn.execute(
+                    (
+                        "SELECT "
+                        "SUM(CASE WHEN priority IN ('🔴', 'red', 'RED') THEN 1 ELSE 0 END) AS red, "
+                        "SUM(CASE WHEN priority IN ('🟡', 'yellow', 'YELLOW') THEN 1 ELSE 0 END) AS yellow, "
+                        "SUM(CASE WHEN priority IN ('🔵', 'blue', 'BLUE') THEN 1 ELSE 0 END) AS blue "
+                        "FROM emails "
+                        "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                        f"{account_clause}"
+                    ),
+                    (day_ago_ts, *account_params),
+                ).fetchone()
+                if pr_row:
+                    payload["priority"] = {
+                        "red": int(pr_row["red"] or 0),
+                        "yellow": int(pr_row["yellow"] or 0),
+                        "blue": int(pr_row["blue"] or 0),
+                    }
+
+                corr_row = conn.execute(
+                    (
+                        "SELECT COUNT(*) AS corrections_week "
+                        "FROM priority_feedback "
+                        "WHERE kind IN ('correction', 'priority_correction') "
+                        "AND COALESCE(strftime('%s', created_at), 0) >= ?"
+                        f"{account_clause}"
+                    ),
+                    (week_ago_ts, *account_params),
+                ).fetchone()
+                if corr_row:
+                    payload["corrections_week"] = int(corr_row["corrections_week"] or 0)
+
+                surprise_row = conn.execute(
+                    (
+                        "SELECT "
+                        "SUM(CASE WHEN event_type = 'surprise_detected' THEN 1 ELSE 0 END) AS surprises, "
+                        "SUM(CASE WHEN event_type = 'priority_correction_recorded' THEN 1 ELSE 0 END) AS corrections "
+                        "FROM events_v1 "
+                        "WHERE ts_utc >= ?"
+                        f"{account_event_clause}"
+                    ),
+                    (week_ago_ts, *account_event_params),
+                ).fetchone()
+                surprises = int(surprise_row["surprises"] or 0) if surprise_row else 0
+                corrections = int(surprise_row["corrections"] or 0) if surprise_row else 0
+                payload["surprise_rate"] = (
+                    round(surprises / corrections, 4) if corrections > 0 else 0.0
+                )
+
+                recent_rows = conn.execute(
+                    (
+                        "SELECT ts, ts_utc, event_type, payload_json, payload "
+                        "FROM events_v1 "
+                        "WHERE event_type IN ("
+                        "'email_processed', 'email_received', 'priority_correction', "
+                        "'priority_correction_recorded', 'llm_fallback', 'pipeline_error'"
+                        ")"
+                        f"{account_event_clause} "
+                        "ORDER BY ts_utc DESC "
+                        "LIMIT 10"
+                    ),
+                    tuple(account_event_params),
+                ).fetchall()
+                recent_events: list[dict[str, str]] = []
+                for item in recent_rows:
+                    event_type = str(item["event_type"] or "")
+                    text = ""
+                    raw_payload = item["payload_json"] or item["payload"]
+                    if raw_payload:
+                        try:
+                            loaded = json.loads(str(raw_payload))
+                            if isinstance(loaded, dict):
+                                for key in ("text", "message", "reason", "summary"):
+                                    value = loaded.get(key)
+                                    if value:
+                                        text = str(value)
+                                        break
+                        except (TypeError, ValueError):
+                            text = str(raw_payload)
+                    ts = item["ts"]
+                    if not ts:
+                        ts_utc = float(item["ts_utc"] or 0.0)
+                        ts = datetime.fromtimestamp(ts_utc, tz=timezone.utc).isoformat()
+                    recent_events.append(
+                        {
+                            "ts": str(ts or ""),
+                            "type": event_type,
+                            "text": text.strip() or event_type,
+                        }
+                    )
+                payload["recent_events"] = recent_events
+        except Exception as exc:
+            logger.warning("dashboard_payload_failed", extra={"error": str(exc)})
+        return payload
+
     def _attention_payload(
         *,
         account_emails: list[str],
@@ -3759,6 +3940,10 @@ def create_app(
                 "slowest": slowest,
             }
         )
+
+    @app.route("/api/dashboard", methods=["GET"])
+    def api_dashboard():
+        return jsonify(_dashboard_payload())
 
     @app.route("/api/v1/observability/health_timeline", methods=["GET"])
     def api_health_timeline():

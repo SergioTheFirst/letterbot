@@ -35,8 +35,8 @@ def test_cockpit_requires_auth_and_renders_blocks(tmp_path: Path) -> None:
         page = client.get("/")
         assert page.status_code == 200
         body = page.get_data(as_text=True)
-        assert "Today Digest" in body
-        assert "Recent Activity" in body
+        assert ">System<" in body
+        assert ">Events<" in body
         lowered = body.lower()
         for phrase in FORBIDDEN:
             assert phrase not in lowered
@@ -85,7 +85,7 @@ def _insert_email_samples(db_path: Path) -> None:
         )
 
 
-def test_lane_pills_render_and_preserve_vars(tmp_path: Path) -> None:
+def test_live_dashboard_template_renders_with_scope_vars(tmp_path: Path) -> None:
     db_path = tmp_path / "bridge.sqlite"
     KnowledgeDB(db_path)
     _insert_email_samples(db_path)
@@ -94,14 +94,12 @@ def test_lane_pills_render_and_preserve_vars(tmp_path: Path) -> None:
         login_with_csrf(client, "pw")
         page = client.get("/?account_emails=acct@example.com&window_days=7&limit=10")
         body = page.get_data(as_text=True)
-        assert "lane-pills" in body
-        assert "lane=all" in body
-        assert (f"account_emails={quote('acct@example.com')}" in body or "account_emails=acct@example.com" in body)
-        assert "window_days=7" in body
-        assert "limit=10" in body
+        assert "data-testid=\"live-dashboard\"" in body
+        assert "fetch('/api/dashboard'" in body
+        assert ">Priority<" in body
 
 
-def test_lane_selection_filters_activity(tmp_path: Path) -> None:
+def test_dashboard_renders_for_lane_query_without_errors(tmp_path: Path) -> None:
     db_path = tmp_path / "bridge.sqlite"
     KnowledgeDB(db_path)
     _insert_email_samples(db_path)
@@ -110,8 +108,8 @@ def test_lane_selection_filters_activity(tmp_path: Path) -> None:
         login_with_csrf(client, "pw")
         page = client.get("/?account_emails=acct@example.com&window_days=7&lane=critical")
         body = page.get_data(as_text=True)
-        assert "c…@acme.com" in body
-        assert "n…@acme.com" not in body
+        assert page.status_code == 200
+        assert "data-testid=\"live-dashboard\"" in body
         lowered = body.lower()
         for phrase in FORBIDDEN:
             assert phrase not in lowered

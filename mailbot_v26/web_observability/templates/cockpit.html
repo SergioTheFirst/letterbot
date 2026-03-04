@@ -16,324 +16,139 @@
     <div class="status-strip-offline" id="status-strip-offline">offline</div>
   </div>
 
-  <div class="cockpit-grid cockpit-grid--home">
-    <div class="cockpit-main">
-      <div class="card activity-card">
-        <div class="section-title">
-          <h2>Что требует внимания сейчас</h2>
-          <div class="hint">Recent Activity with lane focus.</div>
-        </div>
-        {% if lane_pills %}
-        <div class="lane-pills" aria-label="Lane filters">
-          {% for lane in lane_pills %}
-          <a class="lane-pill {% if lane.active %}active{% endif %}" href="{{ lane.url }}">
-            <span class="lane-label">{{ lane.label }}</span>
-            <span class="lane-count">{{ lane.count }}</span>
-          </a>
-          {% endfor %}
-        </div>
-        {% endif %}
-        {% if activity_rows %}
-        <div class="table-scroll activity-table-wrapper cockpit-table">
-          <table class="table compact activity-table fixed">
-            <thead>
-              <tr>
-                <th>Time (UTC)</th>
-                <th>From</th>
-                <th>To / Account</th>
-                <th>Telegram preview</th>
-                <th>Status</th>
-                <th class="numeric">E2E (s)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in activity_rows %}
-              <tr>
-                <td class="mono">{{ row.delivered }}</td>
-                <td class="truncate">{{ row.from_label }}</td>
-                <td class="truncate">{{ row.to_label }}</td>
-                <td class="truncate preview">{{ row.telegram_preview }}</td>
-                <td><span class="badge {{ row.status_class }}">{{ row.status }}</span></td>
-                <td class="numeric">{{ row.e2e }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="hint">Adjust scope or window to populate the stream.</div>
-        {% endif %}
-      </div>
-
-      <div class="card digest-card">
-        <div class="section-title">
-          <h2>Последние сводки</h2>
-          <div class="hint">Today and week digests in one place.</div>
-        </div>
-        <div class="digest-stack">
-          <div class="digest-slice">
-            <h3>Today Digest</h3>
-            {% if digest_today_counts %}
-            <div class="digest-counts">
-              {% for item in digest_today_counts %}
-              <span class="badge muted">{{ item.label }} {{ item.count }}</span>
-              {% endfor %}
-            </div>
-            {% endif %}
-            {% if digest_today %}
-            <div class="digest-items">
-              {% for item in digest_today %}
-              <div class="digest-item">
-                <div class="digest-body">
-                  <div class="title">{{ item.title }}</div>
-                  <div class="preview">{{ item.from_label }}</div>
-                </div>
-                <div class="digest-meta">
-                  <div class="time">{{ item.time }}</div>
-                  <div><span class="badge {% if item.status.lower() == 'delivered' %}success{% elif item.status.lower() == 'failed' %}danger{% else %}muted{% endif %}">{{ item.status }}</span></div>
-                </div>
-              </div>
-              {% endfor %}
-            </div>
-            {% else %}
-            <div class="hint">Expand window or scope to surface today signals.</div>
-            {% endif %}
-          </div>
-
-          <div class="digest-slice">
-            <h3>Week Digest</h3>
-            {% if digest_week_counts %}
-            <div class="digest-counts">
-              {% for item in digest_week_counts %}
-              <span class="badge muted">{{ item.label }} {{ item.count }}</span>
-              {% endfor %}
-            </div>
-            {% endif %}
-            {% if digest_week %}
-            <div class="digest-items">
-              {% for item in digest_week %}
-              <div class="digest-item">
-                <div class="digest-body">
-                  <div class="title">{{ item.title }}</div>
-                  <div class="preview">{{ item.from_label }}</div>
-                </div>
-                <div class="digest-meta">
-                  <div class="time">{{ item.time }}</div>
-                  <div><span class="badge {% if item.status.lower() == 'delivered' %}success{% elif item.status.lower() == 'failed' %}danger{% else %}muted{% endif %}">{{ item.status }}</span></div>
-                </div>
-              </div>
-              {% endfor %}
-            </div>
-            {% else %}
-            <div class="hint">Expand window to highlight weekly flow.</div>
-            {% endif %}
-          </div>
-        </div>
-      </div>
-
-      {% if engineer_mode %}
-      <div class="engineer-blocks" data-testid="engineer-blocks">
-        <details class="card engineer-card">
-          <summary>Top slow spans</summary>
-        {% if engineer_slowest %}
-        <div class="table-scroll">
-          <table class="table compact fixed">
-            <thead>
-              <tr>
-                <th>Started (UTC)</th>
-                <th class="numeric">Total ms</th>
-                <th>Outcome</th>
-                <th>LLM</th>
-                <th>Snapshot</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in engineer_slowest %}
-              <tr>
-                <td class="mono">{{ row.started }}</td>
-                <td class="numeric">{{ row.total_ms }}</td>
-                <td>{{ row.outcome }}</td>
-                <td class="truncate">{{ row.llm }}</td>
-                <td class="truncate">{{ row.snapshot }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="hint">Broaden the window to sample more spans.</div>
-        {% endif %}
-        </details>
-
-        <details class="card engineer-card">
-          <summary>Recent errors</summary>
-        {% if engineer_errors %}
-        <div class="table-scroll">
-          <table class="table compact fixed">
-            <thead>
-              <tr>
-                <th>Time (UTC)</th>
-                <th>Outcome</th>
-                <th>Error</th>
-                <th>LLM</th>
-                <th class="numeric">Total ms</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in engineer_errors %}
-              <tr>
-                <td class="mono">{{ row.ts }}</td>
-                <td>{{ row.outcome }}</td>
-                <td class="truncate">{{ row.error_code }}</td>
-                <td class="truncate">{{ row.llm }}</td>
-                <td class="numeric">{{ row.total_ms }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="hint">Expand window to inspect error history.</div>
-        {% endif %}
-        </details>
-
-        <details class="card engineer-card">
-          <summary>Latency distribution</summary>
-        {% if latency_distribution %}
-        <div class="latency-dist">
-          {% for row in latency_distribution %}
-          <div class="latency-row">
-            <div class="latency-label">{{ row.label }}</div>
-            <pre class="latency-bar">{{ row.bar }}</pre>
-            <div class="latency-count">{{ row.count }}</div>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="hint">Collect more spans to populate the distribution.</div>
-        {% endif %}
-        </details>
-      </div>
-      {% endif %}
-    </div>
-
-    <div class="cockpit-side">
-      <div class="card golden-card">
-        <div class="section-title">
-          <h2>Состояние системы</h2>
-          <div class="hint">Golden signals at a glance</div>
-        </div>
-        {% if golden_signals %}
-        <div class="signal-grid">
-          <div class="signal-item"><div class="label">Latency p50</div><div class="value">{{ golden_signals.latency_p50 }}</div></div>
-          <div class="signal-item"><div class="label">Latency p95</div><div class="value">{{ golden_signals.latency_p95 }}</div></div>
-          <div class="signal-item"><div class="label">Error rate</div><div class="value">{{ golden_signals.error_rate }}</div></div>
-          <div class="signal-item"><div class="label">Fallback rate</div><div class="value">{{ golden_signals.fallback_rate }}</div></div>
-          <div class="signal-item"><div class="label">TG failure</div><div class="value">{{ golden_signals.tg_failure_rate }}</div></div>
-          <div class="signal-item"><div class="label">Traffic</div><div class="value">{{ golden_signals.traffic_volume }}</div></div>
-          <div class="signal-item"><div class="label">Saturation</div><div class="value">{{ golden_signals.saturation }}</div></div>
-        </div>
-        {% else %}
-        <div class="hint">Adjust scope to surface system signals.</div>
-        {% endif %}
-      </div>
-
-      <div class="card golden-card quality-card" data-testid="quality-summary">
-        <div class="section-title">
-          <h2>Качество автоматизации</h2>
-        </div>
-        {% if quality_summary.available %}
-        <div class="quality-metric"><span class="label">Corrections</span><span class="value">{{ quality_summary.corrections }}</span></div>
-        <div class="quality-metric"><span class="label">Surprise rate</span><span class="value">{{ quality_summary.surprise_rate }}</span></div>
-        <div class="hint">{{ quality_summary.trust_hint }}</div>
-        {% else %}
-        <div class="hint">Not enough feedback yet. Quality summary will appear when corrections are recorded.</div>
-        {% endif %}
-      </div>
-
+  <div class="live-dashboard-grid" data-testid="live-dashboard">
+    <section class="card live-card" id="card-system">
+      <h2>System</h2>
+      <p class="hint">{{ scope_hint or 'Live observability feed.' }}</p>
       {% if cfg.features.donate_enabled and support_nav_enabled %}
-      <div class="card golden-card support-card">
-        <div class="section-title support-card-head">
-          <h2>Support Letterbot</h2>
-        </div>
-        <p class="support-card-copy">Letterbot stays free. Your support helps keep the premium experience steady and improving.</p>
-        {% if support_methods and support_methods[0].qr_image_data_uri %}
-        <div class="support-card-qr-preview">
-          <img src="{{ support_methods[0].qr_image_data_uri }}" alt="Support QR preview">
-          <div class="support-card-qr-caption">Quick QR preview</div>
-        </div>
-        {% endif %}
-        <div class="card-actions">
-          <a class="btn" href="/support">Open support page</a>
-        </div>
+      <div class="support-card-copy">Support Letterbot</div>
+      {% if support_methods and support_methods[0].qr_image_data_uri %}
+      <div class="support-card-qr-preview">
+        <img src="{{ support_methods[0].qr_image_data_uri }}" alt="Support QR preview">
+        <div class="support-card-qr-caption">Quick QR preview</div>
       </div>
       {% endif %}
+      <div class="card-actions"><a class="btn" href="/support">Open support page</a></div>
+      {% endif %}
+    </section>
 
-      <div class="card golden-card">
-        <div class="section-title">
-          <h2>Контакты и диалоги</h2>
-        </div>
-        <div class="hint"><b>🔝 Топ по трафику</b></div>
-        {% if lane == "all" and top_senders %}
-          {% for item in top_senders %}
-          <div>• {{ item.display_name }} — {{ item.count }}</div>
-          {% endfor %}
-        {% else %}
-          <div class="hint">— нет данных —</div>
-        {% endif %}
-        <div class="hint" style="margin-top:8px;"><b>🔇 Молчат давно</b></div>
-        {% if lane == "all" and silent_contacts %}
-          {% for item in silent_contacts %}
-          <div>• {{ item.display_name }} — {{ item.days_silent }} дн.</div>
-          {% endfor %}
-        {% else %}
-          <div class="hint">— нет данных —</div>
-        {% endif %}
-        <div class="hint" style="margin-top:8px;"><b>🔁 Застрявшие диалоги</b></div>
-        {% if lane == "all" and stalled_threads %}
-          {% for item in stalled_threads %}
-          <div>• {{ item.from_email }} — {{ item.subject or item.snippet }} ({{ item.days_ago }} дн. назад)</div>
-          {% endfor %}
-        {% else %}
-          <div class="hint">— нет данных —</div>
-        {% endif %}
-      </div>
+    <section class="card live-card" id="card-emails">
+      <h2>Emails</h2>
+      <div class="metric"><span>Today</span><strong id="emails-today">0</strong></div>
+      <div class="metric"><span>Last hour</span><strong id="emails-hour">0</strong></div>
+    </section>
 
-      <div class="card golden-card useful-links-card">
-        <div class="section-title">
-          <h2>Полезные ссылки</h2>
-        </div>
-        <ul class="simple-links">
-          <li><a href="{{ url_for('archive') }}">Archive</a></li>
-          <li><a href="{{ url_for('health') }}">Health</a></li>
-          <li><a href="{{ url_for('events') }}">Events</a></li>
-          <li><a href="{{ url_for('doctor') }}">Doctor / Diagnostics export</a></li>
-          {% if commitments_url %}<li><a href="{{ commitments_url }}">Commitments</a></li>{% endif %}
-        </ul>
-      </div>
-    </div>
+    <section class="card live-card" id="card-llm">
+      <h2>LLM</h2>
+      <div class="metric"><span>Calls today</span><strong id="llm-calls">0</strong></div>
+      <div class="metric"><span>Fallback today</span><strong id="llm-fallback">0</strong></div>
+    </section>
+
+    <section class="card live-card" id="card-priority">
+      <h2>Priority</h2>
+      <div class="metric"><span>Red</span><strong id="priority-red">0</strong></div>
+      <div class="metric"><span>Yellow</span><strong id="priority-yellow">0</strong></div>
+      <div class="metric"><span>Blue</span><strong id="priority-blue">0</strong></div>
+    </section>
+
+    <section class="card live-card" id="card-learning" data-testid="quality-summary">
+      <h2>Learning</h2>
+      <div class="hint">Качество автоматизации</div>
+      {% if quality_summary.available %}
+      <div class="quality-metric"><span class="label">Corrections</span><span class="value" id="corrections-week">{{ quality_summary.corrections }}</span></div>
+      <div class="quality-metric"><span class="label">Surprise rate</span><span class="value" id="surprise-rate">{{ quality_summary.surprise_rate }}</span></div>
+      <div class="hint" id="quality-hint">{{ quality_summary.trust_hint }}</div>
+      {% else %}
+      <div class="quality-metric"><span class="label">Corrections</span><span class="value" id="corrections-week">0</span></div>
+      <div class="quality-metric"><span class="label">Surprise rate</span><span class="value" id="surprise-rate">0%</span></div>
+      <div class="hint" id="quality-hint">Not enough feedback yet. Quality summary will appear when corrections are recorded.</div>
+      {% endif %}
+    </section>
+
+    <section class="card live-card live-events" id="card-events">
+      <h2>Events</h2>
+      <ul id="events-list" class="events-list"><li class="hint">Waiting for live events…</li></ul>
+    </section>
+
+    <section class="card live-card" id="card-links">
+      <h2>Полезные ссылки</h2>
+      <ul class="simple-links">
+        <li><a href="{{ url_for('archive') }}">Archive</a></li>
+        <li><a href="{{ url_for('health') }}">Health</a></li>
+        <li><a href="{{ url_for('events') }}">Events</a></li>
+        <li><a href="{{ url_for('doctor') }}">Doctor / Diagnostics export</a></li>
+      </ul>
+    </section>
+
+    {% if engineer_mode %}
+    <section class="card live-card" data-testid="engineer-blocks">
+      <h2>Engineer</h2>
+      <div class="hint">Advanced spans/trace details stay available in dedicated pages.</div>
+    </section>
+    {% endif %}
   </div>
 
   <script>
     (function() {
       const strip = document.getElementById('status-strip-content');
       const offline = document.getElementById('status-strip-offline');
-      if (!strip || !offline) return;
-      const refresh = () => {
+      const eventsList = document.getElementById('events-list');
+      const setText = (id, value) => {
+        const node = document.getElementById(id);
+        if (node) node.textContent = String(value);
+      };
+      const updateDashboard = () => {
+        fetch('/api/dashboard', { credentials: 'same-origin' })
+          .then((resp) => {
+            if (!resp.ok) throw new Error('dashboard');
+            return resp.json();
+          })
+          .then((data) => {
+            setText('emails-today', data.emails_today ?? 0);
+            setText('emails-hour', data.emails_last_hour ?? 0);
+            setText('llm-calls', data.llm_calls_today ?? 0);
+            setText('llm-fallback', data.llm_fallback_today ?? 0);
+            setText('priority-red', data.priority?.red ?? 0);
+            setText('priority-yellow', data.priority?.yellow ?? 0);
+            setText('priority-blue', data.priority?.blue ?? 0);
+            setText('corrections-week', data.corrections_week ?? 0);
+            setText('surprise-rate', `${Math.round((data.surprise_rate ?? 0) * 100)}%`);
+            if (eventsList) {
+              const items = Array.isArray(data.recent_events) ? data.recent_events : [];
+              if (!items.length) {
+                eventsList.innerHTML = '<li class="hint">No recent events yet.</li>';
+                return;
+              }
+              eventsList.innerHTML = items.map((item) => {
+                const ts = item.ts || '';
+                const type = item.type || 'event';
+                const text = item.text || type;
+                return `<li><span class="mono">${ts}</span> <b>${type}</b> — ${text}</li>`;
+              }).join('');
+            }
+          })
+          .catch(() => {});
+      };
+
+      const refreshStatus = () => {
         fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' })
           .then((resp) => {
             if (!resp.ok) throw new Error('status');
             return resp.text();
           })
           .then((html) => {
-            strip.innerHTML = html;
-            offline.classList.remove('active');
+            if (strip) strip.innerHTML = html;
+            if (offline) offline.classList.remove('active');
           })
           .catch(() => {
-            offline.classList.add('active');
+            if (offline) offline.classList.add('active');
           });
       };
-      setInterval(refresh, {{ status_refresh_ms }});
+
+      refreshStatus();
+      updateDashboard();
+      setInterval(refreshStatus, {{ status_refresh_ms }});
+      setInterval(updateDashboard, 5000);
     })();
   </script>
 {% endblock %}
