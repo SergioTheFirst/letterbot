@@ -1115,9 +1115,11 @@ class MessageProcessor:
     def _choose_priority(subject: str, body: str, attachments: list[Attachment]) -> str:
         combined = " ".join([subject or "", body or ""]).lower()
         attachment_names = " ".join(att.filename.lower() for att in attachments if att.filename)
-        if any(token in combined for token in ("срочно", "urgent", "оплат")):
+        attachment_text = " ".join((att.text or "").lower() for att in attachments if att.text)
+        evidence = " ".join((combined, attachment_names, attachment_text)).strip()
+        if any(token in evidence for token in ("срочно", "urgent", "оплат", "security alert", "offline", "авар")):
             return "🔴"
-        if any(token in combined for token in ("договор", "contract", "согласован", "approval", "счет", "invoice")):
+        if any(token in evidence for token in ("договор", "contract", "согласован", "approval", "счет", "invoice")):
             return "🟡"
         if any(token in attachment_names for token in ("invoice", "счет")):
             return "🟡"
@@ -1977,10 +1979,29 @@ def _build_premium_clarity_text(
             body_summary,
             body_text,
             " ".join(str(attachment.get("filename") or "") for attachment in attachments),
+            " ".join(str(attachment.get("text") or "")[:180] for attachment in attachments),
             " ".join(str(item.get("summary") or "") for item in attachment_summaries),
         )
         if part
     )
+    message_facts = _collect_message_facts(
+        subject=subject,
+        body_text=" ".join(part for part in (body_summary, body_text) if part),
+        attachments=attachments,
+        mail_type=mail_type,
+    )
+    fact_evidence = " ".join(
+        str(value)
+        for value in (
+            message_facts.get("doc_kind"),
+            message_facts.get("amount"),
+            message_facts.get("due_date"),
+            message_facts.get("doc_number"),
+        )
+        if value
+    )
+    if fact_evidence:
+        evidence_text = " ".join((evidence_text, fact_evidence)).strip()
     normalized_evidence = re.sub(r"[\W_]+", " ", evidence_text.lower()).strip()
     short_action = _select_premium_short_action(
         normalized_mail_type=normalized_mail_type,
@@ -2151,8 +2172,6 @@ def _resolve_action_line(action_line: str) -> str:
 
 def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]]) -> str:
     base = (body_text or "").strip()
-    if not attachments:
-        return base
     signals: list[str] = []
     for attachment in attachments[:4]:
         filename = str(attachment.get("filename") or "").strip().lower()
@@ -2171,10 +2190,135 @@ def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]
             if len(compact_text) > 220:
                 compact_text = compact_text[:219].rstrip() + "…"
             signals.append(compact_text)
+    facts = _collect_message_facts(
+        subject="",
+        body_text=body_text or "",
+        attachments=attachments,
+        mail_type="",
+    )
+    if facts["doc_kind"]:
+        signals.append(str(facts["doc_kind"]))
+    if facts["amount"]:
+        signals.append(f"amount {facts['amount']}")
+    if facts["due_date"]:
+        signals.append(f"due {facts['due_date']}")
+    if facts["doc_number"]:
+        signals.append(f"doc {facts['doc_number']}")
+    if facts["invoice_signal"]:
+        signals.append("invoice payment required")
+    if facts["contract_signal"]:
+        signals.append("contract signature required")
+    if facts["incident_signal"]:
+        signals.append("incident security alert")
     if not signals:
         return base
     signal_text = " ".join(dict.fromkeys(signals))
     return " ".join(part for part in (base, signal_text) if part).strip()
+
+
+_FACT_AMOUNT_RE = re.compile(
+    r"(\d{1,3}(?:[ \u00a0]\d{3})+|\d{4,})(?:[\.,]\d{1,2})?\s*(?:₽|руб\.?|rub|rur)?",
+    re.IGNORECASE,
+)
+_FACT_DUE_RE = re.compile(
+    r"(?:оплат(?:ить|а|е)?\s*до|срок\s*оплат[ыы]?|до)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
+    re.IGNORECASE,
+)
+_FACT_DATE_RE = re.compile(r"\b\d{2}\.\d{2}(?:\.\d{2,4})?\b")
+_FACT_DOC_NUMBER_RE = re.compile(
+    r"(?:сч[её]т|invoice|договор|contract|акт)\s*(?:№|no\.?|n\s*°)\s*([0-9a-zа-я\-/]{1,32})",
+    re.IGNORECASE,
+)
+_FACT_INVOICE_MARKERS = (
+    "счет",
+    "счёт",
+    "invoice",
+    "к оплате",
+    "оплатить",
+    "срок оплаты",
+    "итого",
+)
+_FACT_CONTRACT_MARKERS = ("договор", "contract", "agreement", "подпис", "signature")
+_FACT_INCIDENT_MARKERS = (
+    "недоступ",
+    "offline",
+    "outage",
+    "security alert",
+    "подозрительный вход",
+    "авар",
+    "инцидент",
+    "сбой",
+)
+
+
+def _collect_message_facts(
+    *,
+    subject: str,
+    body_text: str,
+    attachments: list[dict[str, Any]],
+    mail_type: str,
+) -> dict[str, Any]:
+    attachment_texts: list[str] = []
+    attachment_facts: list[str] = []
+    for attachment in attachments[:6]:
+        text = str(attachment.get("text") or "").strip()
+        if text:
+            attachment_texts.append(text[:300])
+            doc_type = _detect_attachment_doc_type(
+                filename=str(attachment.get("filename") or ""),
+                content_type=attachment.get("content_type") or attachment.get("type"),
+            )
+            fact = pick_attachment_fact(text, str(attachment.get("filename") or ""), doc_type)
+            if fact:
+                attachment_facts.append(fact)
+    evidence_text = " ".join(
+        part for part in (subject, body_text, " ".join(attachment_texts), " ".join(attachment_facts)) if part
+    )
+    lowered = evidence_text.lower()
+    normalized_mail_type = (mail_type or "").upper()
+    amount = ""
+    for match in _FACT_AMOUNT_RE.finditer(evidence_text):
+        chunk = match.group(0)
+        context = lowered[max(0, match.start() - 20) : match.end() + 10]
+        if any(token in context for token in ("итого", "сумм", "к оплат", "оплат", "руб", "₽")):
+            amount = " ".join(chunk.replace("\u00a0", " ").split())
+            break
+    due_date = ""
+    due_match = _FACT_DUE_RE.search(evidence_text)
+    if due_match:
+        due_date = due_match.group(1)
+    elif any(token in lowered for token in ("до", "срок", "дедлайн", "deadline")):
+        generic_date = _FACT_DATE_RE.search(evidence_text)
+        due_date = generic_date.group(0) if generic_date else ""
+    doc_number_match = _FACT_DOC_NUMBER_RE.search(evidence_text)
+    doc_number = doc_number_match.group(1) if doc_number_match else ""
+    invoice_signal = normalized_mail_type.startswith("INVOICE") or any(marker in lowered for marker in _FACT_INVOICE_MARKERS)
+    contract_signal = (
+        normalized_mail_type.startswith("CONTRACT")
+        or "AGREEMENT" in normalized_mail_type
+        or any(marker in lowered for marker in _FACT_CONTRACT_MARKERS)
+    )
+    incident_signal = (
+        normalized_mail_type in {"INCIDENT", "SECURITY_ALERT"}
+        or any(marker in lowered for marker in _FACT_INCIDENT_MARKERS)
+    )
+    doc_kind = ""
+    if incident_signal:
+        doc_kind = "incident"
+    elif contract_signal:
+        doc_kind = "contract"
+    elif invoice_signal:
+        doc_kind = "invoice"
+    return {
+        "amount": amount,
+        "due_date": due_date,
+        "doc_number": doc_number,
+        "doc_kind": doc_kind,
+        "invoice_signal": invoice_signal,
+        "contract_signal": contract_signal,
+        "incident_signal": incident_signal,
+        "attachment_facts": attachment_facts,
+    }
 
 
 def _normalize_summary_text(summary: str) -> str:
@@ -2764,8 +2908,14 @@ def _count_recent_importance_history(
 def _build_heuristic_llm_result(
     *, subject: str, body_text: str, priority: str, attachments: list[dict[str, Any]]
 ) -> SimpleNamespace:
-    summary = _build_heuristic_summary(subject=subject, body_text=body_text)
-    action_line = _build_heuristic_action_line(priority=priority)
+    summary = _build_heuristic_summary(subject=subject, body_text=body_text, attachments=attachments)
+    message_facts = _collect_message_facts(
+        subject=subject,
+        body_text=body_text,
+        attachments=attachments,
+        mail_type="",
+    )
+    action_line = _build_heuristic_action_line(priority=priority, message_facts=message_facts)
     return SimpleNamespace(
         priority=priority,
         action_line=action_line,
@@ -2775,8 +2925,13 @@ def _build_heuristic_llm_result(
     )
 
 
-def _build_heuristic_summary(*, subject: str, body_text: str) -> str:
+def _build_heuristic_summary(*, subject: str, body_text: str, attachments: list[dict[str, Any]] | None = None) -> str:
     text = clean_email_body(body_text or "").strip()
+    attachment_items = attachments or []
+    if not text and attachment_items:
+        attachment_text = " ".join(str(item.get("text") or "") for item in attachment_items).strip()
+        if attachment_text:
+            text = clean_email_body(attachment_text).strip()
     if not text:
         return ""
 
@@ -2799,7 +2954,14 @@ def _build_heuristic_summary(*, subject: str, body_text: str) -> str:
     return ""
 
 
-def _build_heuristic_action_line(*, priority: str) -> str:
+def _build_heuristic_action_line(*, priority: str, message_facts: dict[str, Any] | None = None) -> str:
+    facts = message_facts or {}
+    if facts.get("incident_signal"):
+        return "Зафиксировать"
+    if facts.get("invoice_signal"):
+        return "Оплатить"
+    if facts.get("contract_signal"):
+        return "Проверить"
     if priority == "🔴":
         return "Срочно требует внимания"
     if priority == "🟡":

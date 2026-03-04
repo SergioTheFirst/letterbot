@@ -458,6 +458,55 @@ def test_action_selection_uses_body_and_attachment_text() -> None:
     assert "Оплатить счёт" in result
 
 
+def test_invoice_body_only_gives_payment_action_and_meaningful_summary() -> None:
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Уточнение",
+        sender="billing@example.com",
+        body="Прошу оплатить счёт №445 до 15.04.2026. Итого 87 500 руб.",
+        attachments=[],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    assert "Оплатить счёт" in result
+    assert "87 500" in result
+
+
+def test_invoice_attachment_only_influences_action_and_priority() -> None:
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Документы",
+        sender="billing@example.com",
+        body="",
+        attachments=[
+            Attachment(
+                filename="table.xlsx",
+                content=b"",
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                text="Итого: 87 500 руб. Оплатить до 15.04.2026",
+            )
+        ],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    assert result.split("\n")[0].startswith(("🟡 от", "🔴 от"))
+    assert "Оплатить счёт" in result
+
+
+def test_contract_signature_case_avoids_generic_output() -> None:
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Подписание договора",
+        sender="legal@example.com",
+        body="Нужно подписать договор и вернуть экземпляр.",
+        attachments=[],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    assert "Проверить договор" in result
+    assert "Проверить письмо" not in result
+
+
 def test_action_selection_avoids_payment_for_incident_signals() -> None:
     processor = _processor()
     msg = InboundMessage(

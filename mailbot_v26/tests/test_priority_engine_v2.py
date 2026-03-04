@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from mailbot_v26.insights.commitment_tracker import Commitment
+from mailbot_v26.pipeline.processor import _build_priority_signal_text
 from mailbot_v26.priority.priority_engine_v2 import (
     PriorityEngineV2,
     PriorityV2Config,
@@ -103,6 +104,36 @@ def test_amount_thresholds(tmp_path: Path) -> None:
 
     assert result.score == 10
     assert "PRIO_AMOUNT_10K" in result.reason_codes
+
+
+def test_attachment_text_contributes_to_priority_score(tmp_path: Path) -> None:
+    db_path = tmp_path / "priority_v2.sqlite"
+    _init_events_db(db_path)
+    engine = _engine_for(db_path)
+    now = datetime(2024, 1, 15, tzinfo=timezone.utc)
+
+    signal_body = _build_priority_signal_text(
+        "Нейтральное письмо",
+        [
+            {
+                "filename": "table.xlsx",
+                "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "text": "Итого: 87 500 руб. Оплатить до 15.04.2026",
+            }
+        ],
+    )
+
+    result = engine.compute(
+        subject="Документы",
+        body_text=signal_body,
+        from_email="billing@example.com",
+        mail_type="UNKNOWN",
+        received_at=now,
+        commitments=[],
+    )
+
+    assert result.score >= 20
+    assert "PRIO_AMOUNT_50K" in result.reason_codes
 
 
 def test_deadline_thresholds(tmp_path: Path) -> None:
