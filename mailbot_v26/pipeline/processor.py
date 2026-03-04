@@ -1742,6 +1742,118 @@ def _is_urgent_action(action_text: str) -> bool:
     return any(token in lowered_action for token in urgency_tokens)
 
 
+def _count_marker_hits(text: str, markers: tuple[str, ...]) -> int:
+    return sum(1 for marker in markers if marker and marker in text)
+
+
+def _select_premium_short_action(
+    *,
+    normalized_mail_type: str,
+    normalized_subject: str,
+    normalized_body: str,
+    normalized_action: str,
+    normalized_evidence: str,
+) -> str:
+    tech_security_markers = (
+        "недоступен",
+        "недоступна",
+        "недоступно",
+        "offline",
+        "outage",
+        "device unreachable",
+        "не удается подключиться",
+        "не удаётся подключиться",
+        "security alert",
+        "важное оповещение",
+        "подозрительный вход",
+        "авар",
+        "сбой",
+    )
+    reconciliation_markers = ("акт сверки", "reconciliation")
+    signed_markers = (
+        "signed contract",
+        "signed agreement",
+        "подписан договор",
+        "подписано",
+    )
+    promo_markers = (
+        "fyi",
+        "к сведению",
+        "for your information",
+        "информацион",
+        "ознаком",
+        "промо",
+        "рассылк",
+        "инвести",
+        "доходност",
+        "вебинар",
+        "акция",
+    )
+    invoice_markers = (
+        "invoice",
+        "счет",
+        "счёт",
+        "счет №",
+        "счёт №",
+        "к оплате",
+        "срок оплаты",
+        "оплатить до",
+        "сумма",
+        "итого",
+        "всего",
+        "оплат",
+    )
+    strong_invoice_phrases = (
+        "счет на оплат",
+        "счёт на оплат",
+        "invoice",
+        "к оплате",
+        "срок оплаты",
+        "оплатить до",
+        "счет №",
+        "счёт №",
+    )
+
+    if any(marker in normalized_evidence for marker in tech_security_markers):
+        return "Проверить"
+    if normalized_mail_type.startswith("ACT") or "RECONCILIATION" in normalized_mail_type:
+        return "Сверить"
+    if any(marker in normalized_evidence for marker in reconciliation_markers):
+        return "Сверить"
+    if "SIGNED" in normalized_mail_type and any(
+        token in normalized_mail_type for token in ("CONTRACT", "AGREEMENT")
+    ):
+        return "Зафиксировать"
+    if any(marker in normalized_evidence for marker in signed_markers):
+        return "Зафиксировать"
+    if any(marker in normalized_evidence for marker in promo_markers):
+        return "Ознакомиться"
+
+    subject_invoice_hits = _count_marker_hits(normalized_subject, invoice_markers)
+    body_invoice_hits = _count_marker_hits(normalized_body, invoice_markers)
+    evidence_invoice_hits = _count_marker_hits(normalized_evidence, invoice_markers)
+    strong_invoice_signal = any(
+        phrase in normalized_subject or phrase in normalized_body
+        for phrase in strong_invoice_phrases
+    )
+    invoice_signal = strong_invoice_signal or (
+        subject_invoice_hits >= 1 and (body_invoice_hits >= 1 or evidence_invoice_hits >= 2)
+    )
+    if normalized_mail_type.startswith("INVOICE") or "PAYMENT_REMINDER" in normalized_mail_type:
+        invoice_signal = invoice_signal or (subject_invoice_hits + body_invoice_hits >= 1)
+    if not invoice_signal:
+        action_invoice_hits = _count_marker_hits(normalized_action, invoice_markers)
+        invoice_signal = action_invoice_hits >= 2 or any(
+            phrase in normalized_action for phrase in strong_invoice_phrases
+        )
+    if invoice_signal:
+        return "Оплатить"
+
+    if any(token in normalized_action for token in ("ответ", "reply", "напис")):
+        return "Ответить"
+    return "Проверить"
+
+
 def _build_premium_clarity_text(
     *,
     priority: str,
@@ -1776,6 +1888,12 @@ def _build_premium_clarity_text(
     action_text = strip_disallowed_emojis(_resolve_action_line(action_line))
     normalized_mail_type = (mail_type or "").strip().upper()
     normalized_action = re.sub(r"[\W_]+", " ", action_text.lower()).strip()
+    normalized_subject = re.sub(r"[\W_]+", " ", (subject or "").lower()).strip()
+    normalized_body = re.sub(
+        r"[\W_]+",
+        " ",
+        " ".join(part for part in (body_summary, body_text) if part).lower(),
+    ).strip()
     evidence_text = " ".join(
         part
         for part in (
@@ -1789,30 +1907,13 @@ def _build_premium_clarity_text(
         if part
     )
     normalized_evidence = re.sub(r"[\W_]+", " ", evidence_text.lower()).strip()
-    if normalized_mail_type.startswith("INVOICE") or "PAYMENT_REMINDER" in normalized_mail_type:
-        short_action = "Оплатить"
-    elif normalized_mail_type.startswith("ACT") or "RECONCILIATION" in normalized_mail_type:
-        short_action = "Сверить"
-    elif "SIGNED" in normalized_mail_type and any(
-        token in normalized_mail_type for token in ("CONTRACT", "AGREEMENT")
-    ):
-        short_action = "Зафиксировать"
-    elif any(token in normalized_evidence for token in ("signed contract", "signed agreement", "подписан договор", "подписанное соглашение")):
-        short_action = "Зафиксировать"
-    elif any(token in normalized_evidence for token in ("акт сверки", "reconciliation act", "сверки")):
-        short_action = "Сверить"
-    elif any(token in normalized_evidence for token in ("outage", "incident", "авар", "сбой", "недоступ", "technical alert")):
-        short_action = "Проверить"
-    elif any(token in normalized_evidence for token in ("к сведению", "for your information", "fyi", "информацион", "ознаком")):
-        short_action = "Ознакомиться"
-    elif any(token in normalized_action for token in ("ответ", "reply", "напис")):
-        short_action = "Ответить"
-    elif any(token in normalized_evidence for token in ("оплат", "счет", "счёт", "invoice", "pay")):
-        short_action = "Оплатить"
-    elif any(token in normalized_evidence for token in ("договор", "contract", "agreement")):
-        short_action = "Зафиксировать"
-    else:
-        short_action = "Проверить"
+    short_action = _select_premium_short_action(
+        normalized_mail_type=normalized_mail_type,
+        normalized_subject=normalized_subject,
+        normalized_body=normalized_body,
+        normalized_action=normalized_action,
+        normalized_evidence=normalized_evidence,
+    )
     safe_action = _escape_dynamic(short_action)
     excerpt_source = (body_summary or "").strip() or (body_text or "").strip()
     excerpt = tg_renderer._clean_excerpt(excerpt_source, max_lines=3)

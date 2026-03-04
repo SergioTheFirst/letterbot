@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-03: Telegram P0/P1 UX hardening — premium short-action selection is now subject/body/evidence aware (invoice vs reconciliation vs signed contract vs outage/security vs promo), bounded priority v2 uplift added for outage/security alerts (strong alerts reach meaningful non-low priority), Excel invoice attachment insight now extracts `Счет №`/amount/due-date from existing extracted text, and focused regressions added (premium clarity, tg renderer, priority, telegram formatting); full pytest green (962 passed).
 - 2026-03-03: Restored PREMIUM TG format for LLM-free path by removing false SAFE_FALLBACK triggers (summary/llm/attachments no longer force fallback when sender+subject exist), relaxed `validate_tg_payload` summary rule for attachment-only emails, and added premium regression coverage (`test_premium_format_regression.py`) plus expectation updates for current attachment-line format; full pytest green (972 passed).
 - 2026-03-03: Fixed web UI dashboard session `account_emails` repr accumulation root cause — `resolve_dashboard_vars` now preserves list[str] from session without `str(list)` reparse, session persistence now sanitizes repr-garbage addresses defensively, cockpit `scope_hint` skips non-email garbage values, and added focused regressions in `tests/test_web_session_account_emails.py`; full pytest green (964 passed).
 - 2026-03-03: Restored premium Telegram fallback behavior when LLM summary is empty but body_text exists (FULL render retained), heuristic summary now extracts deterministic body text with blob guard, heuristic action line now priority-specific/non-empty, FULL render path always appends watermark, and initial notification keyboard defaults to direct priority buttons (🔴/🟡/🔵) without back row; targeted regressions + full pytest green (959 passed).
@@ -159,18 +160,17 @@ Done:
 - 2026-03-03: Telegram P0 follow-up — normalized generic fallback action phrases (`Проверьте вручную` / `Attention Needed` / `Недостаточно данных для оценки`) to `Проверить` in premium Tier-1, added invoice+Excel escalation signals in real priority v2 scoring path, and reinforced renderer/priority tests with full pytest green.
 - 2026-03-03: Telegram P0 final-path fix — restored premium reply_markup propagation (priority buttons preserved), removed stale `html=True` arbiter call mismatch on render path, prevented false `attachments missing` fallback for invoice/excel attachment insights, and expanded deterministic premium short-action selection (`Оплатить`/`Сверить`/`Зафиксировать`/`Ознакомиться`) with regression tests and full pytest green.
 Now:
-- Telegram final-path P0 patch completed and verified (targeted + full pytest green); ready to merge.
+- Telegram P0/P1 user-facing fix implemented and verified (targeted suites + full pytest green); ready to merge.
 Next:
-- Monitor post-merge Telegram logs for `tg_payload_invalid` regressions on attachment-heavy invoice traffic.
+- Monitor post-merge Telegram logs for action distribution (`Оплатить`/`Проверить`/`Ознакомиться`) and priority uplift behavior on outage/security alerts.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/pipeline/tg_renderer.py
+- mailbot_v26/priority/priority_engine_v2.py
 - mailbot_v26/tests/test_premium_clarity_renderer.py
-- mailbot_v26/tests/test_premium_format_regression.py
-- mailbot_v26/tests/test_telegram_payload.py
 - mailbot_v26/tests/test_tg_renderer.py
+- mailbot_v26/tests/test_priority_engine_v2.py
 - mailbot_v26/tests/test_telegram_rendering_format.py
-- mailbot_v26/tests/test_no_emojis.py
 - CONTINUITY.md

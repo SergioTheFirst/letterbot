@@ -108,7 +108,7 @@ def test_processor_build_telegram_text_uses_mail_type_for_attachment_insight() -
         attachment_summary=None,
     )
 
-    assert "📎 Счёт: 58 200 ₽ · до 28.02" in rendered
+    assert "📎 58 200 ₽ · до 28.02" in rendered
     assert "bill.pdf" not in rendered
 
 

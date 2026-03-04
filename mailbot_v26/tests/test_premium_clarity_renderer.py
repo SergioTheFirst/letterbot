@@ -129,6 +129,42 @@ def test_premium_clarity_information_only_prefers_read_action() -> None:
     assert rendered.splitlines()[2] == "Ознакомиться"
 
 
+
+
+def test_premium_clarity_outage_alert_is_check_not_pay() -> None:
+    rendered = processor._build_premium_clarity_text(
+        priority="🔵",
+        received_at=datetime(2026, 1, 1),
+        from_email="notify@keenetic.ru",
+        from_name="Keenetic",
+        subject="Интернет-центр Keenetic Omni недоступен",
+        mail_type="",
+        action_line="Проверьте вручную",
+        body_summary="Устройство offline, не удаётся подключиться.",
+        body_text="",
+        attachments=[],
+        attachment_summaries=[],
+        insights=[],
+        insight_digest=None,
+        commitments=[],
+        attachments_count=0,
+        extracted_text_len=50,
+        confidence_percent=80,
+        confidence_available=True,
+        confidence_dots_mode="auto",
+        confidence_dots_threshold=75,
+        confidence_dots_scale=10,
+        extraction_failed=False,
+    )
+    assert rendered.splitlines()[2] == "Проверить"
+
+
+def test_premium_clarity_investment_promo_prefers_read_not_pay() -> None:
+    rendered = _render(
+        action_line="Проверьте вручную",
+        body_summary="Инвестиционный дайджест: высокая доходность, рекламная рассылка",
+    )
+    assert rendered.splitlines()[2] == "Ознакомиться"
 def test_premium_clarity_signed_contract_prefers_record_action() -> None:
     rendered = processor._build_premium_clarity_text(
         priority="🟡",

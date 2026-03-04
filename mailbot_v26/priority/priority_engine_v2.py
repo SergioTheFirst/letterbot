@@ -175,6 +175,21 @@ class PriorityEngineV2:
     _FYI_MARKERS = {"fyi", "к сведению", "для сведения"}
     _INVOICE_KEYWORDS = {"счет", "счёт", "invoice", "оплат"}
     _EXCEL_ATTACHMENT_MARKERS = {".xls", ".xlsx", ".xlsm", ".xlsb", "excel attachment"}
+    _TECH_SECURITY_ALERT_MARKERS = {
+        "недоступен",
+        "недоступна",
+        "недоступно",
+        "offline",
+        "outage",
+        "авар",
+        "сбой",
+        "не удается подключиться",
+        "не удаётся подключиться",
+        "security alert",
+        "важное оповещение",
+        "подозрительный вход",
+        "device unreachable",
+    }
     _COMMITMENT_TYPES = {
         "INVOICE",
         "INVOICE_FINAL",
@@ -279,6 +294,23 @@ class PriorityEngineV2:
                 "PRIO_INVOICE_EXCEL_ATTACHMENT",
                 "invoice_attachment",
                 detail="excel",
+            )
+
+        alert_hits = self._count_keyword_hits(combined_text, self._TECH_SECURITY_ALERT_MARKERS)
+        subject_alert = self._find_keyword(subject or "", self._TECH_SECURITY_ALERT_MARKERS)
+        if subject_alert or alert_hits >= 2:
+            add_points(
+                36,
+                "PRIO_TECH_SECURITY_ALERT_STRONG",
+                "tech_security_alert",
+                detail=subject_alert or str(alert_hits),
+            )
+        elif alert_hits == 1:
+            add_points(
+                16,
+                "PRIO_TECH_SECURITY_ALERT",
+                "tech_security_alert",
+                detail="1",
             )
 
         amount_value = self._max_amount_value(combined_text)
@@ -473,6 +505,9 @@ class PriorityEngineV2:
             "DEADLINE_WITHIN_3D": bool(deadline_days is not None and deadline_days <= 3),
             "DEADLINE_WITHIN_7D": bool(deadline_days is not None and deadline_days <= 7),
             "MAIL_TYPE_BOOST": type_points > 0,
+            "TECH_SECURITY_ALERT": bool(
+                self._count_keyword_hits(combined_text, self._TECH_SECURITY_ALERT_MARKERS) > 0
+            ),
             "FREQUENCY_SPIKE": bool(
                 frequency_ratio is not None
                 and frequency_ratio > self._config.freq_spike_threshold
@@ -713,6 +748,11 @@ class PriorityEngineV2:
     def _contains_any(text: str, markers: Iterable[str]) -> bool:
         lowered = text.lower()
         return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _count_keyword_hits(text: str, markers: Iterable[str]) -> int:
+        lowered = text.lower()
+        return sum(1 for marker in markers if marker in lowered)
 
     @staticmethod
     def _normalize_subject(subject: str) -> str:
