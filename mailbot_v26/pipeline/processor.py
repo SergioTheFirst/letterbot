@@ -8,7 +8,7 @@ import sqlite3
 import time
 from functools import lru_cache
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
@@ -953,6 +953,7 @@ class MessageProcessor:
             message.mail_type,
             subject,
             message.attachments or [],
+            body_text,
         )
         summary = self._summarize_body(body_text, subject)
         attachments = self._build_attachment_summaries(message.attachments or [], subject)
@@ -1152,6 +1153,7 @@ class MessageProcessor:
         mail_type: str,
         subject: str,
         attachments: list[Attachment],
+        body_text: str = "",
     ) -> str:
         normalized_mail_type = (mail_type or "").strip().upper()
         if normalized_mail_type:
@@ -1164,7 +1166,15 @@ class MessageProcessor:
             if normalized_mail_type.startswith("CONTRACT") or "AMENDMENT" in normalized_mail_type:
                 return "Проверить договор"
 
-        lowered = (subject or "").lower()
+        lowered = " ".join(
+            [
+                (subject or "").lower(),
+                (body_text or "").lower(),
+                " ".join((att.text or "").lower() for att in attachments if att.text),
+            ]
+        )
+        if any(token in lowered for token in ("недоступ", "offline", "авари", "инцидент", "security", "утечк", "взлом", "phish", "promo", "скидк", "распродаж")):
+            return "Проверить"
         if any(token in lowered for token in ("счет", "счёт", "invoice", "оплат")):
             return "Оплатить счёт"
         if any(token in lowered for token in ("договор", "contract", "соглашени")):
@@ -2144,13 +2154,23 @@ def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]
     if not attachments:
         return base
     signals: list[str] = []
-    for attachment in attachments:
+    for attachment in attachments[:4]:
         filename = str(attachment.get("filename") or "").strip().lower()
         if not filename:
             continue
         signals.append(filename)
         if filename.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")):
             signals.append("excel attachment")
+        attachment_text = str(attachment.get("text") or "").strip()
+        if attachment_text:
+            doc_type = _detect_attachment_doc_type(filename=filename, content_type=attachment.get("content_type") or attachment.get("type"))
+            fact = pick_attachment_fact(attachment_text, filename, doc_type)
+            if fact:
+                signals.append(fact[:180])
+            compact_text = re.sub(r"\s+", " ", attachment_text)
+            if len(compact_text) > 220:
+                compact_text = compact_text[:219].rstrip() + "…"
+            signals.append(compact_text)
     if not signals:
         return base
     signal_text = " ".join(dict.fromkeys(signals))
@@ -2715,6 +2735,32 @@ def _estimate_input_chars(body_text: str, attachments: list[dict[str, Any]], sub
     return total
 
 
+def _count_recent_importance_history(
+    *,
+    account_email: str,
+    received_at: datetime,
+    window_days: int,
+    current_email_id: int,
+) -> int | None:
+    since_ts = (received_at - timedelta(days=window_days)).timestamp()
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(1)
+                FROM email_importance_scores
+                WHERE account_email = ?
+                  AND ts_utc >= ?
+                  AND email_id != ?
+                """,
+                (account_email, since_ts, int(current_email_id)),
+            ).fetchone()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("importance_history_count_failed", error=str(exc))
+        return None
+    return int(row[0]) if row else 0
+
+
 def _build_heuristic_llm_result(
     *, subject: str, body_text: str, priority: str, attachments: list[dict[str, Any]]
 ) -> SimpleNamespace:
@@ -2764,13 +2810,44 @@ def _build_heuristic_action_line(*, priority: str) -> str:
 def _build_heuristic_attachment_summaries(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     summaries: list[dict[str, Any]] = []
     for attachment in attachments:
+        filename = str(attachment.get("filename") or "")
+        raw_text = str(attachment.get("text") or "").strip()
+        summary = ""
+        if raw_text:
+            doc_type = _detect_attachment_doc_type(
+                filename=filename,
+                content_type=attachment.get("content_type") or attachment.get("type"),
+            )
+            fact = pick_attachment_fact(raw_text, filename, doc_type)
+            source = fact or raw_text
+            normalized = re.sub(r"\s+", " ", source.replace(";", " ").replace("|", " ")).strip()
+            if normalized:
+                words = [word for word in normalized.split() if len(word) > 1]
+                if len(words) >= 4:
+                    summary = " ".join(words[:16])
+                else:
+                    summary = " ".join(normalized.split()[:16])
+                if len(summary) > 160:
+                    summary = summary[:159].rstrip() + "…"
         summaries.append(
             {
-                "filename": attachment.get("filename"),
-                "summary": "",
+                "filename": filename,
+                "summary": summary,
             }
         )
     return summaries
+
+
+def _detect_attachment_doc_type(*, filename: str, content_type: Any) -> str:
+    lowered_filename = (filename or "").lower()
+    lowered_type = str(content_type or "").lower()
+    if lowered_filename.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")) or "excel" in lowered_type:
+        return "TABLE"
+    if lowered_filename.endswith((".doc", ".docx")) or "word" in lowered_type:
+        return "CONTRACT" if any(token in lowered_filename for token in ("contract", "догов", "agreement")) else "OTHER"
+    if lowered_filename.endswith(".pdf") and any(token in lowered_filename for token in ("invoice", "счет", "сч", "bill")):
+        return "TABLE"
+    return "OTHER"
 
 
 def _compute_heuristic_priority(
@@ -4229,22 +4306,40 @@ def process_message(
 
         # Root cause: anchor budget percentile window to received_at for deterministic tests.
         use_llm_candidate = False
+        prior_history_count: int | None = None
         try:
+            usage_config = get_budget_usage_config()
             percentile_result = is_top_percentile(
                 db_path=DB_PATH,
                 account_email=account_email,
                 current_score=importance.score,
-                percentile_threshold=get_budget_usage_config().llm_percentile_threshold,
-                window_days=get_budget_usage_config().window_days,
+                percentile_threshold=usage_config.llm_percentile_threshold,
+                window_days=usage_config.window_days,
                 anchor_ts_utc=anchor_received_at.timestamp() if anchor_received_at else None,
                 received_at=anchor_received_at,
             )
+            prior_history_count = _count_recent_importance_history(
+                account_email=account_email,
+                received_at=received_at,
+                window_days=usage_config.window_days,
+                current_email_id=message_id,
+            )
+            has_insufficient_history = prior_history_count is not None and prior_history_count < 3
             if not percentile_result.anchored:
                 logger.warning(
                     "importance_score_anchor_missing",
                     email_id=message_id,
                 )
-            use_llm_candidate = percentile_result.is_top and percentile_result.anchored
+            use_llm_candidate = percentile_result.is_top
+            if has_insufficient_history and not percentile_result.is_top:
+                use_llm_candidate = True
+                logger.info(
+                    "llm_cold_start_percentile_allow",
+                    email_id=message_id,
+                    account_email=account_email,
+                    prior_history_count=prior_history_count,
+                    anchored=percentile_result.anchored,
+                )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("importance_score_percentile_failed", error=str(exc))
         can_use_llm = False

@@ -199,3 +199,35 @@ def test_pipeline_resilient_to_percentile_failure(monkeypatch) -> None:
 
     assert llm_calls == []
     assert delivered == [42]
+
+
+def test_pipeline_allows_llm_for_cold_start_with_insufficient_history(monkeypatch, caplog) -> None:
+    caplog.set_level("INFO")
+    llm_calls: list[str] = []
+    _configure_minimal_pipeline(monkeypatch, llm_calls)
+
+    monkeypatch.setattr(
+        processor,
+        "is_top_percentile",
+        lambda **_kwargs: importance.PercentileGateResult(
+            is_top=False,
+            anchored=True,
+            anchor_ts_utc=datetime(2024, 3, 1, 10, 0, tzinfo=timezone.utc).timestamp(),
+        ),
+    )
+    monkeypatch.setattr(processor, "record_importance_score", lambda **_kwargs: None)
+    monkeypatch.setattr(processor, "_count_recent_importance_history", lambda **_kwargs: 0)
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=77,
+        from_email="sender@example.com",
+        subject="Счёт №1234",
+        received_at=datetime(2024, 3, 1, 10, 0, tzinfo=timezone.utc),
+        body_text="Оплатить до 15.04.2026",
+        attachments=[{"filename": "invoice.xlsx", "text": "Итого 87500"}],
+        telegram_chat_id="chat",
+    )
+
+    assert llm_calls == ["called"]
+    assert "llm_cold_start_percentile_allow" in caplog.text

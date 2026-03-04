@@ -6,6 +6,8 @@ from mailbot_v26.pipeline.processor import (
     Attachment,
     InboundMessage,
     MessageProcessor,
+    _build_heuristic_attachment_summaries,
+    _build_priority_signal_text,
     _maybe_drop_duplicate_subject_line,
 )
 
@@ -397,3 +399,70 @@ def test_action_line_generic_fallback_when_no_signals():
 
     result = processor.process("robot@example.com", msg)
     assert "Проверить письмо" in result
+
+
+def test_heuristic_attachment_summary_uses_extracted_text() -> None:
+    summaries = _build_heuristic_attachment_summaries(
+        [
+            {
+                "filename": "invoice.xlsx",
+                "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "text": "Счет №1234 Итого: 87 500 руб. Оплатить до 15.04.2026",
+            }
+        ]
+    )
+
+    assert summaries[0]["filename"] == "invoice.xlsx"
+    assert summaries[0]["summary"]
+    assert "87 500" in summaries[0]["summary"]
+
+
+def test_priority_signal_includes_attachment_content_and_facts() -> None:
+    signal = _build_priority_signal_text(
+        "Письмо без явных маркеров",
+        [
+            {
+                "filename": "invoice.xlsx",
+                "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "text": "Итого: 87 500 руб. Оплатить до 15.04.2026",
+            }
+        ],
+    )
+
+    assert "invoice.xlsx" in signal
+    assert "87 500" in signal
+    assert "оплатить" in signal.lower()
+
+
+def test_action_selection_uses_body_and_attachment_text() -> None:
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Уточнение",
+        sender="billing@example.com",
+        body="Прошу оплатить счёт в срок",
+        attachments=[
+            Attachment(
+                filename="invoice.xlsx",
+                content=b"",
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                text="Итого 87 500 руб.",
+            )
+        ],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    assert "Оплатить счёт" in result
+
+
+def test_action_selection_avoids_payment_for_incident_signals() -> None:
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Сервис недоступен",
+        sender="ops@example.com",
+        body="Платежный шлюз offline, авария в проде",
+        attachments=[],
+    )
+
+    result = processor.process("robot@example.com", msg)
+    assert "Оплатить счёт" not in result
+    assert "Проверить" in result
