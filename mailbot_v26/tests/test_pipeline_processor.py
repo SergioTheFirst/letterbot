@@ -16,6 +16,7 @@ from mailbot_v26.pipeline.processor import (
     _build_heuristic_summary,
     _collect_message_facts,
     _maybe_drop_duplicate_subject_line,
+    _validate_message_facts,
 )
 
 
@@ -825,3 +826,58 @@ def test_summary_uses_decision_facts() -> None:
 
     assert "87 500" in summary
     assert "15.04.2026" in summary
+
+
+def test_validate_amount_filters_table_numbers() -> None:
+    facts = {
+        "amount": "150",
+        "due_date": "",
+        "doc_number": "",
+        "doc_kind": "invoice",
+    }
+
+    validated = _validate_message_facts(facts, evidence_text="таблица: 150 200 250")
+
+    assert validated["amount"] == ""
+
+
+def test_validate_due_date_range() -> None:
+    facts = {
+        "amount": "87 500",
+        "due_date": "01.01.2099",
+        "doc_number": "INV-44",
+    }
+
+    validated = _validate_message_facts(facts, evidence_text="к оплате 87 500 руб")
+
+    assert validated["due_date"] == ""
+
+
+def test_validate_doc_number_reasonable_length() -> None:
+    facts = {
+        "amount": "87 500",
+        "due_date": "15.04.2026",
+        "doc_number": "AB",
+    }
+
+    validated = _validate_message_facts(facts, evidence_text="счет №AB сумма 87 500 руб")
+
+    assert validated["doc_number"] == ""
+
+
+def test_valid_invoice_facts_preserved() -> None:
+    facts = _collect_message_facts(
+        subject="Счет №445",
+        body_text="87 500 руб. Оплатить до 15.04.2026",
+        attachments=[],
+        mail_type="INVOICE",
+    )
+
+    validated = _validate_message_facts(
+        facts,
+        evidence_text="Счет №445 87 500 руб. Оплатить до 15.04.2026",
+    )
+
+    assert validated["amount"]
+    assert validated["due_date"] == "15.04.2026"
+    assert validated["doc_number"] == "445"

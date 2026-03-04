@@ -182,25 +182,17 @@ Done:
 - 2026-03-04: bounded sender-memory personalization added in processor priority path using existing `priority_feedback.sender_email` (45-day window, min 3 corrections, bounded +/-12 bias, no sender-only promotion to red, high-signal dampening guard for invoice/security/incident/contract/claim mail types/reasons), plus targeted sender-memory regressions in pipeline processor tests; full pytest green (1013 passed).
 - 2026-03-04: message-understanding hardening in processor/tg path — added unified message-fact helper (body + attachment text/facts) for action/priority/fallback bridging, improved heuristic no-LLM action+summary from attachment evidence, and enabled invoice attachment insight even when mail_type is unknown; added targeted regressions (invoice body-only, invoice attachment-only, contract signature, attachment-derived priority, fallback summary from attachments, direct LLM path guard) and full pytest green (1020 passed).
 - 2026-03-04: unified decision layer added in processor for priority/action/summary/doc facts consistency (MessageDecision internal object + guards), telegram attachment insight now consumes decision facts, and regressions added for invoice/incident consistency + summary/attachment-facts usage; full pytest green (1025 passed).
+- 2026-03-04: added processor fact-validation layer after message-fact collection (amount range/table-number guards, due-date year window guard, doc-number sanity + amount collision guard, currency-context penalty feeding decision confidence), added focused pipeline regressions, and full pytest green (1033 passed).
 Now:
-- Decision confidence guard layer is active for priority/action/summary safety in MessageDecision.
-- Full test suite green after confidence layer changes (1029 passed).
+- Message-fact validation layer is active for amount/due-date/doc-number sanity and amount confidence penalization on missing currency context.
+- Full test suite green after fact-validation changes (1033 passed).
 Next:
-- Collect product feedback on confidence thresholds and safe-action fallback wording before tuning marker weights.
+- Collect product feedback on validation thresholds (amount table-number heuristic, due-date horizon, doc-number bounds) before tuning confidence penalties.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/pipeline/tg_renderer.py
 - mailbot_v26/tests/test_pipeline_processor.py
-- mailbot_v26/tests/test_priority_engine_v2.py
-- mailbot_v26/tests/test_tg_renderer.py
-- mailbot_v26/tests/test_telegram_render_modes.py
-- mailbot_v26/tests/test_premium_clarity_renderer.py
-- mailbot_v26/tests/test_telegram_payload_pipeline.py
 - CONTINUITY.md
-- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "invoice_body_only or invoice_attachment_only or contract_signature_case or action_selection_avoids_payment_for_incident_signals or heuristic_attachment_summary_uses_extracted_text or priority_signal_includes_attachment_content_and_facts"
-- python -m pytest -q mailbot_v26/tests/test_tg_renderer.py -k "attachment_insight_invoice_from_attachment_text_without_mail_type or attachment_insight_invoice_excel_number_amount_due_date or attachment_insight_does_not_hallucinate_invoice_or_act"
-- python -m pytest -q mailbot_v26/tests/test_priority_engine_v2.py -k "attachment_text_contributes_to_priority_score or amount_thresholds"
-- python -m pytest -q mailbot_v26/tests/test_telegram_render_modes.py -k "heuristic_summary_uses_attachment_text_when_body_empty or direct_llm_path_kept_without_regression or heuristic_path_produces_full_render"
+- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "validate_amount_filters_table_numbers or validate_due_date_range or validate_doc_number_reasonable_length or valid_invoice_facts_preserved"
 - python -m pytest -q
