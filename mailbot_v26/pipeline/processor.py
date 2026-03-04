@@ -1996,12 +1996,23 @@ def _build_premium_clarity_text(
         )
         if part
     )
+    fact_text = " ".join(
+        part
+        for part in (
+            subject,
+            body_summary,
+            body_text,
+            " ".join(str(attachment.get("text") or "") for attachment in attachments),
+        )
+        if part
+    )
     message_facts = _collect_message_facts(
         subject=subject,
         body_text=" ".join(part for part in (body_summary, body_text) if part),
         attachments=attachments,
         mail_type=mail_type,
     )
+    message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
     fact_evidence = " ".join(
         str(value)
         for value in (
@@ -2131,12 +2142,23 @@ def _build_telegram_text(
     attachments: list[dict[str, Any]] | None = None,
     attachment_summary: str | None = None,
 ) -> str:
+    fact_text = " ".join(
+        part
+        for part in (
+            subject,
+            body_summary,
+            body_text,
+            " ".join(str(attachment.get("text") or "") for attachment in (attachments or [])),
+        )
+        if part
+    )
     message_facts = _collect_message_facts(
         subject=subject,
         body_text=" ".join(part for part in (body_summary, body_text) if part),
         attachments=attachments or [],
         mail_type=mail_type,
     )
+    message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
     if attachment_summary is None:
         rendered = tg_renderer.render_telegram_message(
             priority=priority,
@@ -2220,12 +2242,21 @@ def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]
             if len(compact_text) > 220:
                 compact_text = compact_text[:219].rstrip() + "…"
             signals.append(compact_text)
+    fact_text = " ".join(
+        part
+        for part in (
+            body_text or "",
+            " ".join(str(attachment.get("text") or "") for attachment in attachments),
+        )
+        if part
+    )
     facts = _collect_message_facts(
         subject="",
         body_text=body_text or "",
         attachments=attachments,
         mail_type="",
     )
+    facts = _validate_message_facts(facts, evidence_text=fact_text)
     if facts["doc_kind"]:
         signals.append(str(facts["doc_kind"]))
     if facts["amount"]:
@@ -2284,6 +2315,8 @@ _FACT_DECISION_SIGNAL_MARKERS = {
     "contract": _FACT_CONTRACT_MARKERS,
     "incident": _FACT_INCIDENT_MARKERS,
 }
+_FACT_CURRENCY_RE = re.compile(r"(руб\.?|₽|usd|\$|eur|€)", re.IGNORECASE)
+_FACT_MAX_AMOUNT = 10_000_000_000
 
 
 def _compute_decision_confidence(
@@ -2323,6 +2356,8 @@ def _compute_decision_confidence(
         confidence += 0.15
     if message_facts.get("incident_signal"):
         confidence += 0.35
+    if bool(message_facts.get("amount_context_missing")):
+        confidence -= 0.2
 
     if (
         doc_kind == "invoice"
@@ -2334,6 +2369,63 @@ def _compute_decision_confidence(
         confidence = min(confidence, 0.3)
 
     return max(0.0, min(confidence, 1.0))
+
+
+def _validate_message_facts(
+    facts: dict[str, Any],
+    *,
+    evidence_text: str = "",
+) -> dict[str, Any]:
+    validated = dict(facts)
+    amount_raw = str(validated.get("amount") or "").strip()
+    amount_digits = re.sub(r"[^0-9]", "", amount_raw)
+    amount_context_missing = False
+    if amount_digits:
+        try:
+            amount_value = int(amount_digits)
+        except ValueError:
+            amount_value = 0
+        plain_amount = re.fullmatch(r"\d+", amount_raw.replace(" ", "")) is not None
+        looks_like_table_row = plain_amount and len(amount_digits) <= 4
+        if amount_value <= 10 or amount_value >= _FACT_MAX_AMOUNT or looks_like_table_row:
+            validated["amount"] = ""
+        else:
+            lowered_evidence = (evidence_text or "").lower()
+            amount_context_missing = not bool(_FACT_CURRENCY_RE.search(lowered_evidence))
+    else:
+        validated["amount"] = ""
+    validated["amount_context_missing"] = amount_context_missing
+
+    due_date = str(validated.get("due_date") or "").strip()
+    if due_date:
+        match = _FACT_DATE_RE.search(due_date)
+        if match:
+            day, month, year_raw = (match.group(0).split(".") + [""])[:3]
+            try:
+                year = int(year_raw) if year_raw else datetime.now().year
+                if year_raw and len(year_raw) == 2:
+                    year += 2000
+                due_dt = datetime(year=year, month=int(month), day=int(day))
+                min_dt = datetime(year=2000, month=1, day=1)
+                max_dt = datetime.now() + timedelta(days=730)
+                if due_dt < min_dt or due_dt > max_dt:
+                    validated["due_date"] = ""
+            except ValueError:
+                validated["due_date"] = ""
+        else:
+            validated["due_date"] = ""
+
+    doc_number = str(validated.get("doc_number") or "").strip()
+    if doc_number:
+        normalized_doc = re.sub(r"[^0-9a-zа-я]", "", doc_number.lower())
+        if len(normalized_doc) < 3 or len(normalized_doc) > 24:
+            validated["doc_number"] = ""
+        else:
+            amount_for_compare = re.sub(r"[^0-9]", "", str(validated.get("amount") or ""))
+            if amount_for_compare and normalized_doc == amount_for_compare:
+                validated["doc_number"] = ""
+
+    return validated
 
 
 def _collect_message_facts(
@@ -2993,12 +3085,16 @@ def _count_recent_importance_history(
 def _build_heuristic_llm_result(
     *, subject: str, body_text: str, priority: str, attachments: list[dict[str, Any]]
 ) -> SimpleNamespace:
+    fact_text = " ".join(
+        part for part in (subject, body_text, " ".join(str(item.get("text") or "") for item in attachments)) if part
+    )
     message_facts = _collect_message_facts(
         subject=subject,
         body_text=body_text,
         attachments=attachments,
         mail_type="",
     )
+    message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
     action_line = _build_heuristic_action_line(priority=priority, message_facts=message_facts)
     summary = _build_heuristic_summary(
         subject=subject,
@@ -5096,12 +5192,23 @@ def process_message(
         action_line = llm_result.action_line
         body_summary = llm_result.body_summary
         attachment_summaries = llm_result.attachment_summaries
+        fact_text = " ".join(
+            part
+            for part in (
+                subject,
+                body_summary,
+                body_text,
+                " ".join(str(attachment.get("text") or "") for attachment in attachments),
+            )
+            if part
+        )
         message_facts = _collect_message_facts(
             subject=subject,
             body_text=" ".join(part for part in (body_summary, body_text) if part),
             attachments=attachments,
             mail_type=mail_type or "",
         )
+        message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
         decision = _build_message_decision(
             priority=priority,
             action_line=action_line,
