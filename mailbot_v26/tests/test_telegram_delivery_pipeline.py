@@ -369,9 +369,15 @@ def test_tg_stage_rerun_after_success_still_sends_once(monkeypatch, tmp_path) ->
             "SELECT COUNT(*) FROM telegram_delivery_log WHERE email_id = ? AND kind = 'email'",
             (email_id,),
         ).fetchone()[0]
+        message_id_row = storage.conn.execute(
+            "SELECT telegram_message_id FROM telegram_delivery_log WHERE email_id = ? AND kind = 'email'",
+            (email_id,),
+        ).fetchone()
 
     assert len(calls) == 1
     assert delivery_rows == 1
+    assert message_id_row is not None
+    assert message_id_row[0] == "42"
 
 
 def test_duplicate_uid_ingest_is_case_insensitive(monkeypatch, tmp_path) -> None:
