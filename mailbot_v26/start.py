@@ -887,9 +887,17 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         for account in config.accounts:
             runtime_health.register_account(account)
 
+        llm_any_ok = False
         try:
             health_checker = StartupHealthChecker(REPO_ROOT, config)
             results = health_checker.run()
+            health_results = results if isinstance(results, list) else []
+            llm_any_ok = any(
+                str(item.get("status") or "").upper() == "OK"
+                for item in health_results
+                if isinstance(item, dict)
+                and str(item.get("component") or "") in {"GigaChat", "Cloudflare", "LLM Direct"}
+            )
             mode = health_checker.evaluate_mode(results)
             report = LaunchReportBuilder(
                 version_label=f"Letterbot Premium {__version__}",
@@ -921,6 +929,13 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 logger.warning("Launch report skipped: missing admin chat id")
         except Exception:
             logger.exception("Startup health check failed")
+
+        flags.ENABLE_PREMIUM_PROCESSOR = bool(llm_any_ok)
+        logger.info(
+            "premium_processor_startup_toggle enabled=%s llm_any_ok=%s",
+            flags.ENABLE_PREMIUM_PROCESSOR,
+            llm_any_ok,
+        )
 
         try:
             storage = Storage(config.storage.db_path)

@@ -513,3 +513,51 @@ def test_snooze_retry_on_failure_not_stuck(monkeypatch, tmp_path) -> None:
     assert row[0] == "pending"
     assert int(row[1]) >= 1
     assert "tg down" in str(row[2])
+
+
+def test_stage_tg_uses_real_priority_and_attachment_insight(monkeypatch, tmp_path) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    email_id = _seed_queue(storage, config.accounts[0].login)
+    ctx = _seed_pipeline_context(email_id, config.accounts[0].login)
+    ctx.llm_result = {
+        "text": "Базовый текст",
+        "priority": "🔴",
+        "body_text": "Счет на оплату во вложении.",
+        "attachments": [
+            {
+                "filename": "invoice.xlsx",
+                "text": "Счет №123 от 01.03.2026 сумма 120 000 руб оплатить до 10.03.2026",
+            }
+        ],
+    }
+    store_inbound(
+        email_id,
+        InboundMessage(
+            subject="Счет на оплату",
+            body="Счет на оплату во вложении.",
+            sender="sender@example.com",
+            mail_type="INVOICE",
+            attachments=[],
+        ),
+    )
+    processor = _configure_pipeline(config)
+
+    captured: dict[str, object] = {}
+
+    def fake_send(payload):
+        captured["payload"] = payload
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+
+    flags = FeatureFlags(base_dir=tmp_path)
+    _process_queue(storage, config, processor, flags)
+
+    payload = captured["payload"]
+    assert payload.priority == "🔴"
+    assert "📎 Счет" in payload.html_text
+    assert payload.reply_markup
+    assert "inline_keyboard" in payload.reply_markup
+    _cleanup_pipeline(email_id)

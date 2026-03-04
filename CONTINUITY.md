@@ -162,14 +162,18 @@ Done:
 - 2026-03-03: Telegram P0 follow-up — normalized generic fallback action phrases (`Проверьте вручную` / `Attention Needed` / `Недостаточно данных для оценки`) to `Проверить` in premium Tier-1, added invoice+Excel escalation signals in real priority v2 scoring path, and reinforced renderer/priority tests with full pytest green.
 - 2026-03-03: Telegram P0 final-path fix — restored premium reply_markup propagation (priority buttons preserved), removed stale `html=True` arbiter call mismatch on render path, prevented false `attachments missing` fallback for invoice/excel attachment insights, and expanded deterministic premium short-action selection (`Оплатить`/`Сверить`/`Зафиксировать`/`Ознакомиться`) with regression tests and full pytest green.
 - 2026-03-04: startup report now shows honest LLM delivery mode (`DIRECT`/`QUEUED_HEURISTIC_IMMEDIATE`/`DISABLED`) plus immediate-summary and background-queue state; added `[branding] show_watermark` INI toggle through loader/bootstrap/templates, and removed noisy `Учту в качестве.` suffix from inbound priority ack; targeted + full pytest green.
+- 2026-03-04: PR1 restore path — startup now toggles premium processor by LLM health (any provider/direct check OK => enabled, degraded => legacy fallback), ordinary stage_tg now propagates computed priority and appends tg_renderer attachment insight, no-LLM summary builder now returns deterministic non-empty body-based summary, and regressions added for startup toggle + no-LLM summary + ordinary priority/attachment/reply_markup; full pytest green (974 passed).
 Now:
-- Telegram initial notification path now uses dedicated priority keyboard builder with callbacks `mb:prio:{email_id}:{R|Y|B}`; full pytest passed, preparing PR.
+- PR1 restore completed and validated locally; preparing commit + PR for ordinary Telegram path parity with premium primitives.
 Next:
-- Monitor inbound correction flow on production messages to confirm `mb:prio` callbacks are used consistently and legacy menu callbacks remain unaffected.
+- Monitor production traffic for ordinary-path messages to confirm premium-on-healthy routing and attachment insight consistency with no keyboard regressions.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
+- mailbot_v26/start.py
+- mailbot_v26/bot_core/pipeline.py
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/telegram/keyboard.py
-- mailbot_v26/tests/test_priority_keyboard.py
+- mailbot_v26/tests/test_polling_loop.py
+- mailbot_v26/tests/test_telegram_delivery_pipeline.py
+- mailbot_v26/tests/test_no_llm_summary.py
 - CONTINUITY.md

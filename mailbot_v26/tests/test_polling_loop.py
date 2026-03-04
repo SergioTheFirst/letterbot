@@ -226,3 +226,44 @@ def test_polling_loop_keeps_other_accounts_running(monkeypatch, tmp_path, caplog
 
     _assert_cycle_logs(caplog)
     assert call_log.count(good_account.login) == 3
+
+
+def test_main_enables_premium_processor_when_llm_healthy(monkeypatch, tmp_path):
+    account = AccountConfig(
+        account_id="acc1",
+        login="acc1@example.com",
+        password="pw",
+        host="imap.example.com",
+        port=993,
+        use_ssl=True,
+        telegram_chat_id="chat1",
+    )
+    responses = {account.login: [[]]}
+    monkeypatch.setattr(start_module, "ResilientIMAP", _build_imap(responses))
+    _install_common_patches(monkeypatch, [account], tmp_path)
+
+    class HealthyLLMChecker:
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+        def run(self):
+            return [
+                {"component": "GigaChat", "status": "OK", "details": "active"},
+                {"component": "Cloudflare", "status": "DEGRADED", "details": "disabled"},
+            ]
+
+        def evaluate_mode(self, _results):
+            return "FULL"
+
+    monkeypatch.setattr(start_module, "StartupHealthChecker", HealthyLLMChecker)
+
+    captured = {}
+
+    def fake_process_queue(_storage, _config, _processor, flags):
+        captured["premium"] = flags.ENABLE_PREMIUM_PROCESSOR
+
+    monkeypatch.setattr(start_module, "_process_queue", fake_process_queue)
+
+    start_module.main(max_cycles=1)
+
+    assert captured["premium"] is True

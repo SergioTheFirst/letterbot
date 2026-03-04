@@ -24,6 +24,7 @@ from mailbot_v26.constants import (
     MAX_TOTAL_MAIL_BYTES,
 )
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
+from mailbot_v26.pipeline.tg_renderer import build_attachment_insight
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.mime_utils import decode_bytes, decode_mime_header
@@ -576,10 +577,22 @@ def stage_llm(ctx: PipelineContext) -> None:
     )
 
     result_text = _PIPELINE_PROCESSOR.process(ctx.account_email, inbound)
+    ordinary_result = _PIPELINE_PROCESSOR.get_last_ordinary_result()
     ctx.llm_result = {
         "text": result_text or "",
         "body_text": body_text,
         "attachments_text": attachments_text,
+        "priority": ordinary_result.get("priority"),
+        "attachments": ordinary_result.get("attachments") or [
+            {
+                "filename": att.filename,
+                "text": att.text,
+                "content_type": att.content_type,
+                "size_bytes": att.size_bytes,
+                "metadata": att.metadata,
+            }
+            for att in (inbound.attachments or [])
+        ],
     }
 
 
@@ -606,9 +619,25 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
     if account_label:
         telegram_text = f"[{account_label}] {telegram_text}"
 
+    llm_priority = ""
+    attachments: list[dict[str, object]] = []
+    if ctx.llm_result:
+        llm_priority = str(ctx.llm_result.get("priority") or "").strip()
+        attachments = list(ctx.llm_result.get("attachments") or [])
+    priority = llm_priority if llm_priority in {"🔴", "🟡", "🔵"} else "🔵"
+
+    attachment_insight = build_attachment_insight(
+        mail_type=inbound.mail_type,
+        attachments=attachments,
+        subject=inbound.subject,
+        summary=ctx.llm_result.get("body_text", "") if ctx.llm_result else "",
+    )
+    if attachment_insight and attachment_insight not in telegram_text:
+        telegram_text = f"{telegram_text}\n{attachment_insight}"
+
     payload = TelegramPayload(
         html_text=telegram_safe(telegram_text.strip()),
-        priority="🔵",
+        priority=priority,
         metadata={
             "bot_token": _PIPELINE_CONFIG.keys.telegram_bot_token,
             "chat_id": account.telegram_chat_id,
