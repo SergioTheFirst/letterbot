@@ -180,11 +180,12 @@ Done:
 - 2026-03-04: one-message rule hardening for email notifications — removed processor non-retryable fallback chat send (no extra second message), codified delivery SLA edit-in-place behavior (single initial send + edit-only follow-up, no resend on edit failure/missing message_id), and added targeted SLA/dedupe regressions; full pytest green (1007 passed).
 - 2026-03-04: bounded sender-memory personalization added in processor priority path using existing `priority_feedback.sender_email` (45-day window, min 3 corrections, bounded +/-12 bias, no sender-only promotion to red, high-signal dampening guard for invoice/security/incident/contract/claim mail types/reasons), plus targeted sender-memory regressions in pipeline processor tests; full pytest green (1013 passed).
 - 2026-03-04: message-understanding hardening in processor/tg path — added unified message-fact helper (body + attachment text/facts) for action/priority/fallback bridging, improved heuristic no-LLM action+summary from attachment evidence, and enabled invoice attachment insight even when mail_type is unknown; added targeted regressions (invoice body-only, invoice attachment-only, contract signature, attachment-derived priority, fallback summary from attachments, direct LLM path guard) and full pytest green (1020 passed).
+- 2026-03-04: unified decision layer added in processor for priority/action/summary/doc facts consistency (MessageDecision internal object + guards), telegram attachment insight now consumes decision facts, and regressions added for invoice/incident consistency + summary/attachment-facts usage; full pytest green (1025 passed).
 Now:
-- Message understanding now consumes unified body+attachment facts in processor for action/priority signals and no-LLM fallback summary/action quality.
-- Targeted hardening tests and full suite are green (1020 passed).
+- Decision consistency layer is active for priority/action/summary and attachment insight paths.
+- Full test suite green after consistency changes (1025 passed).
 Next:
-- Await product validation on hardening outcomes before any threshold/dictionary configurability follow-up.
+- Collect product feedback on stricter action guards for invoice/incident/contract cases before extending dictionaries.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):

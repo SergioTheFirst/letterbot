@@ -12,6 +12,9 @@ from mailbot_v26.pipeline.processor import (
     _apply_sender_memory_to_priority,
     _build_heuristic_attachment_summaries,
     _build_priority_signal_text,
+    _build_message_decision,
+    _build_heuristic_summary,
+    _collect_message_facts,
     _maybe_drop_duplicate_subject_line,
 )
 
@@ -654,3 +657,79 @@ def test_sender_memory_empty_sender_or_query_failure_keeps_priority(monkeypatch)
     )
 
     assert no_data == "🟡"
+
+
+def test_decision_layer_keeps_priority_action_consistent() -> None:
+    facts = _collect_message_facts(
+        subject="Сервис недоступен",
+        body_text="offline incident, security alert",
+        attachments=[],
+        mail_type="INCIDENT",
+    )
+
+    decision = _build_message_decision(
+        priority="🔴",
+        action_line="Оплатить",
+        summary="",
+        message_facts=facts,
+    )
+
+    assert decision.priority == "🔴"
+    assert "оплат" not in decision.action.lower()
+
+
+def test_invoice_decision_produces_payment_action() -> None:
+    facts = _collect_message_facts(
+        subject="Счет №445",
+        body_text="Итого 87 500 руб. Оплатить до 15.04.2026",
+        attachments=[],
+        mail_type="",
+    )
+
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Проверить",
+        summary="",
+        message_facts=facts,
+    )
+
+    assert decision.doc_kind == "invoice"
+    assert decision.action == "Оплатить"
+
+
+def test_incident_decision_never_returns_payment_action() -> None:
+    facts = _collect_message_facts(
+        subject="Security alert",
+        body_text="Подозрительный вход и offline сервисов",
+        attachments=[],
+        mail_type="SECURITY_ALERT",
+    )
+
+    decision = _build_message_decision(
+        priority="🔴",
+        action_line="Оплатить",
+        summary="",
+        message_facts=facts,
+    )
+
+    assert decision.doc_kind == "incident"
+    assert decision.action == "Зафиксировать"
+
+
+def test_summary_uses_decision_facts() -> None:
+    facts = _collect_message_facts(
+        subject="Счет",
+        body_text="Итого 87 500 руб. Оплатить до 15.04.2026",
+        attachments=[],
+        mail_type="",
+    )
+
+    summary = _build_heuristic_summary(
+        subject="Счет",
+        body_text="Коротко",
+        attachments=[],
+        message_facts=facts,
+    )
+
+    assert "87 500" in summary
+    assert "15.04.2026" in summary

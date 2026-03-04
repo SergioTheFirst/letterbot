@@ -386,3 +386,23 @@ def test_tg_render_strips_external_mail_warning_tail_from_excerpt() -> None:
     assert "Полезный текст" in rendered
     assert "ВНЕШНЯЯ ПОЧТА" not in rendered
     assert "Если отправитель почты неизвестен" not in rendered
+
+
+def test_attachment_insight_uses_decision_facts() -> None:
+    attachments = [{"filename": "notes.txt", "text": "просто текст"}]
+
+    rendered = tg_renderer.build_telegram_text(
+        priority="🟡",
+        from_email="sender@example.com",
+        subject="Документы",
+        action_line="Оплатить",
+        attachments=attachments,
+        mail_type="",
+        message_facts={
+            "doc_kind": "invoice",
+            "amount": "87 500 руб.",
+            "due_date": "15.04.2026",
+        },
+    )
+
+    assert "📎 87 500 ₽ · до 15.04" in rendered

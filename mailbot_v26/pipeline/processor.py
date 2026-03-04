@@ -832,6 +832,17 @@ class TelegramRenderContext:
 
 
 @dataclass(frozen=True, slots=True)
+class MessageDecision:
+    priority: str
+    action: str
+    facts: dict[str, Any]
+    summary: str
+    doc_kind: str
+    amount: str
+    due_date: str
+
+
+@dataclass(frozen=True, slots=True)
 class TelegramBuildContext:
     email_id: int
     received_at: datetime
@@ -2010,6 +2021,14 @@ def _build_premium_clarity_text(
         normalized_action=normalized_action,
         normalized_evidence=normalized_evidence,
     )
+    decision = _build_message_decision(
+        priority=priority,
+        action_line=short_action,
+        summary=body_summary,
+        message_facts=message_facts,
+    )
+    short_action = decision.action
+    body_summary = decision.summary
     safe_action = _escape_dynamic(short_action)
     excerpt_source = (body_summary or "").strip() or (body_text or "").strip()
     excerpt = tg_renderer._clean_excerpt(excerpt_source, max_lines=3)
@@ -2108,6 +2127,12 @@ def _build_telegram_text(
     attachments: list[dict[str, Any]] | None = None,
     attachment_summary: str | None = None,
 ) -> str:
+    message_facts = _collect_message_facts(
+        subject=subject,
+        body_text=" ".join(part for part in (body_summary, body_text) if part),
+        attachments=attachments or [],
+        mail_type=mail_type,
+    )
     if attachment_summary is None:
         rendered = tg_renderer.render_telegram_message(
             priority=priority,
@@ -2117,6 +2142,7 @@ def _build_telegram_text(
             summary=body_summary,
             attachments=attachments or [],
             mail_type=mail_type,
+            message_facts=message_facts,
         )
         return append_watermark(rendered, html=True)
     fields = tg_renderer.apply_semantic_gates(
@@ -2908,7 +2934,6 @@ def _count_recent_importance_history(
 def _build_heuristic_llm_result(
     *, subject: str, body_text: str, priority: str, attachments: list[dict[str, Any]]
 ) -> SimpleNamespace:
-    summary = _build_heuristic_summary(subject=subject, body_text=body_text, attachments=attachments)
     message_facts = _collect_message_facts(
         subject=subject,
         body_text=body_text,
@@ -2916,16 +2941,34 @@ def _build_heuristic_llm_result(
         mail_type="",
     )
     action_line = _build_heuristic_action_line(priority=priority, message_facts=message_facts)
-    return SimpleNamespace(
+    summary = _build_heuristic_summary(
+        subject=subject,
+        body_text=body_text,
+        attachments=attachments,
+        message_facts=message_facts,
+    )
+    decision = _build_message_decision(
         priority=priority,
         action_line=action_line,
-        body_summary=summary,
+        summary=summary,
+        message_facts=message_facts,
+    )
+    return SimpleNamespace(
+        priority=decision.priority,
+        action_line=decision.action,
+        body_summary=decision.summary,
         attachment_summaries=_build_heuristic_attachment_summaries(attachments),
         llm_provider="heuristic",
     )
 
 
-def _build_heuristic_summary(*, subject: str, body_text: str, attachments: list[dict[str, Any]] | None = None) -> str:
+def _build_heuristic_summary(
+    *,
+    subject: str,
+    body_text: str,
+    attachments: list[dict[str, Any]] | None = None,
+    message_facts: dict[str, Any] | None = None,
+) -> str:
     text = clean_email_body(body_text or "").strip()
     attachment_items = attachments or []
     if not text and attachment_items:
@@ -2947,11 +2990,23 @@ def _build_heuristic_summary(*, subject: str, body_text: str, attachments: list[
     for paragraph in text.split("\n"):
         normalized = re.sub(r"\s+", " ", paragraph).strip()
         if len(normalized) >= _MIN_SUMMARY_CHARS and not _contains_probable_blob(normalized):
-            return normalized[:200]
+            text = normalized[:200]
+            break
     normalized_text = re.sub(r"\s+", " ", text)
     if len(normalized_text) >= _MIN_SUMMARY_CHARS and not _contains_probable_blob(normalized_text):
-        return normalized_text[:200]
-    return ""
+        text = normalized_text[:200]
+    else:
+        text = ""
+    facts = message_facts or {}
+    if facts.get("doc_kind") == "invoice":
+        additions: list[str] = []
+        if facts.get("amount") and facts["amount"] not in text:
+            additions.append(f"сумма {facts['amount']}")
+        if facts.get("due_date") and facts["due_date"] not in text:
+            additions.append(f"оплатить до {facts['due_date']}")
+        if additions:
+            text = "; ".join(part for part in (text, ", ".join(additions)) if part)
+    return text[:200]
 
 
 def _build_heuristic_action_line(*, priority: str, message_facts: dict[str, Any] | None = None) -> str:
@@ -2967,6 +3022,46 @@ def _build_heuristic_action_line(*, priority: str, message_facts: dict[str, Any]
     if priority == "🟡":
         return "Требует рассмотрения"
     return "Ознакомиться"
+
+
+def _build_message_decision(
+    *,
+    priority: str,
+    action_line: str,
+    summary: str,
+    message_facts: dict[str, Any],
+) -> MessageDecision:
+    doc_kind = str(message_facts.get("doc_kind") or "")
+    resolved_action = (action_line or "").strip() or _build_heuristic_action_line(
+        priority=priority,
+        message_facts=message_facts,
+    )
+    if doc_kind == "invoice" and resolved_action in {"Проверить", "Проверить письмо"}:
+        resolved_action = "Оплатить"
+    if doc_kind == "contract" and resolved_action in {"Проверить", "Проверить письмо"}:
+        resolved_action = "Проверить договор"
+    if doc_kind == "incident" and "оплат" in resolved_action.lower():
+        resolved_action = "Зафиксировать"
+
+    resolved_summary = summary
+    if doc_kind == "invoice":
+        tokens = " ".join(
+            str(value)
+            for value in (message_facts.get("amount"), message_facts.get("due_date"))
+            if value
+        )
+        if tokens and not summary:
+            resolved_summary = f"Счет к оплате: {tokens}".strip()
+
+    return MessageDecision(
+        priority=priority,
+        action=resolved_action,
+        facts=message_facts,
+        summary=resolved_summary,
+        doc_kind=doc_kind,
+        amount=str(message_facts.get("amount") or ""),
+        due_date=str(message_facts.get("due_date") or ""),
+    )
 
 
 def _build_heuristic_attachment_summaries(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -4926,6 +5021,20 @@ def process_message(
         action_line = llm_result.action_line
         body_summary = llm_result.body_summary
         attachment_summaries = llm_result.attachment_summaries
+        message_facts = _collect_message_facts(
+            subject=subject,
+            body_text=" ".join(part for part in (body_summary, body_text) if part),
+            attachments=attachments,
+            mail_type=mail_type or "",
+        )
+        decision = _build_message_decision(
+            priority=priority,
+            action_line=action_line,
+            summary=body_summary,
+            message_facts=message_facts,
+        )
+        action_line = decision.action
+        body_summary = decision.summary
         llm_provider: str | None = None
         if hasattr(llm_result, "llm_provider"):
             llm_provider = getattr(llm_result, "llm_provider")
