@@ -362,3 +362,22 @@ def test_invoice_subject_with_excel_attachment_signal_is_not_low_priority(tmp_pa
     assert result.priority in {"🟡", "🔴"}
     assert "PRIO_INVOICE_SUBJECT" in result.reason_codes
     assert "PRIO_INVOICE_EXCEL_ATTACHMENT" in result.reason_codes
+
+
+def test_tech_security_alert_gets_bounded_priority_uplift(tmp_path: Path) -> None:
+    db_path = tmp_path / "priority_v2.sqlite"
+    _init_events_db(db_path)
+    engine = _engine_for(db_path)
+    now = datetime(2024, 1, 15, tzinfo=timezone.utc)
+
+    result = engine.compute(
+        subject="Важное оповещение системы безопасности",
+        body_text="Подозрительный вход: устройство offline, не удаётся подключиться",
+        from_email="security@example.com",
+        mail_type="UNKNOWN",
+        received_at=now,
+        commitments=[],
+    )
+
+    assert result.priority in {"🟡", "🔴"}
+    assert "PRIO_TECH_SECURITY_ALERT_STRONG" in result.reason_codes

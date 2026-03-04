@@ -212,9 +212,30 @@ def test_attachment_insight_invoice_amount_due_date() -> None:
         mail_type="INVOICE",
     )
 
-    assert "📎 Счёт: 58 200 ₽ · до 28.02" in rendered
+    assert "📎 58 200 ₽ · до 28.02" in rendered
     assert "invoice.pdf" not in rendered
 
+
+
+
+def test_attachment_insight_invoice_excel_number_amount_due_date() -> None:
+    attachments = [
+        {
+            "filename": "invoice_123.xlsx",
+            "text": "Счет №123 от 20.02.2026 Итого 128400 руб. Оплатить до 25.02.2026",
+        }
+    ]
+
+    rendered = tg_renderer.build_telegram_text(
+        priority="🟡",
+        from_email="sender@example.com",
+        subject="Счет",
+        action_line="Оплатить",
+        attachments=attachments,
+        mail_type="INVOICE",
+    )
+
+    assert "📎 Счет №123 · 128 400 ₽ · до 25.02" in rendered
 
 def test_attachment_insight_act_reconciliation_period() -> None:
     attachments = [

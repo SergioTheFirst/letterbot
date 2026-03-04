@@ -47,6 +47,10 @@ _PAYMENT_DUE_CONTEXT_RE = re.compile(
     r"(?:оплат(?:ить|а|е)?\s*до|срок\s*оплат[ыы]?|до)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
     re.IGNORECASE,
 )
+_INVOICE_NUMBER_RE = re.compile(
+    r"(?:сч[её]т|invoice)\s*(?:№|no\.?|n\s*°)\s*([0-9a-zа-я\-/]{1,32})",
+    re.IGNORECASE,
+)
 _PERIOD_RE = re.compile(
     r"\b(январ(?:ь|я)|феврал(?:ь|я)|март(?:а)?|апрел(?:ь|я)|ма[йя]|июн(?:ь|я)|июл(?:ь|я)|август(?:а)?|сентябр(?:ь|я)|октябр(?:ь|я)|ноябр(?:ь|я)|декабр(?:ь|я))\s+(20\d{2})\b",
     re.IGNORECASE,
@@ -362,16 +366,36 @@ def _invoice_attachment_insight(mail_type: str, text: str, attachments_count: in
     if mail_type not in invoice_types:
         return None
     lowered = text.lower()
+    invoice_number = ""
+    number_match = _INVOICE_NUMBER_RE.search(text)
+    if number_match:
+        candidate = (number_match.group(1) or "").strip(" -.:;,")
+        if candidate:
+            invoice_number = f"Счет №{candidate}"
     amount = ""
     for match in _RUB_AMOUNT_RE.finditer(text):
+        if (match.start() > 0 and text[match.start() - 1] == ".") or (
+            match.end() < len(text) and text[match.end() : match.end() + 1] == "."
+        ):
+            continue
         chunk = match.group(0)
         start = max(0, match.start() - 28)
         context = lowered[start : match.end() + 6]
-        if any(token in context for token in ("итого", "сумм", "к оплат", "оплат")):
+        if any(token in context for token in ("итого", "сумм", "к оплат", "оплат", "всего")):
             amount = _normalize_amount(chunk)
             break
-        if not amount:
-            amount = _normalize_amount(chunk)
+    if not amount:
+        for match in _RUB_AMOUNT_RE.finditer(text):
+            if (match.start() > 0 and text[match.start() - 1] == ".") or (
+                match.end() < len(text) and text[match.end() : match.end() + 1] == "."
+            ):
+                continue
+            chunk = match.group(0)
+            start = max(0, match.start() - 16)
+            context = lowered[start : match.end() + 6]
+            if "₽" in chunk or "руб" in context:
+                amount = _normalize_amount(chunk)
+                break
     due_match = _PAYMENT_DUE_CONTEXT_RE.search(text)
     due_date = _compact_date(due_match.group(1)) if due_match else ""
     if not due_date:
@@ -381,10 +405,15 @@ def _invoice_attachment_insight(mail_type: str, text: str, attachments_count: in
             if any(token in context for token in ("до", "срок", "оплат")):
                 due_date = _compact_date(match.group(0))
                 break
-    if amount and due_date:
-        return f"📎 Счёт: {amount} · до {due_date}"
+    parts: list[str] = []
+    if invoice_number:
+        parts.append(invoice_number)
     if amount:
-        return f"📎 Счёт: {amount}"
+        parts.append(amount)
+    if due_date:
+        parts.append(f"до {due_date}")
+    if parts:
+        return f"📎 {' · '.join(parts)}"
     suffix = "влож." if attachments_count > 0 else "вложение"
     count = max(attachments_count, 1)
     return f"📎 Счёт · {count} {suffix}"
