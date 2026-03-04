@@ -177,21 +177,20 @@ Done:
 - 2026-03-04: `/api/dashboard` now uses a 10s in-memory TTL payload cache (cache hit returns full cached JSON without DB work; cache writes only on successful payload build), and cockpit preview polling was relaxed to 20s while `/dashboard` stays 5s live.
 - 2026-03-04: dashboard SQL perf pass — added explicit SQLite indexes for dashboard hot paths in `schema.sql` (emails/events_v1/priority_feedback), verified `_dashboard_payload` hot query plans via `EXPLAIN QUERY PLAN` show indexed SEARCH paths (no SCAN) for scoped dashboard requests, and ran full pytest green (1004 passed).
 - 2026-03-04: weekly digest UX shifted to calm human-first format ("За неделю N писем. Главное:" + prioritized invoice/contract/overdue/silence bullets + optional human progress line), weekly technical dumps removed from user-facing render, support footer/watermark/send contract preserved, Friday 19:00 weekly defaults set in settings/bootstrap templates, and weekly digest regressions updated; full pytest green (1003 passed).
+- 2026-03-04: one-message rule hardening for email notifications — removed processor non-retryable fallback chat send (no extra second message), codified delivery SLA edit-in-place behavior (single initial send + edit-only follow-up, no resend on edit failure/missing message_id), and added targeted SLA/dedupe regressions; full pytest green (1007 passed).
 Now:
-- Weekly digest render uses human-first executive summary blocks with prioritized highlights from existing weekly primitives/events.
-- Weekly scheduler send path still appends rate-limited support footer and watermark through existing payload path.
+- Email notification lifecycle hardening validated: follow-up quality upgrades in SLA path are edit-in-place only, with no second chat message on edit failure or missing message_id.
+- Processor non-retryable Telegram delivery path now logs safely and avoids fallback chat spam for the same email lifecycle.
 Next:
-- Await product review of phrasing thresholds (invoice/contract keyword coverage) before deeper analytics refinements.
+- Await product confirmation on whether same one-message hardening should be mirrored in legacy `start.py` non-retryable failure notice path.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):
-- mailbot_v26/pipeline/weekly_digest.py
-- mailbot_v26/config/settings.ini.example
-- mailbot_v26/tools/config_bootstrap.py
-- mailbot_v26/tests/test_weekly_digest.py
-- mailbot_v26/tests/test_weekly_digest_accuracy_render.py
-- mailbot_v26/tests/test_weekly_digest_calibration_render.py
-- mailbot_v26/tests/test_notification_sla.py
-- mailbot_v26/tests/test_quality_metrics.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/tests/test_one_message_rule_delivery_sla.py
+- mailbot_v26/tests/test_telegram_delivery_pipeline.py
+- mailbot_v26/tests/test_telegram_inbound.py
 - CONTINUITY.md
+- python -m pytest -q mailbot_v26/tests/test_one_message_rule_delivery_sla.py mailbot_v26/tests/test_telegram_inbound.py -q
+- python -m pytest -q mailbot_v26/tests/test_telegram_delivery_pipeline.py -k "rerun_after_success_still_sends_once or tg_stage_idempotency_skips_duplicate_delivery"
 - python -m pytest -q

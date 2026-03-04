@@ -5437,21 +5437,11 @@ def process_message(
                     chat_id=telegram_chat_id,
                     account_email=account_email,
                 )
-                fallback_metadata = dict(payload.metadata)
-                fallback_metadata.setdefault("chat_id", telegram_chat_id)
-                fallback_metadata.setdefault("account_email", account_email)
-                fallback_payload = TelegramPayload(
-                    html_text="Telegram delivery failed. Check email client.",
-                    priority="🔴",
-                    metadata=fallback_metadata,
-                )
-                fallback_delivery = _coerce_delivery_result(
-                    enqueue_tg(email_id=message_id, payload=fallback_payload),
+                logger.warning(
+                    "telegram_delivery_non_retryable_no_fallback_message",
                     email_id=message_id,
+                    chat_id=telegram_chat_id,
                 )
-                if fallback_delivery.delivered:
-                    telegram_delivered = True
-                    delivery_ts = time.time()
             else:
                 telegram_delivered = True
                 change = system_health.update_component("Telegram", True)
