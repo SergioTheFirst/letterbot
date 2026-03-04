@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-04: Telegram priority correction callbacks (`mb:prio:*` + `prio_set:*`) now edit the original message in-place without sending separate ack chat messages, preserve action keyboard after edit, keep priority feedback/events recording, add safe callback ack on edit failure, and extend inbound regressions for in-place edit/failure safety; full pytest green (994 passed).
 - 2026-03-04: PR4C web auth/CIDR smoke safety — added explicit `[web_ui] allow_local_smoke_bypass=false` template/bootstrap flag, implemented narrow local-only bypass path (loopback or trusted forwarded loopback in loopback-bind dev context) without changing default auth/CIDR behavior, added operator-visible startup/request logging for active bypass, and expanded web auth/CIDR/main/bootstrap regressions; full pytest green (993 passed).
 - 2026-03-04: restored direct inline priority correction buttons for initial Telegram payload via new `telegram/keyboard.py` (`mb:prio:R|Y|B` callback format per email), wired render payload to this keyboard without changing menu/snooze keyboards, and added callback regression test; full pytest green (971 passed).
 - 2026-03-04: Final Telegram summary path now prefers direct `run_llm_stage` when LLM is eligible; heuristic is used as fallback on direct failure only, queue defaults switched to disabled in config loader/template/bootstrap (`[llm_queue]`), startup report now includes direct-path smoke status and delivery mode (`DIRECT` / `HEURISTIC_FALLBACK` / `DISABLED`), and regressions added for direct preference/fallback plus queue defaults.
@@ -170,13 +171,14 @@ Done:
 - 2026-03-04: PR4B web surfaces polish — refined existing Archive/Health/Events/Doctor templates for calmer UX, improved safe empty states and compact explanatory copy, kept engineer-only blocks mode-gated, added CSS panel/readability polish, and expanded web UI behavior tests; full pytest green (987 passed).
 - 2026-03-04: PR5 safe cleanup — removed duplicate root config template (`config.yaml.example`) in favor of canonical `config.example.yaml`, removed stale root `patch.diff` artifact, expanded `.gitignore` runtime-artifact guards (`*.sqlite3`, `*.db`, `runtime/logs/`), and verified no behavior changes with full pytest green (993 passed).
 Now:
-- PR5 safe repository cleanup completed locally (only unambiguous junk/duplicate artifacts), full test suite green; preparing commit + PR.
+- PR UX hotfix for Telegram priority correction completed locally (in-place edit, no ack spam), full test suite green; preparing commit + PR.
 Next:
-- Await reviewer confirmation for any additional cleanup candidates that require stronger usage-proof beyond safe-now scope.
+- Await reviewer validation in production Telegram chat for callback edit behavior across existing messages.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- .gitignore
-- config.yaml.example (deleted)
-- patch.diff (deleted)
+- mailbot_v26/telegram/inbound.py
+- mailbot_v26/tests/test_telegram_inbound.py
+- priority_feedback (SQLite table, unchanged schema/usage)
+- events_v1 (priority_correction_recorded path, unchanged semantics)
 - CONTINUITY.md

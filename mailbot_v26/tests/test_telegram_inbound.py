@@ -159,7 +159,7 @@ def test_parse_command_tolerates_spaces() -> None:
     assert args == ["on"]
 
 
-def test_priority_correction_deduped(tmp_path: Path) -> None:
+def test_priority_callback_edits_message_without_ack_spam_and_persists_feedback(tmp_path: Path, monkeypatch) -> None:
     sent: list[str] = []
     gate_result = GateResult(
         passed=True,
@@ -173,9 +173,16 @@ def test_priority_correction_deduped(tmp_path: Path) -> None:
     processor = _build_processor(tmp_path, sent, gate_result)
     email_id = _insert_email(processor.knowledge_db.path)
 
+    edited: list[dict[str, object]] = []
+
+    def _fake_edit(**kwargs):
+        edited.append(kwargs)
+
+    monkeypatch.setattr("mailbot_v26.telegram.inbound.edit_telegram_message", _fake_edit)
+
     callback = {
-        "data": f"mb:prio:{email_id}:R",
-        "message": {"chat": {"id": "chat"}},
+        "data": f"prio_set:{email_id}:R",
+        "message": {"chat": {"id": "chat"}, "message_id": 101, "text": "old"},
     }
     processor.handle_callback_query(callback)
     processor.handle_callback_query(callback)
@@ -188,7 +195,68 @@ def test_priority_correction_deduped(tmp_path: Path) -> None:
 
     assert len(feedback_rows) == 1
     assert len(event_rows) == 1
-    assert any("Принято: приоритет исправлен на 🔴" in text for text in sent)
+    assert sent == []
+    assert len(edited) == 2
+    assert "🔴" in str(edited[0]["html_text"])
+    assert "Принято: приоритет исправлен" not in str(edited[0]["html_text"])
+    assert edited[0]["reply_markup"] == {
+        "inline_keyboard": [
+            [{"text": "Приоритет", "callback_data": f"prio_menu:{email_id}"}, {"text": "⏰ Позже", "callback_data": f"snz_m:{email_id}"}],
+            [{"text": "✓ Верно", "callback_data": f"mb:ok:{email_id}"}],
+        ]
+    }
+
+
+def test_priority_callback_edit_failure_is_safe_without_ack_spam(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    monkeypatch.setattr(
+        "mailbot_v26.telegram.inbound.edit_telegram_message",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("edit failed")),
+    )
+
+    callback_acks: list[dict[str, object]] = []
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            callback_acks.append({"json": json, "timeout": timeout})
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    callback = {
+        "id": "cb-prio",
+        "data": f"mb:prio:{email_id}:Y",
+        "message": {"chat": {"id": "chat"}, "message_id": 88, "text": "old"},
+    }
+    processor.handle_callback_query(callback)
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        feedback_rows = conn.execute("SELECT id FROM priority_feedback").fetchall()
+
+    assert feedback_rows
+    assert sent == []
+    assert callback_acks == [
+        {
+            "json": {
+                "callback_query_id": "cb-prio",
+                "text": "Приоритет обновлён",
+                "show_alert": False,
+            },
+            "timeout": 5,
+        }
+    ]
 
 
 def test_digest_toggle_command_updates_override(tmp_path: Path) -> None:
