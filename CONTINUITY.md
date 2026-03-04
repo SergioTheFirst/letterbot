@@ -174,15 +174,20 @@ Done:
 - 2026-03-04: web cockpit upgraded to live premium dashboard: added defensive `/api/dashboard` aggregate endpoint (emails/LLM/priority/learning/recent events), rebuilt cockpit into card-based live grid with 5s auto-refresh, switched to premium dark theme tokens, and added dashboard API/web regression tests; targeted web pytest green.
 - 2026-03-04: restored legacy cockpit contract on `/` (recent summaries/system status/useful links + required nav/DOM hooks), moved live card dashboard to new `/dashboard` page while keeping `/api/dashboard`, added dedicated `dashboard.html` route wiring, and updated dashboard template test to target `/dashboard`; full pytest green (1003 passed).
 - 2026-03-04: dashboard recent-events stream added to `/api/dashboard` from `events_v1` (LIMIT 20, newest-first, safe empty fallback on table/query errors), `/dashboard` now renders live "Recent events" list with time+text formatting, and dashboard API/template tests expanded; full pytest green.
+- 2026-03-04: `/api/dashboard` now uses a 10s in-memory TTL payload cache (cache hit returns full cached JSON without DB work; cache writes only on successful payload build), and cockpit preview polling was relaxed to 20s while `/dashboard` stays 5s live.
 Now:
-- Implemented `/api/dashboard` recent event stream update: tracked system event types now return up to 20 newest entries with deterministic text labels and safe empty-list fallback on events query/table errors.
-- Dashboard `/dashboard` now renders a dedicated "Recent events" block and refreshes event rows with counters on every 5s API poll.
+- Implemented dashboard API perf hardening: `_dashboard_payload` now serves a full payload snapshot from a 10s in-memory TTL cache (all sections including `recent_events`) to avoid repeated SQLite aggregation across concurrent tabs.
+- Cockpit home preview polling was reduced from 5s to 20s while `/dashboard` live polling remains at 5s.
 Next:
-- Await reviewer validation for event label wording and whether additional event types should be surfaced in the same feed.
+- Await reviewer validation for dashboard cache TTL (10s) and cockpit preview refresh cadence (20s) under real usage.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should dashboard priority counts remain 24h-scoped or become all-time totals in a follow-up?
 Working set (files / tables / tests):
 - mailbot_v26/web_observability/app.py
+- mailbot_v26/web_observability/templates/cockpit.html
 - mailbot_v26/web_observability/templates/dashboard.html
 - mailbot_v26/tests/test_web_dashboard_api.py
+- mailbot_v26/tests/test_web_cockpit_home.py
+- mailbot_v26/tests/test_web_ui_main.py
+- mailbot_v26/tests/test_web_observability_bridge.py
 - CONTINUITY.md
