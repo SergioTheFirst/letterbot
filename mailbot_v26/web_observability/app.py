@@ -22,7 +22,7 @@ from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 try:
     from flask import (
@@ -180,6 +180,12 @@ _BUDGET_CACHE = _TTLCache(20.0)
 _TRIAGE_LANES_CACHE = _TTLCache(20.0)
 _DECISION_TRACE_CACHE = _TTLCache(20.0)
 _DECISION_TRACE_HIST_CACHE = _TTLCache(30.0)
+_DASHBOARD_CACHE: dict[str, Any] = {
+    "ts": 0.0,
+    "payload": None,
+    "key": None,
+}
+_DASHBOARD_CACHE_TTL = 10.0
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -3442,6 +3448,21 @@ def create_app(
         return payload_text or event_type
 
     def _dashboard_payload() -> dict[str, object]:
+        now = time.time()
+        cache_key = (
+            str(app.config["DB_PATH"]),
+            request.args.get("account_emails") or "",
+            request.args.get("window_days") or "",
+            request.args.get("pii") or "",
+        )
+        cached = _DASHBOARD_CACHE.get("payload")
+        if (
+            cached is not None
+            and _DASHBOARD_CACHE.get("key") == cache_key
+            and (now - _DASHBOARD_CACHE["ts"]) < _DASHBOARD_CACHE_TTL
+        ):
+            return cached
+
         now_ts = datetime.now(timezone.utc).timestamp()
         day_ago_ts = now_ts - 86_400
         hour_ago_ts = now_ts - 3_600
@@ -3609,6 +3630,9 @@ def create_app(
                         }
                     )
                 payload["recent_events"] = recent_events
+                _DASHBOARD_CACHE["payload"] = payload
+                _DASHBOARD_CACHE["ts"] = now
+                _DASHBOARD_CACHE["key"] = cache_key
         except Exception as exc:
             logger.warning("dashboard_payload_failed", extra={"error": str(exc)})
         return payload
