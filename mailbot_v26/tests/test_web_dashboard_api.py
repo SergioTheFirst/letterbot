@@ -119,7 +119,7 @@ def test_dashboard_template_renders_and_has_live_cards(tmp_path: Path) -> None:
 
     with app.test_client() as client:
         login_with_csrf(client, "pw")
-        body = client.get("/").get_data(as_text=True)
+        body = client.get("/dashboard").get_data(as_text=True)
 
     assert "data-testid=\"live-dashboard\"" in body
     assert ">System<" in body

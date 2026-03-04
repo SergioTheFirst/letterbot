@@ -172,17 +172,16 @@ Done:
 - 2026-03-04: PR5 safe cleanup — removed duplicate root config template (`config.yaml.example`) in favor of canonical `config.example.yaml`, removed stale root `patch.diff` artifact, expanded `.gitignore` runtime-artifact guards (`*.sqlite3`, `*.db`, `runtime/logs/`), and verified no behavior changes with full pytest green (993 passed).
 - 2026-03-04: processor pipeline hardening — cold-start percentile path now allows LLM candidate when prior history is insufficient (with explicit info marker), heuristic attachment summaries consume extracted attachment text/facts, priority signal text now includes bounded attachment content facts, and MessageProcessor short-action selection now uses subject+body+attachment text with incident/promo guardrails; targeted regressions added.
 - 2026-03-04: web cockpit upgraded to live premium dashboard: added defensive `/api/dashboard` aggregate endpoint (emails/LLM/priority/learning/recent events), rebuilt cockpit into card-based live grid with 5s auto-refresh, switched to premium dark theme tokens, and added dashboard API/web regression tests; targeted web pytest green.
+- 2026-03-04: restored legacy cockpit contract on `/` (recent summaries/system status/useful links + required nav/DOM hooks), moved live card dashboard to new `/dashboard` page while keeping `/api/dashboard`, added dedicated `dashboard.html` route wiring, and updated dashboard template test to target `/dashboard`; full pytest green (1003 passed).
 Now:
-- Live dashboard/API/theme/tests implemented and verified locally; preparing commit + PR metadata.
+- Cockpit compatibility restored on `/` with legacy blocks and preserved nav/DOM contract; live dashboard moved to dedicated `/dashboard`; full regression suite green.
 Next:
-- Await reviewer validation for live dashboard metrics fidelity on production-like event volume.
+- Await reviewer validation for cockpit compatibility expectations in downstream integrations and UI copy finalization.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should dashboard priority counts remain 24h-scoped or become all-time totals in a follow-up?
 Working set (files / tables / tests):
 - mailbot_v26/web_observability/app.py
 - mailbot_v26/web_observability/templates/cockpit.html
-- mailbot_v26/web_observability/static/style.css
+- mailbot_v26/web_observability/templates/dashboard.html
 - mailbot_v26/tests/test_web_dashboard_api.py
-- mailbot_v26/tests/test_web_cockpit_home.py
-- mailbot_v26/tests/test_web_observability_bridge.py
 - CONTINUITY.md

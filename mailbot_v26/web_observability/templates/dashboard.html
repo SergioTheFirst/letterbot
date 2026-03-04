@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Live Dashboard — {{ title }}{% endblock %}
+
+{% block content %}
+  <div class="status-strip" id="status-strip">
+    <div class="status-strip-content" id="status-strip-content">
+      {% include "partials/status_strip.html" %}
+    </div>
+    <div class="status-strip-offline" id="status-strip-offline">offline</div>
+  </div>
+
+  <div class="live-dashboard-grid" data-testid="live-dashboard">
+    <section class="card live-card" id="card-system">
+      <h2>System</h2>
+      <p class="hint">{{ scope_hint or 'Live observability feed.' }}</p>
+      {% if cfg.features.donate_enabled and support_nav_enabled %}
+      <div class="support-card-copy">Support Letterbot</div>
+      {% if support_methods and support_methods[0].qr_image_data_uri %}
+      <div class="support-card-qr-preview">
+        <img src="{{ support_methods[0].qr_image_data_uri }}" alt="Support QR preview">
+        <div class="support-card-qr-caption">Quick QR preview</div>
+      </div>
+      {% endif %}
+      <div class="card-actions"><a class="btn" href="/support">Open support page</a></div>
+      {% endif %}
+    </section>
+
+    <section class="card live-card" id="card-emails">
+      <h2>Emails</h2>
+      <div class="metric"><span>Today</span><strong id="emails-today">0</strong></div>
+      <div class="metric"><span>Last hour</span><strong id="emails-hour">0</strong></div>
+    </section>
+
+    <section class="card live-card" id="card-llm">
+      <h2>LLM</h2>
+      <div class="metric"><span>Calls today</span><strong id="llm-calls">0</strong></div>
+      <div class="metric"><span>Fallback today</span><strong id="llm-fallback">0</strong></div>
+    </section>
+
+    <section class="card live-card" id="card-priority">
+      <h2>Priority</h2>
+      <div class="metric"><span>Red</span><strong id="priority-red">0</strong></div>
+      <div class="metric"><span>Yellow</span><strong id="priority-yellow">0</strong></div>
+      <div class="metric"><span>Blue</span><strong id="priority-blue">0</strong></div>
+    </section>
+
+    <section class="card live-card" id="card-learning" data-testid="quality-summary">
+      <h2>Learning</h2>
+      <div class="hint">Качество автоматизации</div>
+      {% if quality_summary.available %}
+      <div class="quality-metric"><span class="label">Corrections</span><span class="value" id="corrections-week">{{ quality_summary.corrections }}</span></div>
+      <div class="quality-metric"><span class="label">Surprise rate</span><span class="value" id="surprise-rate">{{ quality_summary.surprise_rate }}</span></div>
+      <div class="hint" id="quality-hint">{{ quality_summary.trust_hint }}</div>
+      {% else %}
+      <div class="quality-metric"><span class="label">Corrections</span><span class="value" id="corrections-week">0</span></div>
+      <div class="quality-metric"><span class="label">Surprise rate</span><span class="value" id="surprise-rate">0%</span></div>
+      <div class="hint" id="quality-hint">Not enough feedback yet. Quality summary will appear when corrections are recorded.</div>
+      {% endif %}
+    </section>
+
+    <section class="card live-card live-events" id="card-events">
+      <h2>Events</h2>
+      <ul id="events-list" class="events-list"><li class="hint">Waiting for live events…</li></ul>
+    </section>
+  </div>
+
+  <script>
+    (function() {
+      const strip = document.getElementById('status-strip-content');
+      const offline = document.getElementById('status-strip-offline');
+      const eventsList = document.getElementById('events-list');
+      const setText = (id, value) => {
+        const node = document.getElementById(id);
+        if (node) node.textContent = String(value);
+      };
+      const updateDashboard = () => {
+        fetch('/api/dashboard', { credentials: 'same-origin' })
+          .then((resp) => {
+            if (!resp.ok) throw new Error('dashboard');
+            return resp.json();
+          })
+          .then((data) => {
+            setText('emails-today', data.emails_today ?? 0);
+            setText('emails-hour', data.emails_last_hour ?? 0);
+            setText('llm-calls', data.llm_calls_today ?? 0);
+            setText('llm-fallback', data.llm_fallback_today ?? 0);
+            setText('priority-red', data.priority?.red ?? 0);
+            setText('priority-yellow', data.priority?.yellow ?? 0);
+            setText('priority-blue', data.priority?.blue ?? 0);
+            setText('corrections-week', data.corrections_week ?? 0);
+            setText('surprise-rate', `${Math.round((data.surprise_rate ?? 0) * 100)}%`);
+            if (eventsList) {
+              const items = Array.isArray(data.recent_events) ? data.recent_events : [];
+              if (!items.length) {
+                eventsList.innerHTML = '<li class="hint">No recent events yet.</li>';
+                return;
+              }
+              eventsList.innerHTML = items.map((item) => {
+                const ts = item.ts || '';
+                const type = item.type || 'event';
+                const text = item.text || type;
+                return `<li><span class="mono">${ts}</span> <b>${type}</b> — ${text}</li>`;
+              }).join('');
+            }
+          })
+          .catch(() => {});
+      };
+
+      const refreshStatus = () => {
+        fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' })
+          .then((resp) => {
+            if (!resp.ok) throw new Error('status');
+            return resp.text();
+          })
+          .then((html) => {
+            if (strip) strip.innerHTML = html;
+            if (offline) offline.classList.remove('active');
+          })
+          .catch(() => {
+            if (offline) offline.classList.add('active');
+          });
+      };
+
+      refreshStatus();
+      updateDashboard();
+      setInterval(refreshStatus, {{ status_refresh_ms }});
+      setInterval(updateDashboard, 5000);
+    })();
+  </script>
+{% endblock %}
