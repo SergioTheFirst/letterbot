@@ -178,19 +178,19 @@ Done:
 - 2026-03-04: dashboard SQL perf pass — added explicit SQLite indexes for dashboard hot paths in `schema.sql` (emails/events_v1/priority_feedback), verified `_dashboard_payload` hot query plans via `EXPLAIN QUERY PLAN` show indexed SEARCH paths (no SCAN) for scoped dashboard requests, and ran full pytest green (1004 passed).
 - 2026-03-04: weekly digest UX shifted to calm human-first format ("За неделю N писем. Главное:" + prioritized invoice/contract/overdue/silence bullets + optional human progress line), weekly technical dumps removed from user-facing render, support footer/watermark/send contract preserved, Friday 19:00 weekly defaults set in settings/bootstrap templates, and weekly digest regressions updated; full pytest green (1003 passed).
 - 2026-03-04: one-message rule hardening for email notifications — removed processor non-retryable fallback chat send (no extra second message), codified delivery SLA edit-in-place behavior (single initial send + edit-only follow-up, no resend on edit failure/missing message_id), and added targeted SLA/dedupe regressions; full pytest green (1007 passed).
+- 2026-03-04: bounded sender-memory personalization added in processor priority path using existing `priority_feedback.sender_email` (45-day window, min 3 corrections, bounded +/-12 bias, no sender-only promotion to red, high-signal dampening guard for invoice/security/incident/contract/claim mail types/reasons), plus targeted sender-memory regressions in pipeline processor tests; full pytest green (1013 passed).
 Now:
-- Email notification lifecycle hardening validated: follow-up quality upgrades in SLA path are edit-in-place only, with no second chat message on edit failure or missing message_id.
-- Processor non-retryable Telegram delivery path now logs safely and avoids fallback chat spam for the same email lifecycle.
+- Sender-memory priority personalization is active in processor with deterministic bounded adaptation from `priority_feedback.sender_email` corrections and safe high-signal dampening guardrails.
+- Targeted sender-memory and related priority/inbound tests are green, with full suite green (1013 passed).
 Next:
-- Await product confirmation on whether same one-message hardening should be mirrored in legacy `start.py` non-retryable failure notice path.
+- Await product validation of sender-memory thresholds (window/min samples/bias caps) before any config surfacing follow-up.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/tests/test_one_message_rule_delivery_sla.py
-- mailbot_v26/tests/test_telegram_delivery_pipeline.py
-- mailbot_v26/tests/test_telegram_inbound.py
+- mailbot_v26/tests/test_pipeline_processor.py
 - CONTINUITY.md
-- python -m pytest -q mailbot_v26/tests/test_one_message_rule_delivery_sla.py mailbot_v26/tests/test_telegram_inbound.py -q
-- python -m pytest -q mailbot_v26/tests/test_telegram_delivery_pipeline.py -k "rerun_after_success_still_sends_once or tg_stage_idempotency_skips_duplicate_delivery"
+- priority_feedback (SQLite table; sender_email-based correction history)
+- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k sender_memory
+- python -m pytest -q mailbot_v26/tests/test_priority_engine_v2.py mailbot_v26/tests/test_telegram_inbound.py mailbot_v26/tests/test_pipeline_processor.py
 - python -m pytest -q

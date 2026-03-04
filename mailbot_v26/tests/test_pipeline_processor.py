@@ -1,11 +1,15 @@
 from datetime import datetime
+import sqlite3
 import re
 from types import SimpleNamespace
 
+from mailbot_v26.pipeline import processor as pipeline_processor
 from mailbot_v26.pipeline.processor import (
     Attachment,
     InboundMessage,
     MessageProcessor,
+    PriorityResultV2,
+    _apply_sender_memory_to_priority,
     _build_heuristic_attachment_summaries,
     _build_priority_signal_text,
     _maybe_drop_duplicate_subject_line,
@@ -466,3 +470,138 @@ def test_action_selection_avoids_payment_for_incident_signals() -> None:
     result = processor.process("robot@example.com", msg)
     assert "Оплатить счёт" not in result
     assert "Проверить" in result
+
+
+def test_sender_memory_uplift_bounded_for_repeated_escalations(monkeypatch) -> None:
+    monkeypatch.setattr(
+        pipeline_processor,
+        "_sender_memory_bias_for_priority",
+        lambda **_kwargs: (12, 4),
+    )
+
+    result = _apply_sender_memory_to_priority(
+        priority="🔵",
+        sender_email="vip.sender@example.com",
+        mail_type="UNKNOWN",
+        priority_v2_result=None,
+        email_id=1,
+    )
+
+    assert result == "🟡"
+
+
+def test_sender_memory_dampening_bounded_for_repeated_demotions(monkeypatch) -> None:
+    monkeypatch.setattr(
+        pipeline_processor,
+        "_sender_memory_bias_for_priority",
+        lambda **_kwargs: (-12, 5),
+    )
+
+    result = _apply_sender_memory_to_priority(
+        priority="🟡",
+        sender_email="noisy.sender@example.com",
+        mail_type="UNKNOWN",
+        priority_v2_result=None,
+        email_id=2,
+    )
+
+    assert result == "🔵"
+
+
+def test_sender_memory_insufficient_history_no_change(monkeypatch) -> None:
+    monkeypatch.setattr(
+        pipeline_processor,
+        "_sender_memory_bias_for_priority",
+        lambda **_kwargs: (0, 2),
+    )
+
+    result = _apply_sender_memory_to_priority(
+        priority="🟡",
+        sender_email="sender@example.com",
+        mail_type="UNKNOWN",
+        priority_v2_result=None,
+        email_id=3,
+    )
+
+    assert result == "🟡"
+
+
+def test_sender_memory_dampening_does_not_suppress_high_signal_mail(monkeypatch) -> None:
+    monkeypatch.setattr(
+        pipeline_processor,
+        "_sender_memory_bias_for_priority",
+        lambda **_kwargs: (-12, 6),
+    )
+
+    result = _apply_sender_memory_to_priority(
+        priority="🟡",
+        sender_email="finance@example.com",
+        mail_type="INVOICE_FINAL",
+        priority_v2_result=PriorityResultV2(
+            priority="🟡",
+            score=55,
+            breakdown=(),
+            reason_codes=("PRIO_INVOICE_SUBJECT",),
+        ),
+        email_id=4,
+    )
+
+    assert result == "🟡"
+
+
+def test_sender_memory_scoped_per_sender(monkeypatch) -> None:
+    def _fake_bias(*, sender_email: str) -> tuple[int, int]:
+        if sender_email == "fav@example.com":
+            return (12, 5)
+        return (0, 5)
+
+    monkeypatch.setattr(pipeline_processor, "_sender_memory_bias_for_priority", _fake_bias)
+
+    favored = _apply_sender_memory_to_priority(
+        priority="🔵",
+        sender_email="fav@example.com",
+        mail_type="UNKNOWN",
+        priority_v2_result=None,
+        email_id=5,
+    )
+    other = _apply_sender_memory_to_priority(
+        priority="🔵",
+        sender_email="other@example.com",
+        mail_type="UNKNOWN",
+        priority_v2_result=None,
+        email_id=6,
+    )
+
+    assert favored == "🟡"
+    assert other == "🔵"
+
+
+def test_sender_memory_empty_sender_or_query_failure_keeps_priority(monkeypatch) -> None:
+    empty_sender = _apply_sender_memory_to_priority(
+        priority="🔵",
+        sender_email="",
+        mail_type="UNKNOWN",
+        priority_v2_result=None,
+        email_id=7,
+    )
+    assert empty_sender == "🔵"
+
+    def _raise_connect(_path: object):
+        raise sqlite3.OperationalError("boom")
+
+    monkeypatch.setattr(pipeline_processor.sqlite3, "connect", _raise_connect)
+    bias, sample_count = pipeline_processor._sender_memory_bias_for_priority(
+        sender_email="sender@example.com"
+    )
+    assert bias == 0
+    assert sample_count == 0
+
+    no_data = _apply_sender_memory_to_priority(
+        priority="🟡",
+        sender_email="sender@example.com",
+        mail_type="UNKNOWN",
+        priority_v2_result=None,
+        email_id=8,
+    )
+
+    assert no_data == "🟡"
