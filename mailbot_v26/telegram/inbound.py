@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -15,6 +16,7 @@ from mailbot_v26.insights.auto_priority_quality_gate import AutoPriorityQualityG
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
 from mailbot_v26.observability import get_logger
+from mailbot_v26.observability.calibration_report import compute_priority_calibration_report
 from mailbot_v26.observability.decision_trace_store import load_latest_decision_traces
 from mailbot_v26.observability.decision_trace_view import build_decision_trace_summary
 from mailbot_v26.observability.event_emitter import EventEmitter
@@ -115,6 +117,45 @@ def _load_email_snapshot(db_path: Path, email_id: int) -> dict[str, object] | No
         return None
     return dict(row)
 
+
+
+
+def _top_priority_transitions(*, db_path: Path, days: int, limit: int = 3) -> list[tuple[str, int]]:
+    since_ts = datetime.now(timezone.utc).timestamp() - (max(1, int(days)) * 86400)
+    totals: dict[str, int] = {}
+    try:
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT payload
+                FROM events_v1
+                WHERE event_type = 'priority_correction_recorded'
+                  AND ts_utc >= ?
+                ORDER BY ts_utc DESC
+                LIMIT 2000
+                """,
+                (since_ts,),
+            ).fetchall()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("telegram_stats_transitions_failed", error=str(exc))
+        return []
+
+    for row in rows:
+        payload_raw = row[0] if isinstance(row, tuple) else None
+        payload: dict[str, object]
+        try:
+            payload = json.loads(str(payload_raw or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+        old_priority = _PRIORITY_MAP.get(str(payload.get("old_priority") or "").strip().upper(), "")
+        new_priority = _PRIORITY_MAP.get(str(payload.get("new_priority") or "").strip().upper(), "")
+        if not old_priority or not new_priority:
+            continue
+        key = f"{old_priority}→{new_priority}"
+        totals[key] = totals.get(key, 0) + 1
+
+    ordered = sorted(totals.items(), key=lambda item: (-item[1], item[0]))
+    return ordered[: max(0, int(limit))]
 
 def _load_email_render_snapshot(db_path: Path, email_id: int) -> dict[str, object] | None:
     try:
@@ -612,6 +653,9 @@ class TelegramInboundProcessor:
             return
         if command in {"/week", "week"}:
             self._reply(chat_id, self._week_text())
+            return
+        if command in {"/stats", "stats"}:
+            self._reply(chat_id, self._stats_text())
             return
         if command in {"/support", "support"}:
             self._reply(chat_id, self._support_text())
@@ -1199,6 +1243,7 @@ class TelegramInboundProcessor:
                 _t("inbound.help.autopriority"),
                 _t("inbound.help.commitments"),
                 _t("inbound.help.week"),
+                _t("inbound.help.stats"),
                 _t("inbound.help.support"),
                 _t("inbound.help.help"),
             ]
@@ -1261,12 +1306,13 @@ class TelegramInboundProcessor:
     def _week_text(self) -> str:
         account_emails = list(self._account_emails())
         if not account_emails:
-            return (
+            base = (
                 "📊 Letterbot — неделя\n"
                 "Писем: 0 · Важных: 0 · Низких: 0\n"
                 "Коррекций: 0 · Точность: н/д\n"
                 "Обязательств открыто: 0"
             )
+            return "\n".join([base, self._stats_text(days=7, include_header=False)])
         primary = account_emails[0]
         summary = self.analytics.weekly_compact_summary(
             account_email=primary,
@@ -1275,12 +1321,96 @@ class TelegramInboundProcessor:
         )
         accuracy_pct = summary.get("accuracy_pct")
         accuracy_text = f"{int(accuracy_pct)}%" if accuracy_pct is not None else "н/д"
-        return (
+        base = (
             "📊 Letterbot — неделя\n"
             f"Писем: {int(summary.get('emails_total') or 0)} · Важных: {int(summary.get('important') or 0)} · Низких: {int(summary.get('low') or 0)}\n"
             f"Коррекций: {int(summary.get('corrections') or 0)} · Точность: {accuracy_text}\n"
             f"Обязательств открыто: {int(summary.get('open_commitments') or 0)}"
         )
+        return "\n".join([base, self._stats_text(days=7, include_header=False)])
+
+    def _stats_text(self, *, days: int = 7, include_header: bool = True) -> str:
+        account_emails = list(self._account_emails())
+        if not account_emails:
+            header = "📈 Качество автоприоритизации" if include_header else ""
+            trust = "Пока данных мало — делаем выводы вручную."
+            lines = [line for line in [header, "Коррекций: 0", "Surprise rate: н/д", "Переходы: нет данных", trust] if line]
+            return "\n".join(lines)
+
+        primary = account_emails[0]
+        accuracy: dict[str, object] = {}
+        calibration: dict[str, object] | None = None
+        calibration_totals: dict[str, object] = {}
+
+        try:
+            accuracy = self.analytics.weekly_accuracy_report(
+                account_email=primary,
+                days=days,
+                account_emails=account_emails,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("telegram_stats_accuracy_failed", error=str(exc))
+
+        try:
+            anchor = datetime.now(timezone.utc)
+            calibration = self.analytics.weekly_calibration_proposals(
+                account_email=primary,
+                since_ts=anchor.timestamp() - (days * 86400),
+                top_n=3,
+                min_corrections=0,
+                account_emails=account_emails,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("telegram_stats_calibration_failed", error=str(exc))
+
+        try:
+            calibration_report = compute_priority_calibration_report(
+                db_path=self.knowledge_db.path,
+                days=days,
+                max_rows=1000,
+            )
+            totals = calibration_report.get("totals")
+            if isinstance(totals, dict):
+                calibration_totals = totals
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("telegram_stats_calibration_report_failed", error=str(exc))
+
+        corrections = int(accuracy.get("priority_corrections") or 0)
+        surprise_rate = accuracy.get("surprise_rate")
+        surprise_text = "н/д"
+        if surprise_rate is not None:
+            surprise_text = f"{float(surprise_rate) * 100:.0f}%"
+
+        transitions_text = "нет данных"
+        transitions = _top_priority_transitions(db_path=self.knowledge_db.path, days=days, limit=3)
+        if transitions:
+            transitions_text = ", ".join(f"{transition} ×{count}" for transition, count in transitions)
+
+        latency_text = "н/д"
+        decisions_total = int(calibration_totals.get("decisions_total") or 0)
+        corrected_total = int(calibration_totals.get("decisions_corrected") or 0)
+        if decisions_total > 0:
+            latency_text = f"{corrected_total}/{decisions_total} решений пересмотрены"
+
+        trust_line = "Можно доверять автоприоритизации: да"
+        if corrections < 3:
+            trust_line = "Можно доверять автоприоритизации: осторожно, мало данных"
+        elif surprise_rate is not None and float(surprise_rate) > 0.35:
+            trust_line = "Можно доверять автоприоритизации: пока осторожно"
+
+        lines = []
+        if include_header:
+            lines.append("📈 Качество автоприоритизации")
+        lines.extend(
+            [
+                f"Коррекций: {corrections}",
+                f"Surprise rate: {surprise_text}",
+                f"Скорость коррекций: {latency_text}",
+                f"Переходы: {transitions_text}",
+                trust_line,
+            ]
+        )
+        return "\n".join(lines)
 
     def _priority_help_text(self) -> str:
         return _t("inbound.priority_help")

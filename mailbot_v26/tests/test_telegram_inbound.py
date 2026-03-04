@@ -437,12 +437,10 @@ def test_week_command_returns_compact_summary_with_empty_dataset(tmp_path: Path)
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/week"})
 
-    assert sent[-1] == (
-        "📊 Letterbot — неделя\n"
-        "Писем: 0 · Важных: 0 · Низких: 0\n"
-        "Коррекций: 0 · Точность: н/д\n"
-        "Обязательств открыто: 0"
-    )
+    assert "📊 Letterbot — неделя" in sent[-1]
+    assert "Коррекций: 0" in sent[-1]
+    assert "Surprise rate: н/д" in sent[-1]
+    assert "Переходы: нет данных" in sent[-1]
 
 
 def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
@@ -493,11 +491,76 @@ def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "week"})
 
+    assert "📊 Letterbot — неделя" in sent[-1]
+    assert "Коррекций: 1 · Точность: 100%" in sent[-1]
+    assert "Surprise rate: 0%" in sent[-1]
+    assert "Переходы: 🔵→🔴 ×1" in sent[-1]
+
+
+def test_stats_command_returns_human_friendly_summary(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    callback = {
+        "data": f"mb:prio:{email_id}:R",
+        "message": {"chat": {"id": "chat"}},
+    }
+    processor.handle_callback_query(callback)
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        feedback_rows = conn.execute("SELECT id FROM priority_feedback").fetchall()
+    assert feedback_rows
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
+
+    assert "📈 Качество автоприоритизации" in sent[-1]
+    assert "Коррекций: 1" in sent[-1]
+    assert "Surprise rate:" in sent[-1]
+    assert "Переходы:" in sent[-1]
+    assert "Можно доверять автоприоритизации:" in sent[-1]
+
+
+def test_stats_command_handles_analytics_failures_without_crash(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("analytics unavailable")
+
+    monkeypatch.setattr(processor.analytics, "weekly_accuracy_report", _boom)
+    monkeypatch.setattr(processor.analytics, "weekly_calibration_proposals", _boom)
+    monkeypatch.setattr(
+        "mailbot_v26.telegram.inbound.compute_priority_calibration_report",
+        _boom,
+    )
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
+
     assert sent[-1] == (
-        "📊 Letterbot — неделя\n"
-        "Писем: 1 · Важных: 1 · Низких: 0\n"
-        "Коррекций: 1 · Точность: 100%\n"
-        "Обязательств открыто: 1"
+        "📈 Качество автоприоритизации\n"
+        "Коррекций: 0\n"
+        "Surprise rate: н/д\n"
+        "Переходы: нет данных\n"
+        "Пока данных мало — делаем выводы вручную."
     )
 
 
@@ -596,6 +659,7 @@ def test_help_contains_support_command(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/help"})
 
     assert "/support — поддержать проект" in sent[-1]
+    assert "/stats — качество автоприоритизации" in sent[-1]
 
 
 def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
