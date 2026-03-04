@@ -841,6 +841,7 @@ class MessageDecision:
     amount: str
     due_date: str
     confidence: float
+    context: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -2013,6 +2014,11 @@ def _build_premium_clarity_text(
         mail_type=mail_type,
     )
     message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
+    context = _detect_conversation_context(
+        subject=subject,
+        body_text=" ".join(part for part in (body_summary, body_text) if part),
+        message_facts=message_facts,
+    )
     fact_evidence = " ".join(
         str(value)
         for value in (
@@ -2041,6 +2047,7 @@ def _build_premium_clarity_text(
         subject=subject,
         body_text=body_text,
         attachments=attachments,
+        context=context,
     )
     short_action = decision.action
     body_summary = decision.summary
@@ -2315,6 +2322,18 @@ _FACT_DECISION_SIGNAL_MARKERS = {
     "contract": _FACT_CONTRACT_MARKERS,
     "incident": _FACT_INCIDENT_MARKERS,
 }
+_CONTEXT_REPLY_SUBJECT_MARKERS = ("re:", "ответ:", "reply:")
+_CONTEXT_FORWARD_SUBJECT_MARKERS = ("fw:", "fwd:", "переслано:")
+_CONTEXT_CONFIRMATION_MARKERS = (
+    "оплатили",
+    "подтверждаем",
+    "согласовано",
+    "получено",
+    "спасибо",
+)
+_CONTEXT_DISCUSSION_MARKERS = ("исправили", "обновили", "комментарий", "правка", "правки")
+_PAYMENT_ACTION_MARKERS = ("оплат", "payment", "pay")
+_CONTRACT_FINAL_ACTION_MARKERS = ("подпис", "соглас", "утверд", "заключ")
 _FACT_CURRENCY_RE = re.compile(r"(руб\.?|₽|usd|\$|eur|€)", re.IGNORECASE)
 _FACT_MAX_AMOUNT = 10_000_000_000
 
@@ -2496,6 +2515,27 @@ def _collect_message_facts(
         "incident_signal": incident_signal,
         "attachment_facts": attachment_facts,
     }
+
+
+def _detect_conversation_context(
+    *,
+    subject: str,
+    body_text: str,
+    message_facts: dict[str, Any],
+) -> str:
+    normalized_subject = (subject or "").strip().lower()
+    normalized_body = (body_text or "").strip().lower()
+    if any(marker in normalized_body for marker in _CONTEXT_CONFIRMATION_MARKERS):
+        return "CONFIRMATION"
+    if any(marker in normalized_body for marker in _CONTEXT_DISCUSSION_MARKERS):
+        return "DISCUSSION"
+    if any(normalized_subject.startswith(marker) for marker in _CONTEXT_FORWARD_SUBJECT_MARKERS):
+        return "FORWARD"
+    if any(normalized_subject.startswith(marker) for marker in _CONTEXT_REPLY_SUBJECT_MARKERS):
+        return "REPLY"
+    if message_facts.get("contract_signal") and any(token in normalized_body for token in ("правк", "коммент", "обсуд")):
+        return "DISCUSSION"
+    return "NEW_MESSAGE"
 
 
 def _normalize_summary_text(summary: str) -> str:
@@ -3095,6 +3135,11 @@ def _build_heuristic_llm_result(
         mail_type="",
     )
     message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
+    context = _detect_conversation_context(
+        subject=subject,
+        body_text=body_text,
+        message_facts=message_facts,
+    )
     action_line = _build_heuristic_action_line(priority=priority, message_facts=message_facts)
     summary = _build_heuristic_summary(
         subject=subject,
@@ -3110,6 +3155,7 @@ def _build_heuristic_llm_result(
         subject=subject,
         body_text=body_text,
         attachments=attachments,
+        context=context,
     )
     return SimpleNamespace(
         priority=decision.priority,
@@ -3191,6 +3237,7 @@ def _build_message_decision(
     subject: str = "",
     body_text: str = "",
     attachments: list[dict[str, Any]] | None = None,
+    context: str = "NEW_MESSAGE",
 ) -> MessageDecision:
     doc_kind = str(message_facts.get("doc_kind") or "")
     confidence = _compute_decision_confidence(
@@ -3212,6 +3259,18 @@ def _build_message_decision(
     payment_action_hits = _count_marker_hits((action_line or "").lower(), ("оплат", "счет", "счёт", "invoice"))
     if doc_kind == "invoice" and confidence < 0.45 and resolved_action == "Оплатить" and payment_action_hits < 2:
         resolved_action = "Проверить"
+    if (
+        context == "CONFIRMATION"
+        and message_facts.get("invoice_signal")
+        and any(marker in resolved_action.lower() for marker in _PAYMENT_ACTION_MARKERS)
+    ):
+        resolved_action = "Зафиксировать"
+    if (
+        context == "DISCUSSION"
+        and message_facts.get("contract_signal")
+        and any(marker in resolved_action.lower() for marker in _CONTRACT_FINAL_ACTION_MARKERS)
+    ):
+        resolved_action = "Обсудить правки"
 
     resolved_summary = summary
     if doc_kind == "invoice":
@@ -3232,6 +3291,7 @@ def _build_message_decision(
         amount=str(message_facts.get("amount") or ""),
         due_date=str(message_facts.get("due_date") or ""),
         confidence=confidence,
+        context=context,
     )
 
 
@@ -5209,6 +5269,11 @@ def process_message(
             mail_type=mail_type or "",
         )
         message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
+        context = _detect_conversation_context(
+            subject=subject,
+            body_text=" ".join(part for part in (body_summary, body_text) if part),
+            message_facts=message_facts,
+        )
         decision = _build_message_decision(
             priority=priority,
             action_line=action_line,
@@ -5217,6 +5282,7 @@ def process_message(
             subject=subject,
             body_text=body_text,
             attachments=attachments,
+            context=context,
         )
         action_line = decision.action
         body_summary = decision.summary
