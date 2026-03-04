@@ -15,6 +15,7 @@ from mailbot_v26.pipeline.processor import (
     _build_message_decision,
     _build_heuristic_summary,
     _collect_message_facts,
+    _detect_conversation_context,
     _maybe_drop_duplicate_subject_line,
     _validate_message_facts,
 )
@@ -881,3 +882,108 @@ def test_valid_invoice_facts_preserved() -> None:
     assert validated["amount"]
     assert validated["due_date"] == "15.04.2026"
     assert validated["doc_number"] == "445"
+
+
+def test_reply_payment_confirmation_not_pay_action() -> None:
+    facts = _collect_message_facts(
+        subject="RE: счет",
+        body_text="оплатили вчера",
+        attachments=[],
+        mail_type="INVOICE",
+    )
+    facts = _validate_message_facts(facts, evidence_text="RE: счет оплатили вчера")
+    context = _detect_conversation_context(subject="RE: счет", body_text="оплатили вчера", message_facts=facts)
+
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Оплатить",
+        summary="",
+        message_facts=facts,
+        subject="RE: счет",
+        body_text="оплатили вчера",
+        attachments=[],
+        context=context,
+    )
+
+    assert context == "CONFIRMATION"
+    assert decision.context == "CONFIRMATION"
+    assert "оплат" not in decision.action.lower()
+
+
+def test_forward_contract_discussion_not_final_action() -> None:
+    facts = _collect_message_facts(
+        subject="FW: договор",
+        body_text="вот правка, комментарий по пункту 4",
+        attachments=[],
+        mail_type="CONTRACT",
+    )
+    facts = _validate_message_facts(facts, evidence_text="FW: договор вот правка")
+    context = _detect_conversation_context(
+        subject="FW: договор",
+        body_text="вот правка, комментарий по пункту 4",
+        message_facts=facts,
+    )
+
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Согласовать договор",
+        summary="",
+        message_facts=facts,
+        subject="FW: договор",
+        body_text="вот правка, комментарий по пункту 4",
+        attachments=[],
+        context=context,
+    )
+
+    assert context == "DISCUSSION"
+    assert decision.context == "DISCUSSION"
+    assert "соглас" not in decision.action.lower()
+
+
+def test_new_invoice_keeps_pay_action() -> None:
+    facts = _collect_message_facts(
+        subject="новый счет",
+        body_text="к оплате 87 500 руб до 15.04.2026",
+        attachments=[],
+        mail_type="INVOICE",
+    )
+    facts = _validate_message_facts(facts, evidence_text="новый счет к оплате 87 500 руб")
+    context = _detect_conversation_context(
+        subject="новый счет",
+        body_text="к оплате 87 500 руб до 15.04.2026",
+        message_facts=facts,
+    )
+
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Оплатить",
+        summary="",
+        message_facts=facts,
+        subject="новый счет",
+        body_text="к оплате 87 500 руб до 15.04.2026",
+        attachments=[],
+        context=context,
+    )
+
+    assert context == "NEW_MESSAGE"
+    assert decision.action == "Оплатить"
+
+
+def test_context_detection_reply() -> None:
+    context = _detect_conversation_context(
+        subject="RE: Счет №123",
+        body_text="Просьба подтвердить",
+        message_facts={"invoice_signal": True},
+    )
+
+    assert context == "REPLY"
+
+
+def test_context_detection_forward() -> None:
+    context = _detect_conversation_context(
+        subject="FW: договор",
+        body_text="посмотрите пункт 4",
+        message_facts={"contract_signal": True},
+    )
+
+    assert context == "FORWARD"

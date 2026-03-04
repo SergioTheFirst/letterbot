@@ -183,16 +183,17 @@ Done:
 - 2026-03-04: message-understanding hardening in processor/tg path — added unified message-fact helper (body + attachment text/facts) for action/priority/fallback bridging, improved heuristic no-LLM action+summary from attachment evidence, and enabled invoice attachment insight even when mail_type is unknown; added targeted regressions (invoice body-only, invoice attachment-only, contract signature, attachment-derived priority, fallback summary from attachments, direct LLM path guard) and full pytest green (1020 passed).
 - 2026-03-04: unified decision layer added in processor for priority/action/summary/doc facts consistency (MessageDecision internal object + guards), telegram attachment insight now consumes decision facts, and regressions added for invoice/incident consistency + summary/attachment-facts usage; full pytest green (1025 passed).
 - 2026-03-04: added processor fact-validation layer after message-fact collection (amount range/table-number guards, due-date year window guard, doc-number sanity + amount collision guard, currency-context penalty feeding decision confidence), added focused pipeline regressions, and full pytest green (1033 passed).
+- 2026-03-04: added deterministic conversation context layer in processor (`NEW_MESSAGE`/`REPLY`/`FORWARD`/`CONFIRMATION`/`DISCUSSION`) after fact validation, threaded context into `MessageDecision`, and added action safety guards (invoice confirmations never keep pay-action; contract discussions avoid final-approval actions); added targeted context regressions and full pytest green (1038 passed).
 Now:
-- Message-fact validation layer is active for amount/due-date/doc-number sanity and amount confidence penalization on missing currency context.
-- Full test suite green after fact-validation changes (1033 passed).
+- Conversation context detection is active after message-fact validation and feeds `MessageDecision.context` plus action safety correction rules.
+- Full test suite green after context-layer changes (1038 passed).
 Next:
-- Collect product feedback on validation thresholds (amount table-number heuristic, due-date horizon, doc-number bounds) before tuning confidence penalties.
+- Collect product feedback on context keyword thresholds (confirmation/discussion markers) and safe-action wording before any tuning.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/tests/test_pipeline_processor.py
 - CONTINUITY.md
-- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "validate_amount_filters_table_numbers or validate_due_date_range or validate_doc_number_reasonable_length or valid_invoice_facts_preserved"
+- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "reply_payment_confirmation_not_pay_action or forward_contract_discussion_not_final_action or new_invoice_keeps_pay_action or context_detection_reply or context_detection_forward"
 - python -m pytest -q
