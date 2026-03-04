@@ -7,6 +7,7 @@ from mailbot_v26.telegram.decision_trace_ui import (
     build_email_actions_keyboard,
 )
 from mailbot_v26.telegram.inbound import parse_callback_data
+from mailbot_v26.telegram.keyboard import build_priority_keyboard
 
 
 def test_priority_keyboard_callback_data_length() -> None:
@@ -87,3 +88,15 @@ def test_initial_keyboard_no_back_button() -> None:
 def test_prio_menu_keeps_back_button() -> None:
     keyboard = build_email_actions_keyboard(email_id=1, expanded=False, prio_menu=True)
     assert keyboard["inline_keyboard"][1][0]["text"] == "Назад"
+
+def test_build_priority_keyboard_has_mb_prio_callbacks() -> None:
+    keyboard = build_priority_keyboard(123)
+    callback_data = [
+        button["callback_data"]
+        for row in keyboard.get("inline_keyboard", [])
+        for button in row
+    ]
+    assert "mb:prio:123:R" in callback_data
+    assert "mb:prio:123:Y" in callback_data
+    assert "mb:prio:123:B" in callback_data
+

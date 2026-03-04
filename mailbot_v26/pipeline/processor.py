@@ -135,7 +135,7 @@ from mailbot_v26.priority.priority_engine_v2 import (
     PriorityResultV2,
     VipSenderMatcher,
 )
-from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
+from mailbot_v26.telegram.keyboard import build_priority_keyboard
 from mailbot_v26.text.clean_email import clean_email_body
 from .attention_gate import (
     AttentionGateInput,
@@ -2573,13 +2573,7 @@ def build_telegram_payload(
         html_text=telegram_text,
         priority=context.priority,
         metadata=metadata,
-        reply_markup=build_email_actions_keyboard(
-            email_id=context.email_id,
-            expanded=False,
-            prio_menu=False,
-            initial_prio=True,
-            show_decision_trace=load_telegram_ui_config().show_decision_trace,
-        ),
+        reply_markup=build_priority_keyboard(context.email_id),
     )
     assert "Сделать:" not in payload.html_text
     return payload, render_mode, payload_invalid
