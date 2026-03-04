@@ -2755,6 +2755,57 @@ def create_app(
     def cockpit_redirect():
         return redirect(url_for("index"))
 
+    @app.route("/dashboard")
+    def dashboard_page():
+        dashboard_vars = _dashboard_vars()
+        account_emails = _resolve_account_scope(dashboard_vars)
+        window_days = dashboard_vars.window_days or 7
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
+        )
+        mode = _resolve_cockpit_mode(request, session)
+        analytics = _analytics()
+        primary_account = account_emails[0] if account_emails else ""
+        quality_summary = _home_quality_summary(
+            analytics=analytics,
+            db_path=app.config["DB_PATH"],
+            account_email=primary_account,
+            account_emails=account_emails,
+            window_days=window_days,
+        )
+        status_strip = _status_strip_view(None, now_ts=time.time())
+        share_params: dict[str, str] = {}
+        if account_emails:
+            share_params["account_emails"] = ",".join(account_emails)
+        if window_days:
+            share_params["window_days"] = str(window_days)
+        if dashboard_vars.limit:
+            share_params["limit"] = str(dashboard_vars.limit)
+        if reveal_pii:
+            share_params["pii"] = "1"
+        if mode:
+            share_params["mode"] = mode
+        share_url = url_for("dashboard_page", **share_params)
+
+        return _render_template(
+            app,
+            "dashboard.html",
+            title=app.config["APP_TITLE"],
+            page_title="Live Dashboard",
+            dashboard_vars=dashboard_vars,
+            account_email=primary_account,
+            window_days=window_days,
+            lane="all",
+            status_strip=status_strip,
+            pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
+            pii_enabled=reveal_pii,
+            cockpit_mode=mode,
+            quality_summary=quality_summary,
+            support_methods=app.config["SUPPORT_SETTINGS"].methods[:1],
+            status_refresh_ms=STATUS_STRIP_REFRESH_MS,
+            share_url=share_url,
+        )
+
     @app.route("/l")
     def legacy_home_redirect():
         return redirect(url_for("index"))
