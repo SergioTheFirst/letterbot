@@ -170,15 +170,15 @@ Done:
 - 2026-03-04: PR4A cockpit polish — simplified top nav to Cockpit/Archive/Health/Events/Doctor(+conditional Support), repacked `/` cockpit into calmer two-column home (attention + digests + system state + compact quality + support + useful links), added defensive home-only `quality_summary` in `index()`, and expanded web cockpit tests; full pytest green (981 passed).
 - 2026-03-04: PR4B web surfaces polish — refined existing Archive/Health/Events/Doctor templates for calmer UX, improved safe empty states and compact explanatory copy, kept engineer-only blocks mode-gated, added CSS panel/readability polish, and expanded web UI behavior tests; full pytest green (987 passed).
 - 2026-03-04: PR5 safe cleanup — removed duplicate root config template (`config.yaml.example`) in favor of canonical `config.example.yaml`, removed stale root `patch.diff` artifact, expanded `.gitignore` runtime-artifact guards (`*.sqlite3`, `*.db`, `runtime/logs/`), and verified no behavior changes with full pytest green (993 passed).
+- 2026-03-04: processor pipeline hardening — cold-start percentile path now allows LLM candidate when prior history is insufficient (with explicit info marker), heuristic attachment summaries consume extracted attachment text/facts, priority signal text now includes bounded attachment content facts, and MessageProcessor short-action selection now uses subject+body+attachment text with incident/promo guardrails; targeted regressions added.
 Now:
-- PR UX hotfix for Telegram priority correction completed locally (in-place edit, no ack spam), full test suite green; preparing commit + PR.
+- Processor pipeline fixes implemented and verified locally (targeted + full pytest green); preparing commit + PR metadata.
 Next:
-- Await reviewer validation in production Telegram chat for callback edit behavior across existing messages.
+- Await reviewer validation for cold-start LLM gate behavior and invoice attachment prioritization in production traffic.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/telegram/inbound.py
-- mailbot_v26/tests/test_telegram_inbound.py
-- priority_feedback (SQLite table, unchanged schema/usage)
-- events_v1 (priority_correction_recorded path, unchanged semantics)
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/tests/test_pipeline_processor.py
+- mailbot_v26/tests/test_budget_percentile_anchor.py
 - CONTINUITY.md
