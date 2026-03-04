@@ -19,6 +19,7 @@ from mailbot_v26.pipeline.processor import (
     _detect_conversation_context,
     _maybe_drop_duplicate_subject_line,
     _soften_duplicate_action,
+    _score_message_facts,
     _validate_message_facts,
 )
 
@@ -830,6 +831,55 @@ def test_summary_uses_decision_facts() -> None:
     assert "87 500" in summary
     assert "15.04.2026" in summary
 
+
+
+
+def test_amount_scoring_prefers_total_keyword() -> None:
+    facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}
+
+    scored = _score_message_facts(
+        facts,
+        evidence_text="91000 строка 87500 итого 87500 руб",
+        attachment_text="",
+    )
+
+    assert scored["amount"] == "87500 руб"
+
+
+def test_amount_scoring_prefers_currency_context() -> None:
+    facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}
+
+    scored = _score_message_facts(
+        facts,
+        evidence_text="сумма 91000 и к оплате 87500 usd",
+        attachment_text="",
+    )
+
+    assert scored["amount"] == "87500"
+
+
+def test_amount_scoring_ignores_table_row_number() -> None:
+    facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}
+
+    scored = _score_message_facts(
+        facts,
+        evidence_text="строка 87500 итоговый платеж 95000 руб",
+        attachment_text="",
+    )
+
+    assert scored["amount"] == "95000 руб"
+
+
+def test_amount_scoring_attachment_context() -> None:
+    facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}
+
+    scored = _score_message_facts(
+        facts,
+        evidence_text="в письме 91000, во вложении amount due 87500 usd",
+        attachment_text="amount due 87500 usd",
+    )
+
+    assert scored["amount"] == "87500"
 
 def test_validate_amount_filters_table_numbers() -> None:
     facts = {

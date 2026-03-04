@@ -185,17 +185,17 @@ Done:
 - 2026-03-04: added processor fact-validation layer after message-fact collection (amount range/table-number guards, due-date year window guard, doc-number sanity + amount collision guard, currency-context penalty feeding decision confidence), added focused pipeline regressions, and full pytest green (1033 passed).
 - 2026-03-04: added deterministic conversation context layer in processor (`NEW_MESSAGE`/`REPLY`/`FORWARD`/`CONFIRMATION`/`DISCUSSION`) after fact validation, threaded context into `MessageDecision`, and added action safety guards (invoice confirmations never keep pay-action; contract discussions avoid final-approval actions); added targeted context regressions and full pytest green (1038 passed).
 - 2026-03-04: added deterministic document-identity layer after decision stage in processor (`_build_document_identity` + events-store duplicate lookup) to flag invoice thread duplicates (`DOCUMENT_DUPLICATE`) and soften duplicate actions to "Зафиксировать" for non-new-message contexts; added targeted pipeline identity tests; full pytest green (1042 passed).
+- 2026-03-04: added deterministic evidence scoring layer for amount facts in processor (`_score_amount_candidate` + `_score_message_facts`) after fact validation, scoring candidates by total/amount-due keywords, currency/date proximity, attachment context bonus, and table-row penalty; wired into all processor fact-validation paths, added targeted amount scoring regressions, and full pytest green (1046 passed).
 Now:
-- Document identity detection is active after decision stage for invoice-like documents, using existing `events` storage to detect duplicates and mark status as `DOCUMENT_DUPLICATE`.
-- Duplicate invoice replies/forwards now soften action to "Зафиксировать" instead of repeating payment action.
-- Full test suite green after document-identity changes (1042 passed).
+- Evidence scoring layer for amount facts is active after `_validate_message_facts`, selecting the highest-confidence amount candidate via deterministic context signals (keywords/currency/date/attachment/table-row penalty).
+- Full test suite green after evidence-scoring rollout (1046 passed).
 Next:
-- Collect product feedback on duplicate detection sensitivity (doc number vs fallback hash) and soft-action wording before tuning thresholds.
+- Collect product feedback on evidence weights/keyword coverage for multilingual invoice phrasing before threshold tuning.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/tests/test_pipeline_processor.py
 - CONTINUITY.md
-- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "document_identity_same_invoice_detected or document_identity_forward_detected or document_identity_new_invoice_not_duplicate or duplicate_softens_action"
+- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "amount_scoring or validate_amount_filters_table_numbers"
 - python -m pytest -q
