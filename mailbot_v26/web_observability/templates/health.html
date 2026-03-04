@@ -18,10 +18,10 @@
 
   <div class="health-grid">
     <div class="health-main stack">
-      <div class="card health-header" data-testid="health-header">
+      <div class="card health-header surface-panel" data-testid="health-header">
         <div class="section-title">
-          <h2>Status header</h2>
-          <div class="hint">System snapshot overview</div>
+          <h2>System health</h2>
+          <div class="hint">Snapshot summary for current operating mode.</div>
         </div>
         <div class="health-header-body">
           <div>
@@ -44,10 +44,10 @@
     </div>
 
     <div class="health-side stack">
-      <div class="card">
+      <div class="card surface-panel">
         <div class="section-title">
           <h2>Golden signals</h2>
-          <div class="hint">Windowed health indicators</div>
+          <div class="hint">Key indicators across the selected scope.</div>
         </div>
         {% if health_signals %}
         <div class="signal-grid health-signal-grid">
@@ -65,14 +65,14 @@
           </div>
         </div>
         {% else %}
-        <div class="hint">Adjust scope to load health indicators.</div>
+        <div class="hint">Health indicators are not available for this scope yet.</div>
         {% endif %}
       </div>
 
-      <div class="card" data-testid="health-trend">
+      <div class="card surface-panel" data-testid="health-trend">
         <div class="section-title">
-          <h2>Status trend</h2>
-          <div class="hint">Recent snapshots</div>
+          <h2>Incidents & trend</h2>
+          <div class="hint">Recent snapshots and mode transitions.</div>
         </div>
         {% if health_trend %}
         <div class="table-scroll">
@@ -100,7 +100,7 @@
           </table>
         </div>
         {% else %}
-        <div class="hint">Awaiting health snapshots for this scope.</div>
+        <div class="hint">No incidents or trend data found for this filter set.</div>
         {% endif %}
       </div>
     </div>

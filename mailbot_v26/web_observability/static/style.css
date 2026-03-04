@@ -1434,3 +1434,79 @@ small {
     white-space: normal;
   }
 }
+
+.surface-panel {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+}
+
+.section-title.compact {
+  margin-bottom: 10px;
+}
+
+.archive-filters .filter-meta,
+.events-filters .filter-meta {
+  align-self: flex-end;
+}
+
+.empty-state {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+}
+
+.events-filters .filter-hint {
+  width: 100%;
+  margin-top: 2px;
+}
+
+.event-group[open] {
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.event-group-title strong {
+  font-size: 15px;
+}
+
+.doctor-card {
+  display: grid;
+  gap: 14px;
+}
+
+.doctor-meta-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.doctor-meta-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.doctor-meta-item .label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.doctor-meta-item .value {
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.doctor-export-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .surface-panel {
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(2, 6, 23, 0.92));
+    border-color: rgba(148, 163, 184, 0.32);
+  }
+}

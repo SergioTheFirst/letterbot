@@ -274,3 +274,34 @@ def test_events_narrative_pagination_stable(tmp_path: Path, monkeypatch: pytest.
         page_two_text = page_two.get_data(as_text=True)
         assert "Email 122" in page_one_text
         assert "Email 101" in page_two_text
+
+
+def test_events_page_renders_grouped_cards(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    app = _build_app(tmp_path)
+    monkeypatch.setattr(
+        "mailbot_v26.storage.analytics.KnowledgeAnalytics._window_start_ts",
+        lambda self, days: 0.0,
+    )
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        page = client.get("/events", query_string={"account_emails": "primary@example.com"})
+        body = page.get_data(as_text=True)
+        assert page.status_code == 200
+        assert "Grouped timeline keeps related events together for easier review." in body
+        assert "Entries" in body
+        assert "Window" in body
+
+
+def test_events_empty_state_safe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    app = _build_app(tmp_path)
+    monkeypatch.setattr(
+        "mailbot_v26.storage.analytics.KnowledgeAnalytics._window_start_ts",
+        lambda self, days: 0.0,
+    )
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        page = client.get("/events", query_string={"account_emails": "missing@example.com"})
+        body = page.get_data(as_text=True)
+        assert page.status_code == 200
+        assert "No events found." in body
+        assert "Try a wider window or include more accounts." in body

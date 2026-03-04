@@ -6,7 +6,11 @@
   </div>
 {% endblock %}
 {% block content %}
-  <div class="card filters">
+  <div class="card filters surface-panel archive-filters">
+    <div class="section-title compact">
+      <h2>Archive</h2>
+      <div class="hint">Review recent email outcomes with stable filters.</div>
+    </div>
     <form method="get" action="{{ url_for('archive') }}" class="filters-form">
       <div class="filter-group">
         <label for="account_emails">Account scope</label>
@@ -101,7 +105,10 @@
     </table>
   </div>
   {% else %}
-  <div class="empty-state card">Archive entries are not available for this filter set.</div>
+  <div class="empty-state card">
+    <strong>No archive entries found.</strong>
+    <div class="hint">Try a wider window or remove account/status filters.</div>
+  </div>
   {% endif %}
 
   <div class="pagination">
