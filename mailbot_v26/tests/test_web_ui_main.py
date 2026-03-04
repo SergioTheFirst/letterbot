@@ -234,3 +234,45 @@ host=h
 
     assert captured["password"] == ""
     assert "web_ui_password_not_configured_using_empty_password" in caplog.text
+
+
+def test_web_main_passes_local_smoke_bypass_from_ini(monkeypatch, tmp_path: Path, caplog) -> None:
+    (tmp_path / "settings.ini").write_text("""[web]
+host=127.0.0.1
+port=8787
+[web_ui]
+password=ini-pass
+allow_local_smoke_bypass=true
+""", encoding="utf-8")
+    (tmp_path / "accounts.ini").write_text("""[acc]
+login=u
+password=p
+host=h
+""", encoding="utf-8")
+
+    monkeypatch.delenv("WEB_PASSWORD", raising=False)
+    monkeypatch.setattr(web_app, "require_runtime_for", lambda _mode: None)
+    monkeypatch.setattr(web_app, "_resolve_yaml_config_path", lambda _path, _config_dir: tmp_path / "config.yaml")
+    monkeypatch.setattr(
+        web_app,
+        "_load_web_ui_settings",
+        lambda _path: web_app.WebUISettings(True, "127.0.0.1", 8787, "yaml-pass", "", False, [], False, False),
+    )
+    monkeypatch.setattr(web_app, "_load_support_settings", lambda _path: web_app.SupportSettings(False, False, []))
+    monkeypatch.setattr(web_app, "_load_web_ui_secrets", lambda _config_dir: ("secret", 1.0))
+    monkeypatch.setattr(web_app, "load_storage_config", lambda _config_dir: type("S", (), {"db_path": tmp_path / "db.sqlite"})())
+
+    captured: dict[str, object] = {}
+
+    class DummyApp:
+        def run(self, **_kwargs) -> None:
+            return
+
+    monkeypatch.setattr(web_app, "create_app", lambda **kwargs: captured.update(kwargs) or DummyApp())
+    monkeypatch.setattr(sys, "argv", ["web_app", "--config", str(tmp_path)])
+
+    with caplog.at_level("WARNING"):
+        web_app.main()
+
+    assert captured["allow_local_smoke_bypass"] is True
+    assert "WEB_UI_LOCAL_SMOKE_BYPASS_ACTIVE" in caplog.text

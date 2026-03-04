@@ -118,6 +118,7 @@ class WebUISettings:
     allow_cidrs: list[str]
     prod_server: bool
     require_strong_password_on_lan: bool
+    allow_local_smoke_bypass: bool = False
 
 
 @dataclass(frozen=True)
@@ -1006,6 +1007,7 @@ def _load_web_ui_settings(config_path: Path | None) -> WebUISettings:
             allow_cidrs=[],
             prod_server=False,
             require_strong_password_on_lan=True,
+            allow_local_smoke_bypass=False,
         )
 
     if config_path is None or not config_path.exists():
@@ -1036,6 +1038,7 @@ def _load_web_ui_settings(config_path: Path | None) -> WebUISettings:
     allow_cidrs = web_ui.get("allow_cidrs") or []
     prod_server = bool(web_ui.get("prod_server", False))
     require_strong_password_on_lan = bool(web_ui.get("require_strong_password_on_lan", True))
+    allow_local_smoke_bypass = bool(web_ui.get("allow_local_smoke_bypass", False))
     if not isinstance(allow_cidrs, list):
         allow_cidrs = []
     return WebUISettings(
@@ -1048,7 +1051,23 @@ def _load_web_ui_settings(config_path: Path | None) -> WebUISettings:
         allow_cidrs=[str(item) for item in allow_cidrs],
         prod_server=prod_server,
         require_strong_password_on_lan=require_strong_password_on_lan,
+        allow_local_smoke_bypass=allow_local_smoke_bypass,
     )
+
+
+def _load_local_smoke_bypass_from_ini(config_dir: Path) -> bool:
+    parser = configparser.ConfigParser()
+    for candidate in (config_dir / "settings.ini", config_dir / "config.ini"):
+        if not candidate.exists():
+            continue
+        try:
+            parser.read(candidate, encoding="utf-8")
+        except (OSError, configparser.Error) as exc:
+            logger.warning("web_ui_smoke_bypass_read_failed path=%s error=%s", candidate, exc)
+            continue
+        if parser.has_section("web_ui"):
+            return parser.getboolean("web_ui", "allow_local_smoke_bypass", fallback=False)
+    return False
 
 
 def _resolve_login_next_target(next_path: str | None) -> str:
@@ -2059,6 +2078,63 @@ def _request_remote_addr() -> str | None:
     return str(remote_addr)
 
 
+def _extract_forwarded_ip() -> str | None:
+    try:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+    except Exception:
+        forwarded = ""
+    if forwarded:
+        first = str(forwarded).split(",", 1)[0].strip()
+        if first:
+            return first
+    try:
+        real_ip = request.headers.get("X-Real-IP", "")
+    except Exception:
+        real_ip = ""
+    real_ip = str(real_ip).strip()
+    return real_ip or None
+
+
+def _trusted_forwarded_loopback_ip(remote_addr: str | None, bind_address: str) -> str | None:
+    forwarded_ip = _extract_forwarded_ip()
+    if not forwarded_ip:
+        return None
+    try:
+        forwarded = ipaddress.ip_address(forwarded_ip)
+    except ValueError:
+        return None
+    if not forwarded.is_loopback:
+        return None
+    if _is_loopback(remote_addr):
+        return str(forwarded)
+    try:
+        remote = ipaddress.ip_address(str(remote_addr or ""))
+    except ValueError:
+        return None
+    if _is_loopback_bind(bind_address) and remote.is_private:
+        return str(forwarded)
+    return None
+
+
+def _local_smoke_bypass_allowed(app: Flask, remote_addr: str | None) -> bool:
+    if not bool(app.config.get("WEB_UI_ALLOW_LOCAL_SMOKE_BYPASS", False)):
+        return False
+    if _is_loopback(remote_addr):
+        return True
+    forwarded_loopback = _trusted_forwarded_loopback_ip(
+        remote_addr,
+        str(app.config.get("WEB_UI_BIND", "127.0.0.1")),
+    )
+    if forwarded_loopback:
+        logger.info(
+            "WEB_UI_LOCAL_SMOKE_BYPASS request_remote=%s forwarded_loopback=%s",
+            remote_addr,
+            forwarded_loopback,
+        )
+        return True
+    return False
+
+
 def _ensure_authenticated() -> bool:
     return bool(session.get("authenticated"))
 
@@ -2214,6 +2290,7 @@ def create_app(
     dist_root: Path | None = None,
     web_ui_bind: str = "127.0.0.1",
     web_ui_port: int = 8080,
+    allow_local_smoke_bypass: bool = False,
     support_settings: SupportSettings | None = None,
 ) -> Flask:
     app = Flask(
@@ -2249,6 +2326,7 @@ def create_app(
     app.config["DOCTOR_DIST_ROOT"] = Path(dist_root) if dist_root else Path.cwd()
     app.config["WEB_UI_BIND"] = str(web_ui_bind)
     app.config["WEB_UI_PORT"] = int(web_ui_port)
+    app.config["WEB_UI_ALLOW_LOCAL_SMOKE_BYPASS"] = bool(allow_local_smoke_bypass)
     app.config["ANALYTICS_FACTORY"] = lambda: KnowledgeAnalytics(
         app.config["DB_PATH"], read_only=True
     )
@@ -2263,6 +2341,8 @@ def create_app(
     @app.before_request
     def _require_login():
         remote_addr = _request_remote_addr()
+        if _local_smoke_bypass_allowed(app, remote_addr):
+            return None
         if not _ip_allowed(remote_addr, app.config.get("WEB_UI_ALLOWED_CIDRS", [])):
             return Response("Forbidden", status=403)
         open_paths = {"login", "static"}
@@ -4702,6 +4782,9 @@ def main() -> None:
         raise RuntimeError("web_ui.enabled=false: refusing to start Web UI")
 
     web_runtime = load_web_config(config_dir)
+    local_smoke_bypass_enabled = _load_local_smoke_bypass_from_ini(config_dir)
+    if local_smoke_bypass_enabled:
+        logger.warning("WEB_UI_LOCAL_SMOKE_BYPASS_ACTIVE allow_local_smoke_bypass=true")
 
     bind_address = args.bind or web_runtime.host or web_ui.bind or "127.0.0.1"
     port = args.port or web_runtime.port or web_ui.port or 8787
@@ -4763,6 +4846,7 @@ def main() -> None:
         dist_root=project_root,
         web_ui_bind=bind_address,
         web_ui_port=int(port),
+        allow_local_smoke_bypass=local_smoke_bypass_enabled,
         support_settings=support_settings,
     )
     try:

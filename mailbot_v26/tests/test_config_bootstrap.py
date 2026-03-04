@@ -138,6 +138,7 @@ def test_settings_example_parses_as_ints_and_booleans() -> None:
     assert parser.getint("trust_bootstrap", "templates_min_corrections") == 10
     assert parser.getboolean("telegram_ui", "show_decision_trace") is False
     assert parser.get("web_ui", "password") == "1"
+    assert parser.getboolean("web_ui", "allow_local_smoke_bypass") is False
 
 
 def test_settings_example_contains_runtime_sections_and_no_inline_comments() -> None:
