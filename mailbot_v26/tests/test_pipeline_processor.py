@@ -13,10 +13,12 @@ from mailbot_v26.pipeline.processor import (
     _build_heuristic_attachment_summaries,
     _build_priority_signal_text,
     _build_message_decision,
+    _build_document_identity,
     _build_heuristic_summary,
     _collect_message_facts,
     _detect_conversation_context,
     _maybe_drop_duplicate_subject_line,
+    _soften_duplicate_action,
     _validate_message_facts,
 )
 
@@ -987,3 +989,56 @@ def test_context_detection_forward() -> None:
     )
 
     assert context == "FORWARD"
+
+def test_document_identity_same_invoice_detected() -> None:
+    facts = {"doc_kind": "invoice", "doc_number": "123", "amount": "87 500"}
+
+    first_id = _build_document_identity(
+        message_facts=facts,
+        sender_email="vendor@example.com",
+        subject="Счет №123",
+    )
+    second_id = _build_document_identity(
+        message_facts=facts,
+        sender_email="vendor@example.com",
+        subject="Счет №123",
+    )
+
+    assert first_id == second_id
+
+
+def test_document_identity_forward_detected() -> None:
+    facts = {"doc_kind": "invoice", "doc_number": "123", "amount": "87 500"}
+
+    base_id = _build_document_identity(
+        message_facts=facts,
+        sender_email="vendor@example.com",
+        subject="Счет №123",
+    )
+    forward_id = _build_document_identity(
+        message_facts=facts,
+        sender_email="vendor@example.com",
+        subject="FW: Счет №123",
+    )
+
+    assert forward_id == base_id
+
+
+def test_document_identity_new_invoice_not_duplicate() -> None:
+    first_id = _build_document_identity(
+        message_facts={"doc_kind": "invoice", "doc_number": "123", "amount": "87 500"},
+        sender_email="vendor@example.com",
+        subject="Счет №123",
+    )
+    second_id = _build_document_identity(
+        message_facts={"doc_kind": "invoice", "doc_number": "124", "amount": "87 500"},
+        sender_email="vendor@example.com",
+        subject="Счет №124",
+    )
+
+    assert first_id != second_id
+
+
+def test_duplicate_softens_action() -> None:
+    assert _soften_duplicate_action("Оплатить") == "Зафиксировать"
+    assert _soften_duplicate_action("Проверить") == "Проверить"
