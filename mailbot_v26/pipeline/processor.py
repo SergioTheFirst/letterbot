@@ -2015,6 +2015,11 @@ def _build_premium_clarity_text(
         mail_type=mail_type,
     )
     message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
+    message_facts = _score_message_facts(
+        message_facts,
+        evidence_text=fact_text,
+        attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+    )
     context = _detect_conversation_context(
         subject=subject,
         body_text=" ".join(part for part in (body_summary, body_text) if part),
@@ -2167,6 +2172,11 @@ def _build_telegram_text(
         mail_type=mail_type,
     )
     message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
+    message_facts = _score_message_facts(
+        message_facts,
+        evidence_text=fact_text,
+        attachment_text=" ".join(str(attachment.get("text") or "") for attachment in (attachments or [])),
+    )
     if attachment_summary is None:
         rendered = tg_renderer.render_telegram_message(
             priority=priority,
@@ -2265,6 +2275,11 @@ def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]
         mail_type="",
     )
     facts = _validate_message_facts(facts, evidence_text=fact_text)
+    facts = _score_message_facts(
+        facts,
+        evidence_text=fact_text,
+        attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+    )
     if facts["doc_kind"]:
         signals.append(str(facts["doc_kind"]))
     if facts["amount"]:
@@ -2446,6 +2461,83 @@ def _validate_message_facts(
                 validated["doc_number"] = ""
 
     return validated
+
+
+def _score_amount_candidate(
+    amount_value: str,
+    *,
+    context_text: str,
+    is_attachment_context: bool,
+) -> int:
+    score = 0
+    normalized_context = (context_text or "").lower()
+    if any(token in normalized_context for token in ("итого", "total", "к оплате", "amount due")):
+        score += 5
+    if _FACT_CURRENCY_RE.search(normalized_context):
+        score += 3
+    if _FACT_DATE_RE.search(normalized_context):
+        score += 2
+    if is_attachment_context:
+        score += 1
+    if any(token in normalized_context for token in ("строка", "row", "line")):
+        score -= 3
+    return score
+
+
+def _score_message_facts(
+    facts: dict[str, Any],
+    *,
+    evidence_text: str = "",
+    attachment_text: str = "",
+) -> dict[str, Any]:
+    scored = dict(facts)
+    source = str(evidence_text or "")
+    if not source.strip():
+        return scored
+
+    attachment_source = str(attachment_text or "")
+    best_amount = ""
+    best_score: int | None = None
+    best_currency_hit = False
+    lower_source = source.lower()
+    for match in _FACT_AMOUNT_RE.finditer(source):
+        candidate = " ".join(match.group(0).replace("\u00a0", " ").split())
+        candidate_digits = re.sub(r"[^0-9]", "", candidate)
+        if not candidate_digits:
+            continue
+        try:
+            candidate_int = int(candidate_digits)
+        except ValueError:
+            continue
+        plain_amount = re.fullmatch(r"\d+", candidate.replace(" ", "")) is not None
+        looks_like_table_row = plain_amount and len(candidate_digits) <= 4
+        if candidate_int <= 10 or candidate_int >= _FACT_MAX_AMOUNT or looks_like_table_row:
+            continue
+        context = lower_source[max(0, match.start() - 12) : match.end() + 12]
+        in_attachment = bool(attachment_source) and candidate in attachment_source
+        candidate_score = _score_amount_candidate(
+            candidate,
+            context_text=context,
+            is_attachment_context=in_attachment,
+        )
+        candidate_currency_hit = bool(_FACT_CURRENCY_RE.search(match.group(0)))
+        if best_score is None or candidate_score > best_score:
+            best_amount = candidate
+            best_score = candidate_score
+            best_currency_hit = candidate_currency_hit
+        elif candidate_score == best_score:
+            if candidate_currency_hit and not best_currency_hit:
+                best_amount = candidate
+                best_currency_hit = True
+            elif candidate_currency_hit == best_currency_hit and len(candidate) > len(best_amount):
+                best_amount = candidate
+
+    if best_score is None:
+        return scored
+
+    scored["amount"] = best_amount
+    scored["amount_context_missing"] = not bool(_FACT_CURRENCY_RE.search(lower_source))
+    return scored
 
 
 def _collect_message_facts(
@@ -3212,6 +3304,11 @@ def _build_heuristic_llm_result(
         mail_type="",
     )
     message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
+    message_facts = _score_message_facts(
+        message_facts,
+        evidence_text=fact_text,
+        attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+    )
     context = _detect_conversation_context(
         subject=subject,
         body_text=body_text,
@@ -5346,6 +5443,11 @@ def process_message(
             mail_type=mail_type or "",
         )
         message_facts = _validate_message_facts(message_facts, evidence_text=fact_text)
+        message_facts = _score_message_facts(
+            message_facts,
+            evidence_text=fact_text,
+            attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+        )
         context = _detect_conversation_context(
             subject=subject,
             body_text=" ".join(part for part in (body_summary, body_text) if part),
