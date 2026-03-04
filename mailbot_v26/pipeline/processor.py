@@ -933,6 +933,10 @@ class MessageProcessor:
             emitter=contract_event_emitter,
         )
         budget_consumer = BudgetConsumer(budget_gate)
+        self._last_ordinary_result: dict[str, Any] = {}
+
+    def get_last_ordinary_result(self) -> dict[str, Any]:
+        return dict(self._last_ordinary_result)
 
     def process(self, account_login: str, message: InboundMessage) -> str:
         """Lightweight placeholder processor to keep imports stable."""
@@ -968,7 +972,22 @@ class MessageProcessor:
         if attachments:
             lines.extend(self._render_attachments(attachments))
         lines.append(f"<i>аккаунт: {safe_account_login}</i>")
-        return "\n".join(lines)
+        text = "\n".join(lines)
+        self._last_ordinary_result = {
+            "text": text,
+            "priority": priority,
+            "attachments": [
+                {
+                    "filename": attachment.filename,
+                    "text": attachment.text,
+                    "content_type": attachment.content_type,
+                    "size_bytes": attachment.size_bytes,
+                    "metadata": attachment.metadata,
+                }
+                for attachment in (message.attachments or [])
+            ],
+        }
+        return text
 
     @classmethod
     def _trim_attachment_snippet(cls, text: str) -> str:
@@ -1347,9 +1366,55 @@ def _attachment_size_bytes(attachment: dict[str, Any]) -> int:
 
 
 def _build_no_llm_summary(
+    body_text: str,
     attachments: list[dict[str, Any]],
     commitments_present: bool,
 ) -> str:
+    source_lines: list[str] = []
+    if body_text.strip():
+        source_lines.append(body_text.strip())
+    for attachment in attachments:
+        text = str(attachment.get("text") or "").strip()
+        if text:
+            source_lines.append(text)
+    if not source_lines:
+        return ""
+
+    source = "\n".join(source_lines)
+    cleaned = " ".join(source.split())
+    if not cleaned:
+        return ""
+
+    cleaned = re.sub(r"(?i)sent from my iphone.*$", "", cleaned).strip()
+    cleaned = re.sub(r"(?i)this e-mail.*confidential.*$", "", cleaned).strip()
+    if not cleaned:
+        return ""
+
+    sentence_parts = re.split(r"(?<=[.!?])\s+", cleaned)
+    meaningful: list[str] = []
+    for part in sentence_parts:
+        line = part.strip(" \t\n\r-•")
+        if len(line) < 8:
+            continue
+        lowered = line.lower()
+        if any(
+            marker in lowered
+            for marker in (
+                "disclaimer",
+                "конфиденциаль",
+                "не является публичной офертой",
+            )
+        ):
+            continue
+        meaningful.append(line)
+        if len(meaningful) == 2:
+            break
+
+    if meaningful:
+        return "Коротко: " + " ".join(meaningful)
+    fallback = cleaned[:220].rstrip()
+    if fallback:
+        return f"Коротко: {fallback}"
     return ""
 
 
@@ -2432,6 +2497,7 @@ def build_telegram_payload(
     no_llm_summary = ""
     if context.attachments_count > 0 and (not summary_valid or context.signal_invalid):
         no_llm_summary = _build_no_llm_summary(
+            context.body_text or "",
             context.attachment_files,
             context.commitments_present,
         )
