@@ -677,6 +677,7 @@ def build_telegram_text(
     mail_type: str | None = None,
     summary: str = "",
     message_facts: dict[str, Any] | None = None,
+    relationship_profile: dict[str, Any] | None = None,
 ) -> str:
     body_lines = _maybe_drop_duplicate_subject_line(subject, [format_main_action(action_line)])
     lines = [
@@ -694,6 +695,21 @@ def build_telegram_text(
     if attachment_line:
         lines.append("")
         lines.append(_escape_dynamic(attachment_line))
+    if relationship_profile:
+        emails_count = int(relationship_profile.get("emails_count") or 0)
+        invoice_count = int(relationship_profile.get("invoice_count") or 0)
+        overdue_count = int(relationship_profile.get("overdue_count") or 0)
+        has_context = emails_count >= 10 or invoice_count >= 3 or overdue_count >= 2
+        if has_context:
+            lines.extend(
+                [
+                    "",
+                    "💡 Контрагент:",
+                    f"{emails_count} писем",
+                    f"{invoice_count} счета",
+                    f"{overdue_count} задержка",
+                ]
+            )
     return dedup_rendered_text("\n".join(lines))
 
 
@@ -709,6 +725,7 @@ def render_telegram_message(
     attachments: list[dict[str, Any]] | None = None,
     mail_type: str | None = None,
     message_facts: dict[str, Any] | None = None,
+    relationship_profile: dict[str, Any] | None = None,
 ) -> str:
     fields = apply_semantic_gates(
         action_line=action_line,
@@ -726,6 +743,7 @@ def render_telegram_message(
         mail_type=mail_type,
         summary=summary_excerpt,
         message_facts=message_facts,
+        relationship_profile=relationship_profile,
     )
     if summary_excerpt:
         safe_summary = _escape_dynamic(summary_excerpt)

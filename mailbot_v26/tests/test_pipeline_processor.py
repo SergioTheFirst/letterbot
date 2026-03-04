@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import sqlite3
 import re
 from types import SimpleNamespace
@@ -14,6 +14,7 @@ from mailbot_v26.pipeline.processor import (
     _build_priority_signal_text,
     _build_message_decision,
     _build_document_identity,
+    _build_sender_relationship_profile,
     _build_heuristic_summary,
     _collect_message_facts,
     _detect_conversation_context,
@@ -22,6 +23,8 @@ from mailbot_v26.pipeline.processor import (
     _score_message_facts,
     _validate_message_facts,
 )
+from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 
 class DummyState:
@@ -1092,3 +1095,149 @@ def test_document_identity_new_invoice_not_duplicate() -> None:
 def test_duplicate_softens_action() -> None:
     assert _soften_duplicate_action("Оплатить") == "Зафиксировать"
     assert _soften_duplicate_action("Проверить") == "Проверить"
+
+
+def test_relationship_profile_counts(tmp_path) -> None:
+    db_path = tmp_path / "relationship-counts.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("user@example.com", "vendor@example.com", "Счет №1", "invoice to pay", now.isoformat(), now.isoformat()),
+        )
+        conn.execute(
+            """
+            INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("user@example.com", "vendor@example.com", "Договор поставки", "contract draft", now.isoformat(), now.isoformat()),
+        )
+        conn.execute(
+            """
+            INSERT INTO events_v1 (event_type, ts_utc, ts, account_id, entity_id, email_id, payload, payload_json, schema_version, fingerprint)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "commitment_overdue",
+                now.timestamp(),
+                now.isoformat(),
+                "user@example.com",
+                "vendor",
+                1,
+                '{"sender_email": "vendor@example.com"}',
+                '{"sender_email": "vendor@example.com"}',
+                1,
+                "rel-counts-overdue",
+            ),
+        )
+        conn.commit()
+
+    analytics = KnowledgeAnalytics(db_path)
+    profile = _build_sender_relationship_profile(
+        analytics=analytics,
+        account_email="user@example.com",
+        sender_email="vendor@example.com",
+    )
+    assert profile is not None
+    assert profile["emails_count"] == 2
+    assert profile["invoice_count"] == 1
+    assert profile["contract_count"] == 1
+    assert profile["overdue_count"] == 1
+
+
+def test_relationship_last_contact_days(tmp_path) -> None:
+    db_path = tmp_path / "relationship-last-contact.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(days=5, hours=2)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("user@example.com", "vendor@example.com", "Ping", "status update", old.isoformat(), old.isoformat()),
+        )
+        conn.commit()
+
+    analytics = KnowledgeAnalytics(db_path)
+    profile = analytics.sender_relationship_profile(
+        account_email="user@example.com",
+        sender_email="vendor@example.com",
+        now=now,
+    )
+    assert profile is not None
+    assert profile["last_contact_days"] == 5
+
+
+def test_relationship_trust_score(tmp_path) -> None:
+    db_path = tmp_path / "relationship-trust.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("user@example.com", "vendor@example.com", "Счет", "invoice", now.isoformat(), now.isoformat()),
+        )
+        events = [
+            ("invoice_paid", '{"sender_email": "vendor@example.com"}', "rel-trust-paid"),
+            ("fast_reply", '{"sender_email": "vendor@example.com"}', "rel-trust-fast"),
+            ("dispute_opened", '{"sender_email": "vendor@example.com"}', "rel-trust-dispute"),
+            ("commitment_overdue", '{"sender_email": "vendor@example.com"}', "rel-trust-overdue"),
+        ]
+        for event_type, payload, fingerprint in events:
+            conn.execute(
+                """
+                INSERT INTO events_v1 (event_type, ts_utc, ts, account_id, entity_id, email_id, payload, payload_json, schema_version, fingerprint)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (event_type, now.timestamp(), now.isoformat(), "user@example.com", "vendor", 1, payload, payload, 1, fingerprint),
+            )
+        conn.commit()
+
+    analytics = KnowledgeAnalytics(db_path)
+    profile = analytics.sender_relationship_profile(
+        account_email="user@example.com",
+        sender_email="vendor@example.com",
+        now=now,
+    )
+    assert profile is not None
+    assert profile["trust_score"] == 0
+
+
+def test_relationship_invoice_tracking(tmp_path) -> None:
+    db_path = tmp_path / "relationship-invoice.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("user@example.com", "vendor@example.com", "Invoice #1", "please pay", now.isoformat(), now.isoformat()),
+        )
+        conn.execute(
+            """
+            INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("user@example.com", "vendor@example.com", "Invoice #2", "invoice attached", now.isoformat(), now.isoformat()),
+        )
+        conn.commit()
+
+    analytics = KnowledgeAnalytics(db_path)
+    profile = analytics.sender_relationship_profile(
+        account_email="user@example.com",
+        sender_email="vendor@example.com",
+        now=now,
+    )
+    assert profile is not None
+    assert profile["invoice_count"] == 2

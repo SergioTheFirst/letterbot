@@ -3476,6 +3476,7 @@ def create_app(
             "corrections_week": 0,
             "surprise_rate": 0.0,
             "recent_events": [],
+            "top_contacts": [],
         }
         try:
             dashboard_vars = _dashboard_vars()
@@ -3630,6 +3631,18 @@ def create_app(
                         }
                     )
                 payload["recent_events"] = recent_events
+                try:
+                    analytics = _analytics()
+                    account_email = account_scope[0] if account_scope else ""
+                    if account_email:
+                        payload["top_contacts"] = analytics.top_sender_relationship_profiles(
+                            account_email=account_email,
+                            account_emails=account_scope,
+                            days=7,
+                            limit=5,
+                        )
+                except Exception as exc:
+                    logger.warning("dashboard_top_contacts_failed", extra={"error": str(exc)})
                 _DASHBOARD_CACHE["payload"] = payload
                 _DASHBOARD_CACHE["ts"] = now
                 _DASHBOARD_CACHE["key"] = cache_key

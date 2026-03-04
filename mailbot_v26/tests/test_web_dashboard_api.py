@@ -137,6 +137,7 @@ def test_api_dashboard_survives_empty_db(tmp_path: Path) -> None:
         "corrections_week": 0,
         "surprise_rate": 0.0,
         "recent_events": [],
+        "top_contacts": [],
     }
 
 
@@ -177,3 +178,36 @@ def test_api_dashboard_limits_recent_events_to_20(tmp_path: Path) -> None:
     assert resp.status_code == 200
     data = resp.get_json()
     assert len(data["recent_events"]) == 20
+
+
+def test_api_dashboard_returns_top_contacts(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-top-contacts.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO emails (account_email, from_email, subject, body_summary, priority, received_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("primary@example.com", "alice@example.com", "Invoice", "invoice to pay", "🔴", now.isoformat(), now.isoformat()),
+        )
+        conn.execute(
+            """
+            INSERT INTO emails (account_email, from_email, subject, body_summary, priority, received_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("primary@example.com", "alice@example.com", "Contract", "contract review", "🟡", now.isoformat(), now.isoformat()),
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/dashboard")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert isinstance(data["top_contacts"], list)
+    assert data["top_contacts"]
+    assert data["top_contacts"][0]["sender_email"] == "alice@example.com"

@@ -866,6 +866,7 @@ class TelegramBuildContext:
     insights: list[Insight]
     insight_digest: InsightDigest | None
     commitments_present: bool
+    relationship_profile: dict[str, Any] | None = None
     preview_hint: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -2154,6 +2155,7 @@ def _build_telegram_text(
     body_text: str,
     attachments: list[dict[str, Any]] | None = None,
     attachment_summary: str | None = None,
+    relationship_profile: dict[str, Any] | None = None,
 ) -> str:
     fact_text = " ".join(
         part
@@ -2187,6 +2189,7 @@ def _build_telegram_text(
             attachments=attachments or [],
             mail_type=mail_type,
             message_facts=message_facts,
+            relationship_profile=relationship_profile,
         )
         return append_watermark(rendered, html=True)
     fields = tg_renderer.apply_semantic_gates(
@@ -2655,6 +2658,23 @@ def _build_document_identity(
     return f"{doc_kind}_{digest}"
 
 
+def _build_sender_relationship_profile(
+    *,
+    analytics: KnowledgeAnalytics,
+    account_email: str,
+    sender_email: str,
+    account_emails: list[str] | None = None,
+) -> dict[str, Any] | None:
+    try:
+        return analytics.sender_relationship_profile(
+            account_email=account_email,
+            sender_email=sender_email,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("sender_relationship_profile_failed", sender_email=sender_email, error=str(exc))
+        return None
+
+
 def _find_duplicate_document_event(
     *,
     account_email: str,
@@ -3007,6 +3027,7 @@ def build_telegram_payload(
                 mail_type=context.mail_type,
                 attachments=context.attachment_files,
                 attachment_summary=None,
+                relationship_profile=context.relationship_profile,
             )
         except Exception as exc:
             logger.error("tg_render_failed", email_id=context.email_id, error=str(exc))
@@ -4822,7 +4843,8 @@ def _render_notification(
     account_email: str,
     attachment_summaries: list[dict[str, Any]],
     commitments: list[Commitment],
-    enable_premium_clarity: bool,
+    relationship_profile: dict[str, Any] | None = None,
+    enable_premium_clarity: bool = False,
     preview_hint: str | None = None,
 ) -> RenderResult:
     attachment_details = _build_attachment_details(attachments)
@@ -4867,6 +4889,7 @@ def _render_notification(
         insights=aggregated_insights,
         insight_digest=insight_digest,
         commitments_present=bool(commitments),
+        relationship_profile=relationship_profile,
         preview_hint=preview_hint,
         metadata={
             "chat_id": telegram_chat_id,
@@ -5465,6 +5488,7 @@ def process_message(
         )
         duplicate_event: dict[str, Any] | None = None
         document_id = ""
+        relationship_profile: dict[str, Any] | None = None
         should_check_document_identity = bool(
             decision.doc_kind == "invoice"
             or decision.facts.get("doc_number")
@@ -5509,6 +5533,16 @@ def process_message(
             )
         else:
             action_line = decision.action
+
+        relationship_profile = _build_sender_relationship_profile(
+            analytics=analytics,
+            account_email=account_email,
+            sender_email=from_email,
+        )
+        if relationship_profile is not None:
+            has_doc_context = decision.doc_kind in {"invoice", "contract"}
+            if not has_doc_context:
+                relationship_profile = None
         body_summary = decision.summary
         llm_provider: str | None = None
         if hasattr(llm_result, "llm_provider"):
@@ -5934,6 +5968,7 @@ def process_message(
             account_email=account_email,
             attachment_summaries=attachment_summaries,
             commitments=commitments,
+            relationship_profile=relationship_profile,
             enable_premium_clarity=enable_premium_clarity,
             preview_hint=preview_hint,
         )

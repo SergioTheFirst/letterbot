@@ -18,6 +18,9 @@ from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 
 logger = logging.getLogger(__name__)
 
+_REL_INVOICE_RE = re.compile(r"(сч[её]т|invoice|оплат)", re.IGNORECASE)
+_REL_CONTRACT_RE = re.compile(r"(договор|contract|подпис|signature|sign)", re.IGNORECASE)
+
 
 @dataclass(frozen=True, slots=True)
 class WeeklyAccuracyProgress:
@@ -4290,6 +4293,151 @@ class KnowledgeAnalytics:
                 }
             )
         return results
+
+    def _build_sender_relationship_profile(
+        self,
+        *,
+        account_ids: Sequence[str],
+        sender_email: str,
+        now_ts: float,
+    ) -> dict[str, object] | None:
+        normalized_sender = str(sender_email or "").strip().lower()
+        if not normalized_sender or not account_ids:
+            return None
+        email_clause, email_params = self._account_scope_clause(account_ids)
+        if email_clause:
+            email_clause = email_clause.replace("account_id", "account_email")
+        sender_params: list[object] = [normalized_sender]
+        sender_params.extend(email_params)
+        email_rows = self._execute_select(
+            (
+                "SELECT subject, body_summary, received_at, created_at "
+                "FROM emails "
+                "WHERE LOWER(COALESCE(from_email, '')) = ?"
+                f"{email_clause}"
+            ),
+            sender_params,
+        )
+        emails_count = len(email_rows)
+        if emails_count <= 0:
+            return None
+
+        invoice_count = 0
+        contract_count = 0
+        last_contact_ts = 0.0
+        for row in email_rows:
+            text = " ".join(str(row.get(key) or "") for key in ("subject", "body_summary")).lower()
+            if _REL_INVOICE_RE.search(text):
+                invoice_count += 1
+            if _REL_CONTRACT_RE.search(text):
+                contract_count += 1
+            raw_ts = row.get("received_at") or row.get("created_at")
+            parsed_ts = parse_sqlite_datetime(str(raw_ts or ""))
+            if parsed_ts is not None:
+                last_contact_ts = max(last_contact_ts, parsed_ts.timestamp())
+
+        event_clause, event_params = self._account_scope_clause(account_ids)
+        sender_like = f'%"sender_email": "{normalized_sender}"%'
+        sender_like_alt = f'%"from_email": "{normalized_sender}"%'
+        event_rows = self._execute_select(
+            (
+                "SELECT event_type, payload_json, payload "
+                "FROM events_v1 "
+                "WHERE (LOWER(COALESCE(payload_json, payload, '')) LIKE ? "
+                "OR LOWER(COALESCE(payload_json, payload, '')) LIKE ? )"
+                f"{event_clause}"
+            ),
+            [sender_like, sender_like_alt, *event_params],
+        )
+        overdue_count = 0
+        trust_score = 0
+        for row in event_rows:
+            event_type = str(row.get("event_type") or "").strip().lower()
+            payload_text = str(row.get("payload_json") or row.get("payload") or "").lower()
+            if "invoice_paid" in event_type or ("invoice" in payload_text and "paid" in payload_text):
+                trust_score += 1
+            if "overdue" in event_type or "expired" in event_type:
+                overdue_count += 1
+                trust_score -= 2
+            if "fast_reply" in event_type or "fast reply" in payload_text:
+                trust_score += 1
+            if "dispute" in event_type or "dispute" in payload_text:
+                trust_score -= 1
+        trust_score = max(0, min(5, trust_score))
+
+        last_contact_days = 0
+        if last_contact_ts > 0:
+            delta_days = (now_ts - last_contact_ts) / 86_400
+            last_contact_days = max(0, int(delta_days))
+        return {
+            "sender_email": normalized_sender,
+            "emails_count": emails_count,
+            "invoice_count": invoice_count,
+            "contract_count": contract_count,
+            "overdue_count": overdue_count,
+            "last_contact_days": last_contact_days,
+            "trust_score": trust_score,
+        }
+
+    def sender_relationship_profile(
+        self,
+        *,
+        account_email: str,
+        sender_email: str,
+        account_emails: Iterable[str] | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, object] | None:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        now_ts = (now or datetime.now(timezone.utc)).timestamp()
+        return self._build_sender_relationship_profile(
+            account_ids=account_ids,
+            sender_email=sender_email,
+            now_ts=now_ts,
+        )
+
+    def top_sender_relationship_profiles(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        days: int = 7,
+        limit: int = 5,
+        now: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids or days <= 0 or limit <= 0:
+            return []
+        since_dt = (now or datetime.now(timezone.utc)) - timedelta(days=days)
+        email_clause, email_params = self._account_scope_clause(account_ids)
+        if email_clause:
+            email_clause = email_clause.replace("account_id", "account_email")
+        sender_rows = self._execute_select(
+            (
+                "SELECT LOWER(COALESCE(from_email, '')) AS sender_email, COUNT(*) AS emails_count "
+                "FROM emails "
+                "WHERE TRIM(COALESCE(from_email, '')) != '' "
+                "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                f"{email_clause} "
+                "GROUP BY LOWER(COALESCE(from_email, '')) "
+                "ORDER BY emails_count DESC "
+                "LIMIT ?"
+            ),
+            [since_dt.timestamp(), *email_params, limit],
+        )
+        now_ts = (now or datetime.now(timezone.utc)).timestamp()
+        profiles: list[dict[str, object]] = []
+        for row in sender_rows:
+            sender = str(row.get("sender_email") or "").strip().lower()
+            if not sender:
+                continue
+            profile = self._build_sender_relationship_profile(
+                account_ids=account_ids,
+                sender_email=sender,
+                now_ts=now_ts,
+            )
+            if profile is not None:
+                profiles.append(profile)
+        return profiles
 
     def silence_insights(
         self,

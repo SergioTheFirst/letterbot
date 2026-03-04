@@ -92,6 +92,8 @@ class WeeklyDigestData:
     invoice_total_rub: int | None = None
     contract_count: int = 0
     silence_risk: dict[str, object] | None = None
+    relationship_top_senders: Sequence[dict[str, object]] = ()
+    relationship_trend: str | None = None
 
 
 _INVOICE_RE = re.compile(r"(сч[её]т|invoice|оплат)", re.IGNORECASE)
@@ -587,6 +589,39 @@ def _collect_weekly_data(
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("weekly_silence_insights_failed", error=str(exc))
 
+    relationship_top_senders: Sequence[dict[str, object]] = ()
+    relationship_trend: str | None = None
+    try:
+        relationship_top_senders = analytics.top_sender_relationship_profiles(
+            account_email=account_email,
+            account_emails=account_emails,
+            days=7,
+            limit=3,
+            now=now,
+        )
+        if relationship_top_senders:
+            avg_trust = sum(float(item.get("trust_score") or 0) for item in relationship_top_senders) / len(
+                relationship_top_senders
+            )
+            relationship_trend = "stable"
+            if avg_trust >= 3.5:
+                relationship_trend = "improving"
+            elif avg_trust <= 1.5:
+                relationship_trend = "declining"
+            if silence_risk is None:
+                top_risk = max(
+                    relationship_top_senders,
+                    key=lambda item: int(item.get("last_contact_days") or 0),
+                    default=None,
+                )
+                if top_risk and int(top_risk.get("last_contact_days") or 0) > 0:
+                    silence_risk = {
+                        "contact": str(top_risk.get("sender_email") or "").strip(),
+                        "days_silent": int(top_risk.get("last_contact_days") or 0),
+                    }
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("weekly_relationship_digest_failed", error=str(exc))
+
     return WeeklyDigestData(
         week_key=week_key,
         total_emails=int(volume.get("total") or 0),
@@ -607,6 +642,8 @@ def _collect_weekly_data(
         invoice_total_rub=invoice_total_rub,
         contract_count=contract_count,
         silence_risk=silence_risk,
+        relationship_top_senders=relationship_top_senders,
+        relationship_trend=relationship_trend,
     )
 
 
@@ -629,6 +666,14 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         days = int(data.silence_risk.get("days_silent") or 0)
         if days > 0:
             highlights.append(f"• От {contact} — молчание {days} дней (риск)")
+    if data.total_emails >= 3 and data.relationship_top_senders:
+        top = data.relationship_top_senders[0]
+        top_sender = _safe_text(str(top.get("sender_email") or "контакт"), max_len=40)
+        top_count = int(top.get("emails_count") or 0)
+        if top_count > 0:
+            highlights.append(f"• Топ контакт: {top_sender} ({top_count} писем)")
+    if data.total_emails >= 3 and data.relationship_trend:
+        highlights.append(f"• Тренд отношений: {data.relationship_trend}")
 
     if not highlights:
         highlights.append("• Спокойная неделя: критичных сигналов не было.")
