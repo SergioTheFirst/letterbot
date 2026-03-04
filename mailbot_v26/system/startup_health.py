@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from mailbot_v26.config.llm_queue import load_llm_queue_config
 from mailbot_v26.config_loader import BotConfig
 from mailbot_v26.llm import router as llm_router
 from mailbot_v26.system_health import OperationalMode, SystemHealth
@@ -156,8 +157,14 @@ class StartupHealthChecker:
 
 
 class LaunchReportBuilder:
-    def __init__(self, version_label: str = "Letterbot Premium v26") -> None:
+    def __init__(
+        self,
+        version_label: str = "Letterbot Premium v26",
+        *,
+        config_dir: Path | None = None,
+    ) -> None:
         self._version_label = version_label
+        self._config_dir = config_dir or Path(__file__).resolve().parents[1] / "config"
 
     def build(
         self,
@@ -172,6 +179,8 @@ class LaunchReportBuilder:
             mail_accounts=mail_accounts,
             unavailable_reason=mail_check_unavailable_reason,
         )
+        llm_delivery_mode = self._get_llm_delivery_mode()
+        background_queue_mode = self._get_background_queue_mode()
         lines = [
             "---",
             f"{self._version_label} started",
@@ -184,6 +193,9 @@ class LaunchReportBuilder:
             "LLM:",
             self._format_line("GigaChat", index.get("GigaChat")),
             self._format_line("Cloudflare", index.get("Cloudflare")),
+            f"- LLM delivery mode: {llm_delivery_mode}",
+            f"- immediate TG summaries: {self._get_immediate_summary_mode(llm_delivery_mode)}",
+            f"- background queue: {background_queue_mode}",
             "",
             "Telegram:",
             self._format_line("Status", index.get("Telegram")),
@@ -230,6 +242,33 @@ class LaunchReportBuilder:
     def _sanitize_details(self, details: str) -> str:
         sanitized = " ".join((details or "").split())
         return sanitized[:180]
+
+    def _get_llm_delivery_mode(self) -> str:
+        llm_config = llm_router._load_llm_config(self._config_dir)
+        has_direct_provider = (
+            bool(llm_config.cloudflare_enabled)
+            and bool(llm_config.cloudflare_account_id)
+            and bool(llm_config.cloudflare_api_key)
+        ) or (
+            bool(llm_config.gigachat_enabled or llm_config.gigachat_api_key)
+            and bool(llm_config.gigachat_api_key)
+        )
+        if not has_direct_provider:
+            return "DISABLED"
+
+        queue_config = load_llm_queue_config(self._config_dir)
+        if queue_config.llm_request_queue_enabled and queue_config.max_concurrent_llm_calls == 1:
+            return "QUEUED_HEURISTIC_IMMEDIATE"
+        return "DIRECT"
+
+    def _get_immediate_summary_mode(self, llm_delivery_mode: str) -> str:
+        return "heuristic" if llm_delivery_mode != "DIRECT" else "direct"
+
+    def _get_background_queue_mode(self) -> str:
+        queue_config = load_llm_queue_config(self._config_dir)
+        if queue_config.llm_request_queue_enabled and queue_config.max_concurrent_llm_calls == 1:
+            return "enabled"
+        return "disabled"
 
 
 def dispatch_launch_report(bot_token: str, chat_id: str, report: str) -> bool:

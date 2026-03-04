@@ -892,7 +892,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             results = health_checker.run()
             mode = health_checker.evaluate_mode(results)
             report = LaunchReportBuilder(
-                version_label=f"Letterbot Premium {__version__}"
+                version_label=f"Letterbot Premium {__version__}",
+                config_dir=REPO_ROOT,
             ).build(
                 results,
                 mode,

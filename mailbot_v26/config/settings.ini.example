@@ -44,6 +44,9 @@ gigachat_cooldown_sec = 600
 [ui]
 locale = ru
 
+[branding]
+show_watermark = true
+
 [features]
 enable_auto_priority = false
 enable_daily_digest = true
