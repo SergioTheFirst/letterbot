@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-04: PR4C web auth/CIDR smoke safety — added explicit `[web_ui] allow_local_smoke_bypass=false` template/bootstrap flag, implemented narrow local-only bypass path (loopback or trusted forwarded loopback in loopback-bind dev context) without changing default auth/CIDR behavior, added operator-visible startup/request logging for active bypass, and expanded web auth/CIDR/main/bootstrap regressions; full pytest green (993 passed).
 - 2026-03-04: restored direct inline priority correction buttons for initial Telegram payload via new `telegram/keyboard.py` (`mb:prio:R|Y|B` callback format per email), wired render payload to this keyboard without changing menu/snooze keyboards, and added callback regression test; full pytest green (971 passed).
 - 2026-03-04: Final Telegram summary path now prefers direct `run_llm_stage` when LLM is eligible; heuristic is used as fallback on direct failure only, queue defaults switched to disabled in config loader/template/bootstrap (`[llm_queue]`), startup report now includes direct-path smoke status and delivery mode (`DIRECT` / `HEURISTIC_FALLBACK` / `DISABLED`), and regressions added for direct preference/fallback plus queue defaults.
 - 2026-03-03: Telegram P0/P1 UX hardening — premium short-action selection is now subject/body/evidence aware (invoice vs reconciliation vs signed contract vs outage/security vs promo), bounded priority v2 uplift added for outage/security alerts (strong alerts reach meaningful non-low priority), Excel invoice attachment insight now extracts `Счет №`/amount/due-date from existing extracted text, and focused regressions added (premium clarity, tg renderer, priority, telegram formatting); full pytest green (962 passed).
@@ -168,19 +169,16 @@ Done:
 - 2026-03-04: PR4A cockpit polish — simplified top nav to Cockpit/Archive/Health/Events/Doctor(+conditional Support), repacked `/` cockpit into calmer two-column home (attention + digests + system state + compact quality + support + useful links), added defensive home-only `quality_summary` in `index()`, and expanded web cockpit tests; full pytest green (981 passed).
 - 2026-03-04: PR4B web surfaces polish — refined existing Archive/Health/Events/Doctor templates for calmer UX, improved safe empty states and compact explanatory copy, kept engineer-only blocks mode-gated, added CSS panel/readability polish, and expanded web UI behavior tests; full pytest green (987 passed).
 Now:
-- PR4B archive/health/events/doctor polish completed and validated locally; preparing commit + PR.
+- PR4C local smoke bypass for Web UI auth/CIDR implemented and validated locally; preparing commit + PR.
 Next:
-- Validate polished surfaces on production-like datasets and monitor readability feedback in both basic and engineer modes.
+- Validate browser-container smoke checks with explicit bypass enabled in local/dev config and keep default production posture unchanged.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/web_observability/templates/archive.html
-- mailbot_v26/web_observability/templates/health.html
-- mailbot_v26/web_observability/templates/events.html
-- mailbot_v26/web_observability/templates/doctor.html
-- mailbot_v26/web_observability/static/style.css
-- mailbot_v26/tests/test_web_archive_forensics.py
-- mailbot_v26/tests/test_web_observability_health.py
-- mailbot_v26/tests/test_web_events_timeline.py
-- mailbot_v26/tests/test_web_doctor_export.py
+- mailbot_v26/web_observability/app.py
+- mailbot_v26/config/settings.ini.example
+- mailbot_v26/tools/config_bootstrap.py
+- mailbot_v26/tests/test_web_login_form.py
+- mailbot_v26/tests/test_web_ui_main.py
+- mailbot_v26/tests/test_config_bootstrap.py
 - CONTINUITY.md
