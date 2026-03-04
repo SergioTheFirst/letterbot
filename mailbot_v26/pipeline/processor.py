@@ -4397,6 +4397,8 @@ def process_message(
                     attachments=attachments,
                     ctx=llm_ctx,
                 )
+                if not llm_result:
+                    raise RuntimeError("LLM stage returned empty result")
                 llm_used = True
                 llm_called_direct = True
             except Exception as exc:

@@ -158,17 +158,84 @@ def test_launch_report_includes_honest_llm_delivery_mode(tmp_path) -> None:
             {
                 "component": "LLM Direct",
                 "status": HealthStatus.FAILED,
-                "details": "configured + direct test failed",
+                "details": "configured + capability probe failed",
             }
         ],
         mode=SimpleNamespace(value="FULL"),
     )
 
     assert "LLM delivery mode: HEURISTIC_FALLBACK" in report
-    assert "immediate TG summaries: heuristic" in report
+    assert "Immediate TG summaries: heuristic" in report
     assert "background queue: disabled" in report
-    assert "direct path check: configured + direct test failed" in report
+    assert "direct path check: configured + capability probe failed" in report
 
+
+
+
+def test_startup_health_checker_probe_failure_is_non_blocking(tmp_path, monkeypatch) -> None:
+    _write_config_files(tmp_path, gigachat_enabled=False, gigachat_key="")
+    config_dir = tmp_path / "config"
+    config = load_config(config_dir)
+
+    class _BoomProvider:
+        def healthcheck(self) -> bool:
+            raise RuntimeError("probe failure")
+
+    def _build_providers(_self, _cfg):
+        return {"cloudflare": _BoomProvider()}
+
+    monkeypatch.setattr(
+        "mailbot_v26.system.startup_health.llm_router.LLMRouter._build_providers",
+        _build_providers,
+    )
+
+    checker = StartupHealthChecker(config_dir, config)
+    results = {item["component"]: item for item in checker.run()}
+
+    assert "LLM Direct" in results
+    assert results["LLM Direct"]["status"] == HealthStatus.FAILED
+
+
+
+def test_launch_report_marks_direct_delivery_mode(tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.ini").write_text(
+        "\n".join(
+            [
+                "[llm]",
+                "primary = cloudflare",
+                "",
+                "[cloudflare]",
+                "enabled = true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text(
+        "\n".join(
+            [
+                "[cloudflare]",
+                "account_id = account",
+                "api_token = token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = LaunchReportBuilder(config_dir=config_dir).build(
+        results=[
+            {
+                "component": "LLM Direct",
+                "status": HealthStatus.OK,
+                "details": "configured + capability probe passed",
+            }
+        ],
+        mode=SimpleNamespace(value="FULL"),
+    )
+
+    assert "LLM delivery mode: DIRECT" in report
+    assert "Immediate TG summaries: direct" in report
 
 def test_startup_report_default_branding_and_watermark() -> None:
     report = LaunchReportBuilder().build(results=[], mode=SimpleNamespace(value="FULL"))

@@ -49,7 +49,16 @@ class StartupHealthChecker:
         ]
         results.extend(self._safe_check(self._check_gigachat, fallback=[]) or [])
         results.extend(self._safe_check(self._check_cloudflare, fallback=[]) or [])
-        results.append(self._safe_check(self._check_llm_direct_path))
+        results.append(
+            self._safe_check(
+                self._check_llm_direct_path,
+                fallback=HealthCheckResult(
+                    "LLM Direct",
+                    HealthStatus.FAILED,
+                    "configured + capability probe failed",
+                ),
+            )
+        )
         return [result.as_dict() for result in results]
 
     def evaluate_mode(self, results: Sequence[dict[str, str]]) -> OperationalMode:
@@ -170,21 +179,13 @@ class StartupHealthChecker:
             return HealthCheckResult(
                 "LLM Direct",
                 HealthStatus.FAILED,
-                "configured + direct test failed",
+                "configured + capability probe failed",
             )
-        try:
-            provider.complete(
-                [{"role": "user", "content": "ping"}],
-                max_tokens=2,
-                temperature=0,
-            )
-        except Exception:
-            return HealthCheckResult(
-                "LLM Direct",
-                HealthStatus.FAILED,
-                "configured + direct test failed",
-            )
-        return HealthCheckResult("LLM Direct", HealthStatus.OK, "configured + direct test passed")
+        return HealthCheckResult(
+            "LLM Direct",
+            HealthStatus.OK,
+            "configured + capability probe passed",
+        )
 
 
 class LaunchReportBuilder:
@@ -227,7 +228,7 @@ class LaunchReportBuilder:
             self._format_line("Cloudflare", index.get("Cloudflare")),
             f"- direct path check: {llm_direct_check}",
             f"- LLM delivery mode: {llm_delivery_mode}",
-            f"- immediate TG summaries: {self._get_immediate_summary_mode(llm_delivery_mode)}",
+            f"- Immediate TG summaries: {self._get_immediate_summary_mode(llm_delivery_mode)}",
             f"- background queue: {background_queue_mode}",
             "",
             "Telegram:",

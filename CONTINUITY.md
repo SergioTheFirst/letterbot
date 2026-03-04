@@ -163,17 +163,16 @@ Done:
 - 2026-03-03: Telegram P0 final-path fix — restored premium reply_markup propagation (priority buttons preserved), removed stale `html=True` arbiter call mismatch on render path, prevented false `attachments missing` fallback for invoice/excel attachment insights, and expanded deterministic premium short-action selection (`Оплатить`/`Сверить`/`Зафиксировать`/`Ознакомиться`) with regression tests and full pytest green.
 - 2026-03-04: startup report now shows honest LLM delivery mode (`DIRECT`/`QUEUED_HEURISTIC_IMMEDIATE`/`DISABLED`) plus immediate-summary and background-queue state; added `[branding] show_watermark` INI toggle through loader/bootstrap/templates, and removed noisy `Учту в качестве.` suffix from inbound priority ack; targeted + full pytest green.
 - 2026-03-04: PR1 restore path — startup now toggles premium processor by LLM health (any provider/direct check OK => enabled, degraded => legacy fallback), ordinary stage_tg now propagates computed priority and appends tg_renderer attachment insight, no-LLM summary builder now returns deterministic non-empty body-based summary, and regressions added for startup toggle + no-LLM summary + ordinary priority/attachment/reply_markup; full pytest green (974 passed).
+- 2026-03-04: PR2 direct-delivery restore — final Telegram summary now prefers direct `run_llm_stage` whenever budget/gate allows, empty direct responses fall back to deterministic heuristic (no user-facing drop), startup LLM direct check switched to lightweight capability probe (non-blocking), and startup report strings now explicitly show `LLM delivery mode` + `Immediate TG summaries`; targeted + full pytest green (976 passed).
 Now:
-- PR1 restore completed and validated locally; preparing commit + PR for ordinary Telegram path parity with premium primitives.
+- PR2 direct-delivery restore completed and validated locally; preparing commit + PR.
 Next:
-- Monitor production traffic for ordinary-path messages to confirm premium-on-healthy routing and attachment insight consistency with no keyboard regressions.
+- Monitor production traffic for direct LLM summary rate vs heuristic fallback triggers (provider failures/timeouts/gate denies) and ensure reply_markup parity remains stable.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/start.py
-- mailbot_v26/bot_core/pipeline.py
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/tests/test_polling_loop.py
-- mailbot_v26/tests/test_telegram_delivery_pipeline.py
-- mailbot_v26/tests/test_no_llm_summary.py
+- mailbot_v26/system/startup_health.py
+- mailbot_v26/tests/test_llm_direct_delivery.py
+- mailbot_v26/tests/test_startup_health.py
 - CONTINUITY.md
