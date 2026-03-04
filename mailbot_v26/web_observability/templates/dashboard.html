@@ -59,7 +59,7 @@
     </section>
 
     <section class="card live-card live-events" id="card-events">
-      <h2>Events</h2>
+      <h2>Recent events</h2>
       <ul id="events-list" class="events-list"><li class="hint">Waiting for live events…</li></ul>
     </section>
   </div>
@@ -72,6 +72,12 @@
       const setText = (id, value) => {
         const node = document.getElementById(id);
         if (node) node.textContent = String(value);
+      };
+      const formatEventTime = (ts) => {
+        if (!ts) return '--:--';
+        const parsed = new Date(ts);
+        if (Number.isNaN(parsed.getTime())) return '--:--';
+        return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
       };
       const updateDashboard = () => {
         fetch('/api/dashboard', { credentials: 'same-origin' })
@@ -96,10 +102,9 @@
                 return;
               }
               eventsList.innerHTML = items.map((item) => {
-                const ts = item.ts || '';
-                const type = item.type || 'event';
-                const text = item.text || type;
-                return `<li><span class="mono">${ts}</span> <b>${type}</b> — ${text}</li>`;
+                const ts = formatEventTime(item.ts || '');
+                const text = item.text || item.type || 'event';
+                return `<li><span class="mono">${ts}</span> ${text}</li>`;
               }).join('');
             }
           })

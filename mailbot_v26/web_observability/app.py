@@ -3411,6 +3411,36 @@ def create_app(
             resolved = [default_account]
         return sorted({email for email in resolved if email})
 
+    def _dashboard_event_text(event_type: str, raw_payload: object) -> str:
+        payload_text = ""
+        if raw_payload:
+            try:
+                loaded = json.loads(str(raw_payload))
+                if isinstance(loaded, dict):
+                    for key in ("text", "message", "reason", "summary", "priority"):
+                        value = loaded.get(key)
+                        if value:
+                            payload_text = str(value).strip()
+                            break
+            except (TypeError, ValueError):
+                payload_text = str(raw_payload).strip()
+
+        if event_type == "email_processed":
+            return payload_text or "email processed"
+        if event_type == "priority_classified":
+            return f"priority {payload_text}".strip() if payload_text else "priority classified"
+        if event_type == "llm_summary_generated":
+            return payload_text or "llm summary generated"
+        if event_type in {"priority_correction", "priority_correction_recorded"}:
+            return (
+                f"priority corrected {payload_text}".strip()
+                if payload_text
+                else "priority corrected"
+            )
+        if event_type == "pipeline_error":
+            return payload_text or "pipeline error"
+        return payload_text or event_type
+
     def _dashboard_payload() -> dict[str, object]:
         now_ts = datetime.now(timezone.utc).timestamp()
         day_ago_ts = now_ts - 86_400
@@ -3546,36 +3576,27 @@ def create_app(
                     round(surprises / corrections, 4) if corrections > 0 else 0.0
                 )
 
-                recent_rows = conn.execute(
-                    (
-                        "SELECT ts, ts_utc, event_type, payload_json, payload "
-                        "FROM events_v1 "
-                        "WHERE event_type IN ("
-                        "'email_processed', 'email_received', 'priority_correction', "
-                        "'priority_correction_recorded', 'llm_fallback', 'pipeline_error'"
-                        ")"
-                        f"{account_event_clause} "
-                        "ORDER BY ts_utc DESC "
-                        "LIMIT 10"
-                    ),
-                    tuple(account_event_params),
-                ).fetchall()
+                try:
+                    recent_rows = conn.execute(
+                        (
+                            "SELECT ts, ts_utc, event_type, payload_json, payload "
+                            "FROM events_v1 "
+                            "WHERE event_type IN ("
+                            "'email_processed', 'priority_classified', 'llm_summary_generated', "
+                            "'priority_correction', 'priority_correction_recorded', 'pipeline_error'"
+                            ")"
+                            f"{account_event_clause} "
+                            "ORDER BY ts_utc DESC "
+                            "LIMIT 20"
+                        ),
+                        tuple(account_event_params),
+                    ).fetchall()
+                except sqlite3.Error:
+                    recent_rows = []
                 recent_events: list[dict[str, str]] = []
                 for item in recent_rows:
                     event_type = str(item["event_type"] or "")
-                    text = ""
                     raw_payload = item["payload_json"] or item["payload"]
-                    if raw_payload:
-                        try:
-                            loaded = json.loads(str(raw_payload))
-                            if isinstance(loaded, dict):
-                                for key in ("text", "message", "reason", "summary"):
-                                    value = loaded.get(key)
-                                    if value:
-                                        text = str(value)
-                                        break
-                        except (TypeError, ValueError):
-                            text = str(raw_payload)
                     ts = item["ts"]
                     if not ts:
                         ts_utc = float(item["ts_utc"] or 0.0)
@@ -3584,7 +3605,7 @@ def create_app(
                         {
                             "ts": str(ts or ""),
                             "type": event_type,
-                            "text": text.strip() or event_type,
+                            "text": _dashboard_event_text(event_type, raw_payload),
                         }
                     )
                 payload["recent_events"] = recent_events

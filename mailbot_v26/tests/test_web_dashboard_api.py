@@ -89,6 +89,34 @@ def test_api_dashboard_returns_json(tmp_path: Path) -> None:
     assert data["surprise_rate"] >= 0
 
 
+def test_api_dashboard_returns_recent_events(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-events.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        tracked = [
+            ("email_processed", {"text": "email processed"}),
+            ("priority_classified", {"priority": "🟡"}),
+            ("llm_summary_generated", {"text": "llm summary generated"}),
+            ("priority_correction", {"priority": "🔴"}),
+            ("pipeline_error", {"reason": "pipeline error"}),
+        ]
+        for offset, (event_type, payload) in enumerate(tracked):
+            event_ts = (now - timedelta(minutes=offset)).timestamp()
+            _insert_event(conn, event_type=event_type, ts_utc=event_ts, payload=payload)
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/dashboard")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert [item["type"] for item in data["recent_events"]][:5] == [event for event, _ in tracked]
+    assert data["recent_events"][1]["text"] == "priority 🟡"
+
+
 def test_api_dashboard_survives_empty_db(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard-empty.sqlite"
     sqlite3.connect(db_path).close()
@@ -112,7 +140,7 @@ def test_api_dashboard_survives_empty_db(tmp_path: Path) -> None:
     }
 
 
-def test_dashboard_template_renders_and_has_live_cards(tmp_path: Path) -> None:
+def test_dashboard_template_renders_events_block(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard-template.sqlite"
     KnowledgeDB(db_path)
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
@@ -122,28 +150,23 @@ def test_dashboard_template_renders_and_has_live_cards(tmp_path: Path) -> None:
         body = client.get("/dashboard").get_data(as_text=True)
 
     assert "data-testid=\"live-dashboard\"" in body
-    assert ">System<" in body
-    assert ">Emails<" in body
-    assert ">LLM<" in body
-    assert ">Priority<" in body
-    assert ">Learning<" in body
-    assert ">Events<" in body
+    assert ">Recent events<" in body
+    assert "id=\"events-list\"" in body
 
 
-def test_api_dashboard_returns_recent_events(tmp_path: Path) -> None:
-    db_path = tmp_path / "dashboard-events.sqlite"
+def test_api_dashboard_limits_recent_events_to_20(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-events-limit.sqlite"
     KnowledgeDB(db_path)
     now = datetime.now(timezone.utc)
     with sqlite3.connect(db_path) as conn:
-        tracked = [
-            "email_processed",
-            "priority_correction",
-            "llm_fallback",
-            "pipeline_error",
-        ]
-        for offset, event_type in enumerate(tracked):
-            event_ts = (now - timedelta(minutes=offset)).timestamp()
-            _insert_event(conn, event_type=event_type, ts_utc=event_ts, payload={"text": event_type})
+        for idx in range(25):
+            event_ts = (now - timedelta(seconds=idx)).timestamp()
+            _insert_event(
+                conn,
+                event_type="email_processed",
+                ts_utc=event_ts,
+                payload={"text": f"email processed {idx}"},
+            )
         conn.commit()
 
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
@@ -153,4 +176,4 @@ def test_api_dashboard_returns_recent_events(tmp_path: Path) -> None:
 
     assert resp.status_code == 200
     data = resp.get_json()
-    assert [item["type"] for item in data["recent_events"]][:4] == tracked
+    assert len(data["recent_events"]) == 20
