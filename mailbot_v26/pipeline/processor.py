@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import sqlite3
 import time
@@ -2536,6 +2537,82 @@ def _detect_conversation_context(
     if message_facts.get("contract_signal") and any(token in normalized_body for token in ("правк", "коммент", "обсуд")):
         return "DISCUSSION"
     return "NEW_MESSAGE"
+
+
+def _build_document_identity(
+    *,
+    message_facts: dict[str, Any],
+    sender_email: str,
+    subject: str,
+) -> str:
+    sender_local = (sender_email or "").split("@", 1)[0].strip().lower()
+    sender_token = re.sub(r"[^0-9a-zа-я]+", "_", sender_local).strip("_") or "unknown"
+    normalized_subject = _normalize_subject_for_compare(subject)
+    subject_token = re.sub(r"[^0-9a-zа-я]+", "_", normalized_subject).strip("_")[:40] or "no_subject"
+    doc_number = re.sub(
+        r"[^0-9a-zа-я]+",
+        "",
+        str(message_facts.get("doc_number") or "").lower(),
+    )
+    amount_token = re.sub(r"[^0-9]", "", str(message_facts.get("amount") or ""))
+    doc_kind = str(message_facts.get("doc_kind") or "document").lower() or "document"
+    if doc_number:
+        return f"{doc_kind}_{doc_number}_{sender_token}"
+    fallback_seed = "|".join((subject_token, amount_token, sender_token))
+    digest = hashlib.sha1(fallback_seed.encode("utf-8")).hexdigest()[:12]
+    return f"{doc_kind}_{digest}"
+
+
+def _find_duplicate_document_event(
+    *,
+    account_email: str,
+    document_id: str,
+    current_email_id: int | None = None,
+) -> dict[str, Any] | None:
+    if not document_id:
+        return None
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.execute(
+                """
+                SELECT id, email_id, payload
+                FROM events
+                WHERE type = ?
+                ORDER BY timestamp DESC
+                LIMIT 200
+                """,
+                ("document_identity_seen",),
+            )
+            for row in cur.fetchall():
+                payload_raw = row[2]
+                if not payload_raw:
+                    continue
+                try:
+                    payload = json.loads(payload_raw)
+                except json.JSONDecodeError:
+                    continue
+                if str(payload.get("account_email") or "") != account_email:
+                    continue
+                if str(payload.get("document_id") or "") != document_id:
+                    continue
+                if current_email_id is not None and str(row[1] or "") == str(current_email_id):
+                    continue
+                return {
+                    "event_id": row[0],
+                    "email_id": row[1],
+                }
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("document_identity_lookup_failed", error=str(exc))
+    return None
+
+
+def _soften_duplicate_action(action_line: str) -> str:
+    normalized = (action_line or "").strip().lower()
+    if not normalized:
+        return "Зафиксировать"
+    if any(token in normalized for token in ("зафикс", "провер", "ознаком", "ответ")):
+        return action_line
+    return "Зафиксировать"
 
 
 def _normalize_summary_text(summary: str) -> str:
@@ -5284,7 +5361,52 @@ def process_message(
             attachments=attachments,
             context=context,
         )
-        action_line = decision.action
+        duplicate_event: dict[str, Any] | None = None
+        document_id = ""
+        should_check_document_identity = bool(
+            decision.doc_kind == "invoice"
+            or decision.facts.get("doc_number")
+            or decision.facts.get("amount")
+        )
+        if should_check_document_identity:
+            document_id = _build_document_identity(
+                message_facts=decision.facts,
+                sender_email=from_email,
+                subject=subject,
+            )
+            duplicate_event = _find_duplicate_document_event(
+                account_email=account_email,
+                document_id=document_id,
+                current_email_id=message_id,
+            )
+            if duplicate_event and decision.context != "NEW_MESSAGE":
+                action_line = _soften_duplicate_action(decision.action)
+                logger.info(
+                    "document_duplicate_detected",
+                    email_id=message_id,
+                    duplicate_email_id=duplicate_event.get("email_id"),
+                    document_id=document_id,
+                )
+            else:
+                action_line = decision.action
+            event_emitter.emit(
+                type="document_identity_seen",
+                timestamp=received_at,
+                email_id=message_id,
+                payload={
+                    "account_email": account_email,
+                    "document_id": document_id,
+                    "status": "DOCUMENT_DUPLICATE" if duplicate_event else "DOCUMENT_NEW",
+                    "doc_number": decision.facts.get("doc_number"),
+                    "amount": decision.facts.get("amount"),
+                    "sender_email": from_email,
+                    "subject": subject,
+                    "context": decision.context,
+                    "duplicate_of_email_id": duplicate_event.get("email_id") if duplicate_event else None,
+                },
+            )
+        else:
+            action_line = decision.action
         body_summary = decision.summary
         llm_provider: str | None = None
         if hasattr(llm_result, "llm_provider"):

@@ -184,16 +184,18 @@ Done:
 - 2026-03-04: unified decision layer added in processor for priority/action/summary/doc facts consistency (MessageDecision internal object + guards), telegram attachment insight now consumes decision facts, and regressions added for invoice/incident consistency + summary/attachment-facts usage; full pytest green (1025 passed).
 - 2026-03-04: added processor fact-validation layer after message-fact collection (amount range/table-number guards, due-date year window guard, doc-number sanity + amount collision guard, currency-context penalty feeding decision confidence), added focused pipeline regressions, and full pytest green (1033 passed).
 - 2026-03-04: added deterministic conversation context layer in processor (`NEW_MESSAGE`/`REPLY`/`FORWARD`/`CONFIRMATION`/`DISCUSSION`) after fact validation, threaded context into `MessageDecision`, and added action safety guards (invoice confirmations never keep pay-action; contract discussions avoid final-approval actions); added targeted context regressions and full pytest green (1038 passed).
+- 2026-03-04: added deterministic document-identity layer after decision stage in processor (`_build_document_identity` + events-store duplicate lookup) to flag invoice thread duplicates (`DOCUMENT_DUPLICATE`) and soften duplicate actions to "Зафиксировать" for non-new-message contexts; added targeted pipeline identity tests; full pytest green (1042 passed).
 Now:
-- Conversation context detection is active after message-fact validation and feeds `MessageDecision.context` plus action safety correction rules.
-- Full test suite green after context-layer changes (1038 passed).
+- Document identity detection is active after decision stage for invoice-like documents, using existing `events` storage to detect duplicates and mark status as `DOCUMENT_DUPLICATE`.
+- Duplicate invoice replies/forwards now soften action to "Зафиксировать" instead of repeating payment action.
+- Full test suite green after document-identity changes (1042 passed).
 Next:
-- Collect product feedback on context keyword thresholds (confirmation/discussion markers) and safe-action wording before any tuning.
+- Collect product feedback on duplicate detection sensitivity (doc number vs fallback hash) and soft-action wording before tuning thresholds.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/tests/test_pipeline_processor.py
 - CONTINUITY.md
-- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "reply_payment_confirmation_not_pay_action or forward_contract_discussion_not_final_action or new_invoice_keeps_pay_action or context_detection_reply or context_detection_forward"
+- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "document_identity_same_invoice_detected or document_identity_forward_detected or document_identity_new_invoice_not_duplicate or duplicate_softens_action"
 - python -m pytest -q
