@@ -238,6 +238,77 @@ def test_heuristic_summary_extracts_body_text() -> None:
     assert len(summary) >= 12
 
 
+def test_heuristic_summary_uses_attachment_text_when_body_empty() -> None:
+    summary = processor._build_heuristic_summary(
+        subject="Тема",
+        body_text="",
+        attachments=[
+            {
+                "filename": "invoice.xlsx",
+                "text": "Итого: 87 500 руб. Оплатить до 15.04.2026",
+            }
+        ],
+    )
+
+    assert "87 500" in summary
+
+
+def test_direct_llm_path_kept_without_regression(monkeypatch) -> None:
+    called = {"value": False}
+
+    def _run_llm_stage(**kwargs):
+        called["value"] = True
+        return SimpleNamespace(
+            priority="🟡",
+            action_line="Проверить договор",
+            body_summary="Нужно проверить и подписать договор.",
+            attachment_summaries=[],
+            llm_provider="gigachat",
+            failed=False,
+        )
+
+    monkeypatch.setattr(processor, "run_llm_stage", _run_llm_stage)
+    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor,
+        "feature_flags",
+        SimpleNamespace(
+            ENABLE_AUTO_PRIORITY=False,
+            ENABLE_AUTO_ACTIONS=False,
+            AUTO_ACTION_CONFIDENCE_THRESHOLD=0.75,
+            ENABLE_SHADOW_PERSISTENCE=False,
+            ENABLE_PREVIEW_ACTIONS=False,
+        ),
+    )
+    monkeypatch.setattr(
+        processor.shadow_priority_engine,
+        "compute",
+        lambda llm_priority, from_email: (llm_priority, None),
+    )
+    monkeypatch.setattr(
+        processor.shadow_action_engine,
+        "compute",
+        lambda account_email, from_email: [],
+    )
+    monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **kwargs: None)
+    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
+    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: DeliveryResult(delivered=True, retryable=False))
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=99,
+        from_email="sender@example.com",
+        subject="Договор",
+        received_at=datetime(2024, 1, 1, 12, 0),
+        body_text="Пожалуйста подпишите договор.",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    assert called["value"] is True
+
+
 def test_heuristic_action_line_not_empty() -> None:
     assert processor._build_heuristic_action_line(priority="🔴")
     assert processor._build_heuristic_action_line(priority="🟡")

@@ -363,9 +363,17 @@ def _compact_date(date_value: str) -> str:
 
 def _invoice_attachment_insight(mail_type: str, text: str, attachments_count: int) -> str | None:
     invoice_types = {"INVOICE", "PAYMENT_REMINDER", "INVOICE_OVERDUE", "OVERDUE_INVOICE"}
-    if mail_type not in invoice_types:
-        return None
     lowered = text.lower()
+    invoice_text_signal = any(
+        marker in lowered
+        for marker in ("счет", "счёт", "invoice", "к оплате", "итого", "оплатить до")
+    )
+    incident_text_signal = any(
+        marker in lowered
+        for marker in ("offline", "outage", "security alert", "подозрительный вход", "недоступ")
+    )
+    if mail_type not in invoice_types and (not invoice_text_signal or incident_text_signal):
+        return None
     invoice_number = ""
     number_match = _INVOICE_NUMBER_RE.search(text)
     if number_match:

@@ -179,18 +179,24 @@ Done:
 - 2026-03-04: weekly digest UX shifted to calm human-first format ("За неделю N писем. Главное:" + prioritized invoice/contract/overdue/silence bullets + optional human progress line), weekly technical dumps removed from user-facing render, support footer/watermark/send contract preserved, Friday 19:00 weekly defaults set in settings/bootstrap templates, and weekly digest regressions updated; full pytest green (1003 passed).
 - 2026-03-04: one-message rule hardening for email notifications — removed processor non-retryable fallback chat send (no extra second message), codified delivery SLA edit-in-place behavior (single initial send + edit-only follow-up, no resend on edit failure/missing message_id), and added targeted SLA/dedupe regressions; full pytest green (1007 passed).
 - 2026-03-04: bounded sender-memory personalization added in processor priority path using existing `priority_feedback.sender_email` (45-day window, min 3 corrections, bounded +/-12 bias, no sender-only promotion to red, high-signal dampening guard for invoice/security/incident/contract/claim mail types/reasons), plus targeted sender-memory regressions in pipeline processor tests; full pytest green (1013 passed).
+- 2026-03-04: message-understanding hardening in processor/tg path — added unified message-fact helper (body + attachment text/facts) for action/priority/fallback bridging, improved heuristic no-LLM action+summary from attachment evidence, and enabled invoice attachment insight even when mail_type is unknown; added targeted regressions (invoice body-only, invoice attachment-only, contract signature, attachment-derived priority, fallback summary from attachments, direct LLM path guard) and full pytest green (1020 passed).
 Now:
-- Sender-memory priority personalization is active in processor with deterministic bounded adaptation from `priority_feedback.sender_email` corrections and safe high-signal dampening guardrails.
-- Targeted sender-memory and related priority/inbound tests are green, with full suite green (1013 passed).
+- Message understanding now consumes unified body+attachment facts in processor for action/priority signals and no-LLM fallback summary/action quality.
+- Targeted hardening tests and full suite are green (1020 passed).
 Next:
-- Await product validation of sender-memory thresholds (window/min samples/bias caps) before any config surfacing follow-up.
+- Await product validation on hardening outcomes before any threshold/dictionary configurability follow-up.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):
 - mailbot_v26/pipeline/processor.py
+- mailbot_v26/pipeline/tg_renderer.py
 - mailbot_v26/tests/test_pipeline_processor.py
+- mailbot_v26/tests/test_priority_engine_v2.py
+- mailbot_v26/tests/test_tg_renderer.py
+- mailbot_v26/tests/test_telegram_render_modes.py
 - CONTINUITY.md
-- priority_feedback (SQLite table; sender_email-based correction history)
-- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k sender_memory
-- python -m pytest -q mailbot_v26/tests/test_priority_engine_v2.py mailbot_v26/tests/test_telegram_inbound.py mailbot_v26/tests/test_pipeline_processor.py
+- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "invoice_body_only or invoice_attachment_only or contract_signature_case or action_selection_avoids_payment_for_incident_signals or heuristic_attachment_summary_uses_extracted_text or priority_signal_includes_attachment_content_and_facts"
+- python -m pytest -q mailbot_v26/tests/test_tg_renderer.py -k "attachment_insight_invoice_from_attachment_text_without_mail_type or attachment_insight_invoice_excel_number_amount_due_date or attachment_insight_does_not_hallucinate_invoice_or_act"
+- python -m pytest -q mailbot_v26/tests/test_priority_engine_v2.py -k "attachment_text_contributes_to_priority_score or amount_thresholds"
+- python -m pytest -q mailbot_v26/tests/test_telegram_render_modes.py -k "heuristic_summary_uses_attachment_text_when_body_empty or direct_llm_path_kept_without_regression or heuristic_path_produces_full_render"
 - python -m pytest -q
