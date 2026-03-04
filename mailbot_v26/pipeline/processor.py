@@ -4319,71 +4319,68 @@ def process_message(
         llm_was_queued = False
         llm_called_direct = False
         if use_llm_candidate and can_use_llm:
-            if llm_queue_path_enabled:
-                _ensure_llm_worker()
-                request = LLMRequest(
+            llm_start = time.perf_counter()
+            try:
+                llm_ctx = SimpleNamespace(
                     account_email=account_email,
                     email_id=message_id,
+                    from_email=from_email,
+                    subject=subject,
+                    body_text=llm_body_text,
+                    attachments_text=[str(item.get("text") or "") for item in attachments],
+                    llm_result=None,
+                )
+                llm_result = run_llm_stage(
                     subject=subject,
                     from_email=from_email,
                     body_text=llm_body_text,
                     attachments=attachments,
-                    received_at=received_at,
-                    input_chars=input_chars,
+                    ctx=llm_ctx,
                 )
-                queued = get_llm_request_queue().enqueue(request, timeout_sec=0.5)
-                llm_was_queued = queued
-                if not queued:
-                    logger.info("llm_queue_full", email_id=message_id)
+                llm_used = True
+                llm_called_direct = True
+            except Exception as exc:
+                change = system_health.update_component(
+                    "LLM",
+                    False,
+                    reason=str(exc) or "LLM stage failed",
+                )
+                _notify_system_mode_change(
+                    change=change,
+                    chat_id=telegram_chat_id,
+                    account_email=account_email,
+                )
+                logger.error(
+                    "processing_error",
+                    stage="llm",
+                    email_id=message_id,
+                    error=str(exc),
+                )
                 llm_result = _build_heuristic_llm_result(
                     subject=subject,
                     body_text=body_text or "",
                     priority=heuristic_priority,
                     attachments=attachments,
                 )
-                llm_latency_ms = 0
-                span.record_stage("llm", llm_latency_ms)
-            else:
-                llm_start = time.perf_counter()
-                try:
-                    llm_ctx = SimpleNamespace(
+                fallback_used = True
+                if llm_queue_path_enabled:
+                    _ensure_llm_worker()
+                    request = LLMRequest(
                         account_email=account_email,
                         email_id=message_id,
-                        from_email=from_email,
-                        subject=subject,
-                        body_text=llm_body_text,
-                        attachments_text=[str(item.get("text") or "") for item in attachments],
-                        llm_result=None,
-                    )
-                    llm_result = run_llm_stage(
                         subject=subject,
                         from_email=from_email,
                         body_text=llm_body_text,
                         attachments=attachments,
-                        ctx=llm_ctx,
+                        received_at=received_at,
+                        input_chars=input_chars,
                     )
-                    llm_used = True
-                    llm_called_direct = True
-                except Exception as exc:
-                    change = system_health.update_component(
-                        "LLM",
-                        False,
-                        reason=str(exc) or "LLM stage failed",
-                    )
-                    _notify_system_mode_change(
-                        change=change,
-                        chat_id=telegram_chat_id,
-                        account_email=account_email,
-                    )
-                    logger.error(
-                        "processing_error",
-                        stage="llm",
-                        email_id=message_id,
-                        error=str(exc),
-                    )
-                    raise
-                llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
-                span.record_stage("llm", llm_latency_ms)
+                    queued = get_llm_request_queue().enqueue(request, timeout_sec=0.5)
+                    llm_was_queued = queued
+                    if not queued:
+                        logger.info("llm_queue_full", email_id=message_id)
+            llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
+            span.record_stage("llm", llm_latency_ms)
         else:
             llm_result = _build_heuristic_llm_result(
                 subject=subject,

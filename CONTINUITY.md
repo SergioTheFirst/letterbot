@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-04: Final Telegram summary path now prefers direct `run_llm_stage` when LLM is eligible; heuristic is used as fallback on direct failure only, queue defaults switched to disabled in config loader/template/bootstrap (`[llm_queue]`), startup report now includes direct-path smoke status and delivery mode (`DIRECT` / `HEURISTIC_FALLBACK` / `DISABLED`), and regressions added for direct preference/fallback plus queue defaults.
 - 2026-03-03: Telegram P0/P1 UX hardening — premium short-action selection is now subject/body/evidence aware (invoice vs reconciliation vs signed contract vs outage/security vs promo), bounded priority v2 uplift added for outage/security alerts (strong alerts reach meaningful non-low priority), Excel invoice attachment insight now extracts `Счет №`/amount/due-date from existing extracted text, and focused regressions added (premium clarity, tg renderer, priority, telegram formatting); full pytest green (962 passed).
 - 2026-03-03: Restored PREMIUM TG format for LLM-free path by removing false SAFE_FALLBACK triggers (summary/llm/attachments no longer force fallback when sender+subject exist), relaxed `validate_tg_payload` summary rule for attachment-only emails, and added premium regression coverage (`test_premium_format_regression.py`) plus expectation updates for current attachment-line format; full pytest green (972 passed).
 - 2026-03-03: Fixed web UI dashboard session `account_emails` repr accumulation root cause — `resolve_dashboard_vars` now preserves list[str] from session without `str(list)` reparse, session persistence now sanitizes repr-garbage addresses defensively, cockpit `scope_hint` skips non-email garbage values, and added focused regressions in `tests/test_web_session_account_emails.py`; full pytest green (964 passed).
@@ -161,20 +162,18 @@ Done:
 - 2026-03-03: Telegram P0 final-path fix — restored premium reply_markup propagation (priority buttons preserved), removed stale `html=True` arbiter call mismatch on render path, prevented false `attachments missing` fallback for invoice/excel attachment insights, and expanded deterministic premium short-action selection (`Оплатить`/`Сверить`/`Зафиксировать`/`Ознакомиться`) with regression tests and full pytest green.
 - 2026-03-04: startup report now shows honest LLM delivery mode (`DIRECT`/`QUEUED_HEURISTIC_IMMEDIATE`/`DISABLED`) plus immediate-summary and background-queue state; added `[branding] show_watermark` INI toggle through loader/bootstrap/templates, and removed noisy `Учту в качестве.` suffix from inbound priority ack; targeted + full pytest green.
 Now:
-- Startup-report honesty + watermark toggle + priority-ack cleanup implemented and verified (targeted suites + full pytest green); ready to merge.
+- Direct-first LLM delivery + startup direct smoke/report honesty patch implemented; running full regression and preparing PR.
 Next:
-- Monitor startup Telegram reports in worker logs to confirm delivery mode lines match real `llm_provider`/`latency_ms` behavior across direct and queued deployments.
+- Monitor production startup reports for direct smoke stability and verify fallback-rate telemetry after direct-first rollout.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Is there an approved process to force-default-change for web_ui.password/api_token at install time for non-technical users?
 Working set (files / tables / tests):
-- mailbot_v26/ui/i18n.py
-- mailbot_v26/ui/branding.py
-- mailbot_v26/config_loader.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/config/llm_queue.py
 - mailbot_v26/system/startup_health.py
-- mailbot_v26/start.py
 - mailbot_v26/config/settings.ini.example
 - mailbot_v26/tools/config_bootstrap.py
-- mailbot_v26/tests/test_branding_and_i18n.py
+- mailbot_v26/tests/test_llm_direct_delivery.py
+- mailbot_v26/tests/test_llm_queue_config.py
 - mailbot_v26/tests/test_startup_health.py
-- mailbot_v26/tests/test_config_loader.py
 - CONTINUITY.md

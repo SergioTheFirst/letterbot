@@ -41,6 +41,10 @@ gigachat_max_consecutive_errors = 3
 gigachat_max_latency_sec = 10
 gigachat_cooldown_sec = 600
 
+[llm_queue]
+llm_request_queue_enabled = false
+max_concurrent_llm_calls = 1
+
 [ui]
 locale = ru
 

@@ -16,7 +16,7 @@ class LLMQueueConfig:
     """EN: LLM queue configuration. RU: Конфигурация очереди LLM."""
 
     max_concurrent_llm_calls: int = 1
-    llm_request_queue_enabled: bool = True
+    llm_request_queue_enabled: bool = False
     llm_request_queue_size: int = 50
     llm_request_queue_timeout_sec: float = 300.0
 
@@ -29,10 +29,10 @@ def load_llm_queue_config(base_dir: Path | None = None) -> LLMQueueConfig:
         logger=_LOGGER,
         scope_label="llm queue settings",
     )
-    section = parser["threading"] if "threading" in parser else None
+    section = parser["llm_queue"] if "llm_queue" in parser else parser["threading"] if "threading" in parser else None
     return LLMQueueConfig(
         max_concurrent_llm_calls=_get_int(section, "max_concurrent_llm_calls", 1),
-        llm_request_queue_enabled=_get_bool(section, "llm_request_queue_enabled", True),
+        llm_request_queue_enabled=_get_bool(section, "llm_request_queue_enabled", False),
         llm_request_queue_size=_get_int(section, "llm_request_queue_size", 50),
         llm_request_queue_timeout_sec=_get_float(section, "llm_request_queue_timeout_sec", 300.0),
     )
