@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-06: added deterministic consistency-check layer in processor fact pipeline (`facts -> validation -> scoring -> consistency_check -> decision`) with payroll-overrides-invoice guard, subtotal+tax vs total math check, qty*price vs line-total check, amount-without-currency penalty, and invalid due-date suppression (`due_date <= invoice_date`); wired into all processor scoring paths including runtime processing flow; added regressions (`test_invoice_math_consistency`, `test_currency_context_required`, `test_payroll_never_invoice`, `test_invalid_due_date_ignored`); local verification blocked because no Python interpreter is installed in this environment.
 - 2026-03-06: interpretation accuracy hardening implemented without LLM dependency: evidence-window number extraction (`_extract_numbers_in_evidence_window`), attachment evidence ordering (PDF text/OCR -> table text -> fact snippets), table-context guard (ignore table evidence without keywords), clean-email forward-thread cutoff, and amount scoring context updates (+`total payable`; negative contexts include `номер`/`строка`) with new regressions (`test_invoice_body_amount_detection`, `test_invoice_attachment_amount_detection`, `test_payroll_never_invoice`, `test_table_numbers_not_selected`, `test_forwarded_thread_not_used`); local verification blocked because no Python interpreter is installed in this environment.
 - 2026-03-05: weekly digest now adds deterministic shareable weekly insight card artifact (`_build_shareable_weekly_card`) with fixed <=6-line format and no LLM dependency, appends a new "Share this report" block to digest output, attaches Telegram inline share button (`📤 Поделиться отчётом`) prefilled via `switch_inline_query_current_chat`, includes optional `https://letterbot.ru` share URL metadata, and adds targeted share-card regressions (`test_shareable_weekly_card_format`, `test_shareable_card_deterministic`, `test_weekly_digest_contains_shareable_card`); full pytest green (1065 passed).
 - 2026-03-05: Telegram UX premium pass — added deterministic decision explanation block in renderer (up to 3 bullets from invoice/amount/due-date/contract/incident signals) placed after summary and before relationship block, and enabled progressive one-message enrichment in processor (initial "📩 Письмо получено
@@ -196,21 +197,17 @@ Done:
 - 2026-03-05: priority callback persistence hardening in telegram inbound — callback correction now persists `emails.priority` before rerender, rerender reloads fresh snapshot from storage (prevents enrichment revert), and structured lifecycle logs now include `tg_priority_callback_received` + `tg_priority_feedback_saved` + `tg_priority_snapshot_updated` + `tg_priority_edit_ok`; added regressions for snapshot update, rerender persistence, and same-message edit; full pytest green (1071 passed).
 - 2026-03-05: finalized P0 callback/payroll hardening — priority callbacks now always answer with deterministic status (`Приоритет обновлён` / `Не нашёл письмо` / `Не могу отредактировать`) and enforce edit-in-place-only flow with no fallback second message; priority keyboards/tests validate callback payloads retain `email_id`; processor gained deterministic `PAYROLL` doc-kind guards (invoice signal suppression, no pay-action coercion, no due-date-from-document leakage) and stricter amount-context scoring separation for invoice vs payroll cues; added targeted regressions for callback ack/edit/persistence aliases and payroll/invoice misclassification; full pytest green (1079 passed).
 Now:
-- Interpretation pipeline accuracy patch is implemented; test execution is currently blocked locally (`python`/`py` not installed).
-- P0 fixes for Telegram priority callback edit-in-place and payroll/invoice guards are implemented and verified with full pytest green.
-- Ready for runtime observation of callback ack/edit logs and payroll classification outputs.
+- Consistency-check layer and new extraction-accuracy regressions are implemented in processor/tests.
+- Runtime and full-suite verification remain blocked locally (`python`/`py`/`.venv\Scripts\python.exe` unavailable).
 Next:
-- Install/enable Python in this environment and run full `python -m pytest -q`; then validate invoice/payroll/table/forwarded-thread behavior on real messages.
-- Observe production logs for malformed callback payload volume and payroll edge-cases with ambiguous amount context.
+- Install/enable Python in this environment and run `python -m pytest -q` (full suite) plus targeted processor tests for new consistency rules.
+- Validate consistency outcomes on real invoice/payroll samples (math mismatch, currencyless amount, invalid due date).
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should callback snapshot-update miss (`email_id` absent) emit a dedicated contract event for dashboard alerting, or keep logger-only?
 Working set (files / tables / tests):
-- mailbot_v26/telegram/inbound.py
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/tests/test_priority_keyboard.py
-- mailbot_v26/tests/test_telegram_inbound.py
 - mailbot_v26/tests/test_pipeline_processor.py
 - CONTINUITY.md
-- python -m pytest -q mailbot_v26/tests/test_priority_keyboard.py mailbot_v26/tests/test_telegram_inbound.py -k "priority_callback or priority_callbacks_always_include_email_id"
-- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "amount_scoring_prefers_total_keyword or amount_scoring_prefers_currency_context or amount_scoring_ignores_table_row_number or payroll"
+- python --version
+- py --version
 - python -m pytest -q

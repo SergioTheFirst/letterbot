@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+﻿from datetime import datetime, timedelta, timezone
 import sqlite3
 import re
 from types import SimpleNamespace
@@ -16,6 +16,7 @@ from mailbot_v26.pipeline.processor import (
     _build_document_identity,
     _build_sender_relationship_profile,
     _build_heuristic_summary,
+    _consistency_check_message_facts,
     _collect_message_facts,
     _detect_conversation_context,
     _maybe_drop_duplicate_subject_line,
@@ -1326,14 +1327,91 @@ def test_invoice_attachment_amount_detection() -> None:
     assert facts["amount"].startswith("4200")
 
 
+def test_invoice_math_consistency() -> None:
+    base_facts = {
+        "amount": "120 USD",
+        "due_date": "15.03.2026",
+        "doc_number": "INV-1",
+        "doc_kind": "invoice",
+        "invoice_signal": True,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+    }
+    consistent_evidence = "Subtotal 100 USD Tax 20 USD Total 120 USD Invoice date: 10.03.2026"
+    inconsistent_evidence = "Subtotal 100 USD Tax 20 USD Total 170 USD Invoice date: 10.03.2026"
+
+    consistent = _consistency_check_message_facts(base_facts, evidence_text=consistent_evidence)
+    inconsistent = _consistency_check_message_facts(base_facts, evidence_text=inconsistent_evidence)
+
+    consistent_decision = _build_message_decision(
+        priority="\U0001f7e1",
+        action_line="Pay invoice",
+        summary="",
+        message_facts=consistent,
+        subject="Invoice",
+        body_text=consistent_evidence,
+        attachments=[],
+        context="NEW_MESSAGE",
+    )
+    inconsistent_decision = _build_message_decision(
+        priority="\U0001f7e1",
+        action_line="Pay invoice",
+        summary="",
+        message_facts=inconsistent,
+        subject="Invoice",
+        body_text=inconsistent_evidence,
+        attachments=[],
+        context="NEW_MESSAGE",
+    )
+
+    assert "subtotal_tax_total_mismatch" in inconsistent["consistency_issues"]
+    assert inconsistent["consistency_penalty"] > consistent["consistency_penalty"]
+    assert inconsistent_decision.confidence < consistent_decision.confidence
+
+
+def test_currency_context_required() -> None:
+    with_currency = {
+        "amount": "87 500 USD",
+        "due_date": "15.03.2026",
+        "doc_number": "INV-2",
+        "doc_kind": "invoice",
+        "invoice_signal": True,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+    }
+    without_currency = dict(with_currency)
+    without_currency["amount"] = "87 500"
+    without_currency["amount_context_missing"] = True
+
+    with_currency_checked = _consistency_check_message_facts(
+        with_currency,
+        evidence_text="Invoice total 87 500 USD amount due 87 500 USD",
+    )
+    without_currency_checked = _consistency_check_message_facts(
+        without_currency,
+        evidence_text="Invoice total 87 500 amount due 87 500",
+    )
+
+    assert "amount_without_currency" not in with_currency_checked["consistency_issues"]
+    assert "amount_without_currency" in without_currency_checked["consistency_issues"]
+    assert without_currency_checked["consistency_penalty"] > with_currency_checked["consistency_penalty"]
+
+
 def test_payroll_never_invoice() -> None:
-    body = "\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a: \u043d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e 120 000 \u0440\u0443\u0431, \u0443\u0434\u0435\u0440\u0436\u0430\u043d\u043e 15 000 \u0440\u0443\u0431, \u043a \u0432\u044b\u043f\u043b\u0430\u0442\u0435 105 000 \u0440\u0443\u0431"
+    body = "\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a: \u043d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e 120 000 \u0440\u0443\u0431, \u0443\u0434\u0435\u0440\u0436\u0430\u043d\u043e 15 000 \u0440\u0443\u0431, \u043a \u0432\u044b\u043f\u043b\u0430\u0442\u0435 105 000 \u0440\u0443\u0431, \u0438\u0442\u043e\u0433\u043e \u043a \u043e\u043f\u043b\u0430\u0442\u0435 105 000 \u0440\u0443\u0431"
     facts = _collect_message_facts(
         subject="\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a \u0437\u0430 \u043c\u0430\u0440\u0442",
         body_text=body,
         attachments=[],
         mail_type="",
     )
+    facts["invoice_signal"] = True
+    facts["doc_kind"] = "invoice"
+    facts = _consistency_check_message_facts(facts, evidence_text=body)
 
     decision = _build_message_decision(
         priority="\U0001f7e1",
@@ -1348,8 +1426,31 @@ def test_payroll_never_invoice() -> None:
 
     assert facts["payroll_signal"] is True
     assert facts["invoice_signal"] is False
+    assert facts["doc_kind"] == "payroll"
     assert "\u043e\u043f\u043b\u0430\u0442" not in decision.action.lower()
 
+
+def test_invalid_due_date_ignored() -> None:
+    facts = {
+        "amount": "120 USD",
+        "due_date": "05.03.2026",
+        "doc_number": "INV-3",
+        "doc_kind": "invoice",
+        "invoice_signal": True,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+    }
+
+    checked = _consistency_check_message_facts(
+        facts,
+        evidence_text="Invoice date: 10.03.2026 Due date: 05.03.2026 Total 120 USD",
+    )
+
+    assert checked["due_date"] == ""
+    assert "due_date_not_after_invoice_date" in checked["consistency_issues"]
+    assert checked["consistency_penalty"] > 0
 
 def test_table_numbers_not_selected() -> None:
     facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}
