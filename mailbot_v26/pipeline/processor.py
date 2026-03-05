@@ -2041,6 +2041,10 @@ def _build_premium_clarity_text(
         evidence_text=fact_text,
         attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
     )
+    message_facts = _consistency_check_message_facts(
+        message_facts,
+        evidence_text=fact_text,
+    )
     context = _detect_conversation_context(
         subject=subject,
         body_text=" ".join(part for part in (body_summary, body_text) if part),
@@ -2199,6 +2203,10 @@ def _build_telegram_text(
         evidence_text=fact_text,
         attachment_text=" ".join(str(attachment.get("text") or "") for attachment in (attachments or [])),
     )
+    message_facts = _consistency_check_message_facts(
+        message_facts,
+        evidence_text=fact_text,
+    )
     if attachment_summary is None:
         rendered = tg_renderer.render_telegram_message(
             priority=priority,
@@ -2331,6 +2339,10 @@ def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]
         facts,
         evidence_text=fact_text,
         attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+    )
+    facts = _consistency_check_message_facts(
+        facts,
+        evidence_text=fact_text,
     )
     if facts["doc_kind"]:
         signals.append(str(facts["doc_kind"]))
@@ -2576,7 +2588,9 @@ def _compute_decision_confidence(
         confidence += 0.35
     if bool(message_facts.get("amount_context_missing")):
         confidence -= 0.2
-
+    consistency_penalty = float(message_facts.get("consistency_penalty") or 0.0)
+    if consistency_penalty > 0:
+        confidence -= min(max(consistency_penalty, 0.0), 0.6)
     if (
         doc_kind == "invoice"
         and filename_signal
@@ -2764,6 +2778,152 @@ def _score_message_facts(
     scored["amount"] = best_amount
     scored["amount_context_missing"] = not bool(_FACT_CURRENCY_RE.search(lower_source))
     return scored
+
+
+def _to_float_amount(value: str) -> float | None:
+    raw = str(value or "").replace("\u00a0", " ").strip()
+    if not raw:
+        return None
+    match = re.search(r"\d[\d\s]*(?:[\.,]\d{1,2})?", raw)
+    if not match:
+        return None
+    token = match.group(0).replace(" ", "")
+    if token.count(",") == 1 and token.count(".") == 0:
+        frac = token.split(",", 1)[1]
+        token = token.replace(",", ".") if len(frac) <= 2 else token.replace(",", "")
+    elif token.count(".") == 1 and token.count(",") == 0:
+        frac = token.split(".", 1)[1]
+        if len(frac) > 2:
+            token = token.replace(".", "")
+    else:
+        token = token.replace(",", "").replace(".", "")
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
+def _extract_amount_for_keywords(text: str, keywords: tuple[str, ...]) -> float | None:
+    for item in _extract_numbers_in_evidence_window(text, keywords, window=120):
+        parsed = _to_float_amount(item.get("amount"))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_ddmmyyyy(value: str) -> datetime | None:
+    token = str(value or "").strip()
+    if not token:
+        return None
+    match = _FACT_DATE_RE.search(token)
+    if not match:
+        return None
+    parts = match.group(0).split(".")
+    if len(parts) < 2:
+        return None
+    day = int(parts[0])
+    month = int(parts[1])
+    year = datetime.now().year
+    if len(parts) > 2 and parts[2]:
+        year = int(parts[2])
+        if len(parts[2]) == 2:
+            year += 2000
+    try:
+        return datetime(year=year, month=month, day=day)
+    except ValueError:
+        return None
+
+
+def _consistency_check_message_facts(
+    facts: dict[str, Any],
+    *,
+    evidence_text: str = "",
+) -> dict[str, Any]:
+    checked = dict(facts)
+    source_text = str(evidence_text or "")
+
+    issues = [str(item) for item in (checked.get("consistency_issues") or []) if str(item).strip()]
+    penalty = float(checked.get("consistency_penalty") or 0.0)
+
+    if bool(checked.get("payroll_signal")) and (
+        bool(checked.get("invoice_signal"))
+        or str(checked.get("doc_kind") or "").strip().lower() == "invoice"
+    ):
+        checked["invoice_signal"] = False
+        checked["doc_kind"] = "payroll"
+        issues.append("payroll_overrides_invoice")
+        penalty += 0.25
+
+    subtotal = _extract_amount_for_keywords(
+        source_text,
+        (
+            "subtotal",
+            "sub total",
+            "\u043f\u043e\u0434\u044b\u0442\u043e\u0433",
+            "\u0431\u0435\u0437 \u043d\u0434\u0441",
+        ),
+    )
+    tax = _extract_amount_for_keywords(
+        source_text,
+        (
+            "tax",
+            "vat",
+            "\u043d\u0434\u0441",
+            "\u043d\u0430\u043b\u043e\u0433",
+        ),
+    )
+    total = _extract_amount_for_keywords(
+        source_text,
+        (
+            "total",
+            "amount due",
+            "total payable",
+            "\u0438\u0442\u043e\u0433\u043e",
+            "\u043a \u043e\u043f\u043b\u0430\u0442\u0435",
+        ),
+    )
+    if subtotal is not None and tax is not None and total is not None:
+        expected_total = subtotal + tax
+        tolerance = max(1.0, abs(total) * 0.03)
+        if abs(expected_total - total) > tolerance:
+            issues.append("subtotal_tax_total_mismatch")
+            penalty += 0.2
+
+    line_match = re.search(
+        r"(\d+(?:[\.,]\d+)?)\s*(?:x|\*|×)\s*(\d+(?:[\.,]\d+)?)\s*(?:=|≈|~)\s*(\d+(?:[\.,]\d+)?)",
+        source_text,
+        flags=re.IGNORECASE,
+    )
+    if line_match:
+        qty = _to_float_amount(line_match.group(1))
+        price = _to_float_amount(line_match.group(2))
+        line_total = _to_float_amount(line_match.group(3))
+        if qty is not None and price is not None and line_total is not None:
+            expected_line_total = qty * price
+            tolerance = max(1.0, abs(line_total) * 0.03)
+            if abs(expected_line_total - line_total) > tolerance:
+                issues.append("line_total_mismatch")
+                penalty += 0.15
+
+    if str(checked.get("amount") or "").strip() and bool(checked.get("amount_context_missing")):
+        issues.append("amount_without_currency")
+        penalty += 0.15
+
+    due_date = _parse_ddmmyyyy(str(checked.get("due_date") or ""))
+    invoice_date_match = re.search(
+        r"(?:invoice\s*date|\u0434\u0430\u0442\u0430\s*\u0441\u0447[\u0435\u0451]\u0442\u0430|\u0434\u0430\u0442\u0430\s*\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
+        source_text,
+        flags=re.IGNORECASE,
+    )
+    invoice_date = _parse_ddmmyyyy(invoice_date_match.group(1)) if invoice_date_match else None
+    if due_date is not None and invoice_date is not None and due_date <= invoice_date:
+        checked["due_date"] = ""
+        issues.append("due_date_not_after_invoice_date")
+        penalty += 0.2
+
+    checked["consistency_issues"] = list(dict.fromkeys(issues))
+    checked["consistency_penalty"] = round(max(0.0, penalty), 3)
+    return checked
 
 
 def _collect_message_facts(
@@ -3675,6 +3835,10 @@ def _build_heuristic_llm_result(
         message_facts,
         evidence_text=fact_text,
         attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+    )
+    message_facts = _consistency_check_message_facts(
+        message_facts,
+        evidence_text=fact_text,
     )
     context = _detect_conversation_context(
         subject=subject,
@@ -5874,6 +6038,10 @@ def process_message(
             message_facts,
             evidence_text=fact_text,
             attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+        )
+        message_facts = _consistency_check_message_facts(
+            message_facts,
+            evidence_text=fact_text,
         )
         context = _detect_conversation_context(
             subject=subject,
