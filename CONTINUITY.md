@@ -191,16 +191,19 @@ Done:
 - 2026-03-04: added deterministic document-identity layer after decision stage in processor (`_build_document_identity` + events-store duplicate lookup) to flag invoice thread duplicates (`DOCUMENT_DUPLICATE`) and soften duplicate actions to "Зафиксировать" for non-new-message contexts; added targeted pipeline identity tests; full pytest green (1042 passed).
 - 2026-03-04: added deterministic evidence scoring layer for amount facts in processor (`_score_amount_candidate` + `_score_message_facts`) after fact validation, scoring candidates by total/amount-due keywords, currency/date proximity, attachment context bonus, and table-row penalty; wired into all processor fact-validation paths, added targeted amount scoring regressions, and full pytest green (1046 passed).
 - 2026-03-05: added canonical `MessageInterpretation` layer in processor (dataclass + deterministic builder + `message_interpretation` events_v1 contract event), rewired weekly digest human signals to aggregate interpretation events (doc_kind/amount), added dashboard interpretation metrics sourced from events_v1 interpretation payloads, and added regression tests for interpretation creation/consistency + weekly/dashboard consumers + telegram payload non-regression; full pytest green (1062 passed).
+- 2026-03-05: fixed P0 premium/direct-path stability by normalizing dict-shaped LLM results before attribute access in processor, preserving heuristic priority when dict lacks `priority`; fixed Telegram priority callback UX to always answer callback, edit in-place without extra ack messages, and emit structured callback/edit logs; added targeted regressions for llm_result normalization + priority callback edit/ack flows.
 Now:
-- Weekly digest includes a deterministic shareable insight card block and Telegram share action without changing processor/decision pipeline behavior.
-- Full regression suite is green after shareable-card rollout.
+- P0 premium processor crash fix and Telegram priority callback edit-in-place fix are implemented with targeted regressions.
+- Focus is verification on full pytest and monitoring callback/edit logs (`tg_priority_callback_received`, `tg_priority_edit_ok`).
 Next:
-- Monitor share-card usage/engagement and adjust copy constraints without altering message processing or canonical interpretation flow.
+- Observe production logs for residual `premium_processor_failed`/priority-callback anomalies and tighten parsing only if new malformed callback shapes appear.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should we extend dashboard UI cards to surface interpretation metrics directly (invoice/contract totals) in a follow-up UX pass?
 Working set (files / tables / tests):
-- mailbot_v26/pipeline/weekly_digest.py
-- mailbot_v26/tests/test_weekly_digest.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/telegram/inbound.py
+- mailbot_v26/tests/test_llm_result_normalization.py
+- mailbot_v26/tests/test_telegram_inbound.py
 - CONTINUITY.md
-- python -m pytest -q mailbot_v26/tests/test_weekly_digest.py
+- python -m pytest -q mailbot_v26/tests/test_llm_result_normalization.py mailbot_v26/tests/test_telegram_inbound.py
 - python -m pytest -q

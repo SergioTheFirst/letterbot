@@ -563,22 +563,48 @@ class TelegramInboundProcessor:
         message = callback.get("message")
         chat_id = ""
         callback_id = _clean_text(callback.get("id"))
+        message_id: int | None = None
+        from_user_id = ""
         if isinstance(message, dict):
             chat = message.get("chat")
             if isinstance(chat, dict):
                 chat_id = _safe_chat_id(chat.get("id"))
+            try:
+                message_id = int(message.get("message_id"))
+            except (TypeError, ValueError):
+                message_id = None
+        from_user = callback.get("from")
+        if isinstance(from_user, dict):
+            from_user_id = _clean_text(str(from_user.get("id") or ""))
         if not chat_id or not self._is_allowed_chat(chat_id):
             logger.warning("telegram_inbound_unauthorized_callback", chat_id=chat_id)
             return
 
         parsed = parse_callback_data(data)
         if not parsed:
+            if data.startswith(("mb:prio:", "prio_set:", "mb:setprio:")):
+                logger.warning(
+                    "tg_priority_callback_missing_email_id",
+                    callback_data=data,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    from_user_id=from_user_id,
+                )
+                self._answer_callback(callback_id, "Не нашёл письмо для изменения")
+                return
             self._reply(chat_id, _t("inbound.bad_button"))
             self._answer_callback(callback_id, _t("inbound.bad_button"))
             return
 
         action, payload = parsed
         if action == "priority":
+            logger.info(
+                "tg_priority_callback_received",
+                callback_data=data,
+                chat_id=chat_id,
+                message_id=message_id,
+                from_user_id=from_user_id,
+            )
             if isinstance(message, dict) and message.get("message_id") is not None:
                 self._apply_priority_edit(chat_id, message, payload)
             else:
@@ -600,6 +626,13 @@ class TelegramInboundProcessor:
             self._close_priority_menu(chat_id, message, payload)
             self._answer_callback(callback_id, _t("inbound.ok"))
         elif action == "prio_set":
+            logger.info(
+                "tg_priority_callback_received",
+                callback_data=data,
+                chat_id=chat_id,
+                message_id=message_id,
+                from_user_id=from_user_id,
+            )
             self._apply_priority_edit(chat_id, message, payload)
             self._answer_callback(callback_id, "Приоритет обновлён")
         elif action == "snooze_menu":
@@ -760,7 +793,7 @@ class TelegramInboundProcessor:
     ) -> None:
         email_id_raw = payload.get("email_id")
         if not email_id_raw or not email_id_raw.isdigit():
-            self._reply(chat_id, _t("inbound.bad_email_id"))
+            logger.warning("tg_priority_callback_missing_email_id", callback_data=payload)
             return
         if not message or not isinstance(message, dict):
             return
@@ -836,8 +869,15 @@ class TelegramInboundProcessor:
                 html_text=full_text,
                 reply_markup=reply_markup,
             )
+            logger.info(
+                "tg_priority_edit_ok",
+                email_id=email_id,
+                chat_id=chat_id,
+                message_id=message_id_int,
+                priority=new_priority,
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("telegram_inbound_edit_failed", error=str(exc))
+            logger.error("tg_priority_edit_failed", error=str(exc))
 
     def _open_priority_menu(
         self,
