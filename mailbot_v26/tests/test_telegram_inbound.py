@@ -159,7 +159,57 @@ def test_parse_command_tolerates_spaces() -> None:
     assert args == ["on"]
 
 
-def test_priority_callback_edits_message_without_ack_spam_and_persists_feedback(tmp_path: Path, monkeypatch) -> None:
+def test_priority_callback_updates_snapshot_priority(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    edited: list[dict[str, object]] = []
+
+    def _fake_edit(**kwargs):
+        edited.append(kwargs)
+
+    monkeypatch.setattr("mailbot_v26.telegram.inbound.edit_telegram_message", _fake_edit)
+
+    callback = {
+        "data": f"prio_set:{email_id}:R",
+        "message": {"chat": {"id": "chat"}, "message_id": 101, "text": "old"},
+    }
+    processor.handle_callback_query(callback)
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        priority_row = conn.execute("SELECT priority FROM emails WHERE id = ?", (email_id,)).fetchone()
+        feedback_rows = conn.execute("SELECT id FROM priority_feedback").fetchall()
+        event_rows = conn.execute(
+            "SELECT event_type FROM events_v1 WHERE event_type = 'priority_correction_recorded'"
+        ).fetchall()
+
+    assert priority_row is not None
+    assert priority_row[0] == "🔴"
+    assert len(feedback_rows) == 1
+    assert len(event_rows) == 1
+    assert sent == []
+    assert len(edited) == 1
+    assert "🔴" in str(edited[0]["html_text"])
+    assert "Принято: приоритет исправлен" not in str(edited[0]["html_text"])
+    assert edited[0]["reply_markup"] == {
+        "inline_keyboard": [
+            [{"text": "Приоритет", "callback_data": f"prio_menu:{email_id}"}, {"text": "⏰ Позже", "callback_data": f"snz_m:{email_id}"}],
+            [{"text": "✓ Верно", "callback_data": f"mb:ok:{email_id}"}],
+        ]
+    }
+
+
+def test_priority_callback_priority_persists_after_rerender(tmp_path: Path, monkeypatch) -> None:
     sent: list[str] = []
     gate_result = GateResult(
         passed=True,
@@ -187,24 +237,42 @@ def test_priority_callback_edits_message_without_ack_spam_and_persists_feedback(
     processor.handle_callback_query(callback)
     processor.handle_callback_query(callback)
 
-    with sqlite3.connect(processor.knowledge_db.path) as conn:
-        feedback_rows = conn.execute("SELECT id FROM priority_feedback").fetchall()
-        event_rows = conn.execute(
-            "SELECT event_type FROM events_v1 WHERE event_type = 'priority_correction_recorded'"
-        ).fetchall()
-
-    assert len(feedback_rows) == 1
-    assert len(event_rows) == 1
-    assert sent == []
     assert len(edited) == 2
     assert "🔴" in str(edited[0]["html_text"])
-    assert "Принято: приоритет исправлен" not in str(edited[0]["html_text"])
-    assert edited[0]["reply_markup"] == {
-        "inline_keyboard": [
-            [{"text": "Приоритет", "callback_data": f"prio_menu:{email_id}"}, {"text": "⏰ Позже", "callback_data": f"snz_m:{email_id}"}],
-            [{"text": "✓ Верно", "callback_data": f"mb:ok:{email_id}"}],
-        ]
+    assert "🔴" in str(edited[1]["html_text"])
+
+
+def test_priority_callback_edit_same_message(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    edited: list[dict[str, object]] = []
+
+    def _fake_edit(**kwargs):
+        edited.append(kwargs)
+
+    monkeypatch.setattr("mailbot_v26.telegram.inbound.edit_telegram_message", _fake_edit)
+
+    callback = {
+        "data": f"mb:prio:{email_id}:Y",
+        "message": {"chat": {"id": "chat"}, "message_id": 808, "text": "old"},
     }
+    processor.handle_callback_query(callback)
+
+    assert sent == []
+    assert len(edited) == 1
+    assert edited[0]["chat_id"] == "chat"
+    assert edited[0]["message_id"] == 808
 
 
 def test_priority_callback_edit_failure_is_safe_without_ack_spam(tmp_path: Path, monkeypatch) -> None:
