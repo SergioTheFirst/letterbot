@@ -2280,21 +2280,37 @@ def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]
     base = (body_text or "").strip()
     signals: list[str] = []
     for attachment in attachments[:4]:
-        filename = str(attachment.get("filename") or "").strip().lower()
+        filename = str(attachment.get("filename") or "").strip()
         if not filename:
             continue
-        signals.append(filename)
-        if filename.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")):
-            signals.append("excel attachment")
+        filename_lower = filename.lower()
+        signals.append(filename_lower)
         attachment_text = str(attachment.get("text") or "").strip()
+        doc_type = _detect_attachment_doc_type(
+            filename=filename_lower,
+            content_type=attachment.get("content_type") or attachment.get("type"),
+        )
+        context_source = " ".join(
+            part
+            for part in (
+                body_text or "",
+                filename,
+                attachment_text[:240],
+            )
+            if part
+        )
+        has_table_context = _has_keyword_context(context_source, _ATTACHMENT_CONTEXT_KEYWORDS)
+        if doc_type == "TABLE" and not has_table_context:
+            continue
+        if filename_lower.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")):
+            signals.append("excel attachment")
         if attachment_text:
-            doc_type = _detect_attachment_doc_type(filename=filename, content_type=attachment.get("content_type") or attachment.get("type"))
-            fact = pick_attachment_fact(attachment_text, filename, doc_type)
+            fact = pick_attachment_fact(attachment_text, filename_lower, doc_type)
             if fact:
                 signals.append(fact[:180])
             compact_text = re.sub(r"\s+", " ", attachment_text)
             if len(compact_text) > 220:
-                compact_text = compact_text[:219].rstrip() + "вЂ¦"
+                compact_text = compact_text[:219].rstrip() + "…"
             signals.append(compact_text)
     fact_text = " ".join(
         part
@@ -2402,6 +2418,123 @@ _PAYMENT_ACTION_MARKERS = ("РѕРїР»Р°С‚", "payment", "pay")
 _CONTRACT_FINAL_ACTION_MARKERS = ("РїРѕРґРїРёСЃ", "СЃРѕРіР»Р°СЃ", "СѓС‚РІРµСЂРґ", "Р·Р°РєР»СЋС‡")
 _FACT_CURRENCY_RE = re.compile(r"(СЂСѓР±\.?|в‚Ѕ|usd|\$|eur|в‚¬)", re.IGNORECASE)
 _FACT_MAX_AMOUNT = 10_000_000_000
+
+_AMOUNT_POSITIVE_CONTEXT_MARKERS = tuple(
+    dict.fromkeys((*_INVOICE_AMOUNT_POSITIVE_MARKERS, "total payable"))
+)
+_AMOUNT_NEGATIVE_CONTEXT_MARKERS = tuple(
+    dict.fromkeys(
+        (
+            *_PAYROLL_AMOUNT_NEGATIVE_MARKERS,
+            "\u043d\u043e\u043c\u0435\u0440",
+            "\u0441\u0442\u0440\u043e\u043a\u0430",
+        )
+    )
+)
+_AMOUNT_EVIDENCE_KEYWORDS = tuple(
+    dict.fromkeys(
+        (
+            *_AMOUNT_POSITIVE_CONTEXT_MARKERS,
+            "\u0438\u0442\u043e\u0433\u043e",
+            "\u043a \u043e\u043f\u043b\u0430\u0442\u0435",
+            "\u0441\u0443\u043c\u043c\u0430",
+            "\u043e\u043f\u043b\u0430\u0442",
+            "\u0440\u0443\u0431",
+            "invoice",
+            "\u0441\u0447\u0435\u0442",
+            "\u0441\u0447\u0451\u0442",
+            "amount due",
+            "total payable",
+            "total",
+        )
+    )
+)
+_ATTACHMENT_CONTEXT_KEYWORDS = tuple(
+    dict.fromkeys(
+        (
+            *_AMOUNT_EVIDENCE_KEYWORDS,
+            *_FACT_CONTRACT_MARKERS,
+            *_FACT_INCIDENT_MARKERS,
+            *_FACT_INVOICE_MARKERS,
+        )
+    )
+)
+
+
+def _has_keyword_context(text: str, keywords: tuple[str, ...]) -> bool:
+    normalized = (text or "").lower()
+    if not normalized:
+        return False
+    return any(keyword and keyword in normalized for keyword in keywords)
+
+
+def _extract_numbers_in_evidence_window(
+    text: str,
+    keywords: tuple[str, ...],
+    window: int = 120,
+) -> list[dict[str, Any]]:
+    source = str(text or "")
+    if not source.strip():
+        return []
+
+    lowered = source.lower()
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[int, int, str]] = set()
+    normalized_keywords = [
+        str(keyword).strip().lower()
+        for keyword in keywords
+        if str(keyword).strip()
+    ]
+
+    for keyword in normalized_keywords:
+        scan_offset = 0
+        keyword_len = len(keyword)
+        while True:
+            index = lowered.find(keyword, scan_offset)
+            if index < 0:
+                break
+            left = max(0, index - window)
+            right = min(len(source), index + keyword_len + window)
+            segment = source[left:right]
+            for match in _FACT_AMOUNT_RE.finditer(segment):
+                amount_value = " ".join(match.group(0).replace("\u00a0", " ").split())
+                global_start = left + match.start()
+                global_end = left + match.end()
+                dedupe_key = (global_start, global_end, amount_value)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                context = lowered[max(0, global_start - 36) : min(len(lowered), global_end + 36)]
+                candidates.append(
+                    {
+                        "amount": amount_value,
+                        "start": global_start,
+                        "end": global_end,
+                        "context": context,
+                        "window_hit": True,
+                    }
+                )
+            scan_offset = index + keyword_len
+
+    if candidates:
+        candidates.sort(key=lambda item: (int(item["start"]), int(item["end"])))
+        return candidates
+
+    for match in _FACT_AMOUNT_RE.finditer(source):
+        amount_value = " ".join(match.group(0).replace("\u00a0", " ").split())
+        global_start = match.start()
+        global_end = match.end()
+        context = lowered[max(0, global_start - 36) : min(len(lowered), global_end + 36)]
+        candidates.append(
+            {
+                "amount": amount_value,
+                "start": global_start,
+                "end": global_end,
+                "context": context,
+                "window_hit": False,
+            }
+        )
+    return candidates
 
 
 def _compute_decision_confidence(
@@ -2524,13 +2657,13 @@ def _score_amount_candidate(
     normalized_context = (context_text or "").lower()
     if any(token in normalized_context for token in ("РёС‚РѕРіРѕ", "total")):
         score += 5
-    if doc_kind == "invoice" and any(token in normalized_context for token in _INVOICE_AMOUNT_POSITIVE_MARKERS):
+    if doc_kind == "invoice" and any(token in normalized_context for token in _AMOUNT_POSITIVE_CONTEXT_MARKERS):
         score += 7
-    if doc_kind == "invoice" and any(token in normalized_context for token in _PAYROLL_AMOUNT_NEGATIVE_MARKERS):
+    if doc_kind == "invoice" and any(token in normalized_context for token in _AMOUNT_NEGATIVE_CONTEXT_MARKERS):
         score -= 8
     if doc_kind == "payroll" and any(token in normalized_context for token in _PAYROLL_AMOUNT_POSITIVE_MARKERS):
         score += 6
-    if doc_kind == "payroll" and any(token in normalized_context for token in _INVOICE_AMOUNT_POSITIVE_MARKERS):
+    if doc_kind == "payroll" and any(token in normalized_context for token in _AMOUNT_POSITIVE_CONTEXT_MARKERS):
         score -= 6
     if _FACT_CURRENCY_RE.search(normalized_context):
         score += 3
@@ -2538,6 +2671,8 @@ def _score_amount_candidate(
         score += 2
     if is_attachment_context:
         score += 1
+    if any(token in normalized_context for token in _AMOUNT_NEGATIVE_CONTEXT_MARKERS):
+        score -= 2
     if any(token in normalized_context for token in ("СЃС‚СЂРѕРєР°", "row", "line")):
         score -= 3
     return score
@@ -2560,8 +2695,15 @@ def _score_message_facts(
     best_currency_hit = False
     lower_source = source.lower()
     doc_kind = str(scored.get("doc_kind") or "").strip().lower()
-    for match in _FACT_AMOUNT_RE.finditer(source):
-        candidate = " ".join(match.group(0).replace("\u00a0", " ").split())
+    candidates = _extract_numbers_in_evidence_window(
+        source,
+        _AMOUNT_EVIDENCE_KEYWORDS,
+        window=120,
+    )
+    for candidate_item in candidates:
+        candidate = str(candidate_item.get("amount") or "").strip()
+        if not candidate:
+            continue
         candidate_digits = re.sub(r"[^0-9]", "", candidate)
         if not candidate_digits:
             continue
@@ -2573,12 +2715,23 @@ def _score_message_facts(
         looks_like_table_row = plain_amount and len(candidate_digits) <= 4
         if candidate_int <= 10 or candidate_int >= _FACT_MAX_AMOUNT or looks_like_table_row:
             continue
-        context = lower_source[max(0, match.start() - 28) : match.end() + 28]
-        has_invoice_context = any(token in context for token in _INVOICE_AMOUNT_POSITIVE_MARKERS)
-        has_payroll_context = any(token in context for token in _PAYROLL_AMOUNT_NEGATIVE_MARKERS)
+
+        candidate_start = int(candidate_item.get("start") or 0)
+        candidate_end = int(candidate_item.get("end") or candidate_start)
+        context = str(
+            candidate_item.get("context")
+            or lower_source[max(0, candidate_start - 36) : min(len(lower_source), candidate_end + 36)]
+        )
+        has_invoice_context = any(token in context for token in _AMOUNT_POSITIVE_CONTEXT_MARKERS)
+        has_payroll_context = any(token in context for token in _AMOUNT_NEGATIVE_CONTEXT_MARKERS)
         has_currency_context = bool(_FACT_CURRENCY_RE.search(context))
+
+        window_hit = bool(candidate_item.get("window_hit"))
+        if not window_hit and not (has_invoice_context or has_currency_context):
+            continue
         if doc_kind == "payroll" and (not has_payroll_context or not has_currency_context):
             continue
+
         in_attachment = bool(attachment_source) and candidate in attachment_source
         candidate_score = _score_amount_candidate(
             candidate,
@@ -2586,10 +2739,10 @@ def _score_message_facts(
             is_attachment_context=in_attachment,
             doc_kind=doc_kind,
         )
-        prefix_context = lower_source[max(0, match.start() - 20) : match.start()]
-        if any(token in prefix_context for token in _INVOICE_AMOUNT_POSITIVE_MARKERS):
+        prefix_context = lower_source[max(0, candidate_start - 20) : candidate_start]
+        if any(token in prefix_context for token in _AMOUNT_POSITIVE_CONTEXT_MARKERS):
             candidate_score += 6
-        candidate_currency_hit = bool(_FACT_CURRENCY_RE.search(match.group(0)))
+        candidate_currency_hit = bool(_FACT_CURRENCY_RE.search(candidate))
         if candidate_currency_hit:
             candidate_score += 4
         elif doc_kind == "invoice" and bool(_FACT_CURRENCY_RE.search(lower_source)):
@@ -2620,31 +2773,81 @@ def _collect_message_facts(
     attachments: list[dict[str, Any]],
     mail_type: str,
 ) -> dict[str, Any]:
-    attachment_texts: list[str] = []
+    cleaned_body_text = clean_email_body(body_text or "").strip() or str(body_text or "")
+    pdf_attachment_texts: list[str] = []
+    table_attachment_texts: list[str] = []
+    other_attachment_texts: list[str] = []
     attachment_facts: list[str] = []
+
     for attachment in attachments[:6]:
         text = str(attachment.get("text") or "").strip()
-        if text:
-            attachment_texts.append(text[:300])
-            doc_type = _detect_attachment_doc_type(
-                filename=str(attachment.get("filename") or ""),
-                content_type=attachment.get("content_type") or attachment.get("type"),
+        if not text:
+            continue
+
+        filename = str(attachment.get("filename") or "")
+        content_type = attachment.get("content_type") or attachment.get("type")
+        doc_type = _detect_attachment_doc_type(
+            filename=filename,
+            content_type=content_type,
+        )
+        context_source = " ".join(
+            part
+            for part in (
+                subject,
+                cleaned_body_text,
+                filename,
+                text[:240],
             )
-            fact = pick_attachment_fact(text, str(attachment.get("filename") or ""), doc_type)
-            if fact:
-                attachment_facts.append(fact)
+            if part
+        )
+        if doc_type == "TABLE" and not _has_keyword_context(context_source, _ATTACHMENT_CONTEXT_KEYWORDS):
+            continue
+
+        compact_text = text[:300]
+        lowered_filename = filename.lower()
+        if lowered_filename.endswith(".pdf"):
+            pdf_attachment_texts.append(compact_text)
+        elif doc_type == "TABLE":
+            table_attachment_texts.append(compact_text)
+        else:
+            other_attachment_texts.append(compact_text)
+
+        fact = pick_attachment_fact(text, filename, doc_type)
+        if fact:
+            attachment_facts.append(fact)
+
     evidence_text = " ".join(
-        part for part in (subject, body_text, " ".join(attachment_texts), " ".join(attachment_facts)) if part
+        part
+        for part in (
+            subject,
+            cleaned_body_text,
+            " ".join(pdf_attachment_texts),
+            " ".join(other_attachment_texts),
+            " ".join(table_attachment_texts),
+            " ".join(attachment_facts),
+        )
+        if part
     )
     lowered = evidence_text.lower()
     normalized_mail_type = (mail_type or "").upper()
+
     amount = ""
-    for match in _FACT_AMOUNT_RE.finditer(evidence_text):
-        chunk = match.group(0)
-        context = lowered[max(0, match.start() - 20) : match.end() + 10]
-        if any(token in context for token in ("РёС‚РѕРіРѕ", "СЃСѓРјРј", "Рє РѕРїР»Р°С‚", "РѕРїР»Р°С‚", "СЂСѓР±", "в‚Ѕ")):
-            amount = " ".join(chunk.replace("\u00a0", " ").split())
+    amount_candidates = _extract_numbers_in_evidence_window(
+        evidence_text,
+        _AMOUNT_EVIDENCE_KEYWORDS,
+        window=120,
+    )
+    for candidate_item in amount_candidates:
+        candidate_value = str(candidate_item.get("amount") or "").strip()
+        if not candidate_value:
+            continue
+        context = str(candidate_item.get("context") or "")
+        if any(token in context for token in _AMOUNT_POSITIVE_CONTEXT_MARKERS) or _FACT_CURRENCY_RE.search(context):
+            amount = candidate_value
             break
+    if not amount and amount_candidates:
+        amount = str(amount_candidates[0].get("amount") or "").strip()
+
     due_date = ""
     due_match = _FACT_DUE_RE.search(evidence_text)
     if due_match:
@@ -2652,6 +2855,7 @@ def _collect_message_facts(
     elif any(token in lowered for token in ("РґРѕ", "СЃСЂРѕРє", "РґРµРґР»Р°Р№РЅ", "deadline")):
         generic_date = _FACT_DATE_RE.search(evidence_text)
         due_date = generic_date.group(0) if generic_date else ""
+
     doc_number_match = _FACT_DOC_NUMBER_RE.search(evidence_text)
     doc_number = doc_number_match.group(1) if doc_number_match else ""
     payroll_signal = normalized_mail_type.startswith("PAYROLL") or any(marker in lowered for marker in _FACT_PAYROLL_MARKERS)
@@ -2665,6 +2869,7 @@ def _collect_message_facts(
         normalized_mail_type in {"INCIDENT", "SECURITY_ALERT"}
         or any(marker in lowered for marker in _FACT_INCIDENT_MARKERS)
     )
+
     doc_kind = ""
     if incident_signal:
         doc_kind = "incident"
@@ -2674,8 +2879,10 @@ def _collect_message_facts(
         doc_kind = "contract"
     elif invoice_signal:
         doc_kind = "invoice"
+
     if payroll_signal:
         due_date = ""
+
     return {
         "amount": amount,
         "due_date": due_date,

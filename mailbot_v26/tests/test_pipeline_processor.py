@@ -1285,3 +1285,103 @@ def test_invoice_amount_prefers_total_to_pay_keywords() -> None:
     )
 
     assert scored["amount"].startswith("87 500 руб")
+
+
+def test_invoice_body_amount_detection() -> None:
+    body = "\u041d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e 120 000 \u0440\u0443\u0431. \u0423\u0434\u0435\u0440\u0436\u0430\u043d\u043e 32 500 \u0440\u0443\u0431. \u0418\u0442\u043e\u0433\u043e \u043a \u043e\u043f\u043b\u0430\u0442\u0435 87 500 \u0440\u0443\u0431."
+    facts = _collect_message_facts(
+        subject="\u0421\u0447\u0435\u0442 \u2116455",
+        body_text=body,
+        attachments=[],
+        mail_type="INVOICE",
+    )
+    facts = _validate_message_facts(facts, evidence_text=body)
+    facts = _score_message_facts(facts, evidence_text=body, attachment_text="")
+
+    assert facts["invoice_signal"] is True
+    assert facts["amount"].startswith("87 500")
+
+
+def test_invoice_attachment_amount_detection() -> None:
+    attachment_text = "Invoice #7 total payable 4200 USD amount due 4200 USD"
+    attachments = [
+        {
+            "filename": "invoice_07.pdf",
+            "content_type": "application/pdf",
+            "text": attachment_text,
+        }
+    ]
+    evidence_text = f"\u0421\u043c. \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u0435 {attachment_text}"
+
+    facts = _collect_message_facts(
+        subject="\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b",
+        body_text="\u0421\u043c. \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u0435",
+        attachments=attachments,
+        mail_type="",
+    )
+    facts = _validate_message_facts(facts, evidence_text=evidence_text)
+    facts = _score_message_facts(facts, evidence_text=evidence_text, attachment_text=attachment_text)
+
+    assert facts["invoice_signal"] is True
+    assert facts["amount"].startswith("4200")
+
+
+def test_payroll_never_invoice() -> None:
+    body = "\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a: \u043d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e 120 000 \u0440\u0443\u0431, \u0443\u0434\u0435\u0440\u0436\u0430\u043d\u043e 15 000 \u0440\u0443\u0431, \u043a \u0432\u044b\u043f\u043b\u0430\u0442\u0435 105 000 \u0440\u0443\u0431"
+    facts = _collect_message_facts(
+        subject="\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a \u0437\u0430 \u043c\u0430\u0440\u0442",
+        body_text=body,
+        attachments=[],
+        mail_type="",
+    )
+
+    decision = _build_message_decision(
+        priority="\U0001f7e1",
+        action_line="\u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c",
+        summary="",
+        message_facts=facts,
+        subject="\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a",
+        body_text=body,
+        attachments=[],
+        context="NEW_MESSAGE",
+    )
+
+    assert facts["payroll_signal"] is True
+    assert facts["invoice_signal"] is False
+    assert "\u043e\u043f\u043b\u0430\u0442" not in decision.action.lower()
+
+
+def test_table_numbers_not_selected() -> None:
+    facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}
+    evidence = "\u0442\u0430\u0431\u043b\u0438\u0446\u0430\n100\n200\n3000\n4000"
+
+    scored = _score_message_facts(
+        facts,
+        evidence_text=evidence,
+        attachment_text=evidence,
+    )
+
+    assert scored["amount"] == ""
+
+
+def test_forwarded_thread_not_used() -> None:
+    body = (
+        "\u041d\u043e\u0432\u044b\u0439 \u0441\u0447\u0435\u0442: \u0438\u0442\u043e\u0433\u043e \u043a \u043e\u043f\u043b\u0430\u0442\u0435 87 500 \u0440\u0443\u0431.\n"
+        "Forwarded message\n"
+        "From: old@example.com\n"
+        "\u0418\u0442\u043e\u0433\u043e \u043a \u043e\u043f\u043b\u0430\u0442\u0435 999 999 \u0440\u0443\u0431."
+    )
+
+    facts = _collect_message_facts(
+        subject="\u0421\u0447\u0435\u0442 \u2116455",
+        body_text=body,
+        attachments=[],
+        mail_type="INVOICE",
+    )
+    facts = _score_message_facts(
+        facts,
+        evidence_text=body,
+        attachment_text="",
+    )
+
+    assert facts["amount"].startswith("87 500")
