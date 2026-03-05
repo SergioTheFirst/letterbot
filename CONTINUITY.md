@@ -189,18 +189,23 @@ Done:
 - 2026-03-04: added deterministic conversation context layer in processor (`NEW_MESSAGE`/`REPLY`/`FORWARD`/`CONFIRMATION`/`DISCUSSION`) after fact validation, threaded context into `MessageDecision`, and added action safety guards (invoice confirmations never keep pay-action; contract discussions avoid final-approval actions); added targeted context regressions and full pytest green (1038 passed).
 - 2026-03-04: added deterministic document-identity layer after decision stage in processor (`_build_document_identity` + events-store duplicate lookup) to flag invoice thread duplicates (`DOCUMENT_DUPLICATE`) and soften duplicate actions to "Зафиксировать" for non-new-message contexts; added targeted pipeline identity tests; full pytest green (1042 passed).
 - 2026-03-04: added deterministic evidence scoring layer for amount facts in processor (`_score_amount_candidate` + `_score_message_facts`) after fact validation, scoring candidates by total/amount-due keywords, currency/date proximity, attachment context bonus, and table-row penalty; wired into all processor fact-validation paths, added targeted amount scoring regressions, and full pytest green (1046 passed).
+- 2026-03-05: added canonical `MessageInterpretation` layer in processor (dataclass + deterministic builder + `message_interpretation` events_v1 contract event), rewired weekly digest human signals to aggregate interpretation events (doc_kind/amount), added dashboard interpretation metrics sourced from events_v1 interpretation payloads, and added regression tests for interpretation creation/consistency + weekly/dashboard consumers + telegram payload non-regression; full pytest green (1062 passed).
 Now:
-- Telegram renderer now includes compact decision explanation and preserves one-message edit-in-place enrichment UX for long/attachment processing.
-- Targeted test suites for tg renderer + delivery SLA are green after UX changes.
+- Canonical interpretation events are emitted from processor decision output and consumed by weekly digest and dashboard aggregates.
+- Full regression suite is green after interpretation-layer stabilization changes.
 Next:
-- Run and monitor full-suite regressions for Telegram UX wording stability across existing pipeline scenarios.
+- Monitor downstream consumers (digest/cockpit/relationship intelligence) and migrate any remaining ad-hoc semantic recomputation onto `message_interpretation` events.
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
+- UNCONFIRMED: Should we extend dashboard UI cards to surface interpretation metrics directly (invoice/contract totals) in a follow-up UX pass?
 Working set (files / tables / tests):
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/pipeline/tg_renderer.py
-- mailbot_v26/tests/test_delivery_sla.py
-- mailbot_v26/tests/test_tg_renderer.py
+- mailbot_v26/pipeline/weekly_digest.py
+- mailbot_v26/web_observability/app.py
+- mailbot_v26/events/contract.py
+- mailbot_v26/tests/test_decision_trace.py
+- mailbot_v26/tests/test_weekly_digest.py
+- mailbot_v26/tests/test_web_dashboard_api.py
 - CONTINUITY.md
-- python -m pytest -q mailbot_v26/tests/test_tg_renderer.py mailbot_v26/tests/test_delivery_sla.py
+- events_v1 (event_type=`message_interpretation`)
+- python -m pytest -q mailbot_v26/tests/test_decision_trace.py mailbot_v26/tests/test_weekly_digest.py mailbot_v26/tests/test_web_dashboard_api.py
 - python -m pytest -q

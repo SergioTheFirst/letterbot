@@ -5,6 +5,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline import processor
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
@@ -169,3 +170,103 @@ def test_decision_trace_records_signal_fallback(monkeypatch, tmp_path) -> None:
         ).fetchone()
 
     assert row == (1,)
+
+
+def test_message_interpretation_created(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "message_interpretation.sqlite"
+    _common_monkeypatches(monkeypatch, db_path)
+    monkeypatch.setattr(processor, "contract_event_emitter", ContractEventEmitter(db_path))
+    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=21,
+        from_email="vendor@example.com",
+        subject="Счет №123",
+        received_at=datetime(2024, 1, 1, 12, 0),
+        body_text="Просим оплатить счет 87500 руб до 15.04.2026",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT event_type, payload
+            FROM events_v1
+            WHERE event_type = 'message_interpretation'
+            ORDER BY ts_utc DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "message_interpretation"
+
+
+def test_interpretation_matches_decision() -> None:
+    facts = processor._collect_message_facts(  # noqa: SLF001
+        subject="Счет №445",
+        body_text="К оплате 87 500 руб до 15.04.2026",
+        attachments=[],
+        mail_type="INVOICE",
+    )
+    facts = processor._validate_message_facts(facts, evidence_text="Счет №445 87 500 руб до 15.04.2026")  # noqa: SLF001
+    context = processor._detect_conversation_context(  # noqa: SLF001
+        subject="Счет №445",
+        body_text="К оплате 87 500 руб до 15.04.2026",
+        message_facts=facts,
+    )
+    decision = processor._build_message_decision(  # noqa: SLF001
+        priority="🟡",
+        action_line="Оплатить",
+        summary="Оплатить счет",
+        message_facts=facts,
+        subject="Счет №445",
+        body_text="К оплате 87 500 руб до 15.04.2026",
+        attachments=[],
+        context=context,
+    )
+
+    interpretation = processor._build_message_interpretation(  # noqa: SLF001
+        email_id=55,
+        sender_email="vendor@example.com",
+        message_facts=facts,
+        decision=decision,
+        document_id="invoice_445_vendor",
+    )
+
+    assert interpretation.action == decision.action
+    assert interpretation.priority == decision.priority
+    assert interpretation.context == decision.context
+    assert interpretation.doc_kind == decision.doc_kind
+
+
+def test_no_behavior_change_in_telegram_payload(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "telegram_payload_stable.sqlite"
+    _common_monkeypatches(monkeypatch, db_path)
+    monkeypatch.setattr(processor, "contract_event_emitter", ContractEventEmitter(db_path))
+
+    payload_store: dict[str, object] = {}
+
+    def _enqueue_tg(*, email_id: int, payload) -> None:
+        payload_store["payload"] = payload
+
+    monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=22,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 1, 12, 0),
+        body_text="Body",
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    payload = payload_store["payload"]
+    assert payload.metadata["chat_id"] == "chat"
+    assert payload.metadata["account_email"] == "account@example.com"
+    assert payload.metadata["action_line"] == "Позвонить клиенту"
+    assert payload.metadata["body_summary"] == "Краткое описание письма."

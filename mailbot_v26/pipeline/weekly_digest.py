@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import configparser
 import logging
-import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -95,13 +94,6 @@ class WeeklyDigestData:
     relationship_top_senders: Sequence[dict[str, object]] = ()
     relationship_trend: str | None = None
 
-
-_INVOICE_RE = re.compile(r"(сч[её]т|invoice|оплат)", re.IGNORECASE)
-_CONTRACT_RE = re.compile(r"(договор|contract|подпис|signature|sign)", re.IGNORECASE)
-_RUB_AMOUNT_RE = re.compile(
-    r"(?<!\d)(\d{1,3}(?:[\s\u00A0]\d{3})+|\d{4,9})\s*(?:₽|руб\.?|рубл[еяи]|rub|rur)",
-    re.IGNORECASE,
-)
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -251,7 +243,7 @@ def _collect_weekly_human_signals(
             return 0, None, 0
         rows = analytics._event_rows_scoped(
             account_ids=account_ids,
-            event_type="email_received",
+            event_type="message_interpretation",
             since_ts=analytics._window_start_ts(7),
         )
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -264,20 +256,17 @@ def _collect_weekly_human_signals(
     has_invoice_amount = False
     for row in rows:
         payload = analytics._event_payload(row)
-        text = " ".join(
-            str(payload.get(key) or "")
-            for key in ("subject", "body_summary")
-        )
-        if _INVOICE_RE.search(text):
+        doc_kind = str(payload.get("doc_kind") or "").strip().lower()
+        if doc_kind == "invoice":
             invoice_count += 1
-            for match in _RUB_AMOUNT_RE.finditer(text):
-                amount_raw = match.group(1).replace(" ", "").replace("\u00A0", "")
+            amount_value = payload.get("amount")
+            if amount_value is not None:
                 try:
-                    invoice_total_rub += int(amount_raw)
+                    invoice_total_rub += int(round(float(amount_value)))
                     has_invoice_amount = True
-                except ValueError:
-                    continue
-        if _CONTRACT_RE.search(text):
+                except (TypeError, ValueError):
+                    logger.warning("weekly_interpretation_amount_invalid", amount=amount_value)
+        if doc_kind == "contract":
             contract_count += 1
 
     return invoice_count, (invoice_total_rub if has_invoice_amount else None), contract_count
