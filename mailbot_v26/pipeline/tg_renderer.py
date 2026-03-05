@@ -695,6 +695,15 @@ def build_telegram_text(
     if attachment_line:
         lines.append("")
         lines.append(_escape_dynamic(attachment_line))
+    summary_excerpt = _clean_excerpt(summary, max_lines=3)
+    if summary_excerpt:
+        lines.append("")
+        lines.append(_escape_dynamic(summary_excerpt))
+    explanation_points = _build_decision_explanation(message_facts or {}, mail_type)
+    if explanation_points:
+        lines.append("")
+        lines.append("Почему:")
+        lines.extend(explanation_points)
     if relationship_profile:
         emails_count = int(relationship_profile.get("emails_count") or 0)
         invoice_count = int(relationship_profile.get("invoice_count") or 0)
@@ -733,7 +742,6 @@ def render_telegram_message(
         insights=insights,
         commitments=commitments,
     )
-    summary_excerpt = _clean_excerpt(summary, max_lines=3)
     base_text = build_telegram_text(
         priority=priority,
         from_email=from_email,
@@ -741,14 +749,31 @@ def render_telegram_message(
         action_line=_resolve_action_line(fields.action_line),
         attachments=attachments or [],
         mail_type=mail_type,
-        summary=summary_excerpt,
+        summary=summary,
         message_facts=message_facts,
         relationship_profile=relationship_profile,
     )
-    if summary_excerpt:
-        safe_summary = _escape_dynamic(summary_excerpt)
-        return dedup_rendered_text(f"{base_text}\n\n{safe_summary}\n{_WATERMARK_LINE}")
     return dedup_rendered_text(f"{base_text}\n{_WATERMARK_LINE}")
+
+
+def _build_decision_explanation(
+    message_facts: dict[str, Any], decision: str | None
+) -> list[str]:
+    points: list[str] = []
+    normalized_decision = str(decision or "").upper()
+    if normalized_decision == "INVOICE" or message_facts.get("invoice_no"):
+        points.append("• найден счет")
+    amount = (message_facts or {}).get("amount")
+    if amount:
+        points.append(f"• сумма {_escape_dynamic(str(amount))}")
+    due_date = (message_facts or {}).get("due_date")
+    if due_date:
+        points.append(f"• срок {_escape_dynamic(str(due_date))}")
+    if normalized_decision == "CONTRACT":
+        points.append("• найден договор")
+    if normalized_decision == "INCIDENT":
+        points.append("• найден инцидент")
+    return points[:3]
 
 
 def _resolve_action_line(action_line: str | None) -> str:

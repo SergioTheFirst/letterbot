@@ -99,3 +99,62 @@ def test_edit_failure_does_not_trigger_second_send() -> None:
     assert outcome.result.delivered is True
     assert outcome.edit_applied is False
 
+
+
+def test_progressive_message_edit() -> None:
+    sends: list[str] = []
+    edited: list[tuple[int, str]] = []
+
+    def _send(payload: TelegramPayload) -> DeliveryResult:
+        sends.append(payload.html_text)
+        return DeliveryResult(delivered=True, retryable=False, message_id=404)
+
+    def _edit(message_id: int, payload: TelegramPayload) -> bool:
+        edited.append((message_id, payload.html_text))
+        return True
+
+    outcome = processor._apply_delivery_sla(
+        processing_started_at=0.0,
+        wait_budget_seconds=10.0,
+        minimal_payload=_payload("📩 Письмо получено\nОбрабатываю вложения…"),
+        final_payload=_payload("final"),
+        send_func=_send,
+        edit_func=_edit,
+        on_edit_failure=None,
+        force_minimal_then_edit=True,
+        monotonic=_monotonic_sequence([0.1, 0.2]),
+    )
+
+    assert sends == ["📩 Письмо получено\nОбрабатываю вложения…"]
+    assert edited == [(404, "final")]
+    assert outcome.delivery_mode == "minimal_then_edit"
+    assert outcome.edit_applied is True
+
+
+def test_progressive_message_only_one_message_id() -> None:
+    sent_ids: list[int | None] = []
+    edited_ids: list[int] = []
+
+    def _send(payload: TelegramPayload) -> DeliveryResult:
+        result = DeliveryResult(delivered=True, retryable=False, message_id=505)
+        sent_ids.append(result.message_id)
+        return result
+
+    def _edit(message_id: int, payload: TelegramPayload) -> bool:
+        edited_ids.append(message_id)
+        return True
+
+    processor._apply_delivery_sla(
+        processing_started_at=0.0,
+        wait_budget_seconds=10.0,
+        minimal_payload=_payload("progress"),
+        final_payload=_payload("final"),
+        send_func=_send,
+        edit_func=_edit,
+        on_edit_failure=None,
+        force_minimal_then_edit=True,
+        monotonic=_monotonic_sequence([0.1, 0.2]),
+    )
+
+    assert sent_ids == [505]
+    assert edited_ids == [505]

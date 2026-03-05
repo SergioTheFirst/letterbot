@@ -579,12 +579,13 @@ def _apply_delivery_sla(
     send_func: Callable[[TelegramPayload], DeliveryResult],
     edit_func: Callable[[int, TelegramPayload], bool] | None,
     on_edit_failure: Callable[[str], None] | None,
+    force_minimal_then_edit: bool = False,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> DeliverySLAOutcome:
     initial_elapsed = monotonic() - processing_started_at
     delivery_mode = "final_first_send"
     first_payload = final_payload
-    if initial_elapsed > wait_budget_seconds:
+    if force_minimal_then_edit or initial_elapsed > wait_budget_seconds:
         delivery_mode = "minimal_then_edit"
         first_payload = minimal_payload
     result = send_func(first_payload)
@@ -2216,6 +2217,19 @@ def _build_telegram_text(
     if attachment_summary:
         lines.append(attachment_summary)
     return append_watermark(tg_renderer.dedup_rendered_text("\n".join(lines)), html=True)
+
+
+def _build_progressive_telegram_payload(
+    *,
+    priority: str,
+    metadata: dict[str, Any],
+) -> TelegramPayload:
+    return TelegramPayload(
+        html_text="📩 Письмо получено\nОбрабатываю вложения…",
+        priority=priority,
+        metadata=metadata,
+        reply_markup=None,
+    )
 
 
 def _normalize_action_line(action_line: str) -> str:
@@ -6279,6 +6293,8 @@ def process_message(
         delivery_mode_for_span = "final_first_send"
         elapsed_to_first_send_seconds = 0.0
         edit_applied = False
+        elapsed_before_delivery = max(0.0, time.perf_counter() - processing_started_at)
+        progressive_mode_enabled = bool(attachments) or elapsed_before_delivery > 1.0
         minimal_payload = _build_minimal_telegram_payload(
             priority=priority,
             from_email=from_email,
@@ -6287,6 +6303,11 @@ def process_message(
             metadata=dict(payload.metadata),
             reply_markup=payload.reply_markup,
         )
+        if progressive_mode_enabled:
+            minimal_payload = _build_progressive_telegram_payload(
+                priority=priority,
+                metadata=dict(payload.metadata),
+            )
         edit_errors: list[str] = []
 
         def _on_edit_failure(reason: str) -> None:
@@ -6331,6 +6352,7 @@ def process_message(
             send_func=_send_payload,
             edit_func=_edit_payload,
             on_edit_failure=_on_edit_failure,
+            force_minimal_then_edit=progressive_mode_enabled,
         )
         delivery_result = sla_outcome.result
         delivery_mode_for_span = sla_outcome.delivery_mode
