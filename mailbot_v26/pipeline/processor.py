@@ -1207,6 +1207,8 @@ class MessageProcessor:
         )
         if any(token in lowered for token in ("недоступ", "offline", "авари", "инцидент", "security", "утечк", "взлом", "phish", "promo", "скидк", "распродаж")):
             return "Проверить"
+        if any(token in lowered for token in _FACT_PAYROLL_MARKERS):
+            return "Ознакомиться"
         if any(token in lowered for token in ("счет", "счёт", "invoice", "оплат")):
             return "Оплатить счёт"
         if any(token in lowered for token in ("договор", "contract", "соглашени")):
@@ -1896,6 +1898,7 @@ def _select_premium_short_action(
         "вебинар",
         "акция",
     )
+    payroll_markers = _FACT_PAYROLL_MARKERS
     invoice_markers = (
         "invoice",
         "счет",
@@ -1934,6 +1937,8 @@ def _select_premium_short_action(
     if any(marker in normalized_evidence for marker in signed_markers):
         return "Зафиксировать"
     if any(marker in normalized_evidence for marker in promo_markers):
+        return "Ознакомиться"
+    if any(marker in normalized_evidence for marker in payroll_markers):
         return "Ознакомиться"
 
     subject_invoice_hits = _count_marker_hits(normalized_subject, invoice_markers)
@@ -2353,6 +2358,16 @@ _FACT_INVOICE_MARKERS = (
     "срок оплаты",
     "итого",
 )
+_FACT_PAYROLL_MARKERS = (
+    "расчетный листок",
+    "расчётный листок",
+    "зарплат",
+    "начислен",
+    "удержан",
+    "оклад",
+    "табель",
+    "ведомость",
+)
 _FACT_CONTRACT_MARKERS = ("договор", "contract", "agreement", "подпис", "signature")
 _FACT_INCIDENT_MARKERS = (
     "недоступ",
@@ -2366,9 +2381,13 @@ _FACT_INCIDENT_MARKERS = (
 )
 _FACT_DECISION_SIGNAL_MARKERS = {
     "invoice": _FACT_INVOICE_MARKERS,
+    "payroll": _FACT_PAYROLL_MARKERS,
     "contract": _FACT_CONTRACT_MARKERS,
     "incident": _FACT_INCIDENT_MARKERS,
 }
+_INVOICE_AMOUNT_POSITIVE_MARKERS = ("итого к оплате", "к оплате", "сумма к оплате", "итого", "итоговый платеж", "итоговый платёж", "payable", "amount due")
+_PAYROLL_AMOUNT_NEGATIVE_MARKERS = ("начислено", "удержано", "всего начислено", "налог", "страховые", "к выплате")
+_PAYROLL_AMOUNT_POSITIVE_MARKERS = ("к выплате", "итого к выплате", "начислено")
 _CONTEXT_REPLY_SUBJECT_MARKERS = ("re:", "ответ:", "reply:")
 _CONTEXT_FORWARD_SUBJECT_MARKERS = ("fw:", "fwd:", "переслано:")
 _CONTEXT_CONFIRMATION_MARKERS = (
@@ -2499,11 +2518,20 @@ def _score_amount_candidate(
     *,
     context_text: str,
     is_attachment_context: bool,
+    doc_kind: str,
 ) -> int:
     score = 0
     normalized_context = (context_text or "").lower()
-    if any(token in normalized_context for token in ("итого", "total", "к оплате", "amount due")):
+    if any(token in normalized_context for token in ("итого", "total")):
         score += 5
+    if doc_kind == "invoice" and any(token in normalized_context for token in _INVOICE_AMOUNT_POSITIVE_MARKERS):
+        score += 7
+    if doc_kind == "invoice" and any(token in normalized_context for token in _PAYROLL_AMOUNT_NEGATIVE_MARKERS):
+        score -= 8
+    if doc_kind == "payroll" and any(token in normalized_context for token in _PAYROLL_AMOUNT_POSITIVE_MARKERS):
+        score += 6
+    if doc_kind == "payroll" and any(token in normalized_context for token in _INVOICE_AMOUNT_POSITIVE_MARKERS):
+        score -= 6
     if _FACT_CURRENCY_RE.search(normalized_context):
         score += 3
     if _FACT_DATE_RE.search(normalized_context):
@@ -2531,6 +2559,7 @@ def _score_message_facts(
     best_score: int | None = None
     best_currency_hit = False
     lower_source = source.lower()
+    doc_kind = str(scored.get("doc_kind") or "").strip().lower()
     for match in _FACT_AMOUNT_RE.finditer(source):
         candidate = " ".join(match.group(0).replace("\u00a0", " ").split())
         candidate_digits = re.sub(r"[^0-9]", "", candidate)
@@ -2544,14 +2573,27 @@ def _score_message_facts(
         looks_like_table_row = plain_amount and len(candidate_digits) <= 4
         if candidate_int <= 10 or candidate_int >= _FACT_MAX_AMOUNT or looks_like_table_row:
             continue
-        context = lower_source[max(0, match.start() - 12) : match.end() + 12]
+        context = lower_source[max(0, match.start() - 28) : match.end() + 28]
+        has_invoice_context = any(token in context for token in _INVOICE_AMOUNT_POSITIVE_MARKERS)
+        has_payroll_context = any(token in context for token in _PAYROLL_AMOUNT_NEGATIVE_MARKERS)
+        has_currency_context = bool(_FACT_CURRENCY_RE.search(context))
+        if doc_kind == "payroll" and (not has_payroll_context or not has_currency_context):
+            continue
         in_attachment = bool(attachment_source) and candidate in attachment_source
         candidate_score = _score_amount_candidate(
             candidate,
             context_text=context,
             is_attachment_context=in_attachment,
+            doc_kind=doc_kind,
         )
+        prefix_context = lower_source[max(0, match.start() - 20) : match.start()]
+        if any(token in prefix_context for token in _INVOICE_AMOUNT_POSITIVE_MARKERS):
+            candidate_score += 6
         candidate_currency_hit = bool(_FACT_CURRENCY_RE.search(match.group(0)))
+        if candidate_currency_hit:
+            candidate_score += 4
+        elif doc_kind == "invoice" and bool(_FACT_CURRENCY_RE.search(lower_source)):
+            candidate_score -= 4
         if best_score is None or candidate_score > best_score:
             best_amount = candidate
             best_score = candidate_score
@@ -2612,7 +2654,8 @@ def _collect_message_facts(
         due_date = generic_date.group(0) if generic_date else ""
     doc_number_match = _FACT_DOC_NUMBER_RE.search(evidence_text)
     doc_number = doc_number_match.group(1) if doc_number_match else ""
-    invoice_signal = normalized_mail_type.startswith("INVOICE") or any(marker in lowered for marker in _FACT_INVOICE_MARKERS)
+    payroll_signal = normalized_mail_type.startswith("PAYROLL") or any(marker in lowered for marker in _FACT_PAYROLL_MARKERS)
+    invoice_signal = (normalized_mail_type.startswith("INVOICE") or any(marker in lowered for marker in _FACT_INVOICE_MARKERS)) and not payroll_signal
     contract_signal = (
         normalized_mail_type.startswith("CONTRACT")
         or "AGREEMENT" in normalized_mail_type
@@ -2625,16 +2668,21 @@ def _collect_message_facts(
     doc_kind = ""
     if incident_signal:
         doc_kind = "incident"
+    elif payroll_signal:
+        doc_kind = "payroll"
     elif contract_signal:
         doc_kind = "contract"
     elif invoice_signal:
         doc_kind = "invoice"
+    if payroll_signal:
+        due_date = ""
     return {
         "amount": amount,
         "due_date": due_date,
         "doc_number": doc_number,
         "doc_kind": doc_kind,
         "invoice_signal": invoice_signal,
+        "payroll_signal": payroll_signal,
         "contract_signal": contract_signal,
         "incident_signal": incident_signal,
         "attachment_facts": attachment_facts,
@@ -3542,6 +3590,8 @@ def _build_message_decision(
         resolved_action = "Проверить договор"
     if doc_kind == "incident" and "оплат" in resolved_action.lower():
         resolved_action = "Зафиксировать"
+    if doc_kind == "payroll" and "оплат" in resolved_action.lower():
+        resolved_action = "Ознакомиться"
     payment_action_hits = _count_marker_hits((action_line or "").lower(), ("оплат", "счет", "счёт", "invoice"))
     if doc_kind == "invoice" and confidence < 0.45 and resolved_action == "Оплатить" and payment_action_hits < 2:
         resolved_action = "Проверить"
@@ -3567,6 +3617,10 @@ def _build_message_decision(
         )
         if tokens and not summary:
             resolved_summary = f"Счет к оплате: {tokens}".strip()
+    if doc_kind == "payroll":
+        message_facts["due_date"] = ""
+        if not str(message_facts.get("amount") or "").strip():
+            resolved_summary = summary or ""
 
     return MessageDecision(
         priority=priority,

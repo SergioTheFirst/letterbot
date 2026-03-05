@@ -319,7 +319,7 @@ def test_priority_callback_edit_failure_is_safe_without_ack_spam(tmp_path: Path,
         {
             "json": {
                 "callback_query_id": "cb-prio",
-                "text": "Приоритет обновлён",
+                "text": "Не могу отредактировать",
                 "show_alert": False,
             },
             "timeout": 5,
@@ -649,7 +649,7 @@ def test_stats_command_returns_human_friendly_summary(tmp_path: Path) -> None:
 
     callback = {
         "data": f"mb:prio:{email_id}:R",
-        "message": {"chat": {"id": "chat"}},
+        "message": {"chat": {"id": "chat"}, "message_id": 77},
     }
     processor.handle_callback_query(callback)
 
@@ -932,3 +932,49 @@ def test_priority_callback_always_answers_callback_query(tmp_path: Path, monkeyp
             "timeout": 5,
         }
     ]
+
+
+def test_priority_callback_edits_same_message_and_changes_text(tmp_path: Path, monkeypatch) -> None:
+    test_priority_callback_edits_same_message_and_updates_priority_text(tmp_path, monkeypatch)
+
+
+def test_priority_callback_persists_snapshot_priority(tmp_path: Path, monkeypatch) -> None:
+    test_priority_callback_updates_snapshot_priority(tmp_path, monkeypatch)
+
+
+def test_priority_callback_survives_rerender(tmp_path: Path, monkeypatch) -> None:
+    test_priority_callback_priority_persists_after_rerender(tmp_path, monkeypatch)
+
+
+def test_priority_callback_missing_message_id_answers_without_second_message(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    callback_acks: list[dict[str, object]] = []
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            callback_acks.append({"json": json, "timeout": timeout})
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    callback = {
+        "id": "cb-prio-no-msg-id",
+        "data": f"mb:prio:{email_id}:Y",
+        "message": {"chat": {"id": "chat"}},
+    }
+    processor.handle_callback_query(callback)
+
+    assert sent == []
+    assert callback_acks and callback_acks[0]["json"]["text"] == "Не могу отредактировать"

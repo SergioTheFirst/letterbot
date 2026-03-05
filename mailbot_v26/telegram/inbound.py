@@ -623,11 +623,8 @@ class TelegramInboundProcessor:
                 message_id=message_id,
                 from_user_id=from_user_id,
             )
-            if isinstance(message, dict) and message.get("message_id") is not None:
-                self._apply_priority_edit(chat_id, message, payload)
-            else:
-                self._apply_priority(chat_id, payload, send_ack=False)
-            self._answer_callback(callback_id, "Приоритет обновлён")
+            ack_text = self._apply_priority_edit(chat_id, message, payload)
+            self._answer_callback(callback_id, ack_text)
         elif action == "toggle":
             self._apply_toggle(chat_id, payload)
             self._answer_callback(callback_id, _t("inbound.ok"))
@@ -651,8 +648,8 @@ class TelegramInboundProcessor:
                 message_id=message_id,
                 from_user_id=from_user_id,
             )
-            self._apply_priority_edit(chat_id, message, payload)
-            self._answer_callback(callback_id, "Приоритет обновлён")
+            ack_text = self._apply_priority_edit(chat_id, message, payload)
+            self._answer_callback(callback_id, ack_text)
         elif action == "snooze_menu":
             self._open_snooze_menu(chat_id, message, payload)
             self._answer_callback(callback_id, _t("inbound.ok"))
@@ -808,22 +805,22 @@ class TelegramInboundProcessor:
         chat_id: str,
         message: dict[str, object] | None,
         payload: dict[str, str],
-    ) -> None:
+    ) -> str:
         email_id_raw = payload.get("email_id")
         if not email_id_raw or not email_id_raw.isdigit():
             logger.warning("tg_priority_callback_missing_email_id", callback_data=payload)
-            return
+            return "Не нашёл письмо"
         if not message or not isinstance(message, dict):
-            return
+            return "Не могу отредактировать"
         message_id = message.get("message_id")
         try:
             message_id_int = int(message_id)
         except (TypeError, ValueError):
-            return
+            return "Не могу отредактировать"
         email_id = int(email_id_raw)
         snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
         if not snapshot:
-            return
+            return "Не нашёл письмо"
         account_email = str(snapshot.get("account_email") or "")
         sender_email = str(snapshot.get("from_email") or "")
         old_priority = str(snapshot.get("priority") or "")
@@ -858,7 +855,7 @@ class TelegramInboundProcessor:
                 message_id=message_id_int,
                 priority=new_priority,
             )
-            return
+            return "Не нашёл письмо"
         logger.info(
             "tg_priority_snapshot_updated",
             email_id=email_id,
@@ -874,7 +871,7 @@ class TelegramInboundProcessor:
                 chat_id=chat_id,
                 message_id=message_id_int,
             )
-            return
+            return "Не нашёл письмо"
         tier1_text = _render_tier1_message(snapshot)
         expanded = _is_trace_expanded(message)
         if expanded:
@@ -927,6 +924,8 @@ class TelegramInboundProcessor:
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("tg_priority_edit_failed", error=str(exc))
+            return "Не могу отредактировать"
+        return "Приоритет обновлён"
 
     def _open_priority_menu(
         self,
