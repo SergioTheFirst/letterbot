@@ -3,6 +3,46 @@ from __future__ import annotations
 from mailbot_v26.pipeline import tg_renderer
 
 
+
+
+def test_decision_explanation_invoice() -> None:
+    explanation = tg_renderer._build_decision_explanation(
+        {
+            "invoice_no": "234",
+            "amount": "87 500 ₽",
+            "due_date": "15.04",
+        },
+        "INVOICE",
+    )
+
+    assert explanation == [
+        "• найден счет",
+        "• сумма 87 500 ₽",
+        "• срок 15.04",
+    ]
+
+
+def test_decision_explanation_contract() -> None:
+    explanation = tg_renderer._build_decision_explanation({}, "CONTRACT")
+
+    assert explanation == ["• найден договор"]
+
+
+def test_decision_explanation_max_three_points() -> None:
+    explanation = tg_renderer._build_decision_explanation(
+        {
+            "invoice_no": "42",
+            "amount": "10 000 ₽",
+            "due_date": "20.05",
+        },
+        "INCIDENT",
+    )
+
+    assert explanation == [
+        "• найден счет",
+        "• сумма 10 000 ₽",
+        "• срок 20.05",
+    ]
 def test_tg_render_standard() -> None:
     attachments = [
         {"filename": "report.pdf", "text": "summary"},

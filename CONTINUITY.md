@@ -17,6 +17,8 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-05: Telegram UX premium pass — added deterministic decision explanation block in renderer (up to 3 bullets from invoice/amount/due-date/contract/incident signals) placed after summary and before relationship block, and enabled progressive one-message enrichment in processor (initial "📩 Письмо получено
+Обрабатываю вложения…" send + edit-in-place final payload when attachments exist or processing exceeds 1s); added targeted renderer/SLA regressions; targeted pytest green (35 passed).
 - 2026-03-04: relationship intelligence layer added using existing `emails` + `events_v1` only: new deterministic sender profile builder in analytics (`_build_sender_relationship_profile` + scoped accessors), processor now computes sender relationship right after document-identity and passes it to Telegram renderer for invoice/contract contexts, weekly digest now consumes relationship profiles for top senders/trend/silence fallback, cockpit `/api/dashboard` exposes `top_contacts` and `/dashboard` renders a Top contacts card, and regressions added for relationship profile math/dashboard/weekly integration; full pytest green (1052 passed).
 - 2026-03-04: decision confidence guard layer added in processor MessageDecision (0..1 confidence from facts/signals/body/attachment evidence), low-confidence invoice payment actions now softened to safe "Проверить", and targeted confidence regressions added (`test_confidence_high_for_invoice_facts`, `test_confidence_low_for_filename_only_invoice`, `test_low_confidence_softens_action`, `test_incident_confidence_high`); full pytest green (1029 passed).
 - 2026-03-04: Telegram priority correction callbacks (`mb:prio:*` + `prio_set:*`) now edit the original message in-place without sending separate ack chat messages, preserve action keyboard after edit, keep priority feedback/events recording, add safe callback ack on edit failure, and extend inbound regressions for in-place edit/failure safety; full pytest green (994 passed).
@@ -188,23 +190,17 @@ Done:
 - 2026-03-04: added deterministic document-identity layer after decision stage in processor (`_build_document_identity` + events-store duplicate lookup) to flag invoice thread duplicates (`DOCUMENT_DUPLICATE`) and soften duplicate actions to "Зафиксировать" for non-new-message contexts; added targeted pipeline identity tests; full pytest green (1042 passed).
 - 2026-03-04: added deterministic evidence scoring layer for amount facts in processor (`_score_amount_candidate` + `_score_message_facts`) after fact validation, scoring candidates by total/amount-due keywords, currency/date proximity, attachment context bonus, and table-row penalty; wired into all processor fact-validation paths, added targeted amount scoring regressions, and full pytest green (1046 passed).
 Now:
-- Relationship intelligence layer is active across processor/telegram, weekly digest, and cockpit dashboard top contacts using existing `emails` + `events_v1` data only.
-- Full test suite green after rollout (1052 passed).
+- Telegram renderer now includes compact decision explanation and preserves one-message edit-in-place enrichment UX for long/attachment processing.
+- Targeted test suites for tg renderer + delivery SLA are green after UX changes.
 Next:
-- Monitor relationship trust-score heuristics against real event_type/payload distributions and tune deterministic mappings if product feedback indicates drift.
+- Run and monitor full-suite regressions for Telegram UX wording stability across existing pipeline scenarios.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should invoice/contract keyword dictionaries be made configurable in a follow-up?
 Working set (files / tables / tests):
-- mailbot_v26/storage/analytics.py
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/pipeline/tg_renderer.py
-- mailbot_v26/pipeline/weekly_digest.py
-- mailbot_v26/web_observability/app.py
-- mailbot_v26/web_observability/templates/dashboard.html
-- mailbot_v26/tests/test_pipeline_processor.py
-- mailbot_v26/tests/test_web_dashboard_api.py
-- mailbot_v26/tests/test_weekly_relationship_digest.py
+- mailbot_v26/tests/test_delivery_sla.py
+- mailbot_v26/tests/test_tg_renderer.py
 - CONTINUITY.md
-- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "relationship_profile_counts or relationship_last_contact_days or relationship_trust_score or relationship_invoice_tracking"
-- python -m pytest -q mailbot_v26/tests/test_web_dashboard_api.py mailbot_v26/tests/test_weekly_relationship_digest.py
+- python -m pytest -q mailbot_v26/tests/test_tg_renderer.py mailbot_v26/tests/test_delivery_sla.py
 - python -m pytest -q
