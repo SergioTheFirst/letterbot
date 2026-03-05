@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import html
 import re
@@ -9,21 +9,29 @@ FORWARD_MARKERS = (
     "sent:",
     "to:",
     "subject:",
-    "от:",
-    "кому:",
-    "тема:",
-    "отправлено:",
+    "\u043e\u0442:",
+    "\u043a\u043e\u043c\u0443:",
+    "\u0442\u0435\u043c\u0430:",
+    "\u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043e:",
+    "----original message----",
     "-----original message-----",
     "----- forwarded message -----",
 )
 
+FORWARD_STOP_PHRASES = (
+    "from:",
+    "forwarded message",
+    "----original message----",
+    "-----original message-----",
+)
+
 SIGNATURE_MARKERS = (
-    "с уважением,",
+    "\u0441 \u0443\u0432\u0430\u0436\u0435\u043d\u0438\u0435\u043c,",
     "regards,",
 )
 
 DISCLAIMER_MARKERS = (
-    "внешняя почта:",
+    "\u0432\u043d\u0435\u0448\u043d\u044f\u044f \u043f\u043e\u0447\u0442\u0430:",
     "external email:",
     "this email was sent from outside",
     "caution: external email",
@@ -41,17 +49,20 @@ def _to_str(text: Any) -> str:
 
 
 def _is_forward_start(line: str) -> bool:
-    lower = line.strip().lower()
-    if lower.startswith("--"):
+    lowered = line.strip().lower()
+    if lowered.startswith("--"):
         return True
-    return any(lower.startswith(marker) for marker in FORWARD_MARKERS)
+    compact = re.sub(r"\s+", " ", lowered)
+    if any(phrase in compact for phrase in FORWARD_STOP_PHRASES):
+        return True
+    return any(compact.startswith(marker) for marker in FORWARD_MARKERS)
 
 
 def _is_signature_start(line: str) -> bool:
-    lower = line.strip().lower()
-    if lower.startswith("--"):
+    lowered = line.strip().lower()
+    if lowered.startswith("--"):
         return True
-    return any(lower.startswith(marker) for marker in SIGNATURE_MARKERS)
+    return any(lowered.startswith(marker) for marker in SIGNATURE_MARKERS)
 
 
 def _is_disclaimer_start(line: str) -> bool:
@@ -65,11 +76,19 @@ def _is_disclaimer_prefix(text: str) -> bool:
     lowered = text.strip().lower()
     if not lowered:
         return True
-    if lowered.endswith(("-", "—", "|", "•")):
+    if lowered.endswith(("-", "\u2014", "|", "\u2022")):
         return True
     return any(
         marker in lowered
-        for marker in ("re:", "fw:", "fwd:", "subject:", "тема:", "from:", "от:")
+        for marker in (
+            "re:",
+            "fw:",
+            "fwd:",
+            "subject:",
+            "\u0442\u0435\u043c\u0430:",
+            "from:",
+            "\u043e\u0442:",
+        )
     )
 
 
