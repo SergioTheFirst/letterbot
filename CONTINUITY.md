@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-05: weekly digest now adds deterministic shareable weekly insight card artifact (`_build_shareable_weekly_card`) with fixed <=6-line format and no LLM dependency, appends a new "Share this report" block to digest output, attaches Telegram inline share button (`📤 Поделиться отчётом`) prefilled via `switch_inline_query_current_chat`, includes optional `https://letterbot.ru` share URL metadata, and adds targeted share-card regressions (`test_shareable_weekly_card_format`, `test_shareable_card_deterministic`, `test_weekly_digest_contains_shareable_card`); full pytest green (1065 passed).
 - 2026-03-05: Telegram UX premium pass — added deterministic decision explanation block in renderer (up to 3 bullets from invoice/amount/due-date/contract/incident signals) placed after summary and before relationship block, and enabled progressive one-message enrichment in processor (initial "📩 Письмо получено
 Обрабатываю вложения…" send + edit-in-place final payload when attachments exist or processing exceeds 1s); added targeted renderer/SLA regressions; targeted pytest green (35 passed).
 - 2026-03-04: relationship intelligence layer added using existing `emails` + `events_v1` only: new deterministic sender profile builder in analytics (`_build_sender_relationship_profile` + scoped accessors), processor now computes sender relationship right after document-identity and passes it to Telegram renderer for invoice/contract contexts, weekly digest now consumes relationship profiles for top senders/trend/silence fallback, cockpit `/api/dashboard` exposes `top_contacts` and `/dashboard` renders a Top contacts card, and regressions added for relationship profile math/dashboard/weekly integration; full pytest green (1052 passed).
@@ -191,21 +192,15 @@ Done:
 - 2026-03-04: added deterministic evidence scoring layer for amount facts in processor (`_score_amount_candidate` + `_score_message_facts`) after fact validation, scoring candidates by total/amount-due keywords, currency/date proximity, attachment context bonus, and table-row penalty; wired into all processor fact-validation paths, added targeted amount scoring regressions, and full pytest green (1046 passed).
 - 2026-03-05: added canonical `MessageInterpretation` layer in processor (dataclass + deterministic builder + `message_interpretation` events_v1 contract event), rewired weekly digest human signals to aggregate interpretation events (doc_kind/amount), added dashboard interpretation metrics sourced from events_v1 interpretation payloads, and added regression tests for interpretation creation/consistency + weekly/dashboard consumers + telegram payload non-regression; full pytest green (1062 passed).
 Now:
-- Canonical interpretation events are emitted from processor decision output and consumed by weekly digest and dashboard aggregates.
-- Full regression suite is green after interpretation-layer stabilization changes.
+- Weekly digest includes a deterministic shareable insight card block and Telegram share action without changing processor/decision pipeline behavior.
+- Full regression suite is green after shareable-card rollout.
 Next:
-- Monitor downstream consumers (digest/cockpit/relationship intelligence) and migrate any remaining ad-hoc semantic recomputation onto `message_interpretation` events.
+- Monitor share-card usage/engagement and adjust copy constraints without altering message processing or canonical interpretation flow.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should we extend dashboard UI cards to surface interpretation metrics directly (invoice/contract totals) in a follow-up UX pass?
 Working set (files / tables / tests):
-- mailbot_v26/pipeline/processor.py
 - mailbot_v26/pipeline/weekly_digest.py
-- mailbot_v26/web_observability/app.py
-- mailbot_v26/events/contract.py
-- mailbot_v26/tests/test_decision_trace.py
 - mailbot_v26/tests/test_weekly_digest.py
-- mailbot_v26/tests/test_web_dashboard_api.py
 - CONTINUITY.md
-- events_v1 (event_type=`message_interpretation`)
-- python -m pytest -q mailbot_v26/tests/test_decision_trace.py mailbot_v26/tests/test_weekly_digest.py mailbot_v26/tests/test_web_dashboard_api.py
+- python -m pytest -q mailbot_v26/tests/test_weekly_digest.py
 - python -m pytest -q

@@ -679,6 +679,42 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
     return "\n".join(lines)
 
 
+def _format_share_accuracy(progress: WeeklyAccuracyProgress | None) -> str:
+    if progress is None:
+        return "n/a"
+    accuracy_pct = max(0, min(100, int(round(100 - float(progress.current_surprise_rate_pp)))))
+    return f"{accuracy_pct}%"
+
+
+def _build_shareable_weekly_card(weekly_data: WeeklyDigestData) -> str:
+    invoice_line = f"{weekly_data.invoice_count} invoices detected"
+    if weekly_data.invoice_total_rub is not None and weekly_data.invoice_total_rub > 0:
+        invoice_line = f"{invoice_line} ({weekly_data.invoice_total_rub} ₽)"
+    return "\n".join(
+        [
+            "📊 My Mail Week",
+            f"{weekly_data.total_emails} emails processed",
+            invoice_line,
+            f"{weekly_data.contract_count} contracts waiting",
+            f"accuracy: {_format_share_accuracy(weekly_data.weekly_accuracy_progress)}",
+            "powered by letterbot · letterbot.ru",
+        ]
+    )
+
+
+def _build_shareable_card_keyboard(share_text: str) -> dict[str, object]:
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "📤 Поделиться отчётом",
+                    "switch_inline_query_current_chat": share_text,
+                }
+            ]
+        ]
+    }
+
+
 def maybe_send_weekly_digest(
     *,
     knowledge_db: KnowledgeDB,
@@ -766,6 +802,8 @@ def maybe_send_weekly_digest(
         )
 
     digest_text = _build_weekly_digest_text(data)
+    share_card = _build_shareable_weekly_card(data)
+    digest_text = f"{digest_text}\n\nShare this report\n{share_card}"
     payload = TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",
@@ -773,7 +811,10 @@ def maybe_send_weekly_digest(
             "chat_id": telegram_chat_id,
             "account_email": account_email,
             "week_key": week_key,
+            "shareable_weekly_card": share_card,
+            "shareable_weekly_qr_url": "https://letterbot.ru",
         },
+        reply_markup=_build_shareable_card_keyboard(share_card),
     )
 
     try:
@@ -869,4 +910,8 @@ def maybe_send_weekly_digest(
         )
 
 
-__all__ = ["WeeklyDigestData", "maybe_send_weekly_digest"]
+__all__ = [
+    "WeeklyDigestData",
+    "_build_shareable_weekly_card",
+    "maybe_send_weekly_digest",
+]
