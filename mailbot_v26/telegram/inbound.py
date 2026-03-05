@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib.util
 import json
@@ -57,15 +57,15 @@ _HELP_PREFIXES = ("mb:help:", "help:")
 _UI_LOCALE = "ru"
 
 _PRIORITY_MAP = {
-    "R": "🔴",
-    "Y": "🟡",
-    "B": "🔵",
-    "RED": "🔴",
-    "YELLOW": "🟡",
-    "BLUE": "🔵",
-    "🔴": "🔴",
-    "🟡": "🟡",
-    "🔵": "🔵",
+    "R": "рџ”ґ",
+    "Y": "рџџЎ",
+    "B": "рџ”µ",
+    "RED": "рџ”ґ",
+    "YELLOW": "рџџЎ",
+    "BLUE": "рџ”µ",
+    "рџ”ґ": "рџ”ґ",
+    "рџџЎ": "рџџЎ",
+    "рџ”µ": "рџ”µ",
 }
 
 
@@ -151,7 +151,7 @@ def _top_priority_transitions(*, db_path: Path, days: int, limit: int = 3) -> li
         new_priority = _PRIORITY_MAP.get(str(payload.get("new_priority") or "").strip().upper(), "")
         if not old_priority or not new_priority:
             continue
-        key = f"{old_priority}→{new_priority}"
+        key = f"{old_priority}в†’{new_priority}"
         totals[key] = totals.get(key, 0) + 1
 
     ordered = sorted(totals.items(), key=lambda item: (-item[1], item[0]))
@@ -184,7 +184,7 @@ def _load_email_render_snapshot(db_path: Path, email_id: int) -> dict[str, objec
         logger.error("telegram_inbound_email_render_failed", error=str(exc))
         return None
     attachment_rows = [
-        {"filename": row[0] or "вложение", "text": "", "content_type": ""}
+        {"filename": row[0] or "РІР»РѕР¶РµРЅРёРµ", "text": "", "content_type": ""}
         for row in attachments
         if row and row[0]
     ]
@@ -199,7 +199,8 @@ def _update_email_snapshot_priority(db_path: Path, email_id: int, new_priority: 
             cursor = conn.execute(
                 """
                 UPDATE emails
-                SET priority = ?
+                SET priority = ?,
+                    priority_source = 'user_override'
                 WHERE id = ?
                 """,
                 (new_priority, email_id),
@@ -269,9 +270,9 @@ def _save_snooze(
 
 
 def _render_tier1_message(snapshot: dict[str, object]) -> str:
-    priority = str(snapshot.get("priority") or "🔵")
-    from_email = str(snapshot.get("from_email") or "неизвестно")
-    subject = str(snapshot.get("subject") or "(без темы)")
+    priority = str(snapshot.get("priority") or "рџ”µ")
+    from_email = str(snapshot.get("from_email") or "РЅРµРёР·РІРµСЃС‚РЅРѕ")
+    subject = str(snapshot.get("subject") or "(Р±РµР· С‚РµРјС‹)")
     action_line = str(snapshot.get("action_line") or "")
     body_summary = str(snapshot.get("body_summary") or "")
     attachments = snapshot.get("attachments") or []
@@ -288,7 +289,7 @@ def _render_tier1_message(snapshot: dict[str, object]) -> str:
 
 def _render_decision_trace_details(snapshot: list[dict[str, object]]) -> str:
     if not snapshot:
-        return "Нет данных explainability для этого решения (trace not available)"
+        return "РќРµС‚ РґР°РЅРЅС‹С… explainability РґР»СЏ СЌС‚РѕРіРѕ СЂРµС€РµРЅРёСЏ (trace not available)"
     lines: list[str] = ["DecisionTraceV1"]
     for entry in snapshot:
         decision_kind = str(entry.get("decision_kind") or "")
@@ -299,17 +300,17 @@ def _render_decision_trace_details(snapshot: list[dict[str, object]]) -> str:
         codes = entry.get("explain_codes") or []
         counterfactuals = entry.get("counterfactuals") or []
         lines.append(f"{decision_kind}: {decision_label}")
-        lines.append(f"Сигналы: {matched}/{total}")
+        lines.append(f"РЎРёРіРЅР°Р»С‹: {matched}/{total}")
         if codes:
             codes_line = ", ".join(str(code) for code in codes if code)
-            lines.append(f"Коды: {codes_line}")
+            lines.append(f"РљРѕРґС‹: {codes_line}")
         if counterfactuals:
-            lines.append("Контрфакты:")
+            lines.append("РљРѕРЅС‚СЂС„Р°РєС‚С‹:")
             for item in counterfactuals:
                 signal = str(item.get("signal") or "")
                 decision = str(item.get("decision") or "")
                 if signal and decision:
-                    lines.append(f"- Без {signal} → {decision}")
+                    lines.append(f"- Р‘РµР· {signal} в†’ {decision}")
         lines.append("")
     return "\n".join(line for line in lines if line.strip())
 
@@ -473,7 +474,7 @@ class TelegramInboundClient:
     def send_message(self, *, chat_id: str, text: str) -> DeliveryResult:
         payload = TelegramPayload(
             html_text=telegram_safe(text),
-            priority="🔵",
+            priority="рџ”µ",
             metadata={"bot_token": self.bot_token, "chat_id": chat_id},
         )
         return send_telegram(payload)
@@ -608,7 +609,7 @@ class TelegramInboundProcessor:
                     message_id=message_id,
                     from_user_id=from_user_id,
                 )
-                self._answer_callback(callback_id, "Не нашёл письмо для изменения")
+                self._answer_callback(callback_id, "РќРµ РЅР°С€С‘Р» РїРёСЃСЊРјРѕ РґР»СЏ РёР·РјРµРЅРµРЅРёСЏ")
                 return
             self._reply(chat_id, _t("inbound.bad_button"))
             self._answer_callback(callback_id, _t("inbound.bad_button"))
@@ -661,9 +662,9 @@ class TelegramInboundProcessor:
             self._answer_callback(callback_id, ack or _t("inbound.bad_button"))
         elif action == "priority_ok":
             if self._record_priority_confirmation(payload):
-                self._answer_callback(callback_id, "✓ Учёл")
+                self._answer_callback(callback_id, "вњ“ РЈС‡С‘Р»")
             else:
-                self._answer_callback(callback_id, "Не удалось учесть")
+                self._answer_callback(callback_id, "РќРµ СѓРґР°Р»РѕСЃСЊ СѓС‡РµСЃС‚СЊ")
 
     def handle_message(self, message: dict[str, object]) -> None:
         chat_id = ""
@@ -781,7 +782,7 @@ class TelegramInboundProcessor:
         record_priority_correction(
             knowledge_db=self.knowledge_db,
             email_id=email_id,
-            correction=payload.get("priority") or "🔵",
+            correction=payload.get("priority") or "рџ”µ",
             entity_id=None,
             sender_email=sender_email or None,
             account_email=account_email or None,
@@ -794,7 +795,7 @@ class TelegramInboundProcessor:
             surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
         )
         if send_ack:
-            priority = payload.get("priority") or "🔵"
+            priority = payload.get("priority") or "рџ”µ"
             self._reply(
                 chat_id,
                 _t("inbound.priority_ack", priority=priority),
@@ -809,22 +810,22 @@ class TelegramInboundProcessor:
         email_id_raw = payload.get("email_id")
         if not email_id_raw or not email_id_raw.isdigit():
             logger.warning("tg_priority_callback_missing_email_id", callback_data=payload)
-            return "Не нашёл письмо"
+            return "РќРµ РЅР°С€С‘Р» РїРёСЃСЊРјРѕ"
         if not message or not isinstance(message, dict):
-            return "Не могу отредактировать"
+            return "РќРµ РјРѕРіСѓ РѕС‚СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ"
         message_id = message.get("message_id")
         try:
             message_id_int = int(message_id)
         except (TypeError, ValueError):
-            return "Не могу отредактировать"
+            return "РќРµ РјРѕРіСѓ РѕС‚СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ"
         email_id = int(email_id_raw)
         snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
         if not snapshot:
-            return "Не нашёл письмо"
+            return "РќРµ РЅР°С€С‘Р» РїРёСЃСЊРјРѕ"
         account_email = str(snapshot.get("account_email") or "")
         sender_email = str(snapshot.get("from_email") or "")
         old_priority = str(snapshot.get("priority") or "")
-        new_priority = payload.get("priority") or "🔵"
+        new_priority = payload.get("priority") or "рџ”µ"
         record_priority_correction(
             knowledge_db=self.knowledge_db,
             email_id=email_id,
@@ -855,7 +856,7 @@ class TelegramInboundProcessor:
                 message_id=message_id_int,
                 priority=new_priority,
             )
-            return "Не нашёл письмо"
+            return "РќРµ РЅР°С€С‘Р» РїРёСЃСЊРјРѕ"
         logger.info(
             "tg_priority_snapshot_updated",
             email_id=email_id,
@@ -871,7 +872,7 @@ class TelegramInboundProcessor:
                 chat_id=chat_id,
                 message_id=message_id_int,
             )
-            return "Не нашёл письмо"
+            return "РќРµ РЅР°С€С‘Р» РїРёСЃСЊРјРѕ"
         tier1_text = _render_tier1_message(snapshot)
         expanded = _is_trace_expanded(message)
         if expanded:
@@ -924,8 +925,8 @@ class TelegramInboundProcessor:
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("tg_priority_edit_failed", error=str(exc))
-            return "Не могу отредактировать"
-        return "Приоритет обновлён"
+            return "РќРµ РјРѕРіСѓ РѕС‚СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ"
+        return "РџСЂРёРѕСЂРёС‚РµС‚ РѕР±РЅРѕРІР»С‘РЅ"
 
     def _open_priority_menu(
         self,
@@ -1089,10 +1090,10 @@ class TelegramInboundProcessor:
         now_local = datetime.now().astimezone()
         if snooze_code == "2h":
             deliver_local = now_local + timedelta(hours=2)
-            ack = "⏰ Напомню в 2 часа"
+            ack = "вЏ° РќР°РїРѕРјРЅСЋ РІ 2 С‡Р°СЃР°"
         elif snooze_code == "6h":
             deliver_local = now_local + timedelta(hours=6)
-            ack = "⏰ Напомню в 6 часов"
+            ack = "вЏ° РќР°РїРѕРјРЅСЋ РІ 6 С‡Р°СЃРѕРІ"
         elif snooze_code == "tom":
             tomorrow = now_local.date() + timedelta(days=1)
             deliver_local = datetime.combine(tomorrow, datetime.min.time(), tzinfo=now_local.tzinfo).replace(
@@ -1101,7 +1102,7 @@ class TelegramInboundProcessor:
                 second=0,
                 microsecond=0,
             )
-            ack = "⏰ Напомню завтра в 09:00"
+            ack = "вЏ° РќР°РїРѕРјРЅСЋ Р·Р°РІС‚СЂР° РІ 09:00"
         else:
             return None
 
@@ -1341,7 +1342,7 @@ class TelegramInboundProcessor:
     def _handle_commitments(self, chat_id: str) -> None:
         account_emails = list(self._account_emails())
         if not account_emails:
-            self._reply(chat_id, "✅ Нет открытых обязательств")
+            self._reply(chat_id, "вњ… РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РѕР±СЏР·Р°С‚РµР»СЊСЃС‚РІ")
             return
         placeholders = ",".join("?" for _ in account_emails)
         try:
@@ -1365,7 +1366,7 @@ class TelegramInboundProcessor:
             logger.error("telegram_inbound_commitments_failed", error=str(exc))
             rows = []
         if not rows:
-            self._reply(chat_id, "✅ Нет открытых обязательств")
+            self._reply(chat_id, "вњ… РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РѕР±СЏР·Р°С‚РµР»СЊСЃС‚РІ")
             return
 
         deduped: list[str] = []
@@ -1380,26 +1381,26 @@ class TelegramInboundProcessor:
             if key in seen:
                 continue
             seen.add(key)
-            line = f"• {escape_tg_html(text)}"
+            line = f"вЂў {escape_tg_html(text)}"
             if deadline:
-                line = f"{line} · до {escape_tg_html(deadline)}"
+                line = f"{line} В· РґРѕ {escape_tg_html(deadline)}"
             deduped.append(line)
             if len(deduped) >= 7:
                 break
 
         if not deduped:
-            self._reply(chat_id, "✅ Нет открытых обязательств")
+            self._reply(chat_id, "вњ… РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РѕР±СЏР·Р°С‚РµР»СЊСЃС‚РІ")
             return
-        self._reply(chat_id, "\n".join(["📋 <b>Обязательства:</b>", *deduped]))
+        self._reply(chat_id, "\n".join(["рџ“‹ <b>РћР±СЏР·Р°С‚РµР»СЊСЃС‚РІР°:</b>", *deduped]))
 
     def _week_text(self) -> str:
         account_emails = list(self._account_emails())
         if not account_emails:
             base = (
-                "📊 Letterbot — неделя\n"
-                "Писем: 0 · Важных: 0 · Низких: 0\n"
-                "Коррекций: 0 · Точность: н/д\n"
-                "Обязательств открыто: 0"
+                "рџ“Љ Letterbot вЂ” РЅРµРґРµР»СЏ\n"
+                "РџРёСЃРµРј: 0 В· Р’Р°Р¶РЅС‹С…: 0 В· РќРёР·РєРёС…: 0\n"
+                "РљРѕСЂСЂРµРєС†РёР№: 0 В· РўРѕС‡РЅРѕСЃС‚СЊ: РЅ/Рґ\n"
+                "РћР±СЏР·Р°С‚РµР»СЊСЃС‚РІ РѕС‚РєСЂС‹С‚Рѕ: 0"
             )
             return "\n".join([base, self._stats_text(days=7, include_header=False)])
         primary = account_emails[0]
@@ -1409,21 +1410,21 @@ class TelegramInboundProcessor:
             days=7,
         )
         accuracy_pct = summary.get("accuracy_pct")
-        accuracy_text = f"{int(accuracy_pct)}%" if accuracy_pct is not None else "н/д"
+        accuracy_text = f"{int(accuracy_pct)}%" if accuracy_pct is not None else "РЅ/Рґ"
         base = (
-            "📊 Letterbot — неделя\n"
-            f"Писем: {int(summary.get('emails_total') or 0)} · Важных: {int(summary.get('important') or 0)} · Низких: {int(summary.get('low') or 0)}\n"
-            f"Коррекций: {int(summary.get('corrections') or 0)} · Точность: {accuracy_text}\n"
-            f"Обязательств открыто: {int(summary.get('open_commitments') or 0)}"
+            "рџ“Љ Letterbot вЂ” РЅРµРґРµР»СЏ\n"
+            f"РџРёСЃРµРј: {int(summary.get('emails_total') or 0)} В· Р’Р°Р¶РЅС‹С…: {int(summary.get('important') or 0)} В· РќРёР·РєРёС…: {int(summary.get('low') or 0)}\n"
+            f"РљРѕСЂСЂРµРєС†РёР№: {int(summary.get('corrections') or 0)} В· РўРѕС‡РЅРѕСЃС‚СЊ: {accuracy_text}\n"
+            f"РћР±СЏР·Р°С‚РµР»СЊСЃС‚РІ РѕС‚РєСЂС‹С‚Рѕ: {int(summary.get('open_commitments') or 0)}"
         )
         return "\n".join([base, self._stats_text(days=7, include_header=False)])
 
     def _stats_text(self, *, days: int = 7, include_header: bool = True) -> str:
         account_emails = list(self._account_emails())
         if not account_emails:
-            header = "📈 Качество автоприоритизации" if include_header else ""
-            trust = "Пока данных мало — делаем выводы вручную."
-            lines = [line for line in [header, "Коррекций: 0", "Surprise rate: н/д", "Переходы: нет данных", trust] if line]
+            header = "рџ“€ РљР°С‡РµСЃС‚РІРѕ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё" if include_header else ""
+            trust = "РџРѕРєР° РґР°РЅРЅС‹С… РјР°Р»Рѕ вЂ” РґРµР»Р°РµРј РІС‹РІРѕРґС‹ РІСЂСѓС‡РЅСѓСЋ."
+            lines = [line for line in [header, "РљРѕСЂСЂРµРєС†РёР№: 0", "Surprise rate: РЅ/Рґ", "РџРµСЂРµС…РѕРґС‹: РЅРµС‚ РґР°РЅРЅС‹С…", trust] if line]
             return "\n".join(lines)
 
         primary = account_emails[0]
@@ -1466,36 +1467,36 @@ class TelegramInboundProcessor:
 
         corrections = int(accuracy.get("priority_corrections") or 0)
         surprise_rate = accuracy.get("surprise_rate")
-        surprise_text = "н/д"
+        surprise_text = "РЅ/Рґ"
         if surprise_rate is not None:
             surprise_text = f"{float(surprise_rate) * 100:.0f}%"
 
-        transitions_text = "нет данных"
+        transitions_text = "РЅРµС‚ РґР°РЅРЅС‹С…"
         transitions = _top_priority_transitions(db_path=self.knowledge_db.path, days=days, limit=3)
         if transitions:
-            transitions_text = ", ".join(f"{transition} ×{count}" for transition, count in transitions)
+            transitions_text = ", ".join(f"{transition} Г—{count}" for transition, count in transitions)
 
-        latency_text = "н/д"
+        latency_text = "РЅ/Рґ"
         decisions_total = int(calibration_totals.get("decisions_total") or 0)
         corrected_total = int(calibration_totals.get("decisions_corrected") or 0)
         if decisions_total > 0:
-            latency_text = f"{corrected_total}/{decisions_total} решений пересмотрены"
+            latency_text = f"{corrected_total}/{decisions_total} СЂРµС€РµРЅРёР№ РїРµСЂРµСЃРјРѕС‚СЂРµРЅС‹"
 
-        trust_line = "Можно доверять автоприоритизации: да"
+        trust_line = "РњРѕР¶РЅРѕ РґРѕРІРµСЂСЏС‚СЊ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё: РґР°"
         if corrections < 3:
-            trust_line = "Можно доверять автоприоритизации: осторожно, мало данных"
+            trust_line = "РњРѕР¶РЅРѕ РґРѕРІРµСЂСЏС‚СЊ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё: РѕСЃС‚РѕСЂРѕР¶РЅРѕ, РјР°Р»Рѕ РґР°РЅРЅС‹С…"
         elif surprise_rate is not None and float(surprise_rate) > 0.35:
-            trust_line = "Можно доверять автоприоритизации: пока осторожно"
+            trust_line = "РњРѕР¶РЅРѕ РґРѕРІРµСЂСЏС‚СЊ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё: РїРѕРєР° РѕСЃС‚РѕСЂРѕР¶РЅРѕ"
 
         lines = []
         if include_header:
-            lines.append("📈 Качество автоприоритизации")
+            lines.append("рџ“€ РљР°С‡РµСЃС‚РІРѕ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё")
         lines.extend(
             [
-                f"Коррекций: {corrections}",
+                f"РљРѕСЂСЂРµРєС†РёР№: {corrections}",
                 f"Surprise rate: {surprise_text}",
-                f"Скорость коррекций: {latency_text}",
-                f"Переходы: {transitions_text}",
+                f"РЎРєРѕСЂРѕСЃС‚СЊ РєРѕСЂСЂРµРєС†РёР№: {latency_text}",
+                f"РџРµСЂРµС…РѕРґС‹: {transitions_text}",
                 trust_line,
             ]
         )
@@ -1507,11 +1508,11 @@ class TelegramInboundProcessor:
     def _support_text(self) -> str:
         support = self.support_settings or load_support_settings()
         if not support.enabled:
-            return "Поддержка проекта сейчас не настроена."
+            return "РџРѕРґРґРµСЂР¶РєР° РїСЂРѕРµРєС‚Р° СЃРµР№С‡Р°СЃ РЅРµ РЅР°СЃС‚СЂРѕРµРЅР°."
         if not support.url or support.url == "CHANGE_ME":
-            return "Поддержка включена, но ссылка ещё не настроена."
+            return "РџРѕРґРґРµСЂР¶РєР° РІРєР»СЋС‡РµРЅР°, РЅРѕ СЃСЃС‹Р»РєР° РµС‰С‘ РЅРµ РЅР°СЃС‚СЂРѕРµРЅР°."
         return "\n".join([
-            support.label or "Поддержать Letterbot",
+            support.label or "РџРѕРґРґРµСЂР¶Р°С‚СЊ Letterbot",
             support.text,
             support.url,
         ])
@@ -1580,7 +1581,7 @@ class TelegramInboundProcessor:
         ]
         insider_since = self.override_store.get_insider_since(chat_id=chat_id)
         if insider_since:
-            status_lines.append(f"⭐ Letterbot Insider since: {insider_since}")
+            status_lines.append(f"в­ђ Letterbot Insider since: {insider_since}")
         status_lines.append(f"Version: {get_version()}")
         return "\n".join(status_lines)
 
@@ -1669,3 +1670,4 @@ __all__ = [
     "parse_command",
     "run_inbound_polling",
 ]
+

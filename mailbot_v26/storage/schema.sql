@@ -1,4 +1,4 @@
-PRAGMA journal_mode=WAL;
+﻿PRAGMA journal_mode=WAL;
 
 CREATE TABLE IF NOT EXISTS emails (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS emails (
     subject TEXT,
     received_at TEXT,
     priority TEXT,
+    priority_source TEXT DEFAULT 'auto',
     original_priority TEXT,
     priority_reason TEXT,
     shadow_priority TEXT,
@@ -371,3 +372,4 @@ CREATE INDEX IF NOT EXISTS idx_system_health_snapshots_ts
 
 CREATE INDEX IF NOT EXISTS idx_system_health_snapshots_ts_snapshot
     ON system_health_snapshots(ts_utc DESC, snapshot_id);
+

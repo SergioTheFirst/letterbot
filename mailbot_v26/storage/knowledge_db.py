@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
@@ -118,6 +118,8 @@ class KnowledgeDB:
             columns = {row[1] for row in cur.fetchall()}
 
             migrations: list[str] = []
+            if "priority_source" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN priority_source TEXT DEFAULT 'auto';")
             if "priority_reason" not in columns:
                 migrations.append("ALTER TABLE emails ADD COLUMN priority_reason TEXT;")
             if "original_priority" not in columns:
@@ -261,6 +263,7 @@ class KnowledgeDB:
         subject: str,
         received_at: str,
         priority: str,
+        priority_source: str = "auto",
         original_priority: str | None = None,
         priority_reason: str | None = None,
         shadow_priority: str | None = None,
@@ -297,6 +300,7 @@ class KnowledgeDB:
                         subject,
                         received_at,
                         priority,
+                        priority_source,
                         original_priority,
                         priority_reason,
                         shadow_priority,
@@ -318,7 +322,7 @@ class KnowledgeDB:
                         "references",
                         thread_key
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account_email,
@@ -326,6 +330,7 @@ class KnowledgeDB:
                         subject,
                         received_at,
                         priority,
+                        priority_source,
                         original_priority,
                         priority_reason,
                         shadow_priority,
@@ -788,3 +793,5 @@ class KnowledgeDB:
         except Exception as exc:
             logger.error("KnowledgeDB priority feedback save failed: %s", exc)
             return feedback_id, False
+
+
