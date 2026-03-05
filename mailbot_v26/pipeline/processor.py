@@ -847,6 +847,20 @@ class MessageDecision:
 
 
 @dataclass(frozen=True, slots=True)
+class MessageInterpretation:
+    email_id: str
+    sender_email: str
+    doc_kind: str | None
+    amount: float | None
+    due_date: str | None
+    action: str
+    priority: str
+    confidence: float
+    context: str
+    document_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class TelegramBuildContext:
     email_id: int
     received_at: datetime
@@ -2739,6 +2753,45 @@ def _soften_duplicate_action(action_line: str) -> str:
     if any(token in normalized for token in ("зафикс", "провер", "ознаком", "ответ")):
         return action_line
     return "Зафиксировать"
+
+
+def _parse_interpretation_amount(raw_amount: Any) -> float | None:
+    if raw_amount is None:
+        return None
+    cleaned = re.sub(r"[^0-9.,]", "", str(raw_amount)).replace(",", ".")
+    if not cleaned:
+        return None
+    if cleaned.count(".") > 1:
+        head, tail = cleaned.rsplit(".", 1)
+        cleaned = head.replace(".", "") + "." + tail
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _build_message_interpretation(
+    *,
+    email_id: int,
+    sender_email: str,
+    message_facts: dict[str, Any],
+    decision: MessageDecision,
+    document_id: str | None,
+) -> MessageInterpretation:
+    due_date = str(decision.due_date or message_facts.get("due_date") or "").strip() or None
+    doc_kind = str(decision.doc_kind or message_facts.get("doc_kind") or "").strip().lower() or None
+    return MessageInterpretation(
+        email_id=str(email_id),
+        sender_email=str(sender_email or "").strip(),
+        doc_kind=doc_kind,
+        amount=_parse_interpretation_amount(decision.amount or message_facts.get("amount")),
+        due_date=due_date,
+        action=str(decision.action or "").strip(),
+        priority=str(decision.priority or "").strip(),
+        confidence=float(decision.confidence or 0.0),
+        context=str(decision.context or "").strip() or "NEW_MESSAGE",
+        document_id=(str(document_id).strip() or None) if document_id else None,
+    )
 
 
 def _normalize_summary_text(summary: str) -> str:
@@ -5547,6 +5600,32 @@ def process_message(
             )
         else:
             action_line = decision.action
+
+        interpretation = _build_message_interpretation(
+            email_id=message_id,
+            sender_email=from_email,
+            message_facts=decision.facts,
+            decision=decision,
+            document_id=document_id or None,
+        )
+        _emit_contract_event(
+            EventType.MESSAGE_INTERPRETATION,
+            ts_utc=received_at.timestamp(),
+            account_id=account_email,
+            entity_id=contract_event_entity_id,
+            email_id=message_id,
+            payload={
+                "sender_email": interpretation.sender_email,
+                "doc_kind": interpretation.doc_kind,
+                "amount": interpretation.amount,
+                "due_date": interpretation.due_date,
+                "priority": interpretation.priority,
+                "action": interpretation.action,
+                "confidence": interpretation.confidence,
+                "context": interpretation.context,
+                "document_id": interpretation.document_id,
+            },
+        )
 
         relationship_profile = _build_sender_relationship_profile(
             analytics=analytics,

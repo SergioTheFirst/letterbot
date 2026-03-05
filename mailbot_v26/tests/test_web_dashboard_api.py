@@ -138,6 +138,7 @@ def test_api_dashboard_survives_empty_db(tmp_path: Path) -> None:
         "surprise_rate": 0.0,
         "recent_events": [],
         "top_contacts": [],
+        "interpretation": {"invoice_count": 0, "contract_count": 0, "invoice_total": 0},
     }
 
 
@@ -211,3 +212,34 @@ def test_api_dashboard_returns_top_contacts(tmp_path: Path) -> None:
     assert isinstance(data["top_contacts"], list)
     assert data["top_contacts"]
     assert data["top_contacts"][0]["sender_email"] == "alice@example.com"
+
+
+def test_dashboard_uses_interpretation_events(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-interpretation.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="message_interpretation",
+            ts_utc=now.timestamp(),
+            payload={"doc_kind": "invoice", "amount": 87500, "sender_email": "vendor@example.com", "due_date": "2026-04-15"},
+        )
+        _insert_event(
+            conn,
+            event_type="message_interpretation",
+            ts_utc=(now + timedelta(seconds=1)).timestamp(),
+            payload={"doc_kind": "contract", "amount": None, "sender_email": "legal@example.com", "due_date": None},
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/dashboard")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["interpretation"]["invoice_count"] == 1
+    assert data["interpretation"]["contract_count"] == 1
+    assert data["interpretation"]["invoice_total"] == 87500

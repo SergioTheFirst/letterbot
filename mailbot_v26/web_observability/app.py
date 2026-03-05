@@ -3477,6 +3477,11 @@ def create_app(
             "surprise_rate": 0.0,
             "recent_events": [],
             "top_contacts": [],
+            "interpretation": {
+                "invoice_count": 0,
+                "contract_count": 0,
+                "invoice_total": 0,
+            },
         }
         try:
             dashboard_vars = _dashboard_vars()
@@ -3597,6 +3602,29 @@ def create_app(
                 payload["surprise_rate"] = (
                     round(surprises / corrections, 4) if corrections > 0 else 0.0
                 )
+
+                try:
+                    interpretation_row = conn.execute(
+                        (
+                            "SELECT "
+                            "SUM(CASE WHEN json_extract(payload, '$.doc_kind') = 'invoice' THEN 1 ELSE 0 END) AS invoice_count, "
+                            "SUM(CASE WHEN json_extract(payload, '$.doc_kind') = 'contract' THEN 1 ELSE 0 END) AS contract_count, "
+                            "SUM(CASE WHEN json_extract(payload, '$.doc_kind') = 'invoice' THEN COALESCE(CAST(json_extract(payload, '$.amount') AS REAL), 0) ELSE 0 END) AS invoice_total "
+                            "FROM events_v1 "
+                            "WHERE event_type = 'message_interpretation' "
+                            "AND ts_utc >= ?"
+                            f"{account_event_clause}"
+                        ),
+                        (week_ago_ts, *account_event_params),
+                    ).fetchone()
+                except sqlite3.Error:
+                    interpretation_row = None
+                if interpretation_row:
+                    payload["interpretation"] = {
+                        "invoice_count": int(interpretation_row["invoice_count"] or 0),
+                        "contract_count": int(interpretation_row["contract_count"] or 0),
+                        "invoice_total": int(round(float(interpretation_row["invoice_total"] or 0))),
+                    }
 
                 try:
                     recent_rows = conn.execute(

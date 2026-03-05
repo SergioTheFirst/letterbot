@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
@@ -405,3 +406,45 @@ def test_weekly_digest_attention_block_skipped_on_small_sample(monkeypatch, tmp_
         cur = conn.execute("SELECT type, payload FROM events WHERE type LIKE 'attention_economics_%'")
         rows = cur.fetchall()
     assert any(row[0] == "attention_economics_skipped" for row in rows)
+
+
+def test_weekly_uses_interpretation_events(tmp_path) -> None:
+    db_path = tmp_path / "weekly-interpretation.sqlite"
+    KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        for payload in (
+            {"doc_kind": "invoice", "amount": 87500, "sender_email": "a@example.com", "due_date": "2026-04-15"},
+            {"doc_kind": "invoice", "amount": 12500, "sender_email": "b@example.com", "due_date": "2026-04-16"},
+            {"doc_kind": "contract", "sender_email": "c@example.com", "due_date": None},
+        ):
+            conn.execute(
+                """
+                INSERT INTO events_v1 (event_type, ts_utc, ts, account_id, entity_id, email_id, payload, payload_json, schema_version, fingerprint)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "message_interpretation",
+                    now.timestamp(),
+                    now.isoformat(),
+                    "account@example.com",
+                    None,
+                    1,
+                    json.dumps(payload, ensure_ascii=False),
+                    json.dumps(payload, ensure_ascii=False),
+                    1,
+                    f"mi-{payload.get('doc_kind')}-{payload.get('amount', 0)}",
+                ),
+            )
+        conn.commit()
+
+    invoice_count, invoice_total, contract_count = weekly_digest._collect_weekly_human_signals(  # noqa: SLF001
+        analytics=analytics,
+        account_email="account@example.com",
+        account_emails=["account@example.com"],
+    )
+
+    assert invoice_count == 2
+    assert invoice_total == 100000
+    assert contract_count == 1
