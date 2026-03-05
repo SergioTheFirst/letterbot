@@ -100,3 +100,19 @@ def test_build_priority_keyboard_has_mb_prio_callbacks() -> None:
     assert "mb:prio:123:Y" in callback_data
     assert "mb:prio:123:B" in callback_data
 
+
+
+def test_priority_callbacks_always_include_email_id() -> None:
+    email_id = 777
+    for keyboard in (
+        build_email_actions_keyboard(email_id=email_id, expanded=False, initial_prio=True),
+        build_email_actions_keyboard(email_id=email_id, expanded=False, prio_menu=True),
+    ):
+        callback_data = [
+            button.get("callback_data", "")
+            for row in keyboard.get("inline_keyboard", [])
+            for button in row
+            if button.get("text") in {"🔴 Срочно", "🟡 Важно", "🔵 Низкий"}
+        ]
+        assert callback_data
+        assert all(f":{email_id}:" in item for item in callback_data)

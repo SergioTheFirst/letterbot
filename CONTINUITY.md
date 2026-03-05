@@ -193,16 +193,21 @@ Done:
 - 2026-03-05: added canonical `MessageInterpretation` layer in processor (dataclass + deterministic builder + `message_interpretation` events_v1 contract event), rewired weekly digest human signals to aggregate interpretation events (doc_kind/amount), added dashboard interpretation metrics sourced from events_v1 interpretation payloads, and added regression tests for interpretation creation/consistency + weekly/dashboard consumers + telegram payload non-regression; full pytest green (1062 passed).
 - 2026-03-05: fixed P0 premium/direct-path stability by normalizing dict-shaped LLM results before attribute access in processor, preserving heuristic priority when dict lacks `priority`; fixed Telegram priority callback UX to always answer callback, edit in-place without extra ack messages, and emit structured callback/edit logs; added targeted regressions for llm_result normalization + priority callback edit/ack flows.
 - 2026-03-05: priority callback persistence hardening in telegram inbound — callback correction now persists `emails.priority` before rerender, rerender reloads fresh snapshot from storage (prevents enrichment revert), and structured lifecycle logs now include `tg_priority_callback_received` + `tg_priority_feedback_saved` + `tg_priority_snapshot_updated` + `tg_priority_edit_ok`; added regressions for snapshot update, rerender persistence, and same-message edit; full pytest green (1071 passed).
+- 2026-03-05: finalized P0 callback/payroll hardening — priority callbacks now always answer with deterministic status (`Приоритет обновлён` / `Не нашёл письмо` / `Не могу отредактировать`) and enforce edit-in-place-only flow with no fallback second message; priority keyboards/tests validate callback payloads retain `email_id`; processor gained deterministic `PAYROLL` doc-kind guards (invoice signal suppression, no pay-action coercion, no due-date-from-document leakage) and stricter amount-context scoring separation for invoice vs payroll cues; added targeted regressions for callback ack/edit/persistence aliases and payroll/invoice misclassification; full pytest green (1079 passed).
 Now:
-- Telegram priority callback persistence fix is implemented and verified: feedback save + snapshot priority DB update + reload-before-rerender + same-message edit path.
-- Focus is production observation for callback lifecycle logs and any snapshot-reload anomalies.
+- P0 fixes for Telegram priority callback edit-in-place and payroll/invoice guards are implemented and verified with full pytest green.
+- Ready for runtime observation of callback ack/edit logs and payroll classification outputs.
 Next:
-- Monitor callback logs (`tg_priority_callback_received`, `tg_priority_feedback_saved`, `tg_priority_snapshot_updated`, `tg_priority_edit_ok`) for malformed callback payloads or snapshot-miss cases.
+- Observe production logs for malformed callback payload volume and payroll edge-cases with ambiguous amount context.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should callback snapshot-update miss (`email_id` absent) emit a dedicated contract event for dashboard alerting, or keep logger-only?
 Working set (files / tables / tests):
 - mailbot_v26/telegram/inbound.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/tests/test_priority_keyboard.py
 - mailbot_v26/tests/test_telegram_inbound.py
+- mailbot_v26/tests/test_pipeline_processor.py
 - CONTINUITY.md
-- python -m pytest -q mailbot_v26/tests/test_telegram_inbound.py -k "priority_callback_updates_snapshot_priority or priority_callback_priority_persists_after_rerender or priority_callback_edit_same_message"
+- python -m pytest -q mailbot_v26/tests/test_priority_keyboard.py mailbot_v26/tests/test_telegram_inbound.py -k "priority_callback or priority_callbacks_always_include_email_id"
+- python -m pytest -q mailbot_v26/tests/test_pipeline_processor.py -k "amount_scoring_prefers_total_keyword or amount_scoring_prefers_currency_context or amount_scoring_ignores_table_row_number or payroll"
 - python -m pytest -q

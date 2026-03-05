@@ -1241,3 +1241,47 @@ def test_relationship_invoice_tracking(tmp_path) -> None:
     )
     assert profile is not None
     assert profile["invoice_count"] == 2
+
+
+def test_payroll_never_classified_as_invoice_action() -> None:
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Расчетный листок за февраль",
+        sender="hr@example.com",
+        body="Начислено 120 000 руб, удержано 15 000 руб, к выплате 105 000 руб. Дата документа 05.03.2026",
+        attachments=[],
+        received_at=datetime(2026, 3, 5, 10, 0),
+    )
+
+    result = processor.process("user@example.com", msg)
+
+    assert result is not None
+    assert "Оплатить счёт" not in result
+
+
+def test_payroll_does_not_emit_invoice_amount_due() -> None:
+    processor = _processor()
+    msg = InboundMessage(
+        subject="Расчётный листок",
+        sender="hr@example.com",
+        body="Начислено 4 848 150. Удержано 120 000. Дата документа 05.03.2026",
+        attachments=[],
+        received_at=datetime(2026, 3, 5, 10, 0),
+    )
+
+    result = processor.process("user@example.com", msg)
+
+    assert result is not None
+    assert "₽ · до" not in result
+    assert "до 05.03.2026" not in result
+
+
+def test_invoice_amount_prefers_total_to_pay_keywords() -> None:
+    facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}
+
+    scored = _score_message_facts(
+        facts,
+        evidence_text="Начислено 4 848 150 руб. Итого к оплате 87 500 руб. Оплатить до 15.04.2026",
+    )
+
+    assert scored["amount"].startswith("87 500 руб")
