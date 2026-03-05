@@ -778,3 +778,89 @@ def test_runtime_override_store_insider_roundtrip(tmp_path: Path) -> None:
 
     store.set_insider_since("", chat_id="chat")
     assert store.get_insider_since(chat_id="chat") is None
+
+
+def test_priority_callback_edits_same_message_and_updates_priority_text(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    edited: list[dict[str, object]] = []
+
+    def _fake_edit(**kwargs):
+        edited.append(kwargs)
+
+    callback_acks: list[dict[str, object]] = []
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            callback_acks.append({"json": json, "timeout": timeout})
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.telegram.inbound.edit_telegram_message", _fake_edit)
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    callback = {
+        "id": "cb-prio-edit",
+        "data": f"prio_set:{email_id}:Y",
+        "message": {"chat": {"id": "chat"}, "message_id": 202, "text": "old"},
+    }
+    processor.handle_callback_query(callback)
+
+    assert len(edited) == 1
+    assert edited[0]["chat_id"] == "chat"
+    assert edited[0]["message_id"] == 202
+    assert "🟡" in str(edited[0]["html_text"])
+    assert sent == []
+    assert callback_acks and callback_acks[0]["json"]["text"] == "Приоритет обновлён"
+
+
+def test_priority_callback_always_answers_callback_query(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    callback_acks: list[dict[str, object]] = []
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            callback_acks.append({"json": json, "timeout": timeout})
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    callback = {
+        "id": "cb-prio-missing",
+        "data": "prio_set::R",
+        "message": {"chat": {"id": "chat"}, "message_id": 11},
+    }
+    processor.handle_callback_query(callback)
+
+    assert sent == []
+    assert callback_acks == [
+        {
+            "json": {
+                "callback_query_id": "cb-prio-missing",
+                "text": "Не нашёл письмо для изменения",
+                "show_alert": False,
+            },
+            "timeout": 5,
+        }
+    ]

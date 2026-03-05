@@ -3333,6 +3333,30 @@ def _read_llm_field(llm_result: Any, key: str, default: Any = None) -> Any:
     return getattr(llm_result, key, default)
 
 
+def _normalize_llm_result(raw: Any) -> Any:
+    if raw is None:
+        return raw
+    if not isinstance(raw, dict):
+        return raw
+    summary = str(raw.get("summary") or raw.get("body_summary") or "")
+    action_line = str(raw.get("action_line") or "")
+    attachment_summaries = raw.get("attachment_summaries")
+    if not isinstance(attachment_summaries, list):
+        attachment_summaries = []
+    return SimpleNamespace(
+        priority=raw.get("priority"),
+        summary=summary,
+        body_summary=summary,
+        action_line=action_line,
+        attachment_summaries=attachment_summaries,
+        used_llm=bool(raw.get("used_llm", False)),
+        model=raw.get("model"),
+        provider=raw.get("provider"),
+        fallback_used=raw.get("fallback_used"),
+        llm_provider=raw.get("llm_provider") or raw.get("provider"),
+    )
+
+
 def _extract_llm_tokens(llm_result: Any) -> Optional[int]:
     raw = _read_llm_field(llm_result, "tokens_used", None)
     if raw is None:
@@ -5510,7 +5534,9 @@ def process_message(
         if fallback_used and outcome == "ok":
             outcome = "fallback"
 
-        priority = llm_result.priority
+        llm_result = _normalize_llm_result(llm_result)
+
+        priority = llm_result.priority or heuristic_priority
         original_priority: str | None = None
         priority_reason: str | None = None
         action_line = llm_result.action_line
