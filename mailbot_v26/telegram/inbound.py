@@ -193,6 +193,24 @@ def _load_email_render_snapshot(db_path: Path, email_id: int) -> dict[str, objec
     return snapshot
 
 
+def _update_email_snapshot_priority(db_path: Path, email_id: int, new_priority: str) -> bool:
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.execute(
+                """
+                UPDATE emails
+                SET priority = ?
+                WHERE id = ?
+                """,
+                (new_priority, email_id),
+            )
+            conn.commit()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("telegram_inbound_priority_snapshot_update_failed", error=str(exc))
+        return False
+    return int(cursor.rowcount or 0) > 0
+
+
 def _ensure_snooze_table(db_path: Path) -> None:
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -825,7 +843,38 @@ class TelegramInboundProcessor:
             source="telegram_inbound",
             surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
         )
-        snapshot["priority"] = new_priority
+        logger.info(
+            "tg_priority_feedback_saved",
+            email_id=email_id,
+            chat_id=chat_id,
+            message_id=message_id_int,
+            priority=new_priority,
+        )
+        if not _update_email_snapshot_priority(self.knowledge_db.path, email_id, new_priority):
+            logger.warning(
+                "tg_priority_snapshot_update_missing_email",
+                email_id=email_id,
+                chat_id=chat_id,
+                message_id=message_id_int,
+                priority=new_priority,
+            )
+            return
+        logger.info(
+            "tg_priority_snapshot_updated",
+            email_id=email_id,
+            chat_id=chat_id,
+            message_id=message_id_int,
+            priority=new_priority,
+        )
+        snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
+        if not snapshot:
+            logger.warning(
+                "tg_priority_snapshot_reload_failed",
+                email_id=email_id,
+                chat_id=chat_id,
+                message_id=message_id_int,
+            )
+            return
         tier1_text = _render_tier1_message(snapshot)
         expanded = _is_trace_expanded(message)
         if expanded:
