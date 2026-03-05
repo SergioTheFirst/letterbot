@@ -448,3 +448,103 @@ def test_weekly_uses_interpretation_events(tmp_path) -> None:
     assert invoice_count == 2
     assert invoice_total == 100000
     assert contract_count == 1
+
+
+def test_shareable_weekly_card_format() -> None:
+    data = weekly_digest.WeeklyDigestData(
+        week_key="2025-W02",
+        total_emails=47,
+        deferred_emails=0,
+        attention_entities=(),
+        commitment_counts={},
+        overdue_commitments=(),
+        trust_deltas={"up": [], "down": []},
+        anomaly_alerts=[],
+        weekly_accuracy_progress=weekly_digest.WeeklyAccuracyProgress(
+            current_surprise_rate_pp=11.0,
+            prev_surprise_rate_pp=14,
+            delta_pp=3,
+            current_decisions=12,
+            prev_decisions=8,
+            current_corrections=5,
+        ),
+        invoice_count=3,
+        invoice_total_rub=387000,
+        contract_count=2,
+    )
+
+    card = weekly_digest._build_shareable_weekly_card(data)
+
+    lines = card.splitlines()
+    assert len(lines) <= 6
+    assert lines[0] == "📊 My Mail Week"
+    assert "47 emails processed" in card
+    assert "3 invoices detected (387000 ₽)" in card
+    assert "2 contracts waiting" in card
+    assert "accuracy: 89%" in card
+    assert "letterbot.ru" in card
+
+
+def test_shareable_card_deterministic() -> None:
+    data = weekly_digest.WeeklyDigestData(
+        week_key="2025-W02",
+        total_emails=10,
+        deferred_emails=0,
+        attention_entities=(),
+        commitment_counts={},
+        overdue_commitments=(),
+        trust_deltas={"up": [], "down": []},
+        anomaly_alerts=[],
+        invoice_count=1,
+        invoice_total_rub=2500,
+        contract_count=1,
+    )
+
+    first = weekly_digest._build_shareable_weekly_card(data)
+    second = weekly_digest._build_shareable_weekly_card(data)
+
+    assert first == second
+
+
+def test_weekly_digest_contains_shareable_card(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "weekly-share.sqlite"
+    db = KnowledgeDB(db_path)
+    analytics = KnowledgeAnalytics(db_path)
+    emitter = EventEmitter(tmp_path / "events-share.sqlite")
+    contract_emitter = ContractEventEmitter(db_path)
+
+    sent: list[dict[str, object]] = []
+
+    def _enqueue_tg(*, email_id: int, payload) -> DeliveryResult:
+        sent.append({"email_id": email_id, "payload": payload})
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(weekly_digest, "enqueue_tg", _enqueue_tg)
+    _patch_due_config(monkeypatch)
+
+    weekly_digest.maybe_send_weekly_digest(
+        knowledge_db=db,
+        analytics=analytics,
+        event_emitter=emitter,
+        contract_event_emitter=contract_emitter,
+        account_email="account@example.com",
+        telegram_chat_id="chat",
+        email_id=999,
+        now=_due_time(),
+    )
+
+    assert sent
+    payload = sent[0]["payload"]
+    assert "Share this report" in payload.html_text
+    assert "📊 My Mail Week" in payload.html_text
+    assert payload.metadata["shareable_weekly_qr_url"] == "https://letterbot.ru"
+    assert payload.reply_markup == {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "📤 Поделиться отчётом",
+                    "switch_inline_query_current_chat": payload.metadata["shareable_weekly_card"],
+                }
+            ]
+        ]
+    }
