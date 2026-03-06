@@ -554,6 +554,10 @@ class PriorityEngineV2:
         normalized_sender = (from_email or "").strip().lower()
         if not normalized_sender:
             return None
+        if reference_time.tzinfo is None:
+            reference_time = reference_time.replace(tzinfo=timezone.utc)
+        else:
+            reference_time = reference_time.astimezone(timezone.utc)
         threshold_short = reference_time - timedelta(days=7)
         threshold_long = reference_time - timedelta(days=30)
         count_short = 0
@@ -566,6 +570,10 @@ class PriorityEngineV2:
             event_time = parse_sqlite_datetime(str(row.get("timestamp") or ""))
             if event_time is None:
                 continue
+            if event_time.tzinfo is None:
+                event_time = event_time.replace(tzinfo=timezone.utc)
+            else:
+                event_time = event_time.astimezone(timezone.utc)
             if event_time >= threshold_long:
                 count_long += 1
             if event_time >= threshold_short:
