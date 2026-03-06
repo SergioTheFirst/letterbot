@@ -77,7 +77,7 @@ def test_gigachat_healthcheck_failure_falls_back(tmp_path) -> None:
     assert cloudflare.calls == 1
     assert (
         runtime_flags.read_text(encoding="utf-8")
-        == "{\"enable_gigachat\": false, \"enable_auto_priority\": false}"
+        == "{\"enable_gigachat\": false, \"enable_auto_priority\": true}"
     )
 
 
@@ -200,7 +200,7 @@ def test_auto_disable_on_consecutive_errors(tmp_path, caplog) -> None:
     assert cloudflare.calls == 3
     assert (
         runtime_flags.read_text(encoding="utf-8")
-        == "{\"enable_gigachat\": false, \"enable_auto_priority\": false}"
+        == "{\"enable_gigachat\": false, \"enable_auto_priority\": true}"
     )
     assert router._circuit_open_until is not None
     assert any(
@@ -250,7 +250,7 @@ def test_auto_disable_on_latency(tmp_path, caplog) -> None:
     assert cloudflare.calls == 1
     assert (
         runtime_flags.read_text(encoding="utf-8")
-        == "{\"enable_gigachat\": false, \"enable_auto_priority\": false}"
+        == "{\"enable_gigachat\": false, \"enable_auto_priority\": true}"
     )
     assert any(
         "[LLM-SAFETY]" in record.message and "latency_exceeded" in record.message

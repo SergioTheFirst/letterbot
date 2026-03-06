@@ -61,7 +61,7 @@ def build_email_actions_keyboard(
     expanded: bool,
     prio_menu: bool = False,
     snooze_menu: bool = False,
-    initial_prio: bool = True,
+    initial_prio: bool = False,
     show_decision_trace: bool = False,
 ) -> dict[str, Any]:
     email_id_int = int(str(email_id))
@@ -89,7 +89,7 @@ def build_email_actions_keyboard(
             ]
             back_row = [
                 {
-                    "text": "Назад",
+                    "text": "↩ Назад",
                     "callback_data": _safe_callback(f"{PRIO_BACK_PREFIX}{email_id_int}"),
                 }
             ]
@@ -103,7 +103,7 @@ def build_email_actions_keyboard(
             ]
             back_row = [
                 {
-                    "text": "Назад",
+                    "text": "↩ Назад",
                     "callback_data": _safe_callback(f"{SNOOZE_BACK_PREFIX}{email_id_int}"),
                 }
             ]
@@ -134,7 +134,6 @@ def build_email_actions_keyboard(
 
         prio_callback = _safe_callback(f"{PRIO_MENU_PREFIX}{email_id_int}")
         snooze_callback = _safe_callback(f"{SNOOZE_MENU_PREFIX}{email_id_int}")
-        ok_callback = _safe_callback(f"{PRIO_OK_PREFIX}{email_id_int}")
         first_row: list[dict[str, str]] = []
         if show_decision_trace:
             trace_label = "◀ Скрыть" if expanded else "Почему так?"
@@ -146,18 +145,11 @@ def build_email_actions_keyboard(
             first_row.append({"text": trace_label, "callback_data": trace_callback})
         first_row.extend(
             [
-                {"text": "Приоритет", "callback_data": prio_callback},
-                {"text": "⏰ Позже", "callback_data": snooze_callback},
+                {"text": "Изменить приоритет", "callback_data": prio_callback},
+                {"text": "⏰ Отложить", "callback_data": snooze_callback},
             ]
         )
-        return {
-            "inline_keyboard": [
-                first_row,
-                [
-                    {"text": "✓ Верно", "callback_data": ok_callback},
-                ],
-            ]
-        }
+        return {"inline_keyboard": [first_row]}
     except ValueError as exc:
         logger.error("telegram_keyboard_callback_invalid", error=str(exc))
         return _fallback_keyboard(email_id=email_id_int, expanded=expanded)

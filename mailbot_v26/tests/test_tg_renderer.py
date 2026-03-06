@@ -446,3 +446,24 @@ def test_attachment_insight_uses_decision_facts() -> None:
     )
 
     assert "📎 87 500 ₽ · до 15.04" in rendered
+
+def test_all_email_notifications_render_priority_circle() -> None:
+    for priority in ("🔴", "🟡", "🔵"):
+        rendered = tg_renderer.render_telegram_message(
+            priority=priority,
+            from_email="sender@example.com",
+            subject="Subject",
+            action_line="Проверить",
+            attachments=[],
+        )
+        assert rendered.splitlines()[0].startswith(priority)
+
+
+def test_priority_circle_present_in_fallback_render() -> None:
+    rendered = tg_renderer.build_tg_fallback(
+        priority="unknown",
+        subject="Subject",
+        from_email="sender@example.com",
+        attachments=[],
+    )
+    assert rendered.splitlines()[0].startswith("🔵")

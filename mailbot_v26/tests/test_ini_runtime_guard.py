@@ -35,7 +35,7 @@ def test_malformed_config_ini_logs_single_actionable_warning(tmp_path, caplog) -
     caplog.set_level(logging.WARNING)
     flags = FeatureFlags(base_dir=config_dir)
 
-    assert flags.ENABLE_AUTO_PRIORITY is False
+    assert flags.ENABLE_AUTO_PRIORITY is True
     warnings = [
         record.getMessage()
         for record in caplog.records

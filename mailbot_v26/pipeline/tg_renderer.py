@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from mailbot_v26.text.clean_email import clean_email_body
+from mailbot_v26.text.mojibake import normalize_mojibake_text
 from mailbot_v26.telegram_utils import escape_tg_html
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.text.sanitize import is_binaryish
@@ -77,9 +78,9 @@ class TelegramRenderFields:
 
 
 def _escape_dynamic(text: str | None) -> str:
-    cleaned = strip_disallowed_emojis(str(text or ""))
+    normalized = normalize_mojibake_text(str(text or ""))
+    cleaned = strip_disallowed_emojis(normalized)
     return escape_tg_html(cleaned)
-
 
 def _strip_internal_noise(text: str | None) -> str:
     value = str(text or "")
@@ -605,11 +606,11 @@ def _attachment_type_summary(attachments: list[dict[str, Any]]) -> str:
 
 
 def format_priority_line(priority: str, from_email: str) -> str:
-    if priority not in {"🔴", "🟡", "🔵"}:
-        priority = "🔵"
+    normalized_priority = normalize_mojibake_text(priority)
+    if normalized_priority not in {"🔴", "🟡", "🔵"}:
+        normalized_priority = "🔵"
     safe_sender = _escape_dynamic(from_email or "неизвестно")
-    return f"{priority} от {safe_sender}:"
-
+    return f"{normalized_priority} от {safe_sender}:"
 
 def format_subject(subject: str) -> str:
     safe_subject = _escape_dynamic(subject or "(без темы)")

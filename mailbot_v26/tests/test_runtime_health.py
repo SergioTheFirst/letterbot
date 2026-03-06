@@ -125,3 +125,27 @@ def test_imap_cooldown_suppresses_minutely_retry_spam(tmp_path):
     assert state.cooldown_until_utc is not None
     assert mgr.should_attempt("acc1", now + timedelta(minutes=30)) is False
     assert mgr.should_attempt("acc1", state.cooldown_until_utc + timedelta(minutes=1)) is True
+
+def test_imap_runtime_failure_is_localized_for_user(tmp_path):
+    mgr = _manager(tmp_path)
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    should_alert, text = mgr.on_failure("acc1", TimeoutError("SSL handshake timed out"), now)
+
+    assert should_alert is True
+    assert "Почта" in text
+    assert "Причина:" in text
+    assert "Следующая попытка:" in text
+    assert "IMAP RUNTIME FAILURE" not in text
+
+
+def test_auth_error_has_human_readable_russian_diagnosis(tmp_path):
+    mgr = _manager(tmp_path)
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    _should_alert, text = mgr.on_failure("acc1", RuntimeError("AUTHENTICATIONFAILED invalid credentials"), now)
+
+    assert "неверный логин или пароль" in text.lower()
+
+def test_repeated_handshake_timeouts_enter_24h_cooldown(tmp_path):
+    test_imap_repeated_handshake_failure_enters_24h_cooldown(tmp_path)

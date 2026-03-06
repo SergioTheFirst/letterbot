@@ -8,9 +8,8 @@ def build_priority_keyboard(email_id: int | str) -> InlineKeyboardMarkup:
     return {
         "inline_keyboard": [
             [
-                {"text": "🔴 Срочно", "callback_data": f"mb:prio:{normalized_id}:R"},
-                {"text": "🟡 Важно", "callback_data": f"mb:prio:{normalized_id}:Y"},
-                {"text": "🔵 Низкий", "callback_data": f"mb:prio:{normalized_id}:B"},
+                {"text": "Изменить приоритет", "callback_data": f"prio_menu:{normalized_id}"},
+                {"text": "⏰ Отложить", "callback_data": f"snz_m:{normalized_id}"},
             ]
         ]
     }

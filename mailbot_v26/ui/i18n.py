@@ -6,8 +6,13 @@ import configparser
 import logging
 from typing import Iterable
 
+from mailbot_v26.text.mojibake import normalize_mojibake_text
+
 DEFAULT_LOCALE = "ru"
 _LOGGER = logging.getLogger(__name__)
+
+def _clean_i18n_text(text: str) -> str:
+    return normalize_mojibake_text(str(text or ""))
 
 
 _MAIL_TYPE_LABELS_RU = {
@@ -228,10 +233,10 @@ def t(key: str, *, locale: str = DEFAULT_LOCALE, **kwargs) -> str:
         _LOGGER.warning("Missing i18n key: %s (locale=%s)", key, locale)
         return ""
     try:
-        return template.format(**kwargs)
+        return _clean_i18n_text(template.format(**kwargs))
     except Exception:
         _LOGGER.warning("Failed to format i18n key: %s (locale=%s)", key, locale)
-        return template
+        return _clean_i18n_text(template)
 
 
 def _normalize_code(code: str) -> str:

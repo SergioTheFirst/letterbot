@@ -353,7 +353,7 @@ def test_autopriority_toggle_respects_gate(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/autopriority on"})
     flags, _ = processor.runtime_flag_store.get_flags(force=True)
 
-    assert flags.enable_auto_priority is False
+    assert flags.enable_auto_priority is True
     assert any("РџРѕРєР° РЅРµР»СЊР·СЏ" in text for text in sent)
 
 def test_run_inbound_polling_updates_offset(tmp_path: Path) -> None:
@@ -1111,3 +1111,63 @@ def test_manual_priority_marker_not_duplicated_on_rerender(tmp_path: Path, monke
 
 def test_user_override_priority_survives_enrichment(tmp_path: Path, monkeypatch) -> None:
     test_priority_callback_priority_persists_after_rerender(tmp_path, monkeypatch)
+
+def test_no_mojibake_in_status_output(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
+
+    assert sent
+    for token in ("вЂ", "РѕС‚", "вЂў", "РґРѕРіРѕРІ", "рџ"):
+        assert token not in sent[-1]
+
+def test_manual_priority_marker_appears_after_callback(tmp_path: Path, monkeypatch) -> None:
+    test_priority_callback_edits_message_with_manual_priority_marker(tmp_path, monkeypatch)
+
+
+def test_priority_circle_present_after_manual_override(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    edited: list[dict[str, object]] = []
+
+    def _fake_edit(**kwargs):
+        edited.append(kwargs)
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.telegram.inbound.edit_telegram_message", _fake_edit)
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    callback = {
+        "id": "cb-prio-circle",
+        "data": f"prio_set:{email_id}:R",
+        "message": {"chat": {"id": "chat"}, "message_id": 909, "text": "old"},
+    }
+    processor.handle_callback_query(callback)
+
+    assert edited
+    rendered = _norm(str(edited[-1]["html_text"]))
+    assert rendered.startswith("🔴")

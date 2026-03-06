@@ -68,7 +68,7 @@ enabled = false
 ; Feature flags (advanced)
 ; =====================
 [features]
-enable_auto_priority = false
+enable_auto_priority = true
 enable_daily_digest = true
 enable_weekly_digest = true
 enable_quality_metrics = false

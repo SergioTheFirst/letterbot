@@ -170,3 +170,42 @@ def test_edit_telegram_message_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         bot_token="token", chat_id="123", message_id=7, html_text="<b>text</b>"
     )
     assert ok is False
+
+def test_outbound_sanitizer_fixes_common_mojibake_sequences(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
+        captured.update(json)
+        return DummyResponse(status_code=200, text="ok")
+
+    monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
+    clean_text = "\U0001F535 from sender@example.com:\nCheck payment by 15.04 — urgent…\n• Action"
+    mojibake_text = clean_text.encode("utf-8").decode("cp1251")
+
+    result = telegram_sender.send_telegram(_payload(mojibake_text))
+
+    assert result.delivered is True
+    sent_text = str(captured.get("text", ""))
+    assert sent_text == clean_text
+    for token in ("вЂ", "Р", "рџ", "СЃ", "РѕС‚"):
+        assert token not in sent_text
+
+
+def test_no_mojibake_in_regular_telegram_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
+        captured.update(json)
+        return DummyResponse(status_code=200, text="ok")
+
+    monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
+    clean_text = "\U0001F7E1 from alerts@example.com:\nTotal payable 1200 USD"
+    mojibake_text = clean_text.encode("utf-8").decode("cp1251")
+
+    result = telegram_sender.send_telegram(_payload(mojibake_text))
+
+    assert result.delivered is True
+    sent_text = str(captured.get("text", ""))
+    assert sent_text == clean_text
+    for token in ("вЂ", "Р", "рџ", "СЃ", "РѕС‚"):
+        assert token not in sent_text

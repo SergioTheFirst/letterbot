@@ -1,13 +1,10 @@
 ﻿from __future__ import annotations
 
 
-def normalize_mojibake_text(text: str) -> str:
-    source = str(text or "")
-    if not source:
-        return ""
-    if not any(marker in source for marker in ("Р", "С", "вЂ", "рџ")):
-        return source
+_MOJIBAKE_MARKERS = ("Р", "С", "вЂ", "рџ", "В·")
 
+
+def _repair_cp1251_utf8_once(source: str) -> str:
     protected_parts: list[str] = []
     placeholders: dict[str, str] = {}
     protected_index = 0
@@ -30,12 +27,31 @@ def normalize_mojibake_text(text: str) -> str:
 
     for token, char in placeholders.items():
         repaired = repaired.replace(token, char)
+    return repaired
+
+
+def normalize_mojibake_text(text: str) -> str:
+    source = str(text or "")
+    if not source:
+        return ""
+    if not any(marker in source for marker in _MOJIBAKE_MARKERS):
+        return source
+
+    repaired = source
+    for _ in range(3):
+        if not any(marker in repaired for marker in _MOJIBAKE_MARKERS):
+            break
+        candidate = _repair_cp1251_utf8_once(repaired)
+        if candidate == repaired:
+            break
+        repaired = candidate
 
     replacements = {
         "вЂ”": "—",
         "вЂ“": "–",
         "вЂ¦": "…",
         "вЂў": "•",
+        "В·": "·",
     }
     for bad, good in replacements.items():
         repaired = repaired.replace(bad, good)

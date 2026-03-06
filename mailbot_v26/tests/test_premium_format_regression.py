@@ -74,7 +74,7 @@ def test_initial_keyboard_priority_buttons() -> None:
 def test_prio_menu_keeps_back_button() -> None:
     keyboard = build_email_actions_keyboard(email_id=1, expanded=False, prio_menu=True)
 
-    assert keyboard["inline_keyboard"][1][0]["text"] == "Назад"
+    assert keyboard["inline_keyboard"][1][0]["text"] == "↩ Назад"
 
 
 def test_simple_email_without_llm_renders_full() -> None:
@@ -101,14 +101,14 @@ def test_safe_fallback_only_when_no_display_data() -> None:
     assert full_mode != processor.TelegramRenderMode.SAFE_FALLBACK
 
 
-def test_initial_keyboard_has_three_priority_buttons_and_no_trace() -> None:
+def test_initial_keyboard_shows_human_readable_actions_and_no_trace() -> None:
     payload, _, _ = processor.build_telegram_payload(_base_context())
 
     keyboard = payload.reply_markup or {}
     rows = keyboard.get("inline_keyboard") or []
     assert len(rows) == 1
     labels = [button["text"] for button in rows[0]]
-    assert labels == ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"]
+    assert labels == ["Изменить приоритет", "⏰ Отложить"]
     assert "Почему так?" not in labels
     assert "◀ Скрыть" not in labels
 
@@ -161,3 +161,12 @@ def test_render_notification_applies_arbiter_without_runtime_error() -> None:
     )
 
     assert "Автоматическая сводка слишком общая." in result.body_summary
+
+def test_default_mode_sends_only_processed_message() -> None:
+    payload, _, _ = processor.build_telegram_payload(_base_context())
+    assert "Письмо получено" not in payload.html_text
+
+
+def test_no_pre_message_in_normal_premium_mode() -> None:
+    payload, _, _ = processor.build_telegram_payload(_base_context())
+    assert not payload.html_text.startswith("📩 Письмо получено")

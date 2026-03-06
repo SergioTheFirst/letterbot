@@ -36,6 +36,9 @@ def _strip_html_tags(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text or "")
 
 
+def _sanitize_user_facing_text(text: str) -> str:
+    return normalize_mojibake_text(text)
+
 def _looks_like_parse_error(error_text: str) -> bool:
     lowered = (error_text or "").lower()
     return "unsupported start tag" in lowered or "can't parse" in lowered
@@ -89,7 +92,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
     """
     bot_token = payload.metadata.get("bot_token")
     chat_id = payload.metadata.get("chat_id")
-    normalized_text = normalize_mojibake_text(payload.html_text)
+    normalized_text = _sanitize_user_facing_text(payload.html_text)
     if not bot_token or not chat_id or not normalized_text:
         log.error("Telegram send failed: empty token, chat_id or text")
         return DeliveryResult(
@@ -269,7 +272,7 @@ def edit_telegram_message(
     html_text: str,
     reply_markup: dict[str, object] | None = None,
 ) -> bool:
-    normalized_text = normalize_mojibake_text(html_text)
+    normalized_text = _sanitize_user_facing_text(html_text)
     if not bot_token or not chat_id or not message_id or not normalized_text:
         log.error(
             "telegram_edit_failed chat_id=%s message_id=%s reason=%s",

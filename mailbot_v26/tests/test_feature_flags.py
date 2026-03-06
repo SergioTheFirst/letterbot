@@ -11,7 +11,7 @@ def write_config(tmpdir: Path, content: str) -> Path:
 
 def test_flags_defaults_when_missing(tmp_path: Path) -> None:
     flags = FeatureFlags(tmp_path)
-    assert not flags.ENABLE_AUTO_PRIORITY
+    assert flags.ENABLE_AUTO_PRIORITY is True
     assert not flags.ENABLE_TASK_SUGGESTIONS
     assert not flags.ENABLE_TG_EDITING
     assert not flags.ENABLE_SHADOW_PERSISTENCE
@@ -55,7 +55,7 @@ auto_priority_confidence_threshold = 0.8
     assert flags.AUTO_PRIORITY_CONFIDENCE_THRESHOLD == 0.8
 
 
-def test_invalid_flag_values_fallback_to_false(tmp_path: Path) -> None:
+def test_invalid_flag_values_fallback_to_default(tmp_path: Path) -> None:
     write_config(
         tmp_path,
         """[features]
@@ -63,7 +63,7 @@ enable_auto_priority = notabool
 """,
     )
     flags = FeatureFlags(tmp_path)
-    assert flags.ENABLE_AUTO_PRIORITY is False
+    assert flags.ENABLE_AUTO_PRIORITY is True
 
 
 def test_support_alias_overrides_donate_enabled(tmp_path: Path) -> None:
@@ -161,3 +161,15 @@ def test_digest_defaults_enabled_in_example_config() -> None:
 
     assert parser.getboolean("features", "enable_daily_digest") is True
     assert parser.getboolean("features", "enable_weekly_digest") is True
+
+
+def test_autopriority_enabled_by_default(tmp_path: Path) -> None:
+    flags = FeatureFlags(tmp_path)
+    assert flags.ENABLE_AUTO_PRIORITY is True
+
+def test_digest_enabled_by_default_in_example() -> None:
+    test_digest_defaults_enabled_in_example_config()
+
+
+def test_digest_enabled_by_default_in_loader(tmp_path: Path) -> None:
+    test_digest_loader_defaults_enabled(tmp_path)

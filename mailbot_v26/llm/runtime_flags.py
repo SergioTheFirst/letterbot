@@ -13,7 +13,7 @@ DEFAULT_RUNTIME_FLAGS_PATH = Path(__file__).resolve().parents[1] / "runtime_flag
 @dataclass(frozen=True)
 class RuntimeFlags:
     enable_gigachat: bool = False
-    enable_auto_priority: bool = False
+    enable_auto_priority: bool = True
 
 
 class RuntimeFlagStore:
@@ -84,7 +84,7 @@ class RuntimeFlagStore:
             return RuntimeFlags()
 
         enabled = raw.get("enable_gigachat", False)
-        auto_priority = raw.get("enable_auto_priority", False)
+        auto_priority = raw.get("enable_auto_priority", True)
         return RuntimeFlags(
             enable_gigachat=bool(enabled),
             enable_auto_priority=bool(auto_priority),

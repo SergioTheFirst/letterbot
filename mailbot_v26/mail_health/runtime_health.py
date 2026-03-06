@@ -165,7 +165,34 @@ class AccountRuntimeHealthManager:
             return "imap_network_timeout"
         if "auth" in lowered or "password" in lowered or "login" in lowered:
             return "imap_auth"
+        if "unavailable" in lowered or "temporarily unavailable" in lowered:
+            return "imap_server_unavailable"
+        if (
+            "dns" in lowered
+            or "getaddrinfo" in lowered
+            or "name or service not known" in lowered
+            or "connection refused" in lowered
+            or "refused" in lowered
+        ):
+            return "imap_connectivity"
         return "other"
+
+    @staticmethod
+    def _human_diagnosis(state: AccountRuntimeState) -> str:
+        lowered = f"{state.last_error_class or ''} {state.last_error or ''}".lower()
+        if state.failure_bucket == "imap_auth":
+            return "неверный логин или пароль"
+        if state.failure_bucket == "imap_network_timeout" and ("handshake" in lowered or "ssl" in lowered):
+            return "ошибка защищенного соединения"
+        if state.failure_bucket == "imap_network_timeout":
+            return "сервер долго не отвечает"
+        if state.failure_bucket == "imap_server_unavailable":
+            return "почтовый сервер недоступен"
+        if state.failure_bucket == "imap_connectivity":
+            return "не удается подключиться к почтовому серверу"
+        if "timeout" in lowered or "timed out" in lowered:
+            return "сервер долго не отвечает"
+        return "временная ошибка подключения к почте"
 
     def _get_state(self, account_id: str) -> AccountRuntimeState:
         if account_id not in self._states:
@@ -190,47 +217,37 @@ class AccountRuntimeHealthManager:
         meta = self._account_meta.get(account_id)
         login = meta.login if meta else account_id
         masked_login = _mask_login(login)
-        host = meta.host if meta else "<unknown>"
-        port = meta.port if meta else 0
-        use_ssl = meta.use_ssl if meta else False
-        error_class = state.last_error_class or "Error"
-        error_msg = state.last_error or "<no error message>"
+        diagnosis = self._human_diagnosis(state)
         retry_in = self._format_retry(state.next_retry_at_utc, now_utc)
         lines = [
-            "\U0001F6A8 IMAP RUNTIME FAILURE",
-            f"Account: {account_id}",
-            f"Login: {masked_login}",
-            f"Host: {host}:{port} ssl={use_ssl}",
-            f"Error: {error_class}: {error_msg}",
-            f"Next retry: {retry_in}",
+            f"🚨 Почта {masked_login} временно недоступна",
+            f"Причина: {diagnosis}",
+            f"Следующая попытка: {retry_in}",
         ]
         if state.cooldown_until_utc is not None:
-            cooldown_text = (
-                state.cooldown_until_utc.astimezone(timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z")
-            )
-            lines.append(f"Cooldown: active until {cooldown_text} ({state.cooldown_reason or 'network'})")
+            lines.append("Режим паузы: 24 часа (повторяющиеся ошибки соединения)")
         return "\n".join(lines)
 
     @staticmethod
     def _format_retry(next_retry_at: datetime | None, now_utc: datetime) -> str:
         if next_retry_at is None:
-            return "now"
+            return "сейчас"
         remaining = max(next_retry_at - now_utc, timedelta())
-        minutes = int(remaining.total_seconds() // 60)
-        hours, minutes = divmod(minutes, 60)
-        parts = []
+        total_minutes = int(remaining.total_seconds() // 60)
+        hours, minutes = divmod(total_minutes, 60)
+        parts: list[str] = []
         if hours:
-            parts.append(f"{hours}h")
-        if minutes or not parts:
-            parts.append(f"{minutes}m")
+            parts.append(f"{hours} ч")
+        if minutes:
+            parts.append(f"{minutes} мин")
+        if not parts:
+            parts.append("0 мин")
         retry_at_text = (
             next_retry_at.astimezone(timezone.utc)
             .isoformat()
             .replace("+00:00", "Z")
         )
-        return f"in {' '.join(parts)} (at {retry_at_text})"
+        return f"через {' '.join(parts)} (в {retry_at_text})"
 
     def _build_fingerprint(
         self,

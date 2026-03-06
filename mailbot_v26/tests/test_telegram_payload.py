@@ -162,4 +162,4 @@ def test_premium_clarity_single_message(monkeypatch) -> None:
     assert preview_called["called"] is False
     keyboard = captured[0].reply_markup or {}
     labels = [button["text"] for button in keyboard.get("inline_keyboard", [[]])[0]]
-    assert labels == ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"]
+    assert labels == ["Изменить приоритет", "⏰ Отложить"]

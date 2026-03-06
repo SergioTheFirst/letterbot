@@ -225,3 +225,9 @@ def test_digest_defaults_enabled_in_bootstrap() -> None:
 
     assert parser.getboolean("features", "enable_daily_digest") is True
     assert parser.getboolean("features", "enable_weekly_digest") is True
+
+def test_autopriority_enabled_in_bootstrap_defaults() -> None:
+    parser = configparser.ConfigParser()
+    parser.read_string(SETTINGS_TEMPLATE)
+
+    assert parser.getboolean("features", "enable_auto_priority") is True

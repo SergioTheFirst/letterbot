@@ -43,10 +43,8 @@ def test_priority_menu_callbacks_parse() -> None:
 def test_email_actions_keyboard_contains_snooze_button() -> None:
     keyboard = build_email_actions_keyboard(email_id=123, expanded=False, initial_prio=False)
     labels = [button["text"] for button in keyboard["inline_keyboard"][0]]
-    assert labels == ["Приоритет", "⏰ Позже"]
-    assert keyboard["inline_keyboard"][1][0]["text"] == "✓ Верно"
-    assert keyboard["inline_keyboard"][1][0]["callback_data"] == "mb:ok:123"
-
+    assert labels == ["Изменить приоритет", "⏰ Отложить"]
+    assert len(keyboard["inline_keyboard"]) == 1
 
 def test_snooze_callbacks_parse() -> None:
     assert parse_callback_data("snz_m:123") == ("snooze_menu", {"email_id": "123"})
@@ -60,14 +58,14 @@ def test_snooze_callbacks_parse() -> None:
 def test_email_actions_keyboard_shows_trace_when_enabled() -> None:
     keyboard = build_email_actions_keyboard(email_id=123, expanded=False, initial_prio=False, show_decision_trace=True)
     labels = [button["text"] for button in keyboard["inline_keyboard"][0]]
-    assert labels == ["Почему так?", "Приоритет", "⏰ Позже"]
+    assert labels == ["Почему так?", "Изменить приоритет", "⏰ Отложить"]
 
 
 def test_priority_menu_labels_match_user_facing_ux() -> None:
     keyboard = build_email_actions_keyboard(email_id=555, expanded=False, prio_menu=True)
     assert [[button["text"] for button in row] for row in keyboard["inline_keyboard"]] == [
         ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"],
-        ["Назад"],
+        ["↩ Назад"],
     ]
 
 
@@ -87,19 +85,17 @@ def test_initial_keyboard_no_back_button() -> None:
 
 def test_prio_menu_keeps_back_button() -> None:
     keyboard = build_email_actions_keyboard(email_id=1, expanded=False, prio_menu=True)
-    assert keyboard["inline_keyboard"][1][0]["text"] == "Назад"
+    assert keyboard["inline_keyboard"][1][0]["text"] == "↩ Назад"
 
-def test_build_priority_keyboard_has_mb_prio_callbacks() -> None:
+def test_build_priority_keyboard_has_menu_callbacks() -> None:
     keyboard = build_priority_keyboard(123)
     callback_data = [
         button["callback_data"]
         for row in keyboard.get("inline_keyboard", [])
         for button in row
     ]
-    assert "mb:prio:123:R" in callback_data
-    assert "mb:prio:123:Y" in callback_data
-    assert "mb:prio:123:B" in callback_data
-
+    assert "prio_menu:123" in callback_data
+    assert "snz_m:123" in callback_data
 
 
 def test_priority_callbacks_always_include_email_id() -> None:
@@ -116,3 +112,24 @@ def test_priority_callbacks_always_include_email_id() -> None:
         ]
         assert callback_data
         assert all(f":{email_id}:" in item for item in callback_data)
+
+
+def test_priority_menu_buttons_are_human_readable() -> None:
+    keyboard = build_email_actions_keyboard(email_id=314, expanded=False, initial_prio=False)
+    labels = [button["text"] for button in keyboard["inline_keyboard"][0]]
+    assert labels == ["Изменить приоритет", "⏰ Отложить"]
+
+
+def test_priority_menu_does_not_show_confusing_verno_label() -> None:
+    keyboard = build_email_actions_keyboard(email_id=314, expanded=False, initial_prio=False)
+    labels = [button["text"] for row in keyboard["inline_keyboard"] for button in row]
+    assert "✓ Верно" not in labels
+
+
+def test_back_button_returns_to_main_keyboard() -> None:
+    menu = build_email_actions_keyboard(email_id=314, expanded=False, prio_menu=True)
+    assert menu["inline_keyboard"][1][0]["text"] == "↩ Назад"
+
+    base = build_email_actions_keyboard(email_id=314, expanded=False, initial_prio=False)
+    labels = [button["text"] for button in base["inline_keyboard"][0]]
+    assert labels == ["Изменить приоритет", "⏰ Отложить"]

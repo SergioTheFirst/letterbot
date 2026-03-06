@@ -59,16 +59,18 @@ _HELP_PREFIXES = ("mb:help:", "help:")
 _UI_LOCALE = "ru"
 
 _PRIORITY_MAP = {
-    "R": "рџ”ґ",
-    "Y": "рџџЎ",
-    "B": "рџ”µ",
-    "RED": "рџ”ґ",
-    "YELLOW": "рџџЎ",
-    "BLUE": "рџ”µ",
-    "рџ”ґ": "рџ”ґ",
-    "рџџЎ": "рџџЎ",
-    "рџ”µ": "рџ”µ",
+    "R": "🔴",
+    "Y": "🟡",
+    "B": "🔵",
+    "RED": "🔴",
+    "YELLOW": "🟡",
+    "BLUE": "🔵",
+    "🔴": "🔴",
+    "🟡": "🟡",
+    "🔵": "🔵",
 }
+
+
 
 
 def _clean_text(text: str | None) -> str:
@@ -196,7 +198,7 @@ def _load_email_render_snapshot(db_path: Path, email_id: int) -> dict[str, objec
         logger.error("telegram_inbound_email_render_failed", error=str(exc))
         return None
     attachment_rows = [
-        {"filename": row[0] or "РІР»РѕР¶РµРЅРёРµ", "text": "", "content_type": ""}
+        {"filename": row[0] or "вложение", "text": "", "content_type": ""}
         for row in attachments
         if row and row[0]
     ]
@@ -282,9 +284,11 @@ def _save_snooze(
 
 
 def _render_tier1_message(snapshot: dict[str, object]) -> str:
-    priority = str(snapshot.get("priority") or "рџ”µ")
-    from_email = str(snapshot.get("from_email") or "РЅРµРёР·РІРµСЃС‚РЅРѕ")
-    subject = str(snapshot.get("subject") or "(Р±РµР· С‚РµРјС‹)")
+    priority = normalize_mojibake_text(str(snapshot.get("priority") or "🔵")).strip()
+    if priority not in {"🔴", "🟡", "🔵"}:
+        priority = "🔵"
+    from_email = normalize_mojibake_text(str(snapshot.get("from_email") or "неизвестно"))
+    subject = normalize_mojibake_text(str(snapshot.get("subject") or "(без темы)"))
     action_line = str(snapshot.get("action_line") or "")
     body_summary = str(snapshot.get("body_summary") or "")
     attachments = snapshot.get("attachments") or []
@@ -300,7 +304,6 @@ def _render_tier1_message(snapshot: dict[str, object]) -> str:
     if priority_source == "user_override":
         base_text = f"{base_text}\nПриоритет: {priority} вручную"
     return telegram_safe(normalize_mojibake_text(base_text))
-
 
 def _render_decision_trace_details(snapshot: list[dict[str, object]]) -> str:
     if not snapshot:
@@ -489,7 +492,7 @@ class TelegramInboundClient:
     def send_message(self, *, chat_id: str, text: str) -> DeliveryResult:
         payload = TelegramPayload(
             html_text=telegram_safe(text),
-            priority="рџ”µ",
+            priority="🔵",
             metadata={"bot_token": self.bot_token, "chat_id": chat_id},
         )
         return send_telegram(payload)
@@ -798,7 +801,7 @@ class TelegramInboundProcessor:
         record_priority_correction(
             knowledge_db=self.knowledge_db,
             email_id=email_id,
-            correction=payload.get("priority") or "рџ”µ",
+            correction=payload.get("priority") or "🔵",
             entity_id=None,
             sender_email=sender_email or None,
             account_email=account_email or None,
@@ -811,7 +814,7 @@ class TelegramInboundProcessor:
             surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
         )
         if send_ack:
-            priority = payload.get("priority") or "рџ”µ"
+            priority = payload.get("priority") or "🔵"
             self._reply(
                 chat_id,
                 _t("inbound.priority_ack", priority=priority),
@@ -841,7 +844,7 @@ class TelegramInboundProcessor:
         account_email = str(snapshot.get("account_email") or "")
         sender_email = str(snapshot.get("from_email") or "")
         old_priority = str(snapshot.get("priority") or "")
-        new_priority = payload.get("priority") or "рџ”µ"
+        new_priority = payload.get("priority") or "🔵"
         record_priority_correction(
             knowledge_db=self.knowledge_db,
             email_id=email_id,

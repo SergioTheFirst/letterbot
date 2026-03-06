@@ -30,7 +30,7 @@ class FeatureFlags:
     """
 
     def __init__(self, base_dir: Optional[Path] = None) -> None:
-        self.ENABLE_AUTO_PRIORITY = False
+        self.ENABLE_AUTO_PRIORITY = True
         self.ENABLE_AUTO_ACTIONS = False
         self.ENABLE_TASK_SUGGESTIONS = False
         self.ENABLE_TG_EDITING = False
@@ -80,7 +80,7 @@ class FeatureFlags:
             logger=_LOGGER,
             scope_label="feature flags",
         )
-        self.ENABLE_AUTO_PRIORITY = self._get_flag(parser, "enable_auto_priority")
+        self.ENABLE_AUTO_PRIORITY = self._get_flag(parser, "enable_auto_priority", fallback_default=True)
         self.ENABLE_AUTO_ACTIONS = self._get_flag(parser, "enable_auto_actions")
         self.ENABLE_TASK_SUGGESTIONS = self._get_flag(parser, "enable_task_suggestions")
         self.ENABLE_TG_EDITING = self._get_flag(parser, "enable_tg_editing")
