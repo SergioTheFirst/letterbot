@@ -18,6 +18,7 @@ class BudgetUsageConfig:
 
     llm_percentile_threshold: int = 80
     window_days: int = 7
+    force_llm_always: bool = False
 
 
 def load_budget_gate_config(base_dir: Path | None = None) -> BudgetGateConfig:
@@ -57,9 +58,14 @@ def load_budget_usage_config(base_dir: Path | None = None) -> BudgetUsageConfig:
         scope_label="budget usage settings",
     )
     usage = parser["llm_usage"] if "llm_usage" in parser else None
+    force_llm_always = _get_bool(usage, "force_llm_always", False)
+    if not force_llm_always:
+        # Backward-compatible alias.
+        force_llm_always = _get_bool(usage, "always_use_llm", False)
     return BudgetUsageConfig(
         llm_percentile_threshold=_get_int(usage, "llm_percentile_threshold", 80),
         window_days=_get_int(usage, "llm_usage_window_days", 7),
+        force_llm_always=force_llm_always,
     )
 
 

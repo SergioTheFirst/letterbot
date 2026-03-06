@@ -1,4 +1,4 @@
-﻿# mailbot_v26/pipeline/processor.py
+# mailbot_v26/pipeline/processor.py
 
 from __future__ import annotations
 
@@ -173,7 +173,7 @@ from mailbot_v26.ui.i18n import (
 
 logger = get_logger("mailbot")
 
-_SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
+_SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd|отв|пер)\s*:\s*)+", re.IGNORECASE)
 
 
 def _normalize_subject_for_compare(text: str) -> str:
@@ -1003,7 +1003,7 @@ class MessageProcessor:
         if attachments:
             lines.extend(self._render_attachments(attachments))
         lines.append(f"<i>Р°РєРєР°СѓРЅС‚: {safe_account_login}</i>")
-        text = "\n".join(lines)
+        text = _normalize_mojibake_text("\n".join(lines))
         self._last_ordinary_result = {
             "text": text,
             "priority": priority,
@@ -2254,7 +2254,7 @@ def _build_progressive_telegram_payload(
     metadata: dict[str, Any],
 ) -> TelegramPayload:
     return TelegramPayload(
-        html_text="рџ“© РџРёСЃСЊРјРѕ РїРѕР»СѓС‡РµРЅРѕ\nРћР±СЂР°Р±Р°С‚С‹РІР°СЋ РІР»РѕР¶РµРЅРёСЏвЂ¦",
+        html_text=_normalize_mojibake_text("📩 Письмо получено\nОбрабатываю вложения…"),
         priority=priority,
         metadata=metadata,
         reply_markup=None,
@@ -3247,6 +3247,49 @@ def _is_meaningful_summary(summary: str) -> bool:
     return True
 
 
+
+
+def _normalize_mojibake_text(text: str) -> str:
+    source = str(text or "")
+    if not source:
+        return ""
+    if not any(marker in source for marker in ("Р", "С", "вЂ", "рџ")):
+        return source
+
+    protected_parts: list[str] = []
+    placeholders: dict[str, str] = {}
+    protected_index = 0
+    for char in source:
+        try:
+            char.encode("cp1251")
+            protected_parts.append(char)
+        except UnicodeEncodeError:
+            token = f"__mb_{protected_index}__"
+            placeholders[token] = char
+            protected_parts.append(token)
+            protected_index += 1
+    protected = "".join(protected_parts)
+
+    repaired = protected
+    try:
+        repaired = protected.encode("cp1251").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        repaired = protected
+
+    for token, char in placeholders.items():
+        repaired = repaired.replace(token, char)
+
+    replacements = {
+        "вЂ”": "—",
+        "вЂ“": "–",
+        "вЂ¦": "…",
+        "вЂў": "•",
+    }
+    for bad, good in replacements.items():
+        repaired = repaired.replace(bad, good)
+    return repaired
+
+
 def _validate_telegram_markup(text: str) -> None:
     for tag in re.findall(r"</?[^>]+>", text):
         if tag not in _ALLOWED_TG_TAGS:
@@ -3629,7 +3672,7 @@ def build_telegram_payload(
                 attachments=context.attachment_files,
                 attachment_summary=context.attachment_summary,
             )
-    telegram_text = telegram_text_raw
+    telegram_text = _normalize_mojibake_text(telegram_text_raw)
 
     if render_mode == TelegramRenderMode.FULL and not payload_invalid:
         if narrative:
@@ -3670,6 +3713,7 @@ def build_telegram_payload(
             "fallback_used": render_mode != TelegramRenderMode.FULL or payload_invalid,
         },
     )
+    telegram_text = _normalize_mojibake_text(telegram_text)
     metadata = {
         "subject": context.subject,
         "sender": context.from_email,
@@ -4049,13 +4093,18 @@ def _build_heuristic_attachment_summaries(attachments: list[dict[str, Any]]) -> 
 
 
 def _detect_attachment_doc_type(*, filename: str, content_type: Any) -> str:
-    lowered_filename = (filename or "").lower()
+    lowered_filename = (filename or "").casefold()
     lowered_type = str(content_type or "").lower()
     if lowered_filename.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")) or "excel" in lowered_type:
         return "TABLE"
+    contract_tokens = ("contract", "agreement", "договор")
+    invoice_tokens = ("invoice", "bill", "счет", "счёт")
+    table_doc_tokens = ("акт", "накладная", "листок")
     if lowered_filename.endswith((".doc", ".docx")) or "word" in lowered_type:
-        return "CONTRACT" if any(token in lowered_filename for token in ("contract", "РґРѕРіРѕРІ", "agreement")) else "OTHER"
-    if lowered_filename.endswith(".pdf") and any(token in lowered_filename for token in ("invoice", "СЃС‡РµС‚", "СЃС‡", "bill")):
+        return "CONTRACT" if any(token in lowered_filename for token in contract_tokens) else "OTHER"
+    if lowered_filename.endswith(".pdf") and any(
+        token in lowered_filename for token in (*invoice_tokens, *table_doc_tokens)
+    ):
         return "TABLE"
     return "OTHER"
 
@@ -4263,6 +4312,51 @@ def _ensure_llm_worker() -> BackgroundLLMWorker:
         )
     llm_worker.start()
     return llm_worker
+
+
+def _resolve_llm_budget_access(
+    *,
+    account_email: str,
+    use_llm_candidate: bool,
+    force_llm_always: bool,
+    email_id: int,
+) -> tuple[bool, bool, bool]:
+    if not use_llm_candidate:
+        return False, False, False
+    budget_gate_allow = budget_gate.can_use_llm(account_email)
+    if budget_gate_allow:
+        return True, True, False
+    if force_llm_always:
+        logger.warning(
+            "llm_budget_gate_override",
+            email_id=email_id,
+            account_email=account_email,
+        )
+        return True, False, True
+    return False, False, False
+
+
+def _enqueue_llm_request_with_retry(request: LLMRequest, *, email_id: int) -> bool:
+    timeout_sec = max(0.0, float(get_llm_queue_config().llm_request_queue_timeout_sec))
+    queued = get_llm_request_queue().enqueue(request, timeout_sec=timeout_sec)
+    if queued:
+        return True
+    logger.warning(
+        "llm_queue_enqueue_timeout",
+        email_id=email_id,
+        timeout_sec=timeout_sec,
+    )
+    queued = get_llm_request_queue().enqueue(request, timeout_sec=0.0)
+    if queued:
+        logger.info("llm_queue_enqueue_retry_ok", email_id=email_id)
+        return True
+    logger.warning(
+        "llm_queue_enqueue_rejected",
+        email_id=email_id,
+        timeout_sec=timeout_sec,
+    )
+    return False
+
 
 
 _PREVIEW_DECISION_LINE = "[РџСЂРёРЅСЏС‚СЊ] [РћС‚РєР»РѕРЅРёС‚СЊ]"
@@ -5682,8 +5776,10 @@ def process_message(
         # Root cause: anchor budget percentile window to received_at for deterministic tests.
         use_llm_candidate = False
         prior_history_count: int | None = None
+        force_llm_always = False
         try:
             usage_config = get_budget_usage_config()
+            force_llm_always = bool(getattr(usage_config, "force_llm_always", False))
             percentile_result = is_top_percentile(
                 db_path=DB_PATH,
                 account_email=account_email,
@@ -5717,41 +5813,45 @@ def process_message(
                 )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("importance_score_percentile_failed", error=str(exc))
-        can_use_llm = False
-        if use_llm_candidate:
-            can_use_llm = budget_gate.can_use_llm(account_email)
-            if not can_use_llm:
-                _emit_contract_event(
-                    EventType.GATE_FLIPPED,
-                    ts_utc=received_at.timestamp(),
-                    account_id=account_email,
-                    entity_id=contract_event_entity_id,
-                    email_id=message_id,
-                    payload={
-                        "feature_name": "clarity_formatter",
-                        "old_mode": "premium",
-                        "new_mode": "basic",
-                    },
-                )
-                _emit_contract_event(
-                    EventType.GATE_FLIPPED,
-                    ts_utc=received_at.timestamp(),
-                    account_id=account_email,
-                    entity_id=contract_event_entity_id,
-                    email_id=message_id,
-                    payload={
-                        "feature_name": "trust_bootstrap",
-                        "old_mode": "premium",
-                        "new_mode": "basic",
-                    },
-                )
-
+        can_use_llm, budget_gate_allow, llm_budget_override = _resolve_llm_budget_access(
+            account_email=account_email,
+            use_llm_candidate=use_llm_candidate,
+            force_llm_always=force_llm_always,
+            email_id=message_id,
+        )
+        if use_llm_candidate and not can_use_llm:
+            _emit_contract_event(
+                EventType.GATE_FLIPPED,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=contract_event_entity_id,
+                email_id=message_id,
+                payload={
+                    "feature_name": "clarity_formatter",
+                    "old_mode": "premium",
+                    "new_mode": "basic",
+                },
+            )
+            _emit_contract_event(
+                EventType.GATE_FLIPPED,
+                ts_utc=received_at.timestamp(),
+                account_id=account_email,
+                entity_id=contract_event_entity_id,
+                email_id=message_id,
+                payload={
+                    "feature_name": "trust_bootstrap",
+                    "old_mode": "premium",
+                    "new_mode": "basic",
+                },
+            )
         anchor_ts_utc = received_at.timestamp()
         attention_signals: dict[str, bool] = {
             "TOP_PERCENTILE_CANDIDATE": use_llm_candidate,
         }
         if use_llm_candidate:
-            attention_signals["BUDGET_GATE_ALLOW"] = can_use_llm
+            attention_signals["BUDGET_GATE_ALLOW"] = budget_gate_allow
+            if llm_budget_override:
+                attention_signals["LLM_FORCE_ALWAYS"] = True
         attention_signals_evaluated = sorted(attention_signals.keys())
         attention_signals_fired = sorted(
             [key for key, fired in attention_signals.items() if fired]
@@ -5855,9 +5955,10 @@ def process_message(
 
         llm_result = None
         input_chars = _estimate_input_chars(llm_body_text, attachments, subject)
+        llm_queue_cfg = get_llm_queue_config()
         llm_queue_path_enabled = (
-            get_llm_queue_config().llm_request_queue_enabled
-            and get_llm_queue_config().max_concurrent_llm_calls == 1
+            llm_queue_cfg.llm_request_queue_enabled
+            and llm_queue_cfg.max_concurrent_llm_calls == 1
             and run_llm_stage is _ORIGINAL_RUN_LLM_STAGE
         )
         llm_was_queued = False
@@ -5921,10 +6022,11 @@ def process_message(
                         received_at=received_at,
                         input_chars=input_chars,
                     )
-                    queued = get_llm_request_queue().enqueue(request, timeout_sec=0.5)
+                    queued = _enqueue_llm_request_with_retry(
+                        request,
+                        email_id=message_id,
+                    )
                     llm_was_queued = queued
-                    if not queued:
-                        logger.info("llm_queue_full", email_id=message_id)
             llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
             span.record_stage("llm", llm_latency_ms)
         else:
@@ -5940,6 +6042,7 @@ def process_message(
         llm_gate_signals = {
             "LLM_CANDIDATE": use_llm_candidate,
             "LLM_BUDGET_OK": can_use_llm,
+            "LLM_FORCE_ALWAYS": llm_budget_override,
             "LLM_QUEUE_ENABLED": llm_queue_path_enabled,
             "LLM_QUEUED": llm_was_queued,
             "LLM_CALLED_DIRECT": llm_called_direct,

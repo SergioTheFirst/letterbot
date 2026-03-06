@@ -94,3 +94,18 @@ def test_segment_email_body_splits_sections():
     assert segmented["main_body"] == "Короткий статус по задаче"
     assert segmented["signature"].startswith("Best regards")
     assert segmented["forwarded_thread"].startswith("----Original Message----")
+
+
+def test_segment_email_body_extracts_disclaimer_block():
+    body = (
+        "Main actionable line\n"
+        "External email: Be careful with unknown links\n"
+        "Noise footer"
+    )
+
+    segmented = segment_email_body(body)
+
+    assert segmented["main_body"] == "Main actionable line"
+    assert segmented["disclaimer_block"].startswith("External email:")
+    assert segmented["forwarded_thread"] == ""
+    assert segmented["signature"] == ""

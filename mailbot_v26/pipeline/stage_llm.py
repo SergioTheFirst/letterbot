@@ -26,10 +26,15 @@ def run_llm_stage(
     errors when the stage is monkeypatched in tests.
     """
     if ctx is not None:
-        from mailbot_v26.bot_core.pipeline import stage_llm as core_stage_llm
+        existing = getattr(ctx, "llm_result", None)
+        if existing:
+            return existing
+        logger.warning(
+            "llm_stage_ctx_unconfigured",
+            email_id=getattr(ctx, "email_id", None),
+        )
+        return None
 
-        core_stage_llm(ctx)
-        return ctx.llm_result
     attachments = attachments or []
     logger.error(
         "processing_error",

@@ -67,6 +67,11 @@ gigachat_cooldown_sec = 600
 llm_request_queue_enabled = false
 max_concurrent_llm_calls = 1
 
+[llm_usage]
+llm_percentile_threshold = 80
+llm_usage_window_days = 7
+force_llm_always = false
+
 [ui]
 locale = ru
 

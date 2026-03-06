@@ -31,6 +31,11 @@ gigachat_max_consecutive_errors = 3
 gigachat_max_latency_sec = 10
 gigachat_cooldown_sec = 600
 
+[llm_usage]
+llm_percentile_threshold = 80
+llm_usage_window_days = 7
+force_llm_always = false
+
 [features]
 enable_daily_digest = true
 enable_weekly_digest = false

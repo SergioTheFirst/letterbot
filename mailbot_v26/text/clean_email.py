@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import html
 import re
@@ -184,18 +184,26 @@ def segment_email_body(text: Any) -> dict[str, str]:
     main_lines: list[str] = []
     forwarded_lines: list[str] = []
     signature_lines: list[str] = []
+    disclaimer_lines: list[str] = []
     zone = "main"
 
     for line in normalized.split("\n"):
-        if zone != "forwarded" and _is_segment_forward_start(line):
-            zone = "forwarded"
-        elif zone == "main" and _is_segment_signature_start(line):
-            zone = "signature"
+        if zone == "main":
+            if _is_segment_forward_start(line):
+                zone = "forwarded"
+            elif _is_segment_signature_start(line):
+                zone = "signature"
+            elif _is_disclaimer_start(line):
+                zone = "disclaimer"
+        elif zone == "signature" and _is_disclaimer_start(line):
+            zone = "disclaimer"
 
         if zone == "forwarded":
             forwarded_lines.append(line)
         elif zone == "signature":
             signature_lines.append(line)
+        elif zone == "disclaimer":
+            disclaimer_lines.append(line)
         else:
             main_lines.append(line)
 
@@ -203,6 +211,7 @@ def segment_email_body(text: Any) -> dict[str, str]:
         "main_body": _collapse_lines(main_lines),
         "forwarded_thread": _collapse_lines(forwarded_lines),
         "signature": _collapse_lines(signature_lines),
+        "disclaimer_block": _collapse_lines(disclaimer_lines),
     }
 
 
