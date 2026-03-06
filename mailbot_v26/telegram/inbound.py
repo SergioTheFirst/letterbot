@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import importlib.util
 import json
@@ -27,7 +27,7 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.version import get_version
-from mailbot_v26.system_health import system_health
+from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.telegram.decision_trace_ui import (
     DETAILS_PREFIX,
     HIDE_PREFIX,
@@ -42,6 +42,8 @@ from mailbot_v26.telegram.decision_trace_ui import (
 )
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
 from mailbot_v26.ui.i18n import humanize_mode, t
+from mailbot_v26.text.mojibake import normalize_mojibake_text
+from mailbot_v26.config.llm_queue import load_llm_queue_config
 from mailbot_v26.worker.telegram_sender import (
     DeliveryResult,
     edit_telegram_message,
@@ -74,7 +76,7 @@ def _clean_text(text: str | None) -> str:
 
 
 def _t(key: str, **kwargs: object) -> str:
-    return t(key, locale=_UI_LOCALE, **kwargs)
+    return normalize_mojibake_text(t(key, locale=_UI_LOCALE, **kwargs))
 
 
 def _format_ts(value: datetime | None) -> str:
@@ -86,6 +88,16 @@ def _format_ts(value: datetime | None) -> str:
 def _format_percent(value: float) -> str:
     return f"{value * 100:.1f}%"
 
+def _status_llm_delivery_mode() -> str:
+    if system_health.mode in {OperationalMode.DEGRADED_NO_LLM, OperationalMode.EMERGENCY_READ_ONLY}:
+        return "heuristic"
+    try:
+        queue = load_llm_queue_config()
+    except Exception:
+        return "direct"
+    if queue.llm_request_queue_enabled and queue.max_concurrent_llm_calls == 1:
+        return "queued"
+    return "direct"
 
 def _safe_chat_id(chat_id: object) -> str:
     return str(chat_id or "").strip()
@@ -163,7 +175,7 @@ def _load_email_render_snapshot(db_path: Path, email_id: int) -> dict[str, objec
             conn.row_factory = sqlite3.Row
             email_row = conn.execute(
                 """
-                SELECT account_email, from_email, subject, priority, action_line, body_summary
+                SELECT account_email, from_email, subject, priority, priority_source, action_line, body_summary
                 FROM emails
                 WHERE id = ?
                 """,
@@ -284,7 +296,10 @@ def _render_tier1_message(snapshot: dict[str, object]) -> str:
         summary=body_summary,
         attachments=attachments if isinstance(attachments, list) else [],
     )
-    return telegram_safe(base_text)
+    priority_source = str(snapshot.get("priority_source") or "").strip().lower()
+    if priority_source == "user_override":
+        base_text = f"{base_text}\nПриоритет: {priority} вручную"
+    return telegram_safe(normalize_mojibake_text(base_text))
 
 
 def _render_decision_trace_details(snapshot: list[dict[str, object]]) -> str:
@@ -713,8 +728,9 @@ class TelegramInboundProcessor:
         self._reply(chat_id, _t("inbound.command_unknown"))
 
     def _reply(self, chat_id: str, text: str) -> None:
+        safe_text = normalize_mojibake_text(text)
         try:
-            self.send_reply(chat_id, text)
+            self.send_reply(chat_id, safe_text)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("telegram_inbound_reply_failed", error=str(exc))
 
@@ -730,7 +746,7 @@ class TelegramInboundProcessor:
         url = f"https://api.telegram.org/bot{self.bot_token}/answerCallbackQuery"
         payload = {
             "callback_query_id": callback_id,
-            "text": text[:200],
+            "text": normalize_mojibake_text(text)[:200],
             "show_alert": False,
         }
         try:
@@ -1568,10 +1584,15 @@ class TelegramInboundProcessor:
             if self.feature_flags.ENABLE_QUALITY_METRICS
             else _t("inbound.status.short_off"),
         )
+        llm_active = system_health.mode not in {OperationalMode.DEGRADED_NO_LLM, OperationalMode.EMERGENCY_READ_ONLY}
+        llm_state = "активен" if llm_active else "недоступен"
+        delivery_mode = _status_llm_delivery_mode()
 
         status_lines = [
             _t("inbound.status.title"),
             _t("inbound.status.mode", mode=mode_label),
+            f"AI: {llm_state}",
+            f"LLM delivery: {delivery_mode}",
             _t("inbound.status.sla", delivery=_format_percent(sla.delivery_rate_24h), errors=_format_percent(sla.error_rate_24h)),
             _t("inbound.status.digest", digest=digest_flag),
             _t("inbound.status.autopriority", mode=auto_mode),
@@ -1583,7 +1604,7 @@ class TelegramInboundProcessor:
         if insider_since:
             status_lines.append(f"в­ђ Letterbot Insider since: {insider_since}")
         status_lines.append(f"Version: {get_version()}")
-        return "\n".join(status_lines)
+        return normalize_mojibake_text("\n".join(status_lines))
 
     def _doctor_text(self) -> str:
         try:
@@ -1670,4 +1691,3 @@ __all__ = [
     "parse_command",
     "run_inbound_polling",
 ]
-

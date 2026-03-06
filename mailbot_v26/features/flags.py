@@ -38,8 +38,8 @@ class FeatureFlags:
         self.ENABLE_CRM_DIAGNOSTICS = False
         self.ENABLE_PREVIEW_ACTIONS = False
         self.ENABLE_COMMITMENT_TRACKER = False
-        self.ENABLE_DAILY_DIGEST = False
-        self.ENABLE_WEEKLY_DIGEST = False
+        self.ENABLE_DAILY_DIGEST = True
+        self.ENABLE_WEEKLY_DIGEST = True
         self.ENABLE_WEEKLY_ACCURACY_REPORT = False
         self.ENABLE_WEEKLY_CALIBRATION_REPORT = False
         self.ENABLE_DIGEST_INSIGHTS = False
@@ -190,7 +190,7 @@ class FeatureFlags:
         for alias in aliases:
             if parser.has_option("features", alias):
                 return FeatureFlags._get_flag(parser, alias)
-        return False
+        return True
 
     @staticmethod
     def _get_flag(

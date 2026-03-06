@@ -140,7 +140,7 @@ def test_tg_payload_never_subject_only(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    assert "Письмо получено" in sent["payload"].html_text
+    assert "Письмо получено" not in sent["payload"].html_text
 
 
 def test_tg_payload_validator_blocks_empty(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -168,7 +168,7 @@ def test_tg_payload_validator_blocks_empty(monkeypatch, caplog: pytest.LogCaptur
         )
 
     assert "payload_validation_failed" in caplog.text
-    assert "Письмо получено" in sent["payload"].html_text
+    assert "Письмо получено" not in sent["payload"].html_text
 
 
 def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, tmp_path) -> None:
@@ -298,3 +298,11 @@ def test_retry_trigger(monkeypatch) -> None:
             attachments=[],
             telegram_chat_id="chat",
         )
+
+
+def test_default_delivery_sends_only_processed_message(monkeypatch) -> None:
+    test_tg_payload_never_subject_only(monkeypatch)
+
+
+def test_no_default_pre_message_in_premium_mode(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    test_tg_payload_validator_blocks_empty(monkeypatch, caplog)

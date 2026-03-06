@@ -51,7 +51,7 @@ force_llm_always = false
 
 [features]
 enable_daily_digest = true
-enable_weekly_digest = false
+enable_weekly_digest = true
 ; Support features (donate/support UI). Keep false for private/self-hosted.
 support = false
 ; Backward-compatible key (optional):

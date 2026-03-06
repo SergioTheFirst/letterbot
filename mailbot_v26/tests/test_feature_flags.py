@@ -146,3 +146,18 @@ def test_settings_example_has_daily_digest_enabled() -> None:
     parser.read("mailbot_v26/config/settings.ini.example", encoding="utf-8")
 
     assert parser.getboolean("daily_digest", "enabled") is True
+
+def test_digest_loader_defaults_enabled(tmp_path: Path) -> None:
+    flags = FeatureFlags(tmp_path)
+    assert flags.ENABLE_DAILY_DIGEST is True
+    assert flags.ENABLE_WEEKLY_DIGEST is True
+
+
+def test_digest_defaults_enabled_in_example_config() -> None:
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read("mailbot_v26/config/settings.ini.example", encoding="utf-8")
+
+    assert parser.getboolean("features", "enable_daily_digest") is True
+    assert parser.getboolean("features", "enable_weekly_digest") is True

@@ -81,7 +81,7 @@ show_watermark = true
 [features]
 enable_auto_priority = false
 enable_daily_digest = true
-enable_weekly_digest = false
+enable_weekly_digest = true
 enable_weekly_accuracy_report = false
 enable_weekly_calibration_report = false
 enable_digest_insights = false

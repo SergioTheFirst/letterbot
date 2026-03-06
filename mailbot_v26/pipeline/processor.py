@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import hashlib
 import re
 import sqlite3
@@ -7118,7 +7119,8 @@ def process_message(
         elapsed_to_first_send_seconds = 0.0
         edit_applied = False
         elapsed_before_delivery = max(0.0, time.perf_counter() - processing_started_at)
-        progressive_mode_enabled = bool(attachments) or elapsed_before_delivery > 1.0
+        progressive_debug_enabled = str(os.getenv("MAILBOT_ENABLE_PROGRESSIVE_PREMESSAGE", "")).strip().lower() in {"1", "true", "yes", "on", "debug", "dev"}
+        progressive_mode_enabled = progressive_debug_enabled and (bool(attachments) or elapsed_before_delivery > 1.0)
         minimal_payload = _build_minimal_telegram_payload(
             priority=priority,
             from_email=from_email,
@@ -7348,7 +7350,3 @@ def process_message(
             elapsed_to_first_send_ms=int(elapsed_to_first_send_seconds * 1000),
             edit_applied=edit_applied,
         )
-
-
-
-

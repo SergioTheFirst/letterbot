@@ -12,7 +12,7 @@ from typing import Iterable, Sequence
 from mailbot_v26.config.llm_queue import load_llm_queue_config
 from mailbot_v26.config_loader import BotConfig
 from mailbot_v26.llm import router as llm_router
-from mailbot_v26.system_health import OperationalMode, SystemHealth
+from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.ui.branding import append_watermark
 from mailbot_v26.worker.telegram_sender import ping_telegram
 
@@ -62,7 +62,7 @@ class StartupHealthChecker:
         return [result.as_dict() for result in results]
 
     def evaluate_mode(self, results: Sequence[dict[str, str]]) -> OperationalMode:
-        system_health = SystemHealth()
+        system_health.reset()
         components = {item["component"]: item for item in results}
         db_status = components.get("DB", {}).get("status")
         telegram_status = components.get("Telegram", {}).get("status")

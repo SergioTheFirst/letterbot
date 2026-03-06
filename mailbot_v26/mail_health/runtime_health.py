@@ -16,7 +16,10 @@ class AccountRuntimeState:
     consecutive_failures: int = 0
     last_error: str | None = None
     last_error_class: str | None = None
+    failure_bucket: str | None = None
     next_retry_at_utc: datetime | None = None
+    cooldown_until_utc: datetime | None = None
+    cooldown_reason: str | None = None
     last_alert_sent_at_utc: datetime | None = None
     last_alert_fingerprint: str | None = None
 
@@ -66,7 +69,10 @@ class AccountRuntimeHealthManager:
             consecutive_failures=0,
             last_error=None,
             last_error_class=None,
+            failure_bucket=None,
             next_retry_at_utc=None,
+            cooldown_until_utc=None,
+            cooldown_reason=None,
             last_alert_sent_at_utc=state.last_alert_sent_at_utc,
             last_alert_fingerprint=state.last_alert_fingerprint,
         )
@@ -77,22 +83,43 @@ class AccountRuntimeHealthManager:
         self, account_id: str, exc: Exception, now_utc: datetime
     ) -> Tuple[bool, str]:
         state = self._get_state(account_id)
-        consecutive_failures = state.consecutive_failures + 1
-        backoff_minutes = self._calculate_backoff_minutes(consecutive_failures)
-        next_retry_at = now_utc + timedelta(minutes=backoff_minutes)
         message = self._normalize_error_message(exc)
         error_class = exc.__class__.__name__
+        failure_bucket = self._classify_failure(error_class=error_class, message=message)
+        if failure_bucket == state.failure_bucket:
+            consecutive_failures = state.consecutive_failures + 1
+        else:
+            consecutive_failures = 1
+
+        next_retry_at: datetime
+        cooldown_until_utc: datetime | None = None
+        cooldown_reason: str | None = None
+        if failure_bucket == "imap_network_timeout" and consecutive_failures >= 3:
+            cooldown_until_utc = now_utc + timedelta(hours=24)
+            next_retry_at = cooldown_until_utc
+            cooldown_reason = "repeated_handshake_connect_failures"
+        else:
+            backoff_minutes = self._calculate_backoff_minutes(consecutive_failures)
+            next_retry_at = now_utc + timedelta(minutes=backoff_minutes)
 
         updated = AccountRuntimeState(
             account_id=account_id,
             consecutive_failures=consecutive_failures,
             last_error=message,
             last_error_class=error_class,
+            failure_bucket=failure_bucket,
             next_retry_at_utc=next_retry_at,
+            cooldown_until_utc=cooldown_until_utc,
+            cooldown_reason=cooldown_reason,
             last_alert_sent_at_utc=state.last_alert_sent_at_utc,
             last_alert_fingerprint=state.last_alert_fingerprint,
         )
-        fingerprint = self._build_fingerprint(account_id, error_class, message)
+        fingerprint = self._build_fingerprint(
+            account_id=account_id,
+            error_class=error_class,
+            message=message,
+            failure_bucket=failure_bucket,
+        )
 
         should_alert = self._should_alert(updated, fingerprint, now_utc)
         if should_alert:
@@ -108,6 +135,12 @@ class AccountRuntimeHealthManager:
     def _should_alert(
         self, state: AccountRuntimeState, fingerprint: str, now_utc: datetime
     ) -> bool:
+        if (
+            state.cooldown_until_utc is not None
+            and now_utc < state.cooldown_until_utc
+            and fingerprint == state.last_alert_fingerprint
+        ):
+            return False
         if fingerprint != state.last_alert_fingerprint:
             return True
         if state.last_alert_sent_at_utc is None:
@@ -119,6 +152,20 @@ class AccountRuntimeHealthManager:
         message = str(exc) or repr(exc)
         message = message if message else "<no error message>"
         return " ".join(message.split())
+
+    @staticmethod
+    def _classify_failure(*, error_class: str, message: str) -> str:
+        lowered = f"{error_class} {message}".lower()
+        if (
+            "handshake" in lowered
+            or "connect" in lowered
+            or "socket" in lowered
+            or "connection" in lowered
+        ) and ("timeout" in lowered or "timed out" in lowered or "ssl" in lowered):
+            return "imap_network_timeout"
+        if "auth" in lowered or "password" in lowered or "login" in lowered:
+            return "imap_auth"
+        return "other"
 
     def _get_state(self, account_id: str) -> AccountRuntimeState:
         if account_id not in self._states:
@@ -149,16 +196,22 @@ class AccountRuntimeHealthManager:
         error_class = state.last_error_class or "Error"
         error_msg = state.last_error or "<no error message>"
         retry_in = self._format_retry(state.next_retry_at_utc, now_utc)
-        return "\n".join(
-            [
-                "\U0001F6A8 IMAP RUNTIME FAILURE",
-                f"Account: {account_id}",
-                f"Login: {masked_login}",
-                f"Host: {host}:{port} ssl={use_ssl}",
-                f"Error: {error_class}: {error_msg}",
-                f"Next retry: {retry_in}",
-            ]
-        )
+        lines = [
+            "\U0001F6A8 IMAP RUNTIME FAILURE",
+            f"Account: {account_id}",
+            f"Login: {masked_login}",
+            f"Host: {host}:{port} ssl={use_ssl}",
+            f"Error: {error_class}: {error_msg}",
+            f"Next retry: {retry_in}",
+        ]
+        if state.cooldown_until_utc is not None:
+            cooldown_text = (
+                state.cooldown_until_utc.astimezone(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+            lines.append(f"Cooldown: active until {cooldown_text} ({state.cooldown_reason or 'network'})")
+        return "\n".join(lines)
 
     @staticmethod
     def _format_retry(next_retry_at: datetime | None, now_utc: datetime) -> str:
@@ -180,11 +233,17 @@ class AccountRuntimeHealthManager:
         return f"in {' '.join(parts)} (at {retry_at_text})"
 
     def _build_fingerprint(
-        self, account_id: str, error_class: str, message: str
+        self,
+        account_id: str,
+        error_class: str,
+        message: str,
+        failure_bucket: str,
     ) -> str:
         meta = self._account_meta.get(account_id)
         host = meta.host if meta else "<unknown>"
         port = meta.port if meta else 0
+        if failure_bucket == "imap_network_timeout":
+            return f"{failure_bucket}:{host}:{port}"
         return f"{error_class}:{message}:{host}:{port}"
 
     def _load_state(self) -> None:
@@ -200,7 +259,10 @@ class AccountRuntimeHealthManager:
                 consecutive_failures=raw.get("consecutive_failures", 0),
                 last_error=raw.get("last_error"),
                 last_error_class=raw.get("last_error_class"),
+                failure_bucket=raw.get("failure_bucket"),
                 next_retry_at_utc=self._parse_dt(raw.get("next_retry_at_utc")),
+                cooldown_until_utc=self._parse_dt(raw.get("cooldown_until_utc")),
+                cooldown_reason=raw.get("cooldown_reason"),
                 last_alert_sent_at_utc=self._parse_dt(
                     raw.get("last_alert_sent_at_utc")
                 ),
@@ -214,6 +276,7 @@ class AccountRuntimeHealthManager:
             payload[account_id] = {
                 **asdict(state),
                 "next_retry_at_utc": self._format_dt(state.next_retry_at_utc),
+                "cooldown_until_utc": self._format_dt(state.cooldown_until_utc),
                 "last_alert_sent_at_utc": self._format_dt(
                     state.last_alert_sent_at_utc
                 ),

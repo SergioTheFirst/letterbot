@@ -83,3 +83,45 @@ def test_other_accounts_continue(tmp_path):
     mgr.on_failure("bad", RuntimeError("boom"), now)
     assert mgr.should_attempt("bad", now) is False
     assert mgr.should_attempt("good", now) is True
+
+def test_imap_repeated_handshake_failure_enters_24h_cooldown(tmp_path):
+    mgr = _manager(tmp_path)
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    for i in range(3):
+        mgr.on_failure("acc1", TimeoutError("SSL handshake timed out"), now + timedelta(minutes=i))
+
+    state = mgr.get_state("acc1")
+    assert state.cooldown_until_utc is not None
+    assert state.next_retry_at_utc == state.cooldown_until_utc
+    assert state.cooldown_reason == "repeated_handshake_connect_failures"
+    assert state.next_retry_at_utc == now + timedelta(hours=24, minutes=2)
+
+
+def test_imap_single_transient_failure_does_not_enter_day_cooldown(tmp_path):
+    mgr = _manager(tmp_path)
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    mgr.on_failure("acc1", TimeoutError("connect timed out"), now)
+
+    state = mgr.get_state("acc1")
+    assert state.cooldown_until_utc is None
+    assert state.next_retry_at_utc == now + timedelta(minutes=1)
+
+
+def test_imap_cooldown_suppresses_minutely_retry_spam(tmp_path):
+    mgr = _manager(tmp_path)
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    should_alert_1, _ = mgr.on_failure("acc1", TimeoutError("SSL handshake timed out"), now)
+    should_alert_2, _ = mgr.on_failure("acc1", TimeoutError("SSL handshake timed out"), now + timedelta(minutes=1))
+    should_alert_3, _ = mgr.on_failure("acc1", TimeoutError("SSL handshake timed out"), now + timedelta(minutes=2))
+
+    assert should_alert_1 is True
+    assert should_alert_2 is False
+    assert should_alert_3 is False
+
+    state = mgr.get_state("acc1")
+    assert state.cooldown_until_utc is not None
+    assert mgr.should_attempt("acc1", now + timedelta(minutes=30)) is False
+    assert mgr.should_attempt("acc1", state.cooldown_until_utc + timedelta(minutes=1)) is True

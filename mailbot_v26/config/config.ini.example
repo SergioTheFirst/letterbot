@@ -70,7 +70,7 @@ enabled = false
 [features]
 enable_auto_priority = false
 enable_daily_digest = true
-enable_weekly_digest = false
+enable_weekly_digest = true
 enable_quality_metrics = false
 enable_priority_v2 = true
 enable_narrative_binding = true

@@ -1081,6 +1081,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                     state_snapshot.next_retry_at_utc
                                 ),
                                 consecutive_failures=state_snapshot.consecutive_failures,
+                            cooldown_until=runtime_health.format_timestamp(state_snapshot.cooldown_until_utc),
+                            cooldown_reason=state_snapshot.cooldown_reason,
                             )
                             continue
 
@@ -1093,6 +1095,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             port=account.port,
                             use_ssl=account.use_ssl,
                             consecutive_failures=state_snapshot.consecutive_failures,
+                            cooldown_until=runtime_health.format_timestamp(state_snapshot.cooldown_until_utc),
+                            cooldown_reason=state_snapshot.cooldown_reason,
                         )
 
                         try:
@@ -1211,6 +1215,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 error_class=e.__class__.__name__,
                                 error_message=str(e),
                                 consecutive_failures=state_snapshot.consecutive_failures,
+                            cooldown_until=runtime_health.format_timestamp(state_snapshot.cooldown_until_utc),
+                            cooldown_reason=state_snapshot.cooldown_reason,
                                 next_retry_at=runtime_health.format_timestamp(
                                     state_snapshot.next_retry_at_utc
                                 ),
@@ -1224,6 +1230,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 port=account.port,
                                 use_ssl=account.use_ssl,
                                 consecutive_failures=state_snapshot.consecutive_failures,
+                            cooldown_until=runtime_health.format_timestamp(state_snapshot.cooldown_until_utc),
+                            cooldown_reason=state_snapshot.cooldown_reason,
                                 next_retry_at=runtime_health.format_timestamp(
                                     state_snapshot.next_retry_at_utc
                                 ),

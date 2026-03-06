@@ -218,3 +218,10 @@ primary = cloudflare
 
     assert ok is False
     assert not any("[llm] fallback is not configured" in issue for issue in issues)
+
+def test_digest_defaults_enabled_in_bootstrap() -> None:
+    parser = configparser.ConfigParser()
+    parser.read_string(SETTINGS_TEMPLATE)
+
+    assert parser.getboolean("features", "enable_daily_digest") is True
+    assert parser.getboolean("features", "enable_weekly_digest") is True

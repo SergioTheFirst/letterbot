@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
+from mailbot_v26.text.mojibake import normalize_mojibake_text
 
 requests_spec = importlib.util.find_spec("requests")
 if requests_spec is None:
@@ -88,7 +89,8 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
     """
     bot_token = payload.metadata.get("bot_token")
     chat_id = payload.metadata.get("chat_id")
-    if not bot_token or not chat_id or not payload.html_text:
+    normalized_text = normalize_mojibake_text(payload.html_text)
+    if not bot_token or not chat_id or not normalized_text:
         log.error("Telegram send failed: empty token, chat_id or text")
         return DeliveryResult(
             delivered=False,
@@ -116,7 +118,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
         resp = _post_message(
             url=url,
             chat_id=chat_id,
-            text=payload.html_text,
+            text=normalized_text,
             parse_mode="HTML",
             reply_markup=payload.reply_markup,
         )
@@ -149,7 +151,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             log.warning(
                 "[TG-SALVAGE] parse error, retrying as plain text",
             )
-            stripped_text = _strip_html_tags(payload.html_text)
+            stripped_text = _strip_html_tags(normalized_text)
             try:
                 salvage_resp = _post_message(
                     url=url,
@@ -267,7 +269,8 @@ def edit_telegram_message(
     html_text: str,
     reply_markup: dict[str, object] | None = None,
 ) -> bool:
-    if not bot_token or not chat_id or not message_id or not html_text:
+    normalized_text = normalize_mojibake_text(html_text)
+    if not bot_token or not chat_id or not message_id or not normalized_text:
         log.error(
             "telegram_edit_failed chat_id=%s message_id=%s reason=%s",
             chat_id,
@@ -282,7 +285,7 @@ def edit_telegram_message(
     payload: dict[str, object] = {
         "chat_id": chat_id,
         "message_id": message_id,
-        "text": html_text,
+        "text": normalized_text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }

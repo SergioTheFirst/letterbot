@@ -311,3 +311,26 @@ def test_startup_health_import_has_no_pipeline_side_effects(monkeypatch) -> None
             del sys.modules[module_name]
     importlib.reload(sys.modules["mailbot_v26.system.startup_health"])
     assert not any(name.startswith("mailbot_v26.pipeline") for name in sys.modules)
+
+def test_evaluate_mode_updates_global_system_health(tmp_path, monkeypatch) -> None:
+    _write_config_files(tmp_path, gigachat_enabled=False, gigachat_key="")
+    config_dir = tmp_path / "config"
+    config = load_config(config_dir)
+    checker = StartupHealthChecker(config_dir, config)
+
+    from mailbot_v26.system_health import OperationalMode, system_health
+
+    system_health.reset()
+    system_health.update_component("LLM", False)
+
+    mode = checker.evaluate_mode(
+        [
+            {"component": "DB", "status": HealthStatus.OK, "details": "ok"},
+            {"component": "Telegram", "status": HealthStatus.OK, "details": "ok"},
+            {"component": "Cloudflare", "status": HealthStatus.OK, "details": "ok"},
+            {"component": "GigaChat", "status": HealthStatus.DEGRADED, "details": "disabled"},
+        ]
+    )
+
+    assert mode == OperationalMode.FULL
+    assert system_health.mode == OperationalMode.FULL
