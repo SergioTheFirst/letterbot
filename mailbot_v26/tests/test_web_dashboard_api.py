@@ -214,6 +214,10 @@ def test_api_dashboard_returns_top_contacts(tmp_path: Path) -> None:
     assert data["top_contacts"][0]["sender_email"] == "alice@example.com"
 
 
+
+def test_dashboard_uses_interpretation_events_only(tmp_path: Path) -> None:
+    test_dashboard_uses_interpretation_events(tmp_path)
+
 def test_dashboard_uses_interpretation_events(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard-interpretation.sqlite"
     KnowledgeDB(db_path)

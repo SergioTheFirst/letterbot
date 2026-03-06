@@ -408,6 +408,10 @@ def test_weekly_digest_attention_block_skipped_on_small_sample(monkeypatch, tmp_
     assert any(row[0] == "attention_economics_skipped" for row in rows)
 
 
+
+def test_weekly_uses_interpretation_events_only(tmp_path) -> None:
+    test_weekly_uses_interpretation_events(tmp_path)
+
 def test_weekly_uses_interpretation_events(tmp_path) -> None:
     db_path = tmp_path / "weekly-interpretation.sqlite"
     KnowledgeDB(db_path)

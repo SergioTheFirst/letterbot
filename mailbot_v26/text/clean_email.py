@@ -40,6 +40,7 @@ SEGMENT_FORWARD_MARKERS = (
 
 SEGMENT_SIGNATURE_MARKERS = (
     "best regards",
+    "kind regards",
     "\u0441 \u0443\u0432\u0430\u0436\u0435\u043d\u0438\u0435\u043c",
 )
 
@@ -175,6 +176,10 @@ def _is_segment_signature_start(line: str) -> bool:
     return any(lowered.startswith(marker) for marker in SEGMENT_SIGNATURE_MARKERS)
 
 
+def _is_quoted_line(line: str) -> bool:
+    return line.lstrip().startswith(">")
+
+
 def segment_email_body(text: Any) -> dict[str, str]:
     normalized = _to_str(text).replace("\r\n", "\n").replace("\r", "\n")
     if _looks_like_html(normalized):
@@ -183,12 +188,22 @@ def segment_email_body(text: Any) -> dict[str, str]:
 
     main_lines: list[str] = []
     forwarded_lines: list[str] = []
+    quoted_lines: list[str] = []
     signature_lines: list[str] = []
     disclaimer_lines: list[str] = []
     zone = "main"
 
     for line in normalized.split("\n"):
         if zone == "main":
+            if _is_segment_forward_start(line):
+                zone = "forwarded"
+            elif _is_quoted_line(line):
+                zone = "quoted"
+            elif _is_segment_signature_start(line):
+                zone = "signature"
+            elif _is_disclaimer_start(line):
+                zone = "disclaimer"
+        elif zone == "quoted":
             if _is_segment_forward_start(line):
                 zone = "forwarded"
             elif _is_segment_signature_start(line):
@@ -200,6 +215,8 @@ def segment_email_body(text: Any) -> dict[str, str]:
 
         if zone == "forwarded":
             forwarded_lines.append(line)
+        elif zone == "quoted":
+            quoted_lines.append(line)
         elif zone == "signature":
             signature_lines.append(line)
         elif zone == "disclaimer":
@@ -207,10 +224,13 @@ def segment_email_body(text: Any) -> dict[str, str]:
         else:
             main_lines.append(line)
 
+    signature_block = _collapse_lines(signature_lines)
     return {
         "main_body": _collapse_lines(main_lines),
         "forwarded_thread": _collapse_lines(forwarded_lines),
-        "signature": _collapse_lines(signature_lines),
+        "quoted_thread": _collapse_lines(quoted_lines),
+        "signature_block": signature_block,
+        "signature": signature_block,
         "disclaimer_block": _collapse_lines(disclaimer_lines),
     }
 

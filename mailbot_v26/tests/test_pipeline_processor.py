@@ -7,6 +7,7 @@ from mailbot_v26.pipeline import processor as pipeline_processor
 from mailbot_v26.pipeline.processor import (
     Attachment,
     InboundMessage,
+    MessageInterpretation,
     MessageProcessor,
     PriorityResultV2,
     _apply_sender_memory_to_priority,
@@ -14,6 +15,7 @@ from mailbot_v26.pipeline.processor import (
     _build_priority_signal_text,
     _build_message_decision,
     _build_document_identity,
+    _build_telegram_text,
     _build_sender_relationship_profile,
     _build_heuristic_summary,
     _consistency_check_message_facts,
@@ -1302,6 +1304,28 @@ def test_invoice_body_amount_detection() -> None:
     assert facts["invoice_signal"] is True
     assert facts["amount"].startswith("87 500")
 
+def test_forwarded_thread_not_used_for_fact_extraction() -> None:
+    test_forwarded_thread_not_used()
+
+
+def test_quoted_reply_not_used_for_fact_extraction() -> None:
+    body = (
+        "\u041d\u043e\u0432\u044b\u0439 \u0441\u0442\u0430\u0442\u0443\u0441 \u043f\u043e \u0441\u0447\u0435\u0442\u0443.\n"
+        "> \u0418\u0442\u043e\u0433\u043e \u043a \u043e\u043f\u043b\u0430\u0442\u0435 999 999 \u0440\u0443\u0431.\n"
+        "> From: old@example.com"
+    )
+    facts = _collect_message_facts(
+        subject="\u0421\u0447\u0435\u0442 \u2116455",
+        body_text=body,
+        attachments=[],
+        mail_type="INVOICE",
+    )
+    assert facts["amount"] == ""
+
+
+def test_main_body_numbers_still_detected() -> None:
+    test_main_body_numbers_detected()
+
 
 def test_invoice_attachment_amount_detection() -> None:
     attachment_text = "Invoice #7 total payable 4200 USD amount due 4200 USD"
@@ -1325,6 +1349,156 @@ def test_invoice_attachment_amount_detection() -> None:
 
     assert facts["invoice_signal"] is True
     assert facts["amount"].startswith("4200")
+
+def test_pdf_table_total_preferred_over_global_number_match() -> None:
+    attachment_text = (
+        "\u041f\u043e\u0437\u0438\u0446\u0438\u044f\t\u0426\u0435\u043d\u0430\n"
+        "\u0423\u0441\u043b\u0443\u0433\u0430\t12 500 \u0440\u0443\u0431\n"
+        "\u0418\u0442\u043e\u0433\u043e \u043a \u043e\u043f\u043b\u0430\u0442\u0435\t87 500 \u0440\u0443\u0431"
+    )
+    attachments = [
+        {
+            "filename": "invoice_table.pdf",
+            "content_type": "application/pdf",
+            "text": attachment_text,
+        }
+    ]
+    evidence_text = "\u041d\u043e\u043c\u0435\u0440 \u0434\u043e\u0433\u043e\u0432\u043e\u0440\u0430 999 999 \u0440\u0443\u0431. " + attachment_text
+
+    facts = _collect_message_facts(
+        subject="\u0421\u0447\u0435\u0442 \u043d\u0430 \u043e\u043f\u043b\u0430\u0442\u0443",
+        body_text="\u0421\u043c. \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u0435",
+        attachments=attachments,
+        mail_type="INVOICE",
+    )
+    facts = _validate_message_facts(facts, evidence_text=evidence_text)
+    facts = _score_message_facts(facts, evidence_text=evidence_text, attachment_text=attachment_text)
+
+    assert facts["amount"].startswith("87 500")
+
+
+def test_invoice_attachment_amount_extracted_from_table_context() -> None:
+    attachment_text = (
+        "item\tqty\tprice\n"
+        "service\t1\t1200 USD\n"
+        "total payable\t4200 USD\n"
+    )
+    attachments = [
+        {
+            "filename": "invoice_table.xlsx",
+            "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "text": attachment_text,
+        }
+    ]
+    evidence_text = "invoice attached " + attachment_text
+
+    facts = _collect_message_facts(
+        subject="Invoice",
+        body_text="See attachment",
+        attachments=attachments,
+        mail_type="",
+    )
+    facts = _validate_message_facts(facts, evidence_text=evidence_text)
+    facts = _score_message_facts(facts, evidence_text=evidence_text, attachment_text=attachment_text)
+
+    assert facts["amount"].startswith("4200")
+
+
+def test_attachment_without_currency_does_not_become_total() -> None:
+    attachment_text = (
+        "item\tqty\tprice\n"
+        "service\t1\t12500\n"
+        "total payable\t87500\n"
+    )
+    attachments = [
+        {
+            "filename": "invoice_table.xlsx",
+            "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "text": attachment_text,
+        }
+    ]
+    evidence_text = "invoice attached " + attachment_text
+
+    facts = _collect_message_facts(
+        subject="Invoice",
+        body_text="See attachment",
+        attachments=attachments,
+        mail_type="INVOICE",
+    )
+    facts = _validate_message_facts(facts, evidence_text=evidence_text)
+    facts = _score_message_facts(facts, evidence_text=evidence_text, attachment_text=attachment_text)
+
+    assert facts["amount"] == ""
+
+
+def test_payroll_attachment_never_invoice_action() -> None:
+    attachment_text = (
+        "\u041d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e\t120 000 \u0440\u0443\u0431\n"
+        "\u0423\u0434\u0435\u0440\u0436\u0430\u043d\u043e\t15 000 \u0440\u0443\u0431\n"
+        "\u041a \u0432\u044b\u043f\u043b\u0430\u0442\u0435\t105 000 \u0440\u0443\u0431"
+    )
+    attachments = [
+        {
+            "filename": "\u0440\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439_\u043b\u0438\u0441\u0442\u043e\u043a.xlsx",
+            "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "text": attachment_text,
+        }
+    ]
+    evidence_text = "\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a " + attachment_text
+
+    facts = _collect_message_facts(
+        subject="\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a",
+        body_text="\u0421\u043c. \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u0435",
+        attachments=attachments,
+        mail_type="",
+    )
+    facts = _validate_message_facts(facts, evidence_text=evidence_text)
+    facts = _score_message_facts(facts, evidence_text=evidence_text, attachment_text=attachment_text)
+    facts = _consistency_check_message_facts(facts, evidence_text=evidence_text)
+
+    decision = _build_message_decision(
+        priority="\U0001f7e1",
+        action_line="\u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c",
+        summary="",
+        message_facts=facts,
+        subject="\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a",
+        body_text=evidence_text,
+        attachments=attachments,
+        context="NEW_MESSAGE",
+    )
+
+    assert facts["doc_kind"] == "payroll"
+    assert "\u043e\u043f\u043b\u0430\u0442" not in decision.action.lower()
+
+
+def test_telegram_uses_interpretation_not_raw_facts() -> None:
+    interpretation = MessageInterpretation(
+        email_id="42",
+        sender_email="vendor@example.com",
+        doc_kind="invoice",
+        amount=87500.0,
+        due_date="15.04.2026",
+        action="Pay now",
+        priority="\U0001f534",
+        confidence=0.91,
+        context="NEW_MESSAGE",
+        document_id="invoice_42_vendor",
+    )
+
+    rendered = _build_telegram_text(
+        priority="\U0001f534",
+        from_email="vendor@example.com",
+        subject="\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a",
+        action_line="Review manually",
+        mail_type="PAYROLL",
+        body_summary="\u041d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e 120 000 \u0440\u0443\u0431",
+        body_text="\u041d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e 120 000 \u0440\u0443\u0431, \u0443\u0434\u0435\u0440\u0436\u0430\u043d\u043e 15 000 \u0440\u0443\u0431",
+        attachments=[],
+        interpretation=interpretation,
+    )
+
+    assert "Pay now" in rendered
+    assert "87 500" in rendered
 
 
 def test_invoice_math_consistency() -> None:
