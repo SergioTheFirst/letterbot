@@ -840,6 +840,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         resolved_paths = resolve_config_paths(config_dir)
         resolved_config_dir = resolved_paths.config_dir
         processor_module.configure_processor_config_dir(resolved_config_dir)
+        processor_module.configure_processor_db_path(config.storage.db_path)
         configure_digest_config_dir(resolved_config_dir)
         flags = FeatureFlags(base_dir=resolved_config_dir)
         logger.info("Configuration loaded: %d accounts", len(config.accounts))
@@ -938,6 +939,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         )
 
         try:
+            config.storage.db_path.parent.mkdir(parents=True, exist_ok=True)
             storage = Storage(config.storage.db_path)
             logger.info("Storage initialized at %s", config.storage.db_path)
         except Exception as exc:

@@ -1,7 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 
-_MOJIBAKE_MARKERS = ("Р", "С", "вЂ", "рџ", "В·")
+_MOJIBAKE_MARKERS = ("Р", "С", "вЂ", "рџ", "·")
 
 
 def _repair_cp1251_utf8_once(source: str) -> str:
@@ -47,11 +47,11 @@ def normalize_mojibake_text(text: str) -> str:
         repaired = candidate
 
     replacements = {
-        "вЂ”": "—",
-        "вЂ“": "–",
-        "вЂ¦": "…",
-        "вЂў": "•",
-        "В·": "·",
+        "—": "—",
+        "–": "–",
+        "…": "…",
+        "•": "•",
+        "·": "·",
     }
     for bad, good in replacements.items():
         repaired = repaired.replace(bad, good)

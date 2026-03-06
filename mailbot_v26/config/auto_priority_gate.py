@@ -11,9 +11,9 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class AutoPriorityGateConfig:
-    enabled: bool = False
+    enabled: bool = True
     window_days: int = 30
-    min_samples: int = 30
+    min_samples: int = 10
     max_correction_rate: float = 0.15
     cooldown_hours: int = 24
 
@@ -29,9 +29,9 @@ def load_auto_priority_gate_config(
 
     section = parser["auto_priority_gate"]
     return AutoPriorityGateConfig(
-        enabled=_get_bool(section, "enabled", default=False),
+        enabled=_get_bool(section, "enabled", default=True),
         window_days=_get_int(section, "window_days", default=30),
-        min_samples=_get_int(section, "min_samples", default=30),
+        min_samples=_get_int(section, "min_samples", default=10),
         max_correction_rate=_get_float(
             section, "max_correction_rate", default=0.15
         ),

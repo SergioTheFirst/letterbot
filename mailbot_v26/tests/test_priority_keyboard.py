@@ -133,3 +133,11 @@ def test_back_button_returns_to_main_keyboard() -> None:
     base = build_email_actions_keyboard(email_id=314, expanded=False, initial_prio=False)
     labels = [button["text"] for button in base["inline_keyboard"][0]]
     assert labels == ["Изменить приоритет", "⏰ Отложить"]
+
+
+
+def test_priority_keyboard_renders_direct_priority_buttons() -> None:
+    keyboard = build_email_actions_keyboard(email_id=1, expanded=False, initial_prio=True)
+    assert [[button["text"] for button in row] for row in keyboard["inline_keyboard"]] == [[
+        "🔴 Срочно", "🟡 Важно", "🔵 Низкий"
+    ]]

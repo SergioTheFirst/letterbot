@@ -137,7 +137,7 @@ from mailbot_v26.priority.priority_engine_v2 import (
     PriorityResultV2,
     VipSenderMatcher,
 )
-from mailbot_v26.telegram.keyboard import build_priority_keyboard
+from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.clean_email import clean_email_body, segment_email_body
 from .attention_gate import (
     AttentionGateInput,
@@ -316,6 +316,70 @@ def configure_processor_config_dir(config_dir: Path) -> None:
     _load_budget_gate_config_cached.cache_clear()
     _load_budget_usage_config_cached.cache_clear()
     _load_llm_queue_config_cached.cache_clear()
+
+
+def configure_processor_db_path(db_path: Path) -> None:
+    global DB_PATH
+    global knowledge_db, analytics, decision_trace_writer, trust_snapshot_writer
+    global relationship_health_snapshot_writer, context_store, event_emitter
+    global contract_event_emitter, shadow_priority_engine, priority_engine_v2
+    global shadow_action_engine, auto_priority_gates, auto_priority_breaker
+    global auto_priority_gate_state_store, auto_priority_quality_gate
+    global metrics_aggregator, system_snapshotter, processing_span_recorder
+    global trust_score_calculator, relationship_health_calculator
+    global relationship_anomaly_detector, temporal_reasoning_engine
+    global auto_priority_engine, notification_alert_store, budget_gate, budget_consumer
+
+    resolved_db_path = Path(db_path)
+    if resolved_db_path == DB_PATH:
+        return
+
+    DB_PATH = resolved_db_path
+    knowledge_db = KnowledgeDB(DB_PATH)
+    analytics = KnowledgeAnalytics(DB_PATH)
+    decision_trace_writer = DecisionTraceWriter(DB_PATH)
+    trust_snapshot_writer = TrustSnapshotWriter(DB_PATH)
+    relationship_health_snapshot_writer = RelationshipHealthSnapshotWriter(DB_PATH)
+    context_store = ContextStore(DB_PATH)
+    event_emitter = EventEmitter(DB_PATH)
+    contract_event_emitter = ContractEventEmitter(DB_PATH)
+    shadow_priority_engine = ShadowPriorityEngine(analytics)
+    priority_engine_v2 = PriorityEngineV2(
+        analytics,
+        config=PriorityV2Config(),
+        vip_senders=VipSenderMatcher(),
+    )
+    shadow_action_engine = ShadowActionEngine(analytics)
+    auto_priority_gates = AutoPriorityGates(analytics)
+    auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
+    auto_priority_gate_state_store = AutoPriorityGateStateStore(knowledge_db)
+    auto_priority_quality_gate = AutoPriorityQualityGate(
+        analytics=analytics,
+        state_store=auto_priority_gate_state_store,
+    )
+    metrics_aggregator = MetricsAggregator(DB_PATH)
+    system_snapshotter = SystemHealthSnapshotter(metrics_aggregator, system_gates)
+    processing_span_recorder = ProcessingSpanRecorder(DB_PATH)
+    trust_score_calculator = TrustScoreCalculator(analytics)
+    relationship_health_calculator = RelationshipHealthCalculator(
+        analytics,
+        trust_score_calculator,
+    )
+    relationship_anomaly_detector = RelationshipAnomalyDetector(
+        analytics,
+        trust_score_calculator,
+    )
+    temporal_reasoning_engine = TemporalReasoningEngine(analytics)
+    auto_priority_engine = AutoPriorityEngine(
+        auto_priority_gates,
+        auto_priority_breaker,
+        runtime_flag_store,
+        system_health,
+        enabled_flag=lambda: feature_flags.ENABLE_AUTO_PRIORITY,
+    )
+    notification_alert_store = NotificationAlertStore(DB_PATH)
+    budget_gate = BudgetGate(DB_PATH, BudgetGateConfig(), emitter=contract_event_emitter)
+    budget_consumer = BudgetConsumer(budget_gate)
 
 
 @lru_cache(maxsize=1)
@@ -1026,7 +1090,7 @@ class MessageProcessor:
     def _trim_attachment_snippet(cls, text: str) -> str:
         if len(text) <= cls._ATTACHMENT_SNIPPET_LIMIT:
             return text
-        return f"{text[: cls._ATTACHMENT_SNIPPET_LIMIT - 1]}вЂ¦"
+        return f"{text[: cls._ATTACHMENT_SNIPPET_LIMIT - 1]}…"
 
     def _render_attachments(self, attachments: list[AttachmentSummary]) -> list[str]:
         rendered: list[str] = []
@@ -1035,7 +1099,7 @@ class MessageProcessor:
             description = self._trim_attachment_snippet(attachment.description or "")
             description = escape_tg_html(description)
             if description:
-                rendered.append(f"{filename} вЂ” {description}")
+                rendered.append(f"{filename} — {description}")
             else:
                 rendered.append(filename)
         return rendered
@@ -1126,7 +1190,7 @@ class MessageProcessor:
             return ""
         summary = " ".join(words[:12]).strip()
         if len(summary) > 120:
-            summary = summary[:119].rstrip() + "вЂ¦"
+            summary = summary[:119].rstrip() + "…"
         return summary
 
     @staticmethod
@@ -1439,7 +1503,7 @@ def _build_no_llm_summary(
     sentence_parts = re.split(r"(?<=[.!?])\s+", cleaned)
     meaningful: list[str] = []
     for part in sentence_parts:
-        line = part.strip(" \t\n\r-вЂў")
+        line = part.strip(" \t\n\r-•")
         if len(line) < 8:
             continue
         lowered = line.lower()
@@ -1561,7 +1625,7 @@ def _strip_attachment_numeric_summary(text: str) -> str:
     cleaned = re.sub(r"[в„–#]+", " ", cleaned)
     cleaned = re.sub(r"[в‚Ѕ$в‚¬]+", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned.strip(" -вЂ“вЂ”:;,.")
+    return cleaned.strip(" -–—:;,.")
 
 
 def _should_suppress_numeric_facts(
@@ -1686,9 +1750,9 @@ def _build_premium_clarity_attachments(
             summary_text = _strip_attachment_numeric_summary(summary_text)
         if summary_text:
             safe_text = _escape_dynamic(strip_disallowed_emojis(summary_text))
-            lines.append(f"вЂў {filename} вЂ” {safe_text}")
+            lines.append(f"• {filename} — {safe_text}")
         else:
-            lines.append(f"вЂў {filename}")
+            lines.append(f"• {filename}")
     remaining = len(attachments) - 3
     if remaining > 0:
         lines.append(f"... Рё РµС‰С‘ {remaining}")
@@ -2120,7 +2184,7 @@ def _trim_telegram_body(text: str) -> str:
     cleaned = text.strip()
     if len(cleaned) <= _TELEGRAM_BODY_LIMIT:
         return cleaned
-    return f"{cleaned[: _TELEGRAM_BODY_LIMIT - 1]}вЂ¦"
+    return f"{cleaned[: _TELEGRAM_BODY_LIMIT - 1]}…"
 
 
 def _looks_like_subject_only(text: str, subject: str) -> bool:
@@ -3375,10 +3439,10 @@ def _normalize_mojibake_text(text: str) -> str:
         repaired = repaired.replace(token, char)
 
     replacements = {
-        "вЂ”": "—",
-        "вЂ“": "–",
-        "вЂ¦": "…",
-        "вЂў": "•",
+        "—": "—",
+        "–": "–",
+        "…": "…",
+        "•": "•",
     }
     for bad, good in replacements.items():
         repaired = repaired.replace(bad, good)
@@ -3512,7 +3576,7 @@ def _build_insights_section(
         severity = _sanitize_preview_line(insight.severity)
         explanation = _sanitize_preview_line(insight.explanation)
         recommendation = _sanitize_preview_line(insight.recommendation)
-        lines.append(f"вЂў {title} ({severity})")
+        lines.append(f"• {title} ({severity})")
         lines.append(f"  {explanation}")
         lines.append(f"  Р РµРєРѕРјРµРЅРґР°С†РёСЏ: {recommendation}")
     return "\n".join(lines)
@@ -3842,7 +3906,12 @@ def build_telegram_payload(
         html_text=telegram_text,
         priority=context.priority,
         metadata=metadata,
-        reply_markup=build_priority_keyboard(context.email_id),
+        reply_markup=build_email_actions_keyboard(
+            email_id=context.email_id,
+            expanded=False,
+            initial_prio=True,
+            show_decision_trace=False,
+        ),
     )
     assert "РЎРґРµР»Р°С‚СЊ:" not in payload.html_text
     return payload, render_mode, payload_invalid
@@ -4178,7 +4247,7 @@ def _build_heuristic_attachment_summaries(attachments: list[dict[str, Any]]) -> 
                 else:
                     summary = " ".join(normalized.split()[:16])
                 if len(summary) > 160:
-                    summary = summary[:159].rstrip() + "вЂ¦"
+                    summary = summary[:159].rstrip() + "…"
         summaries.append(
             {
                 "filename": filename,
@@ -4598,10 +4667,10 @@ def _build_preview_message(
         t("preview.title", locale=_UI_LOCALE),
         "",
         t("preview.action", locale=_UI_LOCALE),
-        f"вЂў {action_line}",
+        f"• {action_line}",
         t("preview.reason", locale=_UI_LOCALE),
     ]
-    lines.extend(f"вЂў {reason}" for reason in safe_reasons)
+    lines.extend(f"• {reason}" for reason in safe_reasons)
     if priority_explain_lines:
         lines.append("")
         lines.append(t("preview.why", locale=_UI_LOCALE))
@@ -4630,7 +4699,7 @@ def _append_commitments_preview(
         icon, label = status_labels.get(
             commitment.status, ("", commitment.status or "РЅРµРёР·РІРµСЃС‚РЅРѕ")
         )
-        line = f"вЂў \"{safe_text}\" вЂ” {label}".replace("  ", " ").strip()
+        line = f"• \"{safe_text}\" — {label}".replace("  ", " ").strip()
         lines.append(line)
     return "\n".join(lines)
 
@@ -4668,7 +4737,7 @@ def _append_insights_preview(
         severity = _sanitize_preview_line(insight.severity)
         explanation = _sanitize_preview_line(insight.explanation)
         recommendation = _sanitize_preview_line(insight.recommendation)
-        lines.append(f"вЂў {title} ({severity})")
+        lines.append(f"• {title} ({severity})")
         lines.append(f"  {explanation}")
         lines.append(f"  Р РµРєРѕРјРµРЅРґР°С†РёСЏ: {recommendation}")
     return "\n".join(lines)
@@ -4725,7 +4794,7 @@ def _append_anomalies_preview(
         title = _sanitize_preview_line(anomaly.title)
         severity = _sanitize_preview_line(humanize_severity(anomaly.severity, locale=_UI_LOCALE))
         details = _sanitize_preview_line(anomaly.details)
-        lines.append(f"вЂў {title} ({severity})")
+        lines.append(f"• {title} ({severity})")
         if details:
             lines.append(f"  {details}")
     return "\n".join(lines)

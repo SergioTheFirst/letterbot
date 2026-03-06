@@ -191,9 +191,9 @@ critical_risk_threshold = 80
 focus_hours = 9-12
 
 [auto_priority_gate]
-enabled = false
+enabled = true
 window_days = 30
-min_samples = 30
+min_samples = 10
 max_correction_rate = 0.15
 cooldown_hours = 168
 

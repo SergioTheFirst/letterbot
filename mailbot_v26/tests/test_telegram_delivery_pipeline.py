@@ -567,3 +567,30 @@ def test_stage_tg_uses_real_priority_and_attachment_insight(monkeypatch, tmp_pat
     assert payload.reply_markup
     assert "inline_keyboard" in payload.reply_markup
     _cleanup_pipeline(email_id)
+
+
+
+def test_priority_keyboard_uses_initial_prio_true_in_user_path(monkeypatch, tmp_path) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    email_id = _seed_queue(storage, config.accounts[0].login)
+    _seed_pipeline_context(email_id, config.accounts[0].login)
+    processor = _configure_pipeline(config, enable_premium_processor=False)
+
+    captured: dict[str, object] = {}
+
+    def fake_send(payload):
+        captured["payload"] = payload
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+
+    flags = FeatureFlags(base_dir=tmp_path)
+    flags.ENABLE_PREMIUM_PROCESSOR = False
+    _process_queue(storage, config, processor, flags)
+
+    keyboard = captured["payload"].reply_markup["inline_keyboard"]
+    labels = [button["text"] for button in keyboard[0]]
+    assert labels == ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"]
+    _cleanup_pipeline(email_id)
