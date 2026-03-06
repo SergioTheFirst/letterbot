@@ -173,3 +173,13 @@ def test_digest_enabled_by_default_in_example() -> None:
 
 def test_digest_enabled_by_default_in_loader(tmp_path: Path) -> None:
     test_digest_loader_defaults_enabled(tmp_path)
+
+
+
+def test_auto_priority_gate_enabled_in_example_config() -> None:
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read("mailbot_v26/config/settings.ini.example", encoding="utf-8")
+
+    assert parser.getboolean("auto_priority_gate", "enabled") is True

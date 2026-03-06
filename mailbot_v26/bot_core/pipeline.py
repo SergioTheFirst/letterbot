@@ -645,6 +645,7 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
         reply_markup=build_email_actions_keyboard(
             email_id=ctx.email_id,
             expanded=False,
+            initial_prio=True,
             show_decision_trace=load_telegram_ui_config().show_decision_trace,
         ),
     )

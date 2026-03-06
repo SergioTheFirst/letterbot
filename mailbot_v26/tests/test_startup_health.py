@@ -1,6 +1,7 @@
 import importlib
 import logging
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -334,3 +335,19 @@ def test_evaluate_mode_updates_global_system_health(tmp_path, monkeypatch) -> No
 
     assert mode == OperationalMode.FULL
     assert system_health.mode == OperationalMode.FULL
+
+
+
+def test_db_parent_dir_created_before_storage_init() -> None:
+    source = Path("mailbot_v26/start.py").read_text(encoding="utf-8")
+
+    mkdir_index = source.index("config.storage.db_path.parent.mkdir(parents=True, exist_ok=True)")
+    storage_index = source.index("storage = Storage(config.storage.db_path)")
+
+    assert mkdir_index < storage_index
+
+
+def test_processor_and_start_use_same_db_path() -> None:
+    source = Path("mailbot_v26/start.py").read_text(encoding="utf-8")
+
+    assert "processor_module.configure_processor_db_path(config.storage.db_path)" in source

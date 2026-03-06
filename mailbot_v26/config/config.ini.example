@@ -95,9 +95,9 @@ donate_enabled = false
 ; Advanced tuning
 ; =====================
 [auto_priority_gate]
-enabled = false
+enabled = true
 window_days = 30
-min_samples = 30
+min_samples = 10
 max_correction_rate = 0.15
 cooldown_hours = 24
 

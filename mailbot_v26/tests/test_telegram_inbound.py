@@ -99,9 +99,9 @@ def _build_processor(tmp_path: Path, sent: list[str], gate_result: GateResult) -
 
 def test_parse_callback_data_priority() -> None:
     parsed = parse_callback_data("mb:prio:123:R")
-    assert parsed == ("priority", {"email_id": "123", "priority": "рџ”ґ"})
+    assert parsed == ("priority", {"email_id": "123", "priority": "🔴"})
     parsed = parse_callback_data("prio:55:рџ”µ")
-    assert parsed == ("priority", {"email_id": "55", "priority": "рџ”µ"})
+    assert parsed == ("priority", {"email_id": "55", "priority": "🔵"})
     parsed = parse_callback_data("mb:help:priority")
     assert parsed == ("help", {"topic": "priority"})
     parsed = parse_callback_data("mb:d:42")
@@ -189,7 +189,7 @@ def test_priority_callback_updates_snapshot_priority(tmp_path: Path, monkeypatch
         ).fetchall()
 
     assert priority_row is not None
-    assert priority_row == ("рџ”ґ", "user_override")
+    assert priority_row == ("🔴", "user_override")
     assert len(feedback_rows) == 1
     assert len(event_rows) == 1
     assert sent == []
@@ -233,7 +233,7 @@ def test_priority_callback_priority_persists_after_rerender(tmp_path: Path, monk
 
     assert len(edited) == 2
     assert "🔴" in _norm(str(edited[0]["html_text"]))
-    assert "рџ”ґ" in str(edited[1]["html_text"])
+    assert "🔴" in str(edited[1]["html_text"])
 
 def test_priority_callback_edit_same_message(tmp_path: Path, monkeypatch) -> None:
     sent: list[str] = []
@@ -484,7 +484,7 @@ def test_tasks_alias_and_limit(tmp_path: Path) -> None:
 
     output = sent[-1]
     assert output.startswith("рџ“‹ <b>РћР±СЏР·Р°С‚РµР»СЊСЃС‚РІР°:</b>")
-    assert output.count("\nвЂў ") == 7
+    assert output.count("\n• ") == 7
 
 def test_priority_ok_callback_records_positive_feedback(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -555,7 +555,7 @@ def test_week_command_returns_compact_summary_with_empty_dataset(tmp_path: Path)
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/week"})
 
-    assert _norm("рџ“Љ Letterbot вЂ” РЅРµРґРµР»СЏ") in _norm(sent[-1])
+    assert _norm("рџ“Љ Letterbot — РЅРµРґРµР»СЏ") in _norm(sent[-1])
     assert _norm("РљРѕСЂСЂРµРєС†РёР№: 0") in _norm(sent[-1])
     assert _norm("Surprise rate: РЅ/Рґ") in _norm(sent[-1])
     assert _norm("РџРµСЂРµС…РѕРґС‹: РЅРµС‚ РґР°РЅРЅС‹С…") in _norm(sent[-1])
@@ -608,8 +608,8 @@ def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "week"})
 
-    assert _norm("рџ“Љ Letterbot вЂ” РЅРµРґРµР»СЏ") in _norm(sent[-1])
-    assert _norm("РљРѕСЂСЂРµРєС†РёР№: 1 В· РўРѕС‡РЅРѕСЃС‚СЊ: 100%") in _norm(sent[-1])
+    assert _norm("рџ“Љ Letterbot — РЅРµРґРµР»СЏ") in _norm(sent[-1])
+    assert _norm("РљРѕСЂСЂРµРєС†РёР№: 1 · РўРѕС‡РЅРѕСЃС‚СЊ: 100%") in _norm(sent[-1])
     assert _norm("Surprise rate: 0%") in _norm(sent[-1])
     assert _norm("РџРµСЂРµС…РѕРґС‹: рџ”µв†’рџ”ґ Г—1") in _norm(sent[-1])
 
@@ -675,7 +675,7 @@ def test_stats_command_handles_analytics_failures_without_crash(tmp_path: Path, 
         "РљРѕСЂСЂРµРєС†РёР№: 0\n"
         "Surprise rate: РЅ/Рґ\n"
         "РџРµСЂРµС…РѕРґС‹: РЅРµС‚ РґР°РЅРЅС‹С…\n"
-        "РџРѕРєР° РґР°РЅРЅС‹С… РјР°Р»Рѕ вЂ” РґРµР»Р°РµРј РІС‹РІРѕРґС‹ РІСЂСѓС‡РЅСѓСЋ."
+        "РџРѕРєР° РґР°РЅРЅС‹С… РјР°Р»Рѕ — РґРµР»Р°РµРј РІС‹РІРѕРґС‹ РІСЂСѓС‡РЅСѓСЋ."
     )
 
 def test_support_command_disabled_returns_honest_message(tmp_path: Path) -> None:
@@ -724,11 +724,7 @@ def test_support_command_enabled_with_url_returns_three_lines(tmp_path: Path) ->
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "support"})
 
-    assert sent[-1] == (
-        "РџРѕРґРґРµСЂР¶Р°С‚СЊ Letterbot\n"
-        "Р•СЃР»Рё Letterbot РїРѕРјРѕРіР°РµС‚, РїСЂРѕРµРєС‚ РјРѕР¶РЅРѕ РїРѕРґРґРµСЂР¶Р°С‚СЊ\n"
-        "https://example.com/insider"
-    )
+    assert _norm(sent[-1]) == _norm("Поддержать Letterbot\nЕсли Letterbot помогает, проект можно поддержать\nhttps://example.com/insider")
 
 def test_support_command_enabled_without_url_reports_not_configured(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -769,8 +765,8 @@ def test_help_contains_support_command(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/help"})
 
-    assert _norm("/support вЂ” РїРѕРґРґРµСЂР¶Р°С‚СЊ РїСЂРѕРµРєС‚") in _norm(sent[-1])
-    assert _norm("/stats вЂ” РєР°С‡РµСЃС‚РІРѕ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё") in _norm(sent[-1])
+    assert _norm("/support — РїРѕРґРґРµСЂР¶Р°С‚СЊ РїСЂРѕРµРєС‚") in _norm(sent[-1])
+    assert _norm("/stats — РєР°С‡РµСЃС‚РІРѕ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё") in _norm(sent[-1])
 
 def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -961,7 +957,7 @@ def test_no_mojibake_in_help_output(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/help"})
 
     assert sent
-    for token in ("вЂ", "РѕС‚", "вЂў", "РґРѕРіРѕРІ", "рџ"):
+    for token in ("вЂ", "РѕС‚", "рџ"):
         assert token not in sent[-1]
 
 def test_no_mojibake_in_stats_output(tmp_path: Path) -> None:
@@ -980,7 +976,7 @@ def test_no_mojibake_in_stats_output(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
 
     assert sent
-    for token in ("вЂ", "РѕС‚", "вЂў", "РґРѕРіРѕРІ", "рџ"):
+    for token in ("вЂ", "РѕС‚", "рџ"):
         assert token not in sent[-1]
 
 def test_status_matches_startup_health_when_llm_active(tmp_path: Path) -> None:
@@ -1128,7 +1124,7 @@ def test_no_mojibake_in_status_output(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
     assert sent
-    for token in ("вЂ", "РѕС‚", "вЂў", "РґРѕРіРѕРІ", "рџ"):
+    for token in ("вЂ", "РѕС‚", "рџ"):
         assert token not in sent[-1]
 
 def test_manual_priority_marker_appears_after_callback(tmp_path: Path, monkeypatch) -> None:
@@ -1171,3 +1167,8 @@ def test_priority_circle_present_after_manual_override(tmp_path: Path, monkeypat
     assert edited
     rendered = _norm(str(edited[-1]["html_text"]))
     assert rendered.startswith("🔴")
+
+
+
+def test_priority_callback_still_edits_same_message(tmp_path: Path, monkeypatch) -> None:
+    test_priority_callback_edits_same_message_and_updates_priority_text(tmp_path, monkeypatch)

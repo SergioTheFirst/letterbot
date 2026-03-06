@@ -15,8 +15,9 @@ def test_malformed_ini_returns_defaults_and_warning(tmp_path: Path, caplog) -> N
     caplog.set_level("WARNING")
     cfg = load_auto_priority_gate_config(tmp_path)
 
-    assert cfg.enabled is False
+    assert cfg.enabled is True
     assert cfg.window_days == 30
+    assert cfg.min_samples == 10
     assert any("using deterministic defaults" in rec.message.lower() for rec in caplog.records)
 
 
@@ -50,3 +51,11 @@ def test_import_processor_does_not_read_ini_on_import(monkeypatch) -> None:
     monkeypatch.setattr(configparser.ConfigParser, "read", _fail_read)
 
     importlib.import_module(module_name)
+
+
+
+def test_auto_priority_gate_loader_defaults(tmp_path: Path) -> None:
+    cfg = load_auto_priority_gate_config(tmp_path)
+
+    assert cfg.enabled is True
+    assert cfg.min_samples == 10

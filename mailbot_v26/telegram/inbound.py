@@ -1400,9 +1400,9 @@ class TelegramInboundProcessor:
             if key in seen:
                 continue
             seen.add(key)
-            line = f"вЂў {escape_tg_html(text)}"
+            line = f"• {escape_tg_html(text)}"
             if deadline:
-                line = f"{line} В· РґРѕ {escape_tg_html(deadline)}"
+                line = f"{line} · РґРѕ {escape_tg_html(deadline)}"
             deduped.append(line)
             if len(deduped) >= 7:
                 break
@@ -1416,9 +1416,9 @@ class TelegramInboundProcessor:
         account_emails = list(self._account_emails())
         if not account_emails:
             base = (
-                "рџ“Љ Letterbot вЂ” РЅРµРґРµР»СЏ\n"
-                "РџРёСЃРµРј: 0 В· Р’Р°Р¶РЅС‹С…: 0 В· РќРёР·РєРёС…: 0\n"
-                "РљРѕСЂСЂРµРєС†РёР№: 0 В· РўРѕС‡РЅРѕСЃС‚СЊ: РЅ/Рґ\n"
+                "рџ“Љ Letterbot — РЅРµРґРµР»СЏ\n"
+                "РџРёСЃРµРј: 0 · Р’Р°Р¶РЅС‹С…: 0 · РќРёР·РєРёС…: 0\n"
+                "РљРѕСЂСЂРµРєС†РёР№: 0 · РўРѕС‡РЅРѕСЃС‚СЊ: РЅ/Рґ\n"
                 "РћР±СЏР·Р°С‚РµР»СЊСЃС‚РІ РѕС‚РєСЂС‹С‚Рѕ: 0"
             )
             return "\n".join([base, self._stats_text(days=7, include_header=False)])
@@ -1431,9 +1431,9 @@ class TelegramInboundProcessor:
         accuracy_pct = summary.get("accuracy_pct")
         accuracy_text = f"{int(accuracy_pct)}%" if accuracy_pct is not None else "РЅ/Рґ"
         base = (
-            "рџ“Љ Letterbot вЂ” РЅРµРґРµР»СЏ\n"
-            f"РџРёСЃРµРј: {int(summary.get('emails_total') or 0)} В· Р’Р°Р¶РЅС‹С…: {int(summary.get('important') or 0)} В· РќРёР·РєРёС…: {int(summary.get('low') or 0)}\n"
-            f"РљРѕСЂСЂРµРєС†РёР№: {int(summary.get('corrections') or 0)} В· РўРѕС‡РЅРѕСЃС‚СЊ: {accuracy_text}\n"
+            "рџ“Љ Letterbot — РЅРµРґРµР»СЏ\n"
+            f"РџРёСЃРµРј: {int(summary.get('emails_total') or 0)} · Р’Р°Р¶РЅС‹С…: {int(summary.get('important') or 0)} · РќРёР·РєРёС…: {int(summary.get('low') or 0)}\n"
+            f"РљРѕСЂСЂРµРєС†РёР№: {int(summary.get('corrections') or 0)} · РўРѕС‡РЅРѕСЃС‚СЊ: {accuracy_text}\n"
             f"РћР±СЏР·Р°С‚РµР»СЊСЃС‚РІ РѕС‚РєСЂС‹С‚Рѕ: {int(summary.get('open_commitments') or 0)}"
         )
         return "\n".join([base, self._stats_text(days=7, include_header=False)])
@@ -1442,7 +1442,7 @@ class TelegramInboundProcessor:
         account_emails = list(self._account_emails())
         if not account_emails:
             header = "рџ“€ РљР°С‡РµСЃС‚РІРѕ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё" if include_header else ""
-            trust = "РџРѕРєР° РґР°РЅРЅС‹С… РјР°Р»Рѕ вЂ” РґРµР»Р°РµРј РІС‹РІРѕРґС‹ РІСЂСѓС‡РЅСѓСЋ."
+            trust = "РџРѕРєР° РґР°РЅРЅС‹С… РјР°Р»Рѕ — РґРµР»Р°РµРј РІС‹РІРѕРґС‹ РІСЂСѓС‡РЅСѓСЋ."
             lines = [line for line in [header, "РљРѕСЂСЂРµРєС†РёР№: 0", "Surprise rate: РЅ/Рґ", "РџРµСЂРµС…РѕРґС‹: РЅРµС‚ РґР°РЅРЅС‹С…", trust] if line]
             return "\n".join(lines)
 

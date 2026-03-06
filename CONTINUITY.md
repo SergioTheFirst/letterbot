@@ -202,33 +202,32 @@ Done:
 - 2026-03-05: fixed P0 premium/direct-path stability by normalizing dict-shaped LLM results before attribute access in processor, preserving heuristic priority when dict lacks `priority`; fixed Telegram priority callback UX to always answer callback, edit in-place without extra ack messages, and emit structured callback/edit logs; added targeted regressions for llm_result normalization + priority callback edit/ack flows.
 - 2026-03-05: priority callback persistence hardening in telegram inbound — callback correction now persists `emails.priority` before rerender, rerender reloads fresh snapshot from storage (prevents enrichment revert), and structured lifecycle logs now include `tg_priority_callback_received` + `tg_priority_feedback_saved` + `tg_priority_snapshot_updated` + `tg_priority_edit_ok`; added regressions for snapshot update, rerender persistence, and same-message edit; full pytest green (1071 passed).
 - 2026-03-05: finalized P0 callback/payroll hardening — priority callbacks now always answer with deterministic status (`Приоритет обновлён` / `Не нашёл письмо` / `Не могу отредактировать`) and enforce edit-in-place-only flow with no fallback second message; priority keyboards/tests validate callback payloads retain `email_id`; processor gained deterministic `PAYROLL` doc-kind guards (invoice signal suppression, no pay-action coercion, no due-date-from-document leakage) and stricter amount-context scoring separation for invoice vs payroll cues; added targeted regressions for callback ack/edit/persistence aliases and payroll/invoice misclassification; full pytest green (1079 passed).
+- 2026-03-06: Telegram UX hotfix pass started: wired startup `config.storage.db_path` into processor module (`configure_processor_db_path`), ensured `start.py` creates DB parent directory before `Storage(...)`, switched user path keyboards to direct priority buttons (`initial_prio=True`), and updated auto-priority-gate defaults/examples (`enabled=true`, `min_samples=10`); runtime verification currently FAILED with broad pre-existing+regression suite failures (94 failed / 950 passed).
 - 2026-03-06: user-facing reliability hardening applied with minimal runtime patchset: outbound Telegram send/edit now normalizes mojibake text centrally, `/status` now includes AI + delivery mode and uses global startup health mode (fixed `StartupHealthChecker.evaluate_mode` global-state update), IMAP runtime health now classifies repeated handshake/connect timeouts and enters per-account 24h cooldown with cooldown metadata/log fields, default progressive pre-message disabled unless `MAILBOT_ENABLE_PROGRESSIVE_PREMESSAGE` is explicitly enabled, weekly digest defaults switched ON across templates/bootstrap/feature defaults, and inbound callback rerender now adds a single `Приоритет: ... вручную` marker when `priority_source=user_override`; runtime verification remains UNCONFIRMED here because no Python interpreter is available (`.venv` missing, `python/py` unavailable).
 Now:
-- Working set includes canonical interpretation wiring (processor render path + event timing), segmentation regression aliases, and table-aware attachment amount tests; runtime verification is still UNCONFIRMED in this environment.
-- Segmentation now exposes `disclaimer_block`; fact extraction still uses `main_body` only.
-- LLM budget override/queue timeout/doc-type/stage_llm guard code paths are patched and covered by focused tests in repo.
-- Runtime verification remains UNCONFIRMED here because `.venv` interpreter is unavailable (`.\.venv\Scripts\python.exe` not found).
+- Telegram UX hotfix working set touches processor/inbound/start/config defaults + targeted tests; mojibake literals remain partially unresolved in `processor.py`/`inbound.py` and some user-facing outputs are still corrupted.
+- Processor/start DB path alignment is now explicit via `processor_module.configure_processor_db_path(config.storage.db_path)`; startup now mkdirs DB parent before storage init.
+- Full test suite currently FAILS in this environment (`python -m pytest mailbot_v26/tests/ -q --tb=short`: 94 failed, 950 passed).
 Next:
-- Run required venv commands once available: interpreter check command, targeted pytest for modified test files, then full python -m pytest -q.
-- Run required commands in project venv once available: interpreter check, targeted tests (`test_priority_source_guard.py`, new hardening tests), then full `pytest -q`.
-- If full suite has residual failures, separate pre-existing baseline failures from regressions introduced in this patch.
+- Finish literal-level mojibake cleanup in Telegram user-facing paths (`processor.py`, `inbound.py`) and align affected regressions.
+- Resolve keyboard-path regression expectations after switching to direct priority buttons and ensure callback/edit tests assert the new markup.
+- Re-run required commands (`python -c ...`, `compileall`, full pytest) and separate pre-existing failures from new regressions before merge.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should callback snapshot-update miss (`email_id` absent) emit a dedicated contract event for dashboard alerting, or keep logger-only?
 Working set (files / tables / tests):
-- mailbot_v26/config/budget_policy.py
+- mailbot_v26/pipeline/processor.py
+- mailbot_v26/telegram/inbound.py
+- mailbot_v26/start.py
+- mailbot_v26/bot_core/pipeline.py
+- mailbot_v26/config/auto_priority_gate.py
 - mailbot_v26/config/config.ini.example
-- mailbot_v26/config/config.ini.compact.example
 - mailbot_v26/config/settings.ini.example
 - mailbot_v26/tools/config_bootstrap.py
-- mailbot_v26/tools/make_ini_compact.py
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/pipeline/stage_llm.py
-- mailbot_v26/text/clean_email.py
-- mailbot_v26/tests/test_clean_email.py
-- mailbot_v26/tests/test_pipeline_hardening.py
-- mailbot_v26/tests/test_stage_llm_guard.py
+- mailbot_v26/tests/test_startup_health.py
+- mailbot_v26/tests/test_auto_priority_gate_loader.py
+- mailbot_v26/tests/test_feature_flags.py
+- mailbot_v26/tests/test_priority_keyboard.py
+- mailbot_v26/tests/test_telegram_delivery_pipeline.py
+- mailbot_v26/tests/test_telegram_inbound.py
 - CONTINUITY.md
-- .\.venv\Scripts\python.exe -c "import sys; print(sys.executable)"
-- .\.venv\Scripts\python.exe -m pytest -q .\mailbot_v26\tests\test_priority_source_guard.py
-- .\.venv\Scripts\python.exe -m pytest -q
