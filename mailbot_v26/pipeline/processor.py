@@ -137,7 +137,7 @@ from mailbot_v26.priority.priority_engine_v2 import (
     VipSenderMatcher,
 )
 from mailbot_v26.telegram.keyboard import build_priority_keyboard
-from mailbot_v26.text.clean_email import clean_email_body
+from mailbot_v26.text.clean_email import clean_email_body, segment_email_body
 from .attention_gate import (
     AttentionGateInput,
     apply_attention_gate,
@@ -2019,19 +2019,20 @@ def _build_premium_clarity_text(
         )
         if part
     )
+    fact_body_text = _main_body_for_facts(body_text)
     fact_text = " ".join(
         part
         for part in (
             subject,
             body_summary,
-            body_text,
+            fact_body_text,
             " ".join(str(attachment.get("text") or "") for attachment in attachments),
         )
         if part
     )
     message_facts = _collect_message_facts(
         subject=subject,
-        body_text=" ".join(part for part in (body_summary, body_text) if part),
+        body_text=" ".join(part for part in (body_summary, fact_body_text) if part),
         attachments=attachments,
         mail_type=mail_type,
     )
@@ -2181,19 +2182,20 @@ def _build_telegram_text(
     attachment_summary: str | None = None,
     relationship_profile: dict[str, Any] | None = None,
 ) -> str:
+    fact_body_text = _main_body_for_facts(body_text)
     fact_text = " ".join(
         part
         for part in (
             subject,
             body_summary,
-            body_text,
+            fact_body_text,
             " ".join(str(attachment.get("text") or "") for attachment in (attachments or [])),
         )
         if part
     )
     message_facts = _collect_message_facts(
         subject=subject,
-        body_text=" ".join(part for part in (body_summary, body_text) if part),
+        body_text=" ".join(part for part in (body_summary, fact_body_text) if part),
         attachments=attachments or [],
         mail_type=mail_type,
     )
@@ -2320,17 +2322,18 @@ def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]
             if len(compact_text) > 220:
                 compact_text = compact_text[:219].rstrip() + "…"
             signals.append(compact_text)
+    fact_body_text = _main_body_for_facts(body_text)
     fact_text = " ".join(
         part
         for part in (
-            body_text or "",
+            fact_body_text,
             " ".join(str(attachment.get("text") or "") for attachment in attachments),
         )
         if part
     )
     facts = _collect_message_facts(
         subject="",
-        body_text=body_text or "",
+        body_text=fact_body_text,
         attachments=attachments,
         mail_type="",
     )
@@ -2926,6 +2929,13 @@ def _consistency_check_message_facts(
     return checked
 
 
+def _main_body_for_facts(text: str) -> str:
+    cleaned = clean_email_body(text or "").strip() or str(text or "")
+    segmented = segment_email_body(cleaned)
+    main_body = str(segmented.get("main_body") or "").strip()
+    return main_body or cleaned
+
+
 def _collect_message_facts(
     *,
     subject: str,
@@ -2933,7 +2943,7 @@ def _collect_message_facts(
     attachments: list[dict[str, Any]],
     mail_type: str,
 ) -> dict[str, Any]:
-    cleaned_body_text = clean_email_body(body_text or "").strip() or str(body_text or "")
+    cleaned_body_text = _main_body_for_facts(body_text)
     pdf_attachment_texts: list[str] = []
     table_attachment_texts: list[str] = []
     other_attachment_texts: list[str] = []
@@ -3821,12 +3831,13 @@ def _count_recent_importance_history(
 def _build_heuristic_llm_result(
     *, subject: str, body_text: str, priority: str, attachments: list[dict[str, Any]]
 ) -> SimpleNamespace:
+    fact_body_text = _main_body_for_facts(body_text)
     fact_text = " ".join(
-        part for part in (subject, body_text, " ".join(str(item.get("text") or "") for item in attachments)) if part
+        part for part in (subject, fact_body_text, " ".join(str(item.get("text") or "") for item in attachments)) if part
     )
     message_facts = _collect_message_facts(
         subject=subject,
-        body_text=body_text,
+        body_text=fact_body_text,
         attachments=attachments,
         mail_type="",
     )
@@ -6017,19 +6028,20 @@ def process_message(
         action_line = llm_result.action_line
         body_summary = llm_result.body_summary
         attachment_summaries = llm_result.attachment_summaries
+        fact_body_text = _main_body_for_facts(body_text)
         fact_text = " ".join(
             part
             for part in (
                 subject,
                 body_summary,
-                body_text,
+                fact_body_text,
                 " ".join(str(attachment.get("text") or "") for attachment in attachments),
             )
             if part
         )
         message_facts = _collect_message_facts(
             subject=subject,
-            body_text=" ".join(part for part in (body_summary, body_text) if part),
+            body_text=" ".join(part for part in (body_summary, fact_body_text) if part),
             attachments=attachments,
             mail_type=mail_type or "",
         )

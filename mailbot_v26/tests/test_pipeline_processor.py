@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 import sqlite3
 import re
 from types import SimpleNamespace
@@ -1467,22 +1467,56 @@ def test_table_numbers_not_selected() -> None:
 
 def test_forwarded_thread_not_used() -> None:
     body = (
-        "\u041d\u043e\u0432\u044b\u0439 \u0441\u0447\u0435\u0442: \u0438\u0442\u043e\u0433\u043e \u043a \u043e\u043f\u043b\u0430\u0442\u0435 87 500 \u0440\u0443\u0431.\n"
+        "Новый статус по письму. Проверьте детали.\n"
         "Forwarded message\n"
         "From: old@example.com\n"
-        "\u0418\u0442\u043e\u0433\u043e \u043a \u043e\u043f\u043b\u0430\u0442\u0435 999 999 \u0440\u0443\u0431."
+        "Итого к оплате 999 999 руб."
     )
 
     facts = _collect_message_facts(
-        subject="\u0421\u0447\u0435\u0442 \u2116455",
+        subject="Счет №455",
         body_text=body,
         attachments=[],
         mail_type="INVOICE",
     )
-    facts = _score_message_facts(
-        facts,
-        evidence_text=body,
-        attachment_text="",
+
+    assert facts["amount"] == ""
+
+
+def test_signature_numbers_not_used() -> None:
+    body = (
+        "Вопрос по документу. Дайте комментарий.\n"
+        "Best regards\n"
+        "Finance Team\n"
+        "Итого к оплате 777 000 руб."
+    )
+
+    facts = _collect_message_facts(
+        subject="Документ",
+        body_text=body,
+        attachments=[],
+        mail_type="UNKNOWN",
+    )
+
+    assert facts["amount"] == ""
+
+
+def test_main_body_numbers_detected() -> None:
+    body = (
+        "Новый счет: итого к оплате 87 500 руб.\n"
+        "Best regards\n"
+        "Finance Team\n"
+        "Итого к оплате 777 000 руб.\n"
+        "Forwarded message\n"
+        "From: old@example.com\n"
+        "Итого к оплате 999 999 руб."
+    )
+
+    facts = _collect_message_facts(
+        subject="Счет №455",
+        body_text=body,
+        attachments=[],
+        mail_type="INVOICE",
     )
 
     assert facts["amount"].startswith("87 500")

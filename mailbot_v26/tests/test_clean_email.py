@@ -1,4 +1,4 @@
-from mailbot_v26.text.clean_email import clean_email_body
+from mailbot_v26.text.clean_email import clean_email_body, segment_email_body
 
 
 def test_clean_email_removes_forward_headers():
@@ -77,3 +77,20 @@ def test_clean_email_cuts_inline_disclaimer_after_subject_prefix():
     cleaned = clean_email_body(body)
 
     assert cleaned == "RE: Оплата счета"
+
+
+def test_segment_email_body_splits_sections():
+    body = (
+        "Короткий статус по задаче\n"
+        "Best regards\n"
+        "Finance Team\n"
+        "----Original Message----\n"
+        "From: old@example.com\n"
+        "Итого к оплате 999 999 руб."
+    )
+
+    segmented = segment_email_body(body)
+
+    assert segmented["main_body"] == "Короткий статус по задаче"
+    assert segmented["signature"].startswith("Best regards")
+    assert segmented["forwarded_thread"].startswith("----Original Message----")

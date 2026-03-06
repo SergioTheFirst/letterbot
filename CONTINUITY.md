@@ -17,6 +17,8 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-06: added deterministic message-segmentation layer for fact extraction: new `segment_email_body()` helper (`main_body` / `forwarded_thread` / `signature`) with forwarded/signature markers, integrated `main_body` usage into processor fact-evidence paths (`_collect_message_facts`, premium/full/heuristic/priority-signal flows), and added regressions (`test_forwarded_thread_not_used`, `test_signature_numbers_not_used`, `test_main_body_numbers_detected`, `test_segment_email_body_splits_sections`); targeted tests green (`test_clean_email.py` 8 passed, processor segmentation selection 3 passed), full suite still red in this environment (152 failed, 915 passed, 6 skipped).
+- 2026-03-06: fixed priority-engine datetime normalization bug in `_frequency_ratio` by coercing `reference_time` and parsed event timestamps to UTC-aware datetimes before window comparisons; verified with `\.venv\Scripts\python.exe -m pytest -q .\mailbot_v26\tests\test_priority_source_guard.py` (3 passed).
 - 2026-03-06: added deterministic consistency-check layer in processor fact pipeline (`facts -> validation -> scoring -> consistency_check -> decision`) with payroll-overrides-invoice guard, subtotal+tax vs total math check, qty*price vs line-total check, amount-without-currency penalty, and invalid due-date suppression (`due_date <= invoice_date`); wired into all processor scoring paths including runtime processing flow; added regressions (`test_invoice_math_consistency`, `test_currency_context_required`, `test_payroll_never_invoice`, `test_invalid_due_date_ignored`); local verification blocked because no Python interpreter is installed in this environment.
 - 2026-03-06: interpretation accuracy hardening implemented without LLM dependency: evidence-window number extraction (`_extract_numbers_in_evidence_window`), attachment evidence ordering (PDF text/OCR -> table text -> fact snippets), table-context guard (ignore table evidence without keywords), clean-email forward-thread cutoff, and amount scoring context updates (+`total payable`; negative contexts include `номер`/`строка`) with new regressions (`test_invoice_body_amount_detection`, `test_invoice_attachment_amount_detection`, `test_payroll_never_invoice`, `test_table_numbers_not_selected`, `test_forwarded_thread_not_used`); local verification blocked because no Python interpreter is installed in this environment.
 - 2026-03-05: weekly digest now adds deterministic shareable weekly insight card artifact (`_build_shareable_weekly_card`) with fixed <=6-line format and no LLM dependency, appends a new "Share this report" block to digest output, attaches Telegram inline share button (`📤 Поделиться отчётом`) prefilled via `switch_inline_query_current_chat`, includes optional `https://letterbot.ru` share URL metadata, and adds targeted share-card regressions (`test_shareable_weekly_card_format`, `test_shareable_card_deterministic`, `test_weekly_digest_contains_shareable_card`); full pytest green (1065 passed).
@@ -197,17 +199,22 @@ Done:
 - 2026-03-05: priority callback persistence hardening in telegram inbound — callback correction now persists `emails.priority` before rerender, rerender reloads fresh snapshot from storage (prevents enrichment revert), and structured lifecycle logs now include `tg_priority_callback_received` + `tg_priority_feedback_saved` + `tg_priority_snapshot_updated` + `tg_priority_edit_ok`; added regressions for snapshot update, rerender persistence, and same-message edit; full pytest green (1071 passed).
 - 2026-03-05: finalized P0 callback/payroll hardening — priority callbacks now always answer with deterministic status (`Приоритет обновлён` / `Не нашёл письмо` / `Не могу отредактировать`) and enforce edit-in-place-only flow with no fallback second message; priority keyboards/tests validate callback payloads retain `email_id`; processor gained deterministic `PAYROLL` doc-kind guards (invoice signal suppression, no pay-action coercion, no due-date-from-document leakage) and stricter amount-context scoring separation for invoice vs payroll cues; added targeted regressions for callback ack/edit/persistence aliases and payroll/invoice misclassification; full pytest green (1079 passed).
 Now:
-- Consistency-check layer and new extraction-accuracy regressions are implemented in processor/tests.
-- Runtime and full-suite verification remain blocked locally (`python`/`py`/`.venv\Scripts\python.exe` unavailable).
+- Message segmentation is active for fact extraction paths; forwarded-thread/signature numbers are excluded from fact evidence.
+- Targeted segmentation tests are green in `.venv` (`test_clean_email.py` and the 3 processor segmentation tests).
+- Full suite remains failing in this environment with many pre-existing/infra issues (`152 failed, 915 passed, 6 skipped`).
 Next:
-- Install/enable Python in this environment and run `python -m pytest -q` (full suite) plus targeted processor tests for new consistency rules.
-- Validate consistency outcomes on real invoice/payroll samples (math mismatch, currencyless amount, invalid due date).
+- Triage failing full-suite baseline in this environment (deps/config/runtime contracts) before expecting global green.
+- Validate segmentation behavior on additional real-world email samples (nested forward chains, multilingual signatures).
+
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should callback snapshot-update miss (`email_id` absent) emit a dedicated contract event for dashboard alerting, or keep logger-only?
 Working set (files / tables / tests):
+- mailbot_v26/text/clean_email.py
 - mailbot_v26/pipeline/processor.py
+- mailbot_v26/tests/test_clean_email.py
 - mailbot_v26/tests/test_pipeline_processor.py
 - CONTINUITY.md
-- python --version
-- py --version
-- python -m pytest -q
+- .\\.venv\\Scripts\\python.exe -m compileall mailbot_v26
+- .\\.venv\\Scripts\\python.exe -m pytest -q .\\mailbot_v26\\tests\\test_clean_email.py
+- .\\.venv\\Scripts\\python.exe -m pytest -q .\\mailbot_v26\\tests\\test_pipeline_processor.py -k "forwarded_thread_not_used or signature_numbers_not_used or main_body_numbers_detected"
+- .\\.venv\\Scripts\\python.exe -m pytest -q

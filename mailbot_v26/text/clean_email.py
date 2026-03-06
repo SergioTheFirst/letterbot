@@ -30,6 +30,19 @@ SIGNATURE_MARKERS = (
     "regards,",
 )
 
+SEGMENT_FORWARD_MARKERS = (
+    "forwarded message",
+    "----original message----",
+    "-----original message-----",
+    "from:",
+    "sent:",
+)
+
+SEGMENT_SIGNATURE_MARKERS = (
+    "best regards",
+    "\u0441 \u0443\u0432\u0430\u0436\u0435\u043d\u0438\u0435\u043c",
+)
+
 DISCLAIMER_MARKERS = (
     "\u0432\u043d\u0435\u0448\u043d\u044f\u044f \u043f\u043e\u0447\u0442\u0430:",
     "external email:",
@@ -127,6 +140,72 @@ def _strip_html(text: str) -> str:
     return working.strip()
 
 
+def _collapse_lines(lines: list[str]) -> str:
+    collapsed: list[str] = []
+    blank = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if blank:
+                continue
+            collapsed.append("")
+            blank = True
+            continue
+        collapsed.append(stripped)
+        blank = False
+
+    result = "\n".join(collapsed).strip()
+    return re.sub(r"\n{3,}", "\n\n", result)
+
+
+def _is_segment_forward_start(line: str) -> bool:
+    compact = re.sub(r"\s+", " ", line.strip().lower())
+    if not compact:
+        return False
+    if any(marker in compact for marker in SEGMENT_FORWARD_MARKERS[:3]):
+        return True
+    return any(compact.startswith(marker) for marker in SEGMENT_FORWARD_MARKERS[3:])
+
+
+def _is_segment_signature_start(line: str) -> bool:
+    stripped = line.strip()
+    lowered = stripped.lower()
+    if stripped.startswith("--"):
+        return True
+    return any(lowered.startswith(marker) for marker in SEGMENT_SIGNATURE_MARKERS)
+
+
+def segment_email_body(text: Any) -> dict[str, str]:
+    normalized = _to_str(text).replace("\r\n", "\n").replace("\r", "\n")
+    if _looks_like_html(normalized):
+        normalized = _strip_html(normalized)
+        normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+
+    main_lines: list[str] = []
+    forwarded_lines: list[str] = []
+    signature_lines: list[str] = []
+    zone = "main"
+
+    for line in normalized.split("\n"):
+        if zone != "forwarded" and _is_segment_forward_start(line):
+            zone = "forwarded"
+        elif zone == "main" and _is_segment_signature_start(line):
+            zone = "signature"
+
+        if zone == "forwarded":
+            forwarded_lines.append(line)
+        elif zone == "signature":
+            signature_lines.append(line)
+        else:
+            main_lines.append(line)
+
+    return {
+        "main_body": _collapse_lines(main_lines),
+        "forwarded_thread": _collapse_lines(forwarded_lines),
+        "signature": _collapse_lines(signature_lines),
+    }
+
+
 def clean_email_body(text: Any) -> str:
     try:
         normalized = _to_str(text).replace("\r\n", "\n").replace("\r", "\n")
@@ -153,22 +232,7 @@ def clean_email_body(text: Any) -> str:
         if had_inline_disclaimer:
             break
 
-    collapsed: list[str] = []
-    blank = False
-    for line in cleaned:
-        stripped = line.strip()
-        if not stripped:
-            if blank:
-                continue
-            collapsed.append("")
-            blank = True
-            continue
-        collapsed.append(stripped)
-        blank = False
-
-    result = "\n".join(collapsed).strip()
-    result = re.sub(r"\n{3,}", "\n\n", result)
-    return result
+    return _collapse_lines(cleaned)
 
 
-__all__ = ["clean_email_body"]
+__all__ = ["clean_email_body", "segment_email_body"]
