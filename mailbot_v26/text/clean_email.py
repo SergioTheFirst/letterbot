@@ -210,8 +210,11 @@ def segment_email_body(text: Any) -> dict[str, str]:
                 zone = "signature"
             elif _is_disclaimer_start(line):
                 zone = "disclaimer"
-        elif zone == "signature" and _is_disclaimer_start(line):
-            zone = "disclaimer"
+        elif zone == "signature":
+            if _is_segment_forward_start(line):
+                zone = "forwarded"
+            elif _is_disclaimer_start(line):
+                zone = "disclaimer"
 
         if zone == "forwarded":
             forwarded_lines.append(line)

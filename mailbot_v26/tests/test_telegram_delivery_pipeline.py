@@ -206,6 +206,7 @@ def test_duplicate_uid_ingest_enqueues_once_and_sends_once(monkeypatch, tmp_path
     ctx.llm_result = {"text": "Telegram message"}
 
     flags = FeatureFlags(base_dir=tmp_path)
+    flags.ENABLE_PREMIUM_PROCESSOR = False
     _process_queue(storage, config, processor, flags)
 
     _, second_enqueued = _persist_inbound_and_enqueue_parse(
@@ -305,7 +306,6 @@ def test_stage_tg_adds_inline_keyboard_when_premium_enabled(monkeypatch, tmp_pat
     monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
 
     flags = FeatureFlags(base_dir=tmp_path)
-    flags.ENABLE_PREMIUM_PROCESSOR = False
     _process_queue(storage, config, processor, flags)
 
     reply_markup = captured["payload"].reply_markup
@@ -332,7 +332,6 @@ def test_stage_tg_adds_inline_keyboard_when_premium_disabled(monkeypatch, tmp_pa
     monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
 
     flags = FeatureFlags(base_dir=tmp_path)
-    flags.ENABLE_PREMIUM_PROCESSOR = False
     _process_queue(storage, config, processor, flags)
 
     reply_markup = captured["payload"].reply_markup
@@ -412,6 +411,7 @@ def test_duplicate_uid_ingest_is_case_insensitive(monkeypatch, tmp_path) -> None
     ctx.llm_result = {"text": "Telegram message"}
 
     flags = FeatureFlags(base_dir=tmp_path)
+    flags.ENABLE_PREMIUM_PROCESSOR = False
     _process_queue(storage, config, processor, flags)
 
     _, second_enqueued = _persist_inbound_and_enqueue_parse(
@@ -587,7 +587,6 @@ def test_priority_keyboard_uses_initial_prio_true_in_user_path(monkeypatch, tmp_
     monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
 
     flags = FeatureFlags(base_dir=tmp_path)
-    flags.ENABLE_PREMIUM_PROCESSOR = False
     _process_queue(storage, config, processor, flags)
 
     keyboard = captured["payload"].reply_markup["inline_keyboard"]

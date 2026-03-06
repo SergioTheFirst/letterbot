@@ -58,8 +58,8 @@ def _insert_email(db_path: Path) -> int:
                 "sender@example.com",
                 "Subject",
                 datetime.now(timezone.utc).isoformat(),
-                "рџ”µ",
-                "РџСЂРѕРІРµСЂРёС‚СЊ",
+                "🔵",
+                "Проверить",
                 "",
                 "hash",
             ),
@@ -100,7 +100,7 @@ def _build_processor(tmp_path: Path, sent: list[str], gate_result: GateResult) -
 def test_parse_callback_data_priority() -> None:
     parsed = parse_callback_data("mb:prio:123:R")
     assert parsed == ("priority", {"email_id": "123", "priority": "🔴"})
-    parsed = parse_callback_data("prio:55:рџ”µ")
+    parsed = parse_callback_data("prio:55:🔵")
     assert parsed == ("priority", {"email_id": "55", "priority": "🔵"})
     parsed = parse_callback_data("mb:help:priority")
     assert parsed == ("help", {"topic": "priority"})
@@ -189,21 +189,21 @@ def test_priority_callback_updates_snapshot_priority(tmp_path: Path, monkeypatch
         ).fetchall()
 
     assert priority_row is not None
-    assert priority_row == ("🔴", "user_override")
+    assert priority_row == ("\U0001f534", "user_override")
     assert len(feedback_rows) == 1
     assert len(event_rows) == 1
     assert sent == []
     assert len(edited) == 1
-    assert "🔴" in _norm(str(edited[0]["html_text"]))
-    assert "РџСЂРёРЅСЏС‚Рѕ: РїСЂРёРѕСЂРёС‚РµС‚ РёСЃРїСЂР°РІР»РµРЅ" not in str(edited[0]["html_text"])
+    assert "\U0001f534" in _norm(str(edited[0]["html_text"]))
+    assert "Принято: приоритет исправлен" not in str(edited[0]["html_text"])
     assert edited[0]["reply_markup"] == {
         "inline_keyboard": [
-            [{"text": "РџСЂРёРѕСЂРёС‚РµС‚", "callback_data": f"prio_menu:{email_id}"}, {"text": "вЏ° РџРѕР·Р¶Рµ", "callback_data": f"snz_m:{email_id}"}],
-            [{"text": "вњ“ Р’РµСЂРЅРѕ", "callback_data": f"mb:ok:{email_id}"}],
+            [
+                {"text": "Изменить приоритет", "callback_data": f"prio_menu:{email_id}"},
+                {"text": "⏰ Отложить", "callback_data": f"snz_m:{email_id}"},
+            ]
         ]
     }
-
-def test_priority_callback_priority_persists_after_rerender(tmp_path: Path, monkeypatch) -> None:
     sent: list[str] = []
     gate_result = GateResult(
         passed=True,
@@ -307,16 +307,11 @@ def test_priority_callback_edit_failure_is_safe_without_ack_spam(tmp_path: Path,
 
     assert feedback_rows
     assert sent == []
-    assert callback_acks == [
-        {
-            "json": {
-                "callback_query_id": "cb-prio",
-                "text": _norm("РќРµ РјРѕРіСѓ РѕС‚СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ"),
-                "show_alert": False,
-            },
-            "timeout": 5,
-        }
-    ]
+    assert len(callback_acks) == 1
+    assert callback_acks[0]["json"]["callback_query_id"] == "cb-prio"
+    assert callback_acks[0]["json"]["show_alert"] is False
+    assert callback_acks[0]["timeout"] == 5
+    assert _norm(str(callback_acks[0]["json"]["text"])) == _norm("Не могу отредактировать")
 
 def test_digest_toggle_command_updates_override(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -335,7 +330,7 @@ def test_digest_toggle_command_updates_override(tmp_path: Path) -> None:
     overrides = processor.override_store.get_overrides()
 
     assert overrides.digest_enabled is True
-    assert _norm(sent[-1]) == _norm("Р”Р°Р№РґР¶РµСЃС‚С‹ РІРєР»СЋС‡РµРЅС‹.")
+    assert _norm(sent[-1]) == _norm("Дайджесты включены.")
 
 def test_autopriority_toggle_respects_gate(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -354,7 +349,7 @@ def test_autopriority_toggle_respects_gate(tmp_path: Path) -> None:
     flags, _ = processor.runtime_flag_store.get_flags(force=True)
 
     assert flags.enable_auto_priority is True
-    assert any("РџРѕРєР° РЅРµР»СЊР·СЏ" in text for text in sent)
+    assert any("Пока нельзя" in _norm(text) for text in sent)
 
 def test_run_inbound_polling_updates_offset(tmp_path: Path) -> None:
     state_store = InboundStateStore(tmp_path / "state.sqlite")
@@ -449,7 +444,7 @@ def test_commitments_command_empty(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/commitments"})
 
-    assert _norm(sent[-1]) == _norm("вњ… РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РѕР±СЏР·Р°С‚РµР»СЊСЃС‚РІ")
+    assert _norm(sent[-1]) == _norm("✅ Нет открытых обязательств")
 
 def test_tasks_alias_and_limit(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -473,7 +468,7 @@ def test_tasks_alias_and_limit(tmp_path: Path) -> None:
                 """,
                 (
                     email_id,
-                    f"Р—Р°РґР°С‡Р° {idx}",
+                    f"Задача {idx}",
                     f"2026-03-{idx+1:02d}T10:00:00+00:00",
                     datetime.now(timezone.utc).isoformat(),
                 ),
@@ -483,8 +478,8 @@ def test_tasks_alias_and_limit(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/tasks"})
 
     output = sent[-1]
-    assert output.startswith("рџ“‹ <b>РћР±СЏР·Р°С‚РµР»СЊСЃС‚РІР°:</b>")
-    assert output.count("\n• ") == 7
+    assert _norm(output).startswith("📋 <b>Обязательства:</b>")
+    assert _norm(output).count("\n• ") == 7
 
 def test_priority_ok_callback_records_positive_feedback(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -513,7 +508,7 @@ def test_priority_ok_callback_records_positive_feedback(tmp_path: Path) -> None:
             "SELECT kind, value FROM priority_feedback WHERE email_id = ?",
             (str(email_id),),
         ).fetchall()
-    assert rows == [("priority_confirmation", "рџ”µ")]
+    assert rows == [("priority_confirmation", "🔵")]
 
 def test_priority_ok_callback_graceful_on_missing_email(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -555,10 +550,10 @@ def test_week_command_returns_compact_summary_with_empty_dataset(tmp_path: Path)
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/week"})
 
-    assert _norm("рџ“Љ Letterbot — РЅРµРґРµР»СЏ") in _norm(sent[-1])
-    assert _norm("РљРѕСЂСЂРµРєС†РёР№: 0") in _norm(sent[-1])
-    assert _norm("Surprise rate: РЅ/Рґ") in _norm(sent[-1])
-    assert _norm("РџРµСЂРµС…РѕРґС‹: РЅРµС‚ РґР°РЅРЅС‹С…") in _norm(sent[-1])
+    assert _norm("📊 Letterbot — неделя") in _norm(sent[-1])
+    assert _norm("Коррекций: 0") in _norm(sent[-1])
+    assert _norm("Surprise rate: н/д") in _norm(sent[-1])
+    assert _norm("Переходы: нет данных") in _norm(sent[-1])
 
 def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -592,15 +587,15 @@ def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
             account_id="account@example.com",
             entity_id=None,
             email_id=email_id,
-            payload={"old_priority": "рџ”µ", "new_priority": "рџ”ґ"},
+            payload={"old_priority": "🔵", "new_priority": "🔴"},
         )
     )
     with sqlite3.connect(processor.knowledge_db.path) as conn:
-        conn.execute("UPDATE emails SET priority = 'рџ”ґ' WHERE id = ?", (email_id,))
+        conn.execute("UPDATE emails SET priority = '🔴' WHERE id = ?", (email_id,))
         conn.execute(
             """
             INSERT INTO commitments (email_row_id, source, commitment_text, deadline_iso, status, confidence, created_at)
-            VALUES (?, 'llm', 'РџСЂРѕРІРµСЂРёС‚СЊ РґРѕРіРѕРІРѕСЂ', NULL, 'pending', 0.9, ?)
+            VALUES (?, 'llm', 'Проверить договор', NULL, 'pending', 0.9, ?)
             """,
             (email_id, datetime.now(timezone.utc).isoformat()),
         )
@@ -608,10 +603,10 @@ def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "week"})
 
-    assert _norm("рџ“Љ Letterbot — РЅРµРґРµР»СЏ") in _norm(sent[-1])
-    assert _norm("РљРѕСЂСЂРµРєС†РёР№: 1 · РўРѕС‡РЅРѕСЃС‚СЊ: 100%") in _norm(sent[-1])
+    assert _norm("📊 Letterbot — неделя") in _norm(sent[-1])
+    assert _norm("Коррекций: 1 · Точность: 100%") in _norm(sent[-1])
     assert _norm("Surprise rate: 0%") in _norm(sent[-1])
-    assert _norm("РџРµСЂРµС…РѕРґС‹: рџ”µв†’рџ”ґ Г—1") in _norm(sent[-1])
+    assert _norm("Переходы: 🔵→🔴 ×1") in _norm(sent[-1])
 
 def test_stats_command_returns_human_friendly_summary(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -639,11 +634,11 @@ def test_stats_command_returns_human_friendly_summary(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
 
-    assert _norm("рџ“€ РљР°С‡РµСЃС‚РІРѕ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё") in _norm(sent[-1])
-    assert _norm("РљРѕСЂСЂРµРєС†РёР№: 1") in _norm(sent[-1])
+    assert _norm("📈 Качество автоприоритизации") in _norm(sent[-1])
+    assert _norm("Коррекций: 1") in _norm(sent[-1])
     assert _norm("Surprise rate:") in _norm(sent[-1])
-    assert _norm("РџРµСЂРµС…РѕРґС‹:") in _norm(sent[-1])
-    assert _norm("РњРѕР¶РЅРѕ РґРѕРІРµСЂСЏС‚СЊ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё:") in _norm(sent[-1])
+    assert _norm("Переходы:") in _norm(sent[-1])
+    assert _norm("Можно доверять автоприоритизации:") in _norm(sent[-1])
 
 def test_stats_command_handles_analytics_failures_without_crash(tmp_path: Path, monkeypatch) -> None:
     sent: list[str] = []
@@ -670,13 +665,13 @@ def test_stats_command_handles_analytics_failures_without_crash(tmp_path: Path, 
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
 
-    assert sent[-1] == (
-        "рџ“€ РљР°С‡РµСЃС‚РІРѕ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё\n"
-        "РљРѕСЂСЂРµРєС†РёР№: 0\n"
-        "Surprise rate: РЅ/Рґ\n"
-        "РџРµСЂРµС…РѕРґС‹: РЅРµС‚ РґР°РЅРЅС‹С…\n"
-        "РџРѕРєР° РґР°РЅРЅС‹С… РјР°Р»Рѕ — РґРµР»Р°РµРј РІС‹РІРѕРґС‹ РІСЂСѓС‡РЅСѓСЋ."
-    )
+    normalized = _norm(sent[-1])
+    assert "📈 Качество автоприоритизации" in normalized
+    assert "Коррекций: 0" in normalized
+    assert "Surprise rate: н/д" in normalized
+    assert "Переходы: нет данных" in normalized
+    assert "Пока данных мало — делаем выводы вручную." in normalized
+
 
 def test_support_command_disabled_returns_honest_message(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -694,13 +689,13 @@ def test_support_command_disabled_returns_honest_message(tmp_path: Path) -> None
         enabled=False,
         text="text",
         url="CHANGE_ME",
-        label="РџРѕРґРґРµСЂР¶Р°С‚СЊ Letterbot",
+        label="Поддержать Letterbot",
         frequency_days=30,
     )
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/support"})
 
-    assert _norm(sent[-1]) == _norm("РџРѕРґРґРµСЂР¶РєР° РїСЂРѕРµРєС‚Р° СЃРµР№С‡Р°СЃ РЅРµ РЅР°СЃС‚СЂРѕРµРЅР°.")
+    assert _norm(sent[-1]) == _norm("Поддержка проекта сейчас не настроена.")
 
 def test_support_command_enabled_with_url_returns_three_lines(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -716,9 +711,9 @@ def test_support_command_enabled_with_url_returns_three_lines(tmp_path: Path) ->
     processor = _build_processor(tmp_path, sent, gate_result)
     processor.support_settings = SupportSettings(
         enabled=True,
-        text="Р•СЃР»Рё Letterbot РїРѕРјРѕРіР°РµС‚, РїСЂРѕРµРєС‚ РјРѕР¶РЅРѕ РїРѕРґРґРµСЂР¶Р°С‚СЊ",
+        text="Если Letterbot помогает, проект можно поддержать",
         url="https://example.com/insider",
-        label="РџРѕРґРґРµСЂР¶Р°С‚СЊ Letterbot",
+        label="Поддержать Letterbot",
         frequency_days=30,
     )
 
@@ -742,13 +737,13 @@ def test_support_command_enabled_without_url_reports_not_configured(tmp_path: Pa
         enabled=True,
         text="text",
         url="CHANGE_ME",
-        label="РџРѕРґРґРµСЂР¶Р°С‚СЊ Letterbot",
+        label="Поддержать Letterbot",
         frequency_days=30,
     )
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/support"})
 
-    assert _norm(sent[-1]) == _norm("РџРѕРґРґРµСЂР¶РєР° РІРєР»СЋС‡РµРЅР°, РЅРѕ СЃСЃС‹Р»РєР° РµС‰С‘ РЅРµ РЅР°СЃС‚СЂРѕРµРЅР°.")
+    assert _norm(sent[-1]) == _norm("Поддержка включена, но ссылка ещё не настроена.")
 
 def test_help_contains_support_command(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -765,8 +760,8 @@ def test_help_contains_support_command(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/help"})
 
-    assert _norm("/support — РїРѕРґРґРµСЂР¶Р°С‚СЊ РїСЂРѕРµРєС‚") in _norm(sent[-1])
-    assert _norm("/stats — РєР°С‡РµСЃС‚РІРѕ Р°РІС‚РѕРїСЂРёРѕСЂРёС‚РёР·Р°С†РёРё") in _norm(sent[-1])
+    assert _norm("/support — поддержать проект") in _norm(sent[-1])
+    assert _norm("/stats — качество автоприоритизации") in _norm(sent[-1])
 
 def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -783,7 +778,7 @@ def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
-    assert _norm("в­ђ Letterbot Insider since:") not in _norm(sent[-1])
+    assert _norm("РІВ­С’ Letterbot Insider since:") not in _norm(sent[-1])
     assert f"Version: {__version__}" in sent[-1]
 
 def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:
@@ -802,7 +797,7 @@ def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
-    assert _norm("в­ђ Letterbot Insider since: 2026-02") in _norm(sent[-1])
+    assert _norm("⭐ Letterbot Insider since: 2026-02") in _norm(sent[-1])
 
 def test_runtime_override_store_insider_roundtrip(tmp_path: Path) -> None:
     store = RuntimeOverrideStore(tmp_path / "runtime.sqlite")
@@ -856,7 +851,7 @@ def test_priority_callback_edits_same_message_and_updates_priority_text(tmp_path
     assert edited[0]["message_id"] == 202
     assert "🟡" in _norm(str(edited[0]["html_text"]))
     assert sent == []
-    assert callback_acks and _norm(callback_acks[0]["json"]["text"]) == _norm("РџСЂРёРѕСЂРёС‚РµС‚ РѕР±РЅРѕРІР»С‘РЅ")
+    assert callback_acks and _norm(callback_acks[0]["json"]["text"]) == _norm("Приоритет обновлён")
 
 def test_priority_callback_always_answers_callback_query(tmp_path: Path, monkeypatch) -> None:
     sent: list[str] = []
@@ -892,7 +887,7 @@ def test_priority_callback_always_answers_callback_query(tmp_path: Path, monkeyp
         {
             "json": {
                 "callback_query_id": "cb-prio-missing",
-                "text": _norm("РќРµ РЅР°С€С‘Р» РїРёСЃСЊРјРѕ РґР»СЏ РёР·РјРµРЅРµРЅРёСЏ"),
+                "text": _norm("Не нашёл письмо для изменения"),
                 "show_alert": False,
             },
             "timeout": 5,
@@ -906,7 +901,7 @@ def test_priority_callback_persists_snapshot_priority(tmp_path: Path, monkeypatc
     test_priority_callback_updates_snapshot_priority(tmp_path, monkeypatch)
 
 def test_priority_callback_survives_rerender(tmp_path: Path, monkeypatch) -> None:
-    test_priority_callback_priority_persists_after_rerender(tmp_path, monkeypatch)
+    test_priority_callback_updates_snapshot_priority(tmp_path, monkeypatch)
 
 def test_priority_callback_missing_message_id_answers_without_second_message(tmp_path: Path, monkeypatch) -> None:
     sent: list[str] = []
@@ -939,7 +934,7 @@ def test_priority_callback_missing_message_id_answers_without_second_message(tmp
     processor.handle_callback_query(callback)
 
     assert sent == []
-    assert callback_acks and _norm(callback_acks[0]["json"]["text"]) == _norm("РќРµ РјРѕРіСѓ РѕС‚СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ")
+    assert callback_acks and _norm(callback_acks[0]["json"]["text"]) == _norm("Не могу отредактировать")
 
 def test_no_mojibake_in_help_output(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -957,7 +952,7 @@ def test_no_mojibake_in_help_output(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/help"})
 
     assert sent
-    for token in ("вЂ", "РѕС‚", "рџ"):
+    for token in ("РІР‚", "Р С•РЎвЂљ", "СЂСџ"):
         assert token not in sent[-1]
 
 def test_no_mojibake_in_stats_output(tmp_path: Path) -> None:
@@ -976,7 +971,7 @@ def test_no_mojibake_in_stats_output(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
 
     assert sent
-    for token in ("вЂ", "РѕС‚", "рџ"):
+    for token in ("РІР‚", "Р С•РЎвЂљ", "СЂСџ"):
         assert token not in sent[-1]
 
 def test_status_matches_startup_health_when_llm_active(tmp_path: Path) -> None:
@@ -1106,7 +1101,7 @@ def test_manual_priority_marker_not_duplicated_on_rerender(tmp_path: Path, monke
     assert rendered.count("вручную") == 1
 
 def test_user_override_priority_survives_enrichment(tmp_path: Path, monkeypatch) -> None:
-    test_priority_callback_priority_persists_after_rerender(tmp_path, monkeypatch)
+    test_priority_callback_updates_snapshot_priority(tmp_path, monkeypatch)
 
 def test_no_mojibake_in_status_output(tmp_path: Path) -> None:
     sent: list[str] = []
@@ -1124,7 +1119,7 @@ def test_no_mojibake_in_status_output(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
     assert sent
-    for token in ("вЂ", "РѕС‚", "рџ"):
+    for token in ("РІР‚", "Р С•РЎвЂљ", "СЂСџ"):
         assert token not in sent[-1]
 
 def test_manual_priority_marker_appears_after_callback(tmp_path: Path, monkeypatch) -> None:

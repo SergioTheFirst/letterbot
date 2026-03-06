@@ -66,6 +66,16 @@ telegram_chat_id = chat
     )
     collector = _Collector()
     monkeypatch.setattr(processor, "contract_event_emitter", collector)
+    monkeypatch.setattr(
+        processor,
+        "is_top_percentile",
+        lambda **kwargs: SimpleNamespace(
+            is_top=True,
+            anchored=True,
+            anchor_ts_utc=float(kwargs.get("anchor_ts_utc") or 0.0),
+        ),
+    )
+    monkeypatch.setattr(processor.budget_gate, "can_use_llm", lambda _account_email: True)
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         return DeliveryResult(delivered=True, retryable=False)
@@ -169,6 +179,16 @@ telegram_chat_id = chat
     )
     collector = _Collector()
     monkeypatch.setattr(processor, "contract_event_emitter", collector)
+    monkeypatch.setattr(
+        processor,
+        "is_top_percentile",
+        lambda **kwargs: SimpleNamespace(
+            is_top=True,
+            anchored=True,
+            anchor_ts_utc=float(kwargs.get("anchor_ts_utc") or 0.0),
+        ),
+    )
+    monkeypatch.setattr(processor.budget_gate, "can_use_llm", lambda _account_email: True)
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         return DeliveryResult(delivered=True, retryable=False)
@@ -238,6 +258,16 @@ password = secret
     )
     collector = _Collector()
     monkeypatch.setattr(processor, "contract_event_emitter", collector)
+    monkeypatch.setattr(
+        processor,
+        "is_top_percentile",
+        lambda **kwargs: SimpleNamespace(
+            is_top=True,
+            anchored=True,
+            anchor_ts_utc=float(kwargs.get("anchor_ts_utc") or 0.0),
+        ),
+    )
+    monkeypatch.setattr(processor.budget_gate, "can_use_llm", lambda _account_email: True)
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         return DeliveryResult(delivered=True, retryable=False)

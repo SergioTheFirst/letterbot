@@ -139,6 +139,7 @@ from mailbot_v26.priority.priority_engine_v2 import (
 )
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.clean_email import clean_email_body, segment_email_body
+from mailbot_v26.text.mojibake import normalize_mojibake_text as _normalize_mojibake_text_impl
 from .attention_gate import (
     AttentionGateInput,
     apply_attention_gate,
@@ -174,7 +175,64 @@ from mailbot_v26.ui.i18n import (
 
 logger = get_logger("mailbot")
 
-_SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd|отв|пер)\s*:\s*)+", re.IGNORECASE)
+_SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd|отв|пер|РѕС‚РІ|РїРµСЂ)\s*:\s*)+", re.IGNORECASE)
+
+
+@lru_cache(maxsize=2048)
+def _normalize_token(token: str) -> str:
+    return _normalized_lower(str(token or "")).strip()
+
+
+def _normalized_lower(text: str) -> str:
+    source = str(text or "")
+    normalized = _normalize_mojibake_text_impl(source)
+    if any(marker in normalized for marker in ("Р", "С", "рџ", "вЂ", "Ð", "Ñ")):
+        for encoding in ("cp1251", "latin-1", "cp1252"):
+            try:
+                candidate = normalized.encode(encoding).decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                continue
+            if candidate != normalized:
+                normalized = _normalize_mojibake_text_impl(candidate)
+                break
+    return normalized.casefold()
+
+
+def _contains_any(text: str, tokens: tuple[str, ...] | list[str]) -> bool:
+    raw = str(text or "").casefold()
+    normalized = _normalized_lower(text)
+    for token in tokens:
+        raw_token = str(token or "").casefold().strip()
+        normalized_token = _normalize_token(str(token or ""))
+        if raw_token and (raw_token in raw or raw_token in normalized):
+            return True
+        if normalized_token and (normalized_token in raw or normalized_token in normalized):
+            return True
+    return False
+
+
+_PRIORITY_RED = "🔴"
+_PRIORITY_YELLOW = "🟡"
+_PRIORITY_BLUE = "🔵"
+
+
+def _normalize_priority_value(priority: str) -> str:
+    normalized = _normalize_mojibake_text_impl(str(priority or "")).strip()
+    if normalized in {_PRIORITY_RED, _PRIORITY_YELLOW, _PRIORITY_BLUE}:
+        return normalized
+    aliases = {
+        "рџ”ґ": _PRIORITY_RED,
+        "СЂСџвЂќТ‘": _PRIORITY_RED,
+        "рџџЎ": _PRIORITY_YELLOW,
+        "СЂСџСџРЋ": _PRIORITY_YELLOW,
+        "рџ”µ": _PRIORITY_BLUE,
+        "СЂСџвЂќВµ": _PRIORITY_BLUE,
+    }
+    lowered = str(priority or "").casefold()
+    for token, value in aliases.items():
+        if token.casefold() == lowered:
+            return value
+    return _PRIORITY_BLUE
 
 
 def _normalize_subject_for_compare(text: str) -> str:
@@ -1011,7 +1069,7 @@ class InvalidTelegramPayload(ValueError):
 class MessageProcessor:
     _ATTACHMENT_SNIPPET_LIMIT = 120
     _MAX_ATTACHMENTS = 12
-    _VERB_ORDER = ("РџСЂРѕРІРµСЂРёС‚СЊ", "РћС‚РІРµС‚РёС‚СЊ", "РЎРґРµР»Р°С‚СЊ", "РЎРѕРіР»Р°СЃРѕРІР°С‚СЊ")
+    _VERB_ORDER = tuple(_normalize_mojibake_text_impl(v) for v in ("Проверить", "Ответить", "Сделать", "Согласовать"))
 
     def __init__(self, config: Any, state: Any) -> None:
         self.config = config
@@ -1209,19 +1267,20 @@ class MessageProcessor:
 
     @staticmethod
     def _choose_priority(subject: str, body: str, attachments: list[Attachment]) -> str:
-        combined = " ".join([subject or "", body or ""]).lower()
-        attachment_names = " ".join(att.filename.lower() for att in attachments if att.filename)
-        attachment_text = " ".join((att.text or "").lower() for att in attachments if att.text)
+        combined = _normalized_lower(" ".join([subject or "", body or ""]))
+        attachment_names = _normalized_lower(" ".join(att.filename for att in attachments if att.filename))
+        attachment_text = _normalized_lower(" ".join((att.text or "") for att in attachments if att.text))
         evidence = " ".join((combined, attachment_names, attachment_text)).strip()
-        if any(token in evidence for token in ("СЃСЂРѕС‡РЅРѕ", "urgent", "РѕРїР»Р°С‚", "security alert", "offline", "Р°РІР°СЂ")):
-            return "рџ”ґ"
-        if any(token in evidence for token in ("РґРѕРіРѕРІРѕСЂ", "contract", "СЃРѕРіР»Р°СЃРѕРІР°РЅ", "approval", "СЃС‡РµС‚", "invoice")):
-            return "рџџЎ"
-        if any(token in attachment_names for token in ("invoice", "СЃС‡РµС‚")):
-            return "рџџЎ"
-        if any(token in attachment_names for token in ("contract", "РґРѕРіРѕРІ")):
-            return "рџџЎ"
-        return "рџ”µ"
+        if _contains_any(evidence, ("срочно", "urgent", "оплат", "security alert", "offline", "авар")):
+            return _normalize_mojibake_text("🔴")
+        if _contains_any(evidence, ("договор", "contract", "согласован", "approval", "счет", "invoice")):
+            return _normalize_mojibake_text("🟡")
+        if _contains_any(attachment_names, ("invoice", "счет", "счёт")):
+            return _normalize_mojibake_text("🟡")
+        if _contains_any(attachment_names, ("contract", "договор")):
+            return _normalize_mojibake_text("🟡")
+        return _normalize_mojibake_text("🔵")
+
 
     @staticmethod
     def _is_image_attachment(attachment: Attachment) -> bool:
@@ -1253,45 +1312,65 @@ class MessageProcessor:
         attachments: list[Attachment],
         body_text: str = "",
     ) -> str:
-        normalized_mail_type = (mail_type or "").strip().upper()
-        if normalized_mail_type:
-            if normalized_mail_type.startswith("ACT") or "RECONCILIATION" in normalized_mail_type:
-                return "РџСЂРѕРІРµСЂРёС‚СЊ Р°РєС‚"
-            if normalized_mail_type.startswith("INVOICE") or normalized_mail_type.startswith("PAYMENT_REMINDER"):
-                return "РћРїР»Р°С‚РёС‚СЊ СЃС‡С‘С‚"
-            if normalized_mail_type.startswith("OVERDUE_INVOICE"):
-                return "РћРїР»Р°С‚РёС‚СЊ СЃС‡С‘С‚"
-            if normalized_mail_type.startswith("CONTRACT") or "AMENDMENT" in normalized_mail_type:
-                return "РџСЂРѕРІРµСЂРёС‚СЊ РґРѕРіРѕРІРѕСЂ"
+        def _out(text: str) -> str:
+            return _normalize_mojibake_text(text)
 
-        lowered = " ".join(
-            [
-                (subject or "").lower(),
-                (body_text or "").lower(),
-                " ".join((att.text or "").lower() for att in attachments if att.text),
-            ]
+        normalized_mail_type = _normalized_lower(mail_type).replace("_", "")
+        if normalized_mail_type:
+            if normalized_mail_type.startswith("act") or "reconciliation" in normalized_mail_type:
+                return _out("Проверить акт")
+            if normalized_mail_type.startswith("invoice") or normalized_mail_type.startswith("paymentreminder"):
+                return _out("Оплатить счёт")
+            if normalized_mail_type.startswith("overdueinvoice"):
+                return _out("Оплатить счёт")
+            if normalized_mail_type.startswith("contract") or "amendment" in normalized_mail_type:
+                return _out("Проверить договор")
+
+        lowered = _normalized_lower(
+            " ".join(
+                [
+                    subject or "",
+                    body_text or "",
+                    " ".join(att.text or "" for att in attachments if att.text),
+                ]
+            )
         )
-        if any(token in lowered for token in ("РЅРµРґРѕСЃС‚СѓРї", "offline", "Р°РІР°СЂРё", "РёРЅС†РёРґРµРЅС‚", "security", "СѓС‚РµС‡Рє", "РІР·Р»РѕРј", "phish", "promo", "СЃРєРёРґРє", "СЂР°СЃРїСЂРѕРґР°Р¶")):
-            return "РџСЂРѕРІРµСЂРёС‚СЊ"
-        if any(token in lowered for token in _FACT_PAYROLL_MARKERS):
-            return "РћР·РЅР°РєРѕРјРёС‚СЊСЃСЏ"
-        if any(token in lowered for token in ("СЃС‡РµС‚", "СЃС‡С‘С‚", "invoice", "РѕРїР»Р°С‚")):
-            return "РћРїР»Р°С‚РёС‚СЊ СЃС‡С‘С‚"
-        if any(token in lowered for token in ("РґРѕРіРѕРІРѕСЂ", "contract", "СЃРѕРіР»Р°С€РµРЅРё")):
-            return "РџСЂРѕРІРµСЂРёС‚СЊ РґРѕРіРѕРІРѕСЂ"
-        if "РїСЂР°Р№СЃ" in lowered or "С†РµРЅР°" in lowered or "С†РµРЅ" in lowered:
-            return "РџСЂРѕРІРµСЂРёС‚СЊ С†РµРЅС‹"
-        if any(att.filename.lower().endswith((".xls", ".xlsx")) for att in attachments if att.filename):
-            return "РџСЂРѕРІРµСЂРёС‚СЊ С‚Р°Р±Р»РёС†Сѓ"
-        return "РџСЂРѕРІРµСЂРёС‚СЊ РїРёСЃСЊРјРѕ"
+        if _contains_any(
+            lowered,
+            (
+                "недоступ",
+                "offline",
+                "авари",
+                "инцидент",
+                "security",
+                "утечк",
+                "взлом",
+                "phish",
+                "promo",
+                "скидк",
+                "распродаж",
+            ),
+        ):
+            return _out("Проверить")
+        if _contains_any(lowered, _FACT_PAYROLL_MARKERS):
+            return _out("Ознакомиться")
+        if _contains_any(lowered, ("счет", "счёт", "invoice", "оплат")):
+            return _out("Оплатить счёт")
+        if _contains_any(lowered, ("договор", "contract", "соглашени")):
+            return _out("Проверить договор")
+        if _contains_any(lowered, ("прайс", "цена", "цен")):
+            return _out("Проверить цены")
+        if any(str(att.filename or "").lower().endswith((".xls", ".xlsx")) for att in attachments if att.filename):
+            return _out("Проверить таблицу")
+        return _out("Проверить письмо")
 
 
 __all__ = ["Attachment", "AttachmentSummary", "InboundMessage", "MessageProcessor"]
 
 
 def _is_shadow_higher(shadow_priority: str, llm_priority: str) -> bool:
-    priority_order = {"рџ”µ": 0, "рџџЎ": 1, "рџ”ґ": 2}
-    return priority_order.get(shadow_priority, 0) > priority_order.get(llm_priority, 0)
+    priority_order = {"🔵": 0, "🟡": 1, "🔴": 2}
+    return priority_order.get(_normalize_priority_value(shadow_priority), 0) > priority_order.get(_normalize_priority_value(llm_priority), 0)
 
 
 def _lookup_sender_stats(from_email: str) -> dict[str, object]:
@@ -1691,18 +1770,18 @@ def _build_premium_clarity_facts(
 
 def _fact_type_label(label: str) -> str:
     return {
-        "РЎСѓРјРјР°": "amount",
-        "Р”Р°С‚Р°": "date",
-        "РќРѕРјРµСЂ": "doc_number",
+        "Сумма": "amount",
+        "Дата": "date",
+        "Номер": "doc_number",
     }.get(label, "other")
 
 
 def _fact_source_tag(tag: str) -> str:
     if not tag:
         return ""
-    if tag == "С‚РµРјР°":
+    if tag == "тема":
         return "subject"
-    if tag == "РїРёСЃСЊРјРѕ":
+    if tag == "письмо":
         return "body"
     return "attachment"
 
@@ -1721,8 +1800,6 @@ def _confidence_bucket(
     return "low"
 
 
-
-
 def _build_premium_clarity_attachments(
     attachments: list[dict[str, Any]],
     attachment_summaries: list[dict[str, Any]],
@@ -1738,9 +1815,9 @@ def _build_premium_clarity_attachments(
         if not summary_text:
             continue
         summary_by_name[filename.lower()] = summary_text
-    lines = [f"рџ“Ћ Р’Р»РѕР¶РµРЅРёСЏ ({len(attachments)}):"]
+    lines = [f"📎 Вложения ({len(attachments)}):"]
     for attachment in attachments[:3]:
-        raw_filename = attachment.get("filename") or "РІР»РѕР¶РµРЅРёРµ"
+        raw_filename = attachment.get("filename") or "вложение"
         filename = _escape_dynamic(strip_disallowed_emojis(raw_filename))
         summary_text = summary_by_name.get(str(raw_filename).strip().lower(), "")
         summary_text = _normalize_attachment_text(summary_text)
@@ -1755,7 +1832,7 @@ def _build_premium_clarity_attachments(
             lines.append(f"• {filename}")
     remaining = len(attachments) - 3
     if remaining > 0:
-        lines.append(f"... Рё РµС‰С‘ {remaining}")
+        lines.append(f"... и ещё {remaining}")
     return lines
 
 
@@ -1763,7 +1840,7 @@ def _format_confidence_dots(confidence_percent: int, scale: int) -> str:
     dots_scale = scale if scale in {5, 10} else 10
     filled = min(dots_scale, (confidence_percent * dots_scale) // 100)
     empty = dots_scale - filled
-    return f"{'в—Џ' * filled}{'в—‹' * empty}"
+    return f"{'●' * filled}{'○' * empty}"
 
 
 def _should_show_confidence_dots(
@@ -1803,7 +1880,7 @@ def _build_premium_clarity_spoiler_lines(
     closing = "</tg-spoiler>"
     if dots:
         closing = f"{closing} {dots}"
-    return ["<tg-spoiler>", "РџРѕРґСЂРѕР±РЅРµРµ:", *limited, closing]
+    return ["<tg-spoiler>", "Подробнее:", *limited, closing]
 
 
 def _enforce_premium_clarity_line_budget(
@@ -1889,15 +1966,15 @@ def _enforce_premium_clarity_line_budget(
 
 def _pick_action_emoji(action_text: str) -> str:
     if _is_urgent_action(action_text):
-        return "вљЎ"
+        return "⚡"
     if not action_text:
-        return "вљЎ"
+        return "⚡"
     lowered_action = action_text.lower()
-    if any(token in lowered_action for token in ("РѕС‚РІРµС‚", "РЅР°РїРёСЃ", "СЃРѕРѕР±С‰", "reply")):
-        return "рџ’¬"
-    if any(token in lowered_action for token in ("РїРѕР·Р¶Рµ", "РѕС‚Р»РѕР¶", "pause")):
-        return "вЏёпёЏ"
-    return "вљЎ"
+    if any(token in lowered_action for token in ("ответ", "напис", "сообщ", "reply")):
+        return "💬"
+    if any(token in lowered_action for token in ("позже", "отлож", "pause")):
+        return "⏸️"
+    return "⚡"
 
 
 def _is_urgent_action(action_text: str) -> bool:
@@ -1905,14 +1982,15 @@ def _is_urgent_action(action_text: str) -> bool:
     if not lowered_action:
         return False
     urgency_tokens = (
-        "СЃСЂРѕС‡РЅРѕ",
-        "РЅРµРјРµРґ",
-        "РєР°Рє РјРѕР¶РЅРѕ СЃРєРѕСЂРµРµ",
-        "СЃРµРіРѕРґРЅСЏ",
-        "РѕРїР»Р°С‚",
-        "СЃС‡РµС‚",
+        "срочно",
+        "немед",
+        "как можно скорее",
+        "сегодня",
+        "оплат",
+        "счет",
+        "счёт",
         "invoice",
-        "РґРѕ РєРѕРЅС†Р° РґРЅСЏ",
+        "до конца дня",
     )
     return any(token in lowered_action for token in urgency_tokens)
 
@@ -1930,82 +2008,82 @@ def _select_premium_short_action(
     normalized_evidence: str,
 ) -> str:
     tech_security_markers = (
-        "РЅРµРґРѕСЃС‚СѓРїРµРЅ",
-        "РЅРµРґРѕСЃС‚СѓРїРЅР°",
-        "РЅРµРґРѕСЃС‚СѓРїРЅРѕ",
+        "недоступен",
+        "недоступна",
+        "недоступно",
         "offline",
         "outage",
         "device unreachable",
-        "РЅРµ СѓРґР°РµС‚СЃСЏ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ",
-        "РЅРµ СѓРґР°С‘С‚СЃСЏ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ",
+        "не удается подключиться",
+        "не удаётся подключиться",
         "security alert",
-        "РІР°Р¶РЅРѕРµ РѕРїРѕРІРµС‰РµРЅРёРµ",
-        "РїРѕРґРѕР·СЂРёС‚РµР»СЊРЅС‹Р№ РІС…РѕРґ",
-        "Р°РІР°СЂ",
-        "СЃР±РѕР№",
+        "важное оповещение",
+        "подозрительный вход",
+        "авар",
+        "сбой",
     )
-    reconciliation_markers = ("Р°РєС‚ СЃРІРµСЂРєРё", "reconciliation")
+    reconciliation_markers = ("акт сверки", "reconciliation")
     signed_markers = (
         "signed contract",
         "signed agreement",
-        "РїРѕРґРїРёСЃР°РЅ РґРѕРіРѕРІРѕСЂ",
-        "РїРѕРґРїРёСЃР°РЅРѕ",
+        "подписан договор",
+        "подписано",
     )
     promo_markers = (
         "fyi",
-        "Рє СЃРІРµРґРµРЅРёСЋ",
+        "к сведению",
         "for your information",
-        "РёРЅС„РѕСЂРјР°С†РёРѕРЅ",
-        "РѕР·РЅР°РєРѕРј",
-        "РїСЂРѕРјРѕ",
-        "СЂР°СЃСЃС‹Р»Рє",
-        "РёРЅРІРµСЃС‚Рё",
-        "РґРѕС…РѕРґРЅРѕСЃС‚",
-        "РІРµР±РёРЅР°СЂ",
-        "Р°РєС†РёСЏ",
+        "информацион",
+        "ознаком",
+        "промо",
+        "рассылк",
+        "инвести",
+        "доходност",
+        "вебинар",
+        "акция",
     )
     payroll_markers = _FACT_PAYROLL_MARKERS
     invoice_markers = (
         "invoice",
-        "СЃС‡РµС‚",
-        "СЃС‡С‘С‚",
-        "СЃС‡РµС‚ в„–",
-        "СЃС‡С‘С‚ в„–",
-        "Рє РѕРїР»Р°С‚Рµ",
-        "СЃСЂРѕРє РѕРїР»Р°С‚С‹",
-        "РѕРїР»Р°С‚РёС‚СЊ РґРѕ",
-        "СЃСѓРјРјР°",
-        "РёС‚РѕРіРѕ",
-        "РІСЃРµРіРѕ",
-        "РѕРїР»Р°С‚",
+        "счет",
+        "счёт",
+        "счет №",
+        "счёт №",
+        "к оплате",
+        "срок оплаты",
+        "оплатить до",
+        "сумма",
+        "итого",
+        "всего",
+        "оплат",
     )
     strong_invoice_phrases = (
-        "СЃС‡РµС‚ РЅР° РѕРїР»Р°С‚",
-        "СЃС‡С‘С‚ РЅР° РѕРїР»Р°С‚",
+        "счет на оплат",
+        "счёт на оплат",
         "invoice",
-        "Рє РѕРїР»Р°С‚Рµ",
-        "СЃСЂРѕРє РѕРїР»Р°С‚С‹",
-        "РѕРїР»Р°С‚РёС‚СЊ РґРѕ",
-        "СЃС‡РµС‚ в„–",
-        "СЃС‡С‘С‚ в„–",
+        "к оплате",
+        "срок оплаты",
+        "оплатить до",
+        "счет №",
+        "счёт №",
     )
 
     if any(marker in normalized_evidence for marker in tech_security_markers):
-        return "РџСЂРѕРІРµСЂРёС‚СЊ"
+        return "Проверить"
     if normalized_mail_type.startswith("ACT") or "RECONCILIATION" in normalized_mail_type:
-        return "РЎРІРµСЂРёС‚СЊ"
+        return "Сверить"
     if any(marker in normalized_evidence for marker in reconciliation_markers):
-        return "РЎРІРµСЂРёС‚СЊ"
+        return "Сверить"
     if "SIGNED" in normalized_mail_type and any(
         token in normalized_mail_type for token in ("CONTRACT", "AGREEMENT")
     ):
-        return "Р—Р°С„РёРєСЃРёСЂРѕРІР°С‚СЊ"
+        return "Зафиксировать"
     if any(marker in normalized_evidence for marker in signed_markers):
-        return "Р—Р°С„РёРєСЃРёСЂРѕРІР°С‚СЊ"
+        return "Зафиксировать"
     if any(marker in normalized_evidence for marker in promo_markers):
-        return "РћР·РЅР°РєРѕРјРёС‚СЊСЃСЏ"
+        return "Ознакомиться"
     if any(marker in normalized_evidence for marker in payroll_markers):
-        return "РћР·РЅР°РєРѕРјРёС‚СЊСЃСЏ"
+        return "Ознакомиться"
 
     subject_invoice_hits = _count_marker_hits(normalized_subject, invoice_markers)
     body_invoice_hits = _count_marker_hits(normalized_body, invoice_markers)
@@ -2025,11 +2103,11 @@ def _select_premium_short_action(
             phrase in normalized_action for phrase in strong_invoice_phrases
         )
     if invoice_signal:
-        return "РћРїР»Р°С‚РёС‚СЊ"
+        return "Оплатить"
 
-    if any(token in normalized_action for token in ("РѕС‚РІРµС‚", "reply", "РЅР°РїРёСЃ")):
-        return "РћС‚РІРµС‚РёС‚СЊ"
-    return "РџСЂРѕРІРµСЂРёС‚СЊ"
+    if any(token in normalized_action for token in ("ответ", "reply", "напис")):
+        return "Ответить"
+    return "Проверить"
 
 
 def _build_premium_clarity_text(
@@ -2057,21 +2135,17 @@ def _build_premium_clarity_text(
     confidence_dots_scale: int,
     extraction_failed: bool,
 ) -> str:
-    priority = strip_disallowed_emojis(priority or "")
-    if priority not in {"рџ”ґ", "рџџЎ", "рџ”µ"}:
-        priority = "рџ”µ"
-    sender_display = from_email or from_name or "РЅРµРёР·РІРµСЃС‚РЅРѕ"
+    priority = _normalize_priority_value(strip_disallowed_emojis(priority or ""))
+    sender_display = from_email or from_name or "неизвестно"
     safe_sender = _escape_dynamic(strip_disallowed_emojis(sender_display))
-    safe_subject = _escape_dynamic(strip_disallowed_emojis(subject or "(Р±РµР· С‚РµРјС‹)"))
+    safe_subject = _escape_dynamic(strip_disallowed_emojis(subject or "(без темы)"))
     action_text = strip_disallowed_emojis(_resolve_action_line(action_line))
     normalized_mail_type = (mail_type or "").strip().upper()
-    normalized_action = re.sub(r"[\W_]+", " ", action_text.lower()).strip()
-    normalized_subject = re.sub(r"[\W_]+", " ", (subject or "").lower()).strip()
-    normalized_body = re.sub(
-        r"[\W_]+",
-        " ",
-        " ".join(part for part in (body_summary, body_text) if part).lower(),
-    ).strip()
+    normalized_action = _normalized_lower(re.sub(r"[\W_]+", " ", action_text).strip())
+    normalized_subject = _normalized_lower(re.sub(r"[\W_]+", " ", subject or "").strip())
+    normalized_body = _normalized_lower(
+        re.sub(r"[\W_]+", " ", " ".join(part for part in (body_summary, body_text) if part)).strip()
+    )
     evidence_text = " ".join(
         part
         for part in (
@@ -2129,7 +2203,7 @@ def _build_premium_clarity_text(
     )
     if fact_evidence:
         evidence_text = " ".join((evidence_text, fact_evidence)).strip()
-    normalized_evidence = re.sub(r"[\W_]+", " ", evidence_text.lower()).strip()
+    normalized_evidence = _normalized_lower(re.sub(r"[\W_]+", " ", evidence_text).strip())
     short_action = _select_premium_short_action(
         normalized_mail_type=normalized_mail_type,
         normalized_subject=normalized_subject,
@@ -2154,16 +2228,18 @@ def _build_premium_clarity_text(
     excerpt = tg_renderer._clean_excerpt(excerpt_source, max_lines=3)
 
     if attachments:
-        first_name = _escape_dynamic(strip_disallowed_emojis(str(attachments[0].get("filename") or "РІР»РѕР¶РµРЅРёРµ")))
+        first_name = _escape_dynamic(
+            strip_disallowed_emojis(str(attachments[0].get("filename") or "вложение"))
+        )
         if len(attachments) == 1:
-            attachment_line = f"рџ“Ћ 1 РІР»РѕР¶РµРЅРёРµ: {first_name}"
+            attachment_line = f"📎 1 вложение: {first_name}"
         else:
-            attachment_line = f"рџ“Ћ {len(attachments)} РІР»РѕР¶РµРЅРёСЏ"
+            attachment_line = f"📎 {len(attachments)} вложения"
     else:
-        attachment_line = "рџ“Ћ 0 РІР»РѕР¶РµРЅРёР№"
+        attachment_line = "📎 0 вложений"
 
     lines = [
-        f"{priority} РѕС‚ {safe_sender}:",
+        f"{priority} от {safe_sender}:",
         safe_subject,
         safe_action,
         "",
@@ -2322,7 +2398,7 @@ def _build_telegram_text(
             message_facts=message_facts,
             relationship_profile=relationship_profile,
         )
-        return append_watermark(rendered, html=True)
+        return append_watermark(_normalize_mojibake_text(rendered), html=True)
     fields = tg_renderer.apply_semantic_gates(
         action_line=resolved_action,
         summary=body_summary,
@@ -2345,7 +2421,7 @@ def _build_telegram_text(
         )
     if attachment_summary:
         lines.append(attachment_summary)
-    return append_watermark(tg_renderer.dedup_rendered_text("\n".join(lines)), html=True)
+    return append_watermark(_normalize_mojibake_text(tg_renderer.dedup_rendered_text("\n".join(lines))), html=True)
 
 def _build_progressive_telegram_payload(
     *,
@@ -2368,20 +2444,20 @@ def _normalize_action_line(action_line: str) -> str:
 
 
 def _resolve_action_line(action_line: str) -> str:
-    cleaned = _normalize_action_line(action_line)
+    cleaned = _normalize_mojibake_text(_normalize_action_line(action_line))
     if not cleaned:
-        return "РџСЂРѕРІРµСЂРёС‚СЊ"
+        return "Проверить"
     normalized = re.sub(r"[\W_]+", " ", cleaned.lower()).strip()
     generic_actions = {
-        "РґРµР№СЃС‚РІРёР№ РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ",
-        "РґРµР№СЃС‚РІРёРµ РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ",
-        "С‚СЂРµР±СѓРµС‚ СЂР°СЃСЃРјРѕС‚СЂРµРЅРёСЏ",
-        "РїСЂРѕРІРµСЂСЊС‚Рµ РІСЂСѓС‡РЅСѓСЋ",
+        "действий не требуется",
+        "действие не требуется",
+        "требует рассмотрения",
+        "проверьте вручную",
         "attention needed",
-        "РЅРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РґР°РЅРЅС‹С… РґР»СЏ РѕС†РµРЅРєРё",
+        "недостаточно данных для оценки",
     }
     if normalized in generic_actions:
-        return "РџСЂРѕРІРµСЂРёС‚СЊ"
+        return "Проверить"
     return cleaned
 
 
@@ -2467,47 +2543,47 @@ def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]
 
 
 _FACT_AMOUNT_RE = re.compile(
-    r"(\d{1,3}(?:[ \u00a0]\d{3})+|\d{4,})(?:[\.,]\d{1,2})?\s*(?:в‚Ѕ|СЂСѓР±\.?|rub|rur)?",
+    r"(\d{1,3}(?:[ \u00a0]\d{3})+|\d{4,})(?:[\.,]\d{1,2})?\s*(?:\u20bd|\u0440\u0443\u0431\.?|rub|rur|usd|\$|eur|\u20ac)?",
     re.IGNORECASE,
 )
 _FACT_DUE_RE = re.compile(
-    r"(?:РѕРїР»Р°С‚(?:РёС‚СЊ|Р°|Рµ)?\s*РґРѕ|СЃСЂРѕРє\s*РѕРїР»Р°С‚[С‹С‹]?|РґРѕ)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
+    r"(?:\u043e\u043f\u043b\u0430\u0442(?:\u0438\u0442\u044c|\u0430|\u0435)?\s*\u0434\u043e|\u0441\u0440\u043e\u043a\s*\u043e\u043f\u043b\u0430\u0442[\u044b\u0438]?|\u0434\u043e)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
     re.IGNORECASE,
 )
 _FACT_DATE_RE = re.compile(r"\b\d{2}\.\d{2}(?:\.\d{2,4})?\b")
 _FACT_DOC_NUMBER_RE = re.compile(
-    r"(?:СЃС‡[РµС‘]С‚|invoice|РґРѕРіРѕРІРѕСЂ|contract|Р°РєС‚)\s*(?:в„–|no\.?|n\s*В°)\s*([0-9a-zР°-СЏ\-/]{1,32})",
+    r"(?:\u0441\u0447[\u0435\u0451]\u0442|invoice|\u0434\u043e\u0433\u043e\u0432\u043e\u0440|contract|\u0430\u043a\u0442)\s*(?:\u2116|no\.?|n\s*\u00b0)\s*([0-9a-z\u0430-\u044f\-/]{1,32})",
     re.IGNORECASE,
 )
 _FACT_INVOICE_MARKERS = (
-    "СЃС‡РµС‚",
-    "СЃС‡С‘С‚",
+    "счет",
+    "счёт",
     "invoice",
-    "Рє РѕРїР»Р°С‚Рµ",
-    "РѕРїР»Р°С‚РёС‚СЊ",
-    "СЃСЂРѕРє РѕРїР»Р°С‚С‹",
-    "РёС‚РѕРіРѕ",
+    "к оплате",
+    "оплатить",
+    "срок оплаты",
+    "итого",
 )
 _FACT_PAYROLL_MARKERS = (
-    "СЂР°СЃС‡РµС‚РЅС‹Р№ Р»РёСЃС‚РѕРє",
-    "СЂР°СЃС‡С‘С‚РЅС‹Р№ Р»РёСЃС‚РѕРє",
-    "Р·Р°СЂРїР»Р°С‚",
-    "РЅР°С‡РёСЃР»РµРЅ",
-    "СѓРґРµСЂР¶Р°РЅ",
-    "РѕРєР»Р°Рґ",
-    "С‚Р°Р±РµР»СЊ",
-    "РІРµРґРѕРјРѕСЃС‚СЊ",
+    "расчетный листок",
+    "расчётный листок",
+    "зарплат",
+    "начислен",
+    "удержан",
+    "оклад",
+    "табель",
+    "ведомость",
 )
-_FACT_CONTRACT_MARKERS = ("РґРѕРіРѕРІРѕСЂ", "contract", "agreement", "РїРѕРґРїРёСЃ", "signature")
+_FACT_CONTRACT_MARKERS = ("договор", "contract", "agreement", "подпис", "signature")
 _FACT_INCIDENT_MARKERS = (
-    "РЅРµРґРѕСЃС‚СѓРї",
+    "недоступ",
     "offline",
     "outage",
     "security alert",
-    "РїРѕРґРѕР·СЂРёС‚РµР»СЊРЅС‹Р№ РІС…РѕРґ",
-    "Р°РІР°СЂ",
-    "РёРЅС†РёРґРµРЅС‚",
-    "СЃР±РѕР№",
+    "подозрительный вход",
+    "авар",
+    "инцидент",
+    "сбой",
 )
 _FACT_DECISION_SIGNAL_MARKERS = {
     "invoice": _FACT_INVOICE_MARKERS,
@@ -2515,23 +2591,40 @@ _FACT_DECISION_SIGNAL_MARKERS = {
     "contract": _FACT_CONTRACT_MARKERS,
     "incident": _FACT_INCIDENT_MARKERS,
 }
-_INVOICE_AMOUNT_POSITIVE_MARKERS = ("РёС‚РѕРіРѕ Рє РѕРїР»Р°С‚Рµ", "Рє РѕРїР»Р°С‚Рµ", "СЃСѓРјРјР° Рє РѕРїР»Р°С‚Рµ", "РёС‚РѕРіРѕ", "РёС‚РѕРіРѕРІС‹Р№ РїР»Р°С‚РµР¶", "РёС‚РѕРіРѕРІС‹Р№ РїР»Р°С‚С‘Р¶", "payable", "amount due")
-_PAYROLL_AMOUNT_NEGATIVE_MARKERS = ("РЅР°С‡РёСЃР»РµРЅРѕ", "СѓРґРµСЂР¶Р°РЅРѕ", "РІСЃРµРіРѕ РЅР°С‡РёСЃР»РµРЅРѕ", "РЅР°Р»РѕРі", "СЃС‚СЂР°С…РѕРІС‹Рµ", "Рє РІС‹РїР»Р°С‚Рµ")
-_PAYROLL_AMOUNT_POSITIVE_MARKERS = ("Рє РІС‹РїР»Р°С‚Рµ", "РёС‚РѕРіРѕ Рє РІС‹РїР»Р°С‚Рµ", "РЅР°С‡РёСЃР»РµРЅРѕ")
-_CONTEXT_REPLY_SUBJECT_MARKERS = ("re:", "РѕС‚РІРµС‚:", "reply:")
-_CONTEXT_FORWARD_SUBJECT_MARKERS = ("fw:", "fwd:", "РїРµСЂРµСЃР»Р°РЅРѕ:")
-_CONTEXT_CONFIRMATION_MARKERS = (
-    "РѕРїР»Р°С‚РёР»Рё",
-    "РїРѕРґС‚РІРµСЂР¶РґР°РµРј",
-    "СЃРѕРіР»Р°СЃРѕРІР°РЅРѕ",
-    "РїРѕР»СѓС‡РµРЅРѕ",
-    "СЃРїР°СЃРёР±Рѕ",
+_INVOICE_AMOUNT_POSITIVE_MARKERS = (
+    "итого к оплате",
+    "к оплате",
+    "сумма к оплате",
+    "итого",
+    "итоговый платеж",
+    "итоговый платёж",
+    "payable",
+    "amount due",
 )
-_CONTEXT_DISCUSSION_MARKERS = ("РёСЃРїСЂР°РІРёР»Рё", "РѕР±РЅРѕРІРёР»Рё", "РєРѕРјРјРµРЅС‚Р°СЂРёР№", "РїСЂР°РІРєР°", "РїСЂР°РІРєРё")
-_PAYMENT_ACTION_MARKERS = ("РѕРїР»Р°С‚", "payment", "pay")
-_CONTRACT_FINAL_ACTION_MARKERS = ("РїРѕРґРїРёСЃ", "СЃРѕРіР»Р°СЃ", "СѓС‚РІРµСЂРґ", "Р·Р°РєР»СЋС‡")
-_FACT_CURRENCY_RE = re.compile(r"(СЂСѓР±\.?|в‚Ѕ|usd|\$|eur|в‚¬)", re.IGNORECASE)
+_PAYROLL_AMOUNT_NEGATIVE_MARKERS = (
+    "начислено",
+    "удержано",
+    "всего начислено",
+    "налог",
+    "страховые",
+    "к выплате",
+)
+_PAYROLL_AMOUNT_POSITIVE_MARKERS = ("к выплате", "итого к выплате", "начислено")
+_CONTEXT_REPLY_SUBJECT_MARKERS = ("re:", "отв:", "reply:")
+_CONTEXT_FORWARD_SUBJECT_MARKERS = ("fw:", "fwd:", "переслано:")
+_CONTEXT_CONFIRMATION_MARKERS = (
+    "оплатили",
+    "подтверждаем",
+    "согласовано",
+    "получено",
+    "спасибо",
+)
+_CONTEXT_DISCUSSION_MARKERS = ("исправили", "обновили", "комментарий", "правка", "правки")
+_PAYMENT_ACTION_MARKERS = ("оплат", "payment", "pay")
+_CONTRACT_FINAL_ACTION_MARKERS = ("подпис", "соглас", "утверд", "заключ")
+_FACT_CURRENCY_RE = re.compile(r"(руб\.?|₽|usd|\$|eur|€)", re.IGNORECASE)
 _FACT_MAX_AMOUNT = 10_000_000_000
+
 
 _AMOUNT_POSITIVE_CONTEXT_MARKERS = tuple(
     dict.fromkeys((*_INVOICE_AMOUNT_POSITIVE_MARKERS, "total payable"))
@@ -2584,10 +2677,10 @@ _ATTACHMENT_CONTEXT_KEYWORDS = tuple(
 
 
 def _has_keyword_context(text: str, keywords: tuple[str, ...]) -> bool:
-    normalized = (text or "").lower()
+    normalized = _normalized_lower(text)
     if not normalized:
         return False
-    return any(keyword and keyword in normalized for keyword in keywords)
+    return any(keyword and _contains_any(normalized, (str(keyword),)) for keyword in keywords)
 
 
 def _extract_numbers_in_evidence_window(
@@ -2595,15 +2688,15 @@ def _extract_numbers_in_evidence_window(
     keywords: tuple[str, ...],
     window: int = 120,
 ) -> list[dict[str, Any]]:
-    source = str(text or "")
+    source = _normalize_mojibake_text(str(text or ""))
     if not source.strip():
         return []
 
-    lowered = source.lower()
+    lowered = _normalized_lower(source)
     candidates: list[dict[str, Any]] = []
     seen: set[tuple[int, int, str]] = set()
     normalized_keywords = [
-        str(keyword).strip().lower()
+        _normalize_token(str(keyword))
         for keyword in keywords
         if str(keyword).strip()
     ]
@@ -2619,7 +2712,7 @@ def _extract_numbers_in_evidence_window(
             right = min(len(source), index + keyword_len + window)
             segment = source[left:right]
             for match in _FACT_AMOUNT_RE.finditer(segment):
-                amount_value = " ".join(match.group(0).replace("\u00a0", " ").split())
+                amount_value = " ".join(match.group(0).replace(" ", " ").split())
                 global_start = left + match.start()
                 global_end = left + match.end()
                 dedupe_key = (global_start, global_end, amount_value)
@@ -2643,7 +2736,7 @@ def _extract_numbers_in_evidence_window(
         return candidates
 
     for match in _FACT_AMOUNT_RE.finditer(source):
-        amount_value = " ".join(match.group(0).replace("\u00a0", " ").split())
+        amount_value = " ".join(match.group(0).replace(" ", " ").split())
         global_start = match.start()
         global_end = match.end()
         context = lowered[max(0, global_start - 36) : min(len(lowered), global_end + 36)]
@@ -2728,7 +2821,7 @@ def _validate_message_facts(
         except ValueError:
             amount_value = 0
         plain_amount = re.fullmatch(r"\d+", amount_raw.replace(" ", "")) is not None
-        looks_like_table_row = plain_amount and len(amount_digits) <= 4
+        looks_like_table_row = plain_amount and len(amount_digits) <= 3
         if amount_value <= 10 or amount_value >= _FACT_MAX_AMOUNT or looks_like_table_row:
             validated["amount"] = ""
         else:
@@ -2778,16 +2871,16 @@ def _score_amount_candidate(
     doc_kind: str,
 ) -> int:
     score = 0
-    normalized_context = (context_text or "").lower()
-    if any(token in normalized_context for token in ("РёС‚РѕРіРѕ", "total")):
+    normalized_context = _normalized_lower(context_text)
+    if _contains_any(normalized_context, ("итого", "total")):
         score += 5
-    if doc_kind == "invoice" and any(token in normalized_context for token in _AMOUNT_POSITIVE_CONTEXT_MARKERS):
+    if doc_kind == "invoice" and _contains_any(normalized_context, _AMOUNT_POSITIVE_CONTEXT_MARKERS):
         score += 7
-    if doc_kind == "invoice" and any(token in normalized_context for token in _AMOUNT_NEGATIVE_CONTEXT_MARKERS):
+    if doc_kind == "invoice" and _contains_any(normalized_context, _AMOUNT_NEGATIVE_CONTEXT_MARKERS):
         score -= 8
-    if doc_kind == "payroll" and any(token in normalized_context for token in _PAYROLL_AMOUNT_POSITIVE_MARKERS):
+    if doc_kind == "payroll" and _contains_any(normalized_context, _PAYROLL_AMOUNT_POSITIVE_MARKERS):
         score += 6
-    if doc_kind == "payroll" and any(token in normalized_context for token in _AMOUNT_POSITIVE_CONTEXT_MARKERS):
+    if doc_kind == "payroll" and _contains_any(normalized_context, _AMOUNT_POSITIVE_CONTEXT_MARKERS):
         score -= 6
     if _FACT_CURRENCY_RE.search(normalized_context):
         score += 3
@@ -2795,32 +2888,31 @@ def _score_amount_candidate(
         score += 2
     if is_attachment_context:
         score += 1
-    if any(token in normalized_context for token in _AMOUNT_NEGATIVE_CONTEXT_MARKERS):
+    if _contains_any(normalized_context, _AMOUNT_NEGATIVE_CONTEXT_MARKERS):
         score -= 2
-    if any(token in normalized_context for token in ("СЃС‚СЂРѕРєР°", "row", "line")):
+    if _contains_any(normalized_context, ("строка", "row", "line")):
         score -= 3
     return score
 
 
-
 def _extract_table_total_amount(text: str) -> str:
-    source = str(text or "")
+    source = _normalize_mojibake_text(str(text or ""))
     if not source.strip():
         return ""
 
     for line in source.splitlines():
-        normalized_line = " ".join(line.lower().split())
+        normalized_line = _normalized_lower(" ".join(line.split()))
         if not normalized_line:
             continue
-        if not any(anchor in normalized_line for anchor in _TABLE_TOTAL_ANCHORS):
+        if not _contains_any(normalized_line, _TABLE_TOTAL_ANCHORS):
             continue
-        if any(marker in normalized_line for marker in _PAYROLL_AMOUNT_NEGATIVE_MARKERS):
+        if _contains_any(normalized_line, _PAYROLL_AMOUNT_NEGATIVE_MARKERS):
             continue
 
         best_amount = ""
         best_value = 0
         for match in _FACT_AMOUNT_RE.finditer(line):
-            candidate = " ".join(match.group(0).replace("\u00a0", " ").split())
+            candidate = " ".join(match.group(0).replace(" ", " ").split())
             digits = re.sub(r"[^0-9]", "", candidate)
             if not digits:
                 continue
@@ -2838,6 +2930,13 @@ def _extract_table_total_amount(text: str) -> str:
             return best_amount
     return ""
 
+
+def _normalize_amount_candidate(amount_value: str) -> str:
+    candidate = " ".join(str(amount_value or "").replace(" ", " ").split())
+    candidate = re.sub(r"\s*(?:usd|\$|eur|€)\s*$", "", candidate, flags=re.IGNORECASE).strip()
+    return candidate
+
+
 def _score_message_facts(
     facts: dict[str, Any],
     *,
@@ -2845,26 +2944,28 @@ def _score_message_facts(
     attachment_text: str = "",
 ) -> dict[str, Any]:
     scored = dict(facts)
-    source = str(evidence_text or "")
+    source = _normalize_mojibake_text(str(evidence_text or ""))
     if not source.strip():
         return scored
 
-    attachment_source = str(attachment_text or "")
+    attachment_source = _normalize_mojibake_text(str(attachment_text or ""))
     best_amount = ""
     best_score: int | None = None
     best_currency_hit = False
-    lower_source = source.lower()
-    doc_kind = str(scored.get("doc_kind") or "").strip().lower()
-    attachment_lower = attachment_source.lower()
-    table_total_amount = _extract_table_total_amount(attachment_source)
+    lower_source = _normalized_lower(source)
+    doc_kind = _normalized_lower(str(scored.get("doc_kind") or "")).strip()
+    attachment_lower = _normalized_lower(attachment_source)
+    table_total_amount = _normalize_amount_candidate(_extract_table_total_amount(attachment_source))
     attachment_has_currency = bool(_FACT_CURRENCY_RE.search(attachment_lower))
     candidates = _extract_numbers_in_evidence_window(
         source,
         _AMOUNT_EVIDENCE_KEYWORDS,
         window=120,
     )
+
     for candidate_item in candidates:
-        candidate = str(candidate_item.get("amount") or "").strip()
+        candidate_raw = str(candidate_item.get("amount") or "").strip()
+        candidate = _normalize_amount_candidate(candidate_raw)
         if not candidate:
             continue
         candidate_digits = re.sub(r"[^0-9]", "", candidate)
@@ -2875,22 +2976,24 @@ def _score_message_facts(
         except ValueError:
             continue
         plain_amount = re.fullmatch(r"\d+", candidate.replace(" ", "")) is not None
-        looks_like_table_row = plain_amount and len(candidate_digits) <= 4
+        looks_like_table_row = plain_amount and len(candidate_digits) <= 3
         if candidate_int <= 10 or candidate_int >= _FACT_MAX_AMOUNT or looks_like_table_row:
             continue
 
         candidate_start = int(candidate_item.get("start") or 0)
         candidate_end = int(candidate_item.get("end") or candidate_start)
-        context = str(
-            candidate_item.get("context")
-            or lower_source[max(0, candidate_start - 36) : min(len(lower_source), candidate_end + 36)]
+        context = _normalized_lower(
+            str(
+                candidate_item.get("context")
+                or lower_source[max(0, candidate_start - 36) : min(len(lower_source), candidate_end + 36)]
+            )
         )
-        has_invoice_context = any(token in context for token in _AMOUNT_POSITIVE_CONTEXT_MARKERS)
-        has_payroll_context = any(token in context for token in _AMOUNT_NEGATIVE_CONTEXT_MARKERS)
+        has_invoice_context = _contains_any(context, _AMOUNT_POSITIVE_CONTEXT_MARKERS)
+        has_payroll_context = _contains_any(context, _AMOUNT_NEGATIVE_CONTEXT_MARKERS)
         has_currency_context = bool(_FACT_CURRENCY_RE.search(context))
 
-        has_table_total_context = any(token in context for token in _TABLE_TOTAL_ANCHORS)
-        in_attachment = bool(attachment_source) and candidate in attachment_source
+        has_table_total_context = _contains_any(context, _TABLE_TOTAL_ANCHORS)
+        in_attachment = bool(attachment_source) and candidate_raw in attachment_source
 
         window_hit = bool(candidate_item.get("window_hit"))
         if not window_hit and not (has_invoice_context or has_currency_context):
@@ -2899,27 +3002,30 @@ def _score_message_facts(
             continue
         if in_attachment and doc_kind == "invoice" and not has_currency_context and not attachment_has_currency:
             continue
+
         candidate_score = _score_amount_candidate(
             candidate,
             context_text=context,
             is_attachment_context=in_attachment,
             doc_kind=doc_kind,
         )
-        prefix_context = lower_source[max(0, candidate_start - 20) : candidate_start]
-        if any(token in prefix_context for token in _AMOUNT_POSITIVE_CONTEXT_MARKERS):
+        prefix_context = _normalized_lower(lower_source[max(0, candidate_start - 20) : candidate_start])
+        if _contains_any(prefix_context, _AMOUNT_POSITIVE_CONTEXT_MARKERS):
             candidate_score += 6
         if table_total_amount and in_attachment:
-            if candidate == table_total_amount:
+            if _normalize_amount_candidate(candidate) == table_total_amount:
                 candidate_score += 12
             else:
                 candidate_score -= 6
         if in_attachment and doc_kind == "invoice" and not has_table_total_context and candidate != table_total_amount:
             candidate_score -= 2
-        candidate_currency_hit = bool(_FACT_CURRENCY_RE.search(candidate)) or has_currency_context
+
+        candidate_currency_hit = bool(_FACT_CURRENCY_RE.search(candidate_raw)) or has_currency_context
         if candidate_currency_hit:
             candidate_score += 4
         elif doc_kind == "invoice" and bool(_FACT_CURRENCY_RE.search(lower_source)):
             candidate_score -= 4
+
         if best_score is None or candidate_score > best_score:
             best_amount = candidate
             best_score = candidate_score
@@ -2963,7 +3069,24 @@ def _to_float_amount(value: str) -> float | None:
 
 
 def _extract_amount_for_keywords(text: str, keywords: tuple[str, ...]) -> float | None:
-    for item in _extract_numbers_in_evidence_window(text, keywords, window=120):
+    source = _normalize_mojibake_text(str(text or ""))
+    lowered = _normalized_lower(source)
+    normalized_keywords = [_normalize_token(k) for k in keywords if str(k or "").strip()]
+    keyword_amount_re = re.compile(r"\d+(?:[  ]\d{3})*(?:[\.,]\d+)?", re.IGNORECASE)
+
+    for keyword in normalized_keywords:
+        if not keyword:
+            continue
+        keyword_pattern = re.compile(rf"(?<![a-zа-я0-9]){re.escape(keyword)}(?![a-zа-я0-9])", re.IGNORECASE)
+        for keyword_match in keyword_pattern.finditer(lowered):
+            index = keyword_match.start()
+            segment = source[index : min(len(source), index + 48)]
+            for amount_match in keyword_amount_re.finditer(segment):
+                parsed = _to_float_amount(amount_match.group(0))
+                if parsed is not None:
+                    return parsed
+
+    for item in _extract_numbers_in_evidence_window(source, keywords, window=120):
         parsed = _to_float_amount(item.get("amount"))
         if parsed is not None:
             return parsed
@@ -3075,6 +3198,11 @@ def _consistency_check_message_facts(
         flags=re.IGNORECASE,
     )
     invoice_date = _parse_ddmmyyyy(invoice_date_match.group(1)) if invoice_date_match else None
+    if due_date is not None and invoice_date is None:
+        date_candidates = [_parse_ddmmyyyy(token) for token in _FACT_DATE_RE.findall(source_text)]
+        date_candidates = [item for item in date_candidates if item is not None]
+        if date_candidates:
+            invoice_date = date_candidates[0]
     if due_date is not None and invoice_date is not None and due_date <= invoice_date:
         checked["due_date"] = ""
         issues.append("due_date_not_after_invoice_date")
@@ -3099,18 +3227,19 @@ def _collect_message_facts(
     attachments: list[dict[str, Any]],
     mail_type: str,
 ) -> dict[str, Any]:
-    cleaned_body_text = _main_body_for_facts(body_text)
+    normalized_subject = _normalize_mojibake_text(subject)
+    cleaned_body_text = _normalize_mojibake_text(_main_body_for_facts(body_text))
     pdf_attachment_texts: list[str] = []
     table_attachment_texts: list[str] = []
     other_attachment_texts: list[str] = []
     attachment_facts: list[str] = []
 
     for attachment in attachments[:6]:
-        text = str(attachment.get("text") or "").strip()
-        if not text:
+        text_value = _normalize_mojibake_text(str(attachment.get("text") or "")).strip()
+        if not text_value:
             continue
 
-        filename = str(attachment.get("filename") or "")
+        filename = _normalize_mojibake_text(str(attachment.get("filename") or ""))
         content_type = attachment.get("content_type") or attachment.get("type")
         doc_type = _detect_attachment_doc_type(
             filename=filename,
@@ -3119,17 +3248,17 @@ def _collect_message_facts(
         context_source = " ".join(
             part
             for part in (
-                subject,
+                normalized_subject,
                 cleaned_body_text,
                 filename,
-                text[:240],
+                text_value[:240],
             )
             if part
         )
         if doc_type == "TABLE" and not _has_keyword_context(context_source, _ATTACHMENT_CONTEXT_KEYWORDS):
             continue
 
-        compact_text = text[:300]
+        compact_text = text_value[:300]
         lowered_filename = filename.lower()
         if lowered_filename.endswith(".pdf"):
             pdf_attachment_texts.append(compact_text)
@@ -3138,24 +3267,28 @@ def _collect_message_facts(
         else:
             other_attachment_texts.append(compact_text)
 
-        fact = pick_attachment_fact(text, filename, doc_type)
+        fact = pick_attachment_fact(text_value, filename, doc_type)
         if fact:
-            attachment_facts.append(fact)
+            attachment_facts.append(_normalize_mojibake_text(fact))
 
-    evidence_text = " ".join(
-        part
-        for part in (
-            subject,
-            cleaned_body_text,
-            " ".join(pdf_attachment_texts),
-            " ".join(other_attachment_texts),
-            " ".join(table_attachment_texts),
-            " ".join(attachment_facts),
+    evidence_text = _normalize_mojibake_text(
+        " ".join(
+            part
+            for part in (
+                normalized_subject,
+                cleaned_body_text,
+                " ".join(pdf_attachment_texts),
+                " ".join(other_attachment_texts),
+                " ".join(table_attachment_texts),
+                " ".join(attachment_facts),
+            )
+            if part
         )
-        if part
     )
-    lowered = evidence_text.lower()
-    normalized_mail_type = (mail_type or "").upper()
+    lowered = _normalized_lower(evidence_text)
+    normalized_mail_type = _normalized_lower(mail_type).replace("_", "")
+    explicit_invoice = normalized_mail_type.startswith("invoice")
+    explicit_payroll = normalized_mail_type.startswith("payroll")
 
     amount = ""
     amount_candidates = _extract_numbers_in_evidence_window(
@@ -3163,37 +3296,48 @@ def _collect_message_facts(
         _AMOUNT_EVIDENCE_KEYWORDS,
         window=120,
     )
+    attachment_source = " ".join((" ".join(pdf_attachment_texts), " ".join(table_attachment_texts), " ".join(other_attachment_texts))).strip()
+    attachment_source_norm = _normalized_lower(attachment_source)
     for candidate_item in amount_candidates:
-        candidate_value = str(candidate_item.get("amount") or "").strip()
+        candidate_value_raw = str(candidate_item.get("amount") or "").strip()
+        candidate_value = _normalize_amount_candidate(candidate_value_raw)
         if not candidate_value:
             continue
-        context = str(candidate_item.get("context") or "")
-        if any(token in context for token in _AMOUNT_POSITIVE_CONTEXT_MARKERS) or _FACT_CURRENCY_RE.search(context):
+        context = _normalized_lower(str(candidate_item.get("context") or ""))
+        has_positive = _contains_any(context, _AMOUNT_POSITIVE_CONTEXT_MARKERS)
+        has_currency = bool(_FACT_CURRENCY_RE.search(context)) or bool(_FACT_CURRENCY_RE.search(candidate_value_raw))
+        in_attachment = bool(attachment_source_norm) and candidate_value_raw in attachment_source
+        if explicit_invoice and in_attachment and not has_currency:
+            continue
+        if has_positive or has_currency:
             amount = candidate_value
             break
-    if not amount and amount_candidates:
-        amount = str(amount_candidates[0].get("amount") or "").strip()
+    if not amount and amount_candidates and not explicit_invoice:
+        amount = _normalize_amount_candidate(str(amount_candidates[0].get("amount") or "").strip())
 
     due_date = ""
     due_match = _FACT_DUE_RE.search(evidence_text)
     if due_match:
         due_date = due_match.group(1)
-    elif any(token in lowered for token in ("РґРѕ", "СЃСЂРѕРє", "РґРµРґР»Р°Р№РЅ", "deadline")):
+    elif _contains_any(lowered, ("до", "срок", "deadline")):
+        generic_date = _FACT_DATE_RE.search(evidence_text)
+        due_date = generic_date.group(0) if generic_date else ""
+    if not due_date and _contains_any(lowered, ("счет", "счёт", "invoice", "оплат", "due")):
         generic_date = _FACT_DATE_RE.search(evidence_text)
         due_date = generic_date.group(0) if generic_date else ""
 
     doc_number_match = _FACT_DOC_NUMBER_RE.search(evidence_text)
     doc_number = doc_number_match.group(1) if doc_number_match else ""
-    payroll_signal = normalized_mail_type.startswith("PAYROLL") or any(marker in lowered for marker in _FACT_PAYROLL_MARKERS)
-    invoice_signal = (normalized_mail_type.startswith("INVOICE") or any(marker in lowered for marker in _FACT_INVOICE_MARKERS)) and not payroll_signal
+    payroll_signal = explicit_payroll or (not explicit_invoice and _contains_any(lowered, _FACT_PAYROLL_MARKERS))
+    invoice_signal = (explicit_invoice or _contains_any(lowered, _FACT_INVOICE_MARKERS)) and not payroll_signal
     contract_signal = (
-        normalized_mail_type.startswith("CONTRACT")
-        or "AGREEMENT" in normalized_mail_type
-        or any(marker in lowered for marker in _FACT_CONTRACT_MARKERS)
+        normalized_mail_type.startswith("contract")
+        or "agreement" in normalized_mail_type
+        or _contains_any(lowered, _FACT_CONTRACT_MARKERS)
     )
     incident_signal = (
-        normalized_mail_type in {"INCIDENT", "SECURITY_ALERT"}
-        or any(marker in lowered for marker in _FACT_INCIDENT_MARKERS)
+        normalized_mail_type in {"incident", "securityalert"}
+        or _contains_any(lowered, _FACT_INCIDENT_MARKERS)
     )
 
     doc_kind = ""
@@ -3328,12 +3472,12 @@ def _find_duplicate_document_event(
 
 
 def _soften_duplicate_action(action_line: str) -> str:
-    normalized = (action_line or "").strip().lower()
+    normalized = _normalized_lower((action_line or "").strip())
     if not normalized:
-        return "Р—Р°С„РёРєСЃРёСЂРѕРІР°С‚СЊ"
-    if any(token in normalized for token in ("Р·Р°С„РёРєСЃ", "РїСЂРѕРІРµСЂ", "РѕР·РЅР°РєРѕРј", "РѕС‚РІРµС‚")):
-        return action_line
-    return "Р—Р°С„РёРєСЃРёСЂРѕРІР°С‚СЊ"
+        return _normalize_mojibake_text("Зафиксировать")
+    if _contains_any(normalized, ("зафикс", "провер", "ознаком", "ответ")):
+        return _normalize_mojibake_text(action_line)
+    return _normalize_mojibake_text("Зафиксировать")
 
 
 def _parse_interpretation_amount(raw_amount: Any) -> float | None:
@@ -3409,44 +3553,7 @@ def _is_meaningful_summary(summary: str) -> bool:
 
 
 def _normalize_mojibake_text(text: str) -> str:
-    source = str(text or "")
-    if not source:
-        return ""
-    if not any(marker in source for marker in ("Р", "С", "вЂ", "рџ")):
-        return source
-
-    protected_parts: list[str] = []
-    placeholders: dict[str, str] = {}
-    protected_index = 0
-    for char in source:
-        try:
-            char.encode("cp1251")
-            protected_parts.append(char)
-        except UnicodeEncodeError:
-            token = f"__mb_{protected_index}__"
-            placeholders[token] = char
-            protected_parts.append(token)
-            protected_index += 1
-    protected = "".join(protected_parts)
-
-    repaired = protected
-    try:
-        repaired = protected.encode("cp1251").decode("utf-8")
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        repaired = protected
-
-    for token, char in placeholders.items():
-        repaired = repaired.replace(token, char)
-
-    replacements = {
-        "—": "—",
-        "–": "–",
-        "…": "…",
-        "•": "•",
-    }
-    for bad, good in replacements.items():
-        repaired = repaired.replace(bad, good)
-    return repaired
+    return _normalize_mojibake_text_impl(str(text or ""))
 
 
 def _validate_telegram_markup(text: str) -> None:
@@ -3475,13 +3582,20 @@ def validate_tg_payload(text: str, ctx: EmailContext) -> str:
     has_attachments = ctx.attachments_count > 0
     if not _is_meaningful_summary(summary) and not has_attachments:
         raise InvalidTelegramPayload("summary_invalid")
-    action_line = ctx.action_line.strip() or "Р”РµР№СЃС‚РІРёР№ РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ"
+    action_line = ctx.action_line.strip() or "Действий не требуется"
     if not action_line:
         raise InvalidTelegramPayload("missing_action")
-    normalized_text = text.lower()
+    normalized_text = _normalized_lower(text)
     has_attachment_marker = any(
         marker in normalized_text
-        for marker in ("РІР»РѕР¶", "рџ“Ћ", "рџ’°", "Р°РєС‚ СЃРІРµСЂРєРё", "СЃС‡С‘С‚")
+        for marker in (
+            "влож",
+            "📎",
+            "💰",
+            "акт сверки",
+            "счёт",
+            "счет",
+        )
     )
     if ctx.attachments_count > 0 and not has_attachment_marker:
         raise InvalidTelegramPayload("attachments missing")
@@ -3495,38 +3609,21 @@ def validate_tg_payload(text: str, ctx: EmailContext) -> str:
 
 def _build_tg_fallback(
     *,
-    priority: str = "рџ”µ",
+    priority: str = "🔵",
     subject: str,
     from_email: str,
     attachments: list[dict[str, Any]] | None = None,
     attachment_summary: str | None = None,
 ) -> str:
-    if attachment_summary is None:
-        return append_watermark(
-            tg_renderer.build_tg_fallback(
-            priority=priority,
-            subject=subject,
-            from_email=from_email,
-            attachments=attachments or [],
-            ),
-            html=True,
-        )
-    safe_subject = escape_tg_html(subject or "(\u0431\u0435\u0437 \u0442\u0435\u043c\u044b)")
-    safe_sender = escape_tg_html(from_email or "\u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e")
-    if attachment_summary is None:
-        attachment_summary = _build_attachment_summary(
-            _build_attachment_details(attachments or [])
-        )
-    if not attachment_summary:
-        attachment_summary = "Р’Р»РѕР¶РµРЅРёСЏ: 0"
-    lines = [
-        "РџРёСЃСЊРјРѕ РїРѕР»СѓС‡РµРЅРѕ",
-        f"РћС‚: {safe_sender}",
-        f"РўРµРјР°: {safe_subject}",
-        "РћСЃРЅРѕРІРЅРѕР№ С‚РµРєСЃС‚ РЅРµ СѓРґР°Р»РѕСЃСЊ Р±РµР·РѕРїР°СЃРЅРѕ РѕС‚РѕР±СЂР°Р·РёС‚СЊ.",
-        attachment_summary,
-    ]
-    return append_watermark("\n".join(lines), html=True)
+    rendered = tg_renderer.build_tg_fallback(
+        priority=priority,
+        subject=subject,
+        from_email=from_email,
+        attachments=attachments or [],
+    )
+    if attachment_summary:
+        rendered = f"{rendered}\n{escape_tg_html(attachment_summary)}"
+    return append_watermark(rendered, html=True)
 
 
 def _build_tg_short_template(*, priority: str, subject: str, from_email: str) -> str:
@@ -3545,12 +3642,12 @@ def _build_tg_plain_text(
     action_line: str,
     attachments: list[dict[str, Any]],
 ) -> str:
-    safe_subject = escape_tg_html(subject or "(\u0431\u0435\u0437 \u0442\u0435\u043c\u044b)")
-    safe_sender = escape_tg_html(from_email or "\u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e")
+    safe_subject = escape_tg_html(subject or "(без темы)")
+    safe_sender = escape_tg_html(from_email or "неизвестно")
     resolved_action = escape_tg_html(_resolve_action_line(action_line))
-    lines = [f"{priority} РѕС‚ {safe_sender}:", safe_subject, resolved_action]
+    lines = [f"{priority} от {safe_sender}:", safe_subject, resolved_action]
     if attachments:
-        lines.append(f"Р’Р»РѕР¶РµРЅРёСЏ: {len(attachments)}")
+        lines.append(f"Вложения: {len(attachments)}")
     return "\n".join(lines)
 
 
@@ -3578,7 +3675,7 @@ def _build_insights_section(
         recommendation = _sanitize_preview_line(insight.recommendation)
         lines.append(f"• {title} ({severity})")
         lines.append(f"  {explanation}")
-        lines.append(f"  Р РµРєРѕРјРµРЅРґР°С†РёСЏ: {recommendation}")
+        lines.append(f"  Рекомендация: {recommendation}")
     return "\n".join(lines)
 
 
@@ -3614,22 +3711,22 @@ def _build_signal_hints(insights: list[Insight]) -> list[str]:
         normalized_expl = explanation.lower()
         if (
             "silence" in insight_type
-            or "РјРѕР»С‡" in insight_type
+            or "молч" in insight_type
             or "silence" in normalized_expl
-            or "РјРѕР»С‡РёС‚" in normalized_expl
+            or "молчит" in normalized_expl
         ) and "silence" not in seen_types:
             if explanation:
-                hints.append(f"вљ  {explanation}")
+                hints.append(f"⚠ {explanation}")
                 seen_types.add("silence")
                 continue
         if (
             "deadlock" in insight_type
-            or "Р±РµР· РѕС‚РІРµС‚Р°" in insight_type
+            or "без ответа" in insight_type
             or "deadlock" in normalized_expl
-            or "Р±РµР· РѕС‚РІРµС‚Р°" in normalized_expl
+            or "без ответа" in normalized_expl
         ) and "deadlock" not in seen_types:
             if explanation:
-                hints.append(f"рџ”Ѓ {explanation}")
+                hints.append(f"🔁 {explanation}")
                 seen_types.add("deadlock")
                 continue
     return hints
@@ -3851,7 +3948,7 @@ def build_telegram_payload(
         if insights_section:
             telegram_text = f"{telegram_text}{escape_tg_html(insights_section)}"
     if context.preview_hint:
-        telegram_text = f"{telegram_text}\nрџ’Ў {escape_tg_html(_sanitize_preview_line(context.preview_hint))}"
+        telegram_text = f"{telegram_text}\n💡 {escape_tg_html(_sanitize_preview_line(context.preview_hint))}"
     if render_mode != TelegramRenderMode.FULL or payload_invalid:
         fallback_reason = ",".join(fallback_reasons) if fallback_reasons else "payload_validation_failed"
         event_emitter.emit(
@@ -4141,16 +4238,17 @@ def _build_heuristic_summary(
 def _build_heuristic_action_line(*, priority: str, message_facts: dict[str, Any] | None = None) -> str:
     facts = message_facts or {}
     if facts.get("incident_signal"):
-        return "Р—Р°С„РёРєСЃРёСЂРѕРІР°С‚СЊ"
+        return "Зафиксировать"
     if facts.get("invoice_signal"):
-        return "РћРїР»Р°С‚РёС‚СЊ"
+        return "Оплатить"
     if facts.get("contract_signal"):
-        return "РџСЂРѕРІРµСЂРёС‚СЊ"
-    if priority == "рџ”ґ":
-        return "РЎСЂРѕС‡РЅРѕ С‚СЂРµР±СѓРµС‚ РІРЅРёРјР°РЅРёСЏ"
-    if priority == "рџџЎ":
-        return "РўСЂРµР±СѓРµС‚ СЂР°СЃСЃРјРѕС‚СЂРµРЅРёСЏ"
-    return "РћР·РЅР°РєРѕРјРёС‚СЊСЃСЏ"
+        return "Проверить"
+    normalized_priority = _normalize_mojibake_text(priority)
+    if normalized_priority == "🔴":
+        return "Срочно требует внимания"
+    if normalized_priority == "🟡":
+        return "Требует рассмотрения"
+    return "Ознакомиться"
 
 
 def _build_message_decision(
@@ -4171,53 +4269,60 @@ def _build_message_decision(
         body_text=body_text,
         attachments=attachments or [],
     )
-    resolved_action = (action_line or "").strip() or _build_heuristic_action_line(
+    resolved_action = _normalize_mojibake_text((action_line or "").strip()) or _build_heuristic_action_line(
         priority=priority,
         message_facts=message_facts,
     )
-    if doc_kind == "invoice" and resolved_action in {"РџСЂРѕРІРµСЂРёС‚СЊ", "РџСЂРѕРІРµСЂРёС‚СЊ РїРёСЃСЊРјРѕ"}:
-        resolved_action = "РћРїР»Р°С‚РёС‚СЊ"
-    if doc_kind == "contract" and resolved_action in {"РџСЂРѕРІРµСЂРёС‚СЊ", "РџСЂРѕРІРµСЂРёС‚СЊ РїРёСЃСЊРјРѕ"}:
-        resolved_action = "РџСЂРѕРІРµСЂРёС‚СЊ РґРѕРіРѕРІРѕСЂ"
-    if doc_kind == "incident" and "РѕРїР»Р°С‚" in resolved_action.lower():
-        resolved_action = "Р—Р°С„РёРєСЃРёСЂРѕРІР°С‚СЊ"
-    if doc_kind == "payroll" and "РѕРїР»Р°С‚" in resolved_action.lower():
-        resolved_action = "РћР·РЅР°РєРѕРјРёС‚СЊСЃСЏ"
-    payment_action_hits = _count_marker_hits((action_line or "").lower(), ("РѕРїР»Р°С‚", "СЃС‡РµС‚", "СЃС‡С‘С‚", "invoice"))
-    if doc_kind == "invoice" and confidence < 0.45 and resolved_action == "РћРїР»Р°С‚РёС‚СЊ" and payment_action_hits < 2:
-        resolved_action = "РџСЂРѕРІРµСЂРёС‚СЊ"
+    resolved_action_lower = _normalized_lower(resolved_action)
+
+    if doc_kind == "invoice" and resolved_action_lower in {"проверить", "проверить письмо"}:
+        resolved_action = "Оплатить"
+    if doc_kind == "contract" and resolved_action_lower in {"проверить", "проверить письмо"}:
+        resolved_action = "Проверить договор"
+    if doc_kind == "incident" and "оплат" in resolved_action_lower:
+        resolved_action = "Зафиксировать"
+    if doc_kind == "payroll" and "оплат" in resolved_action_lower:
+        resolved_action = "Ознакомиться"
+
+    payment_action_hits = _count_marker_hits(
+        _normalized_lower(action_line or ""),
+        ("оплат", "счет", "счёт", "invoice"),
+    )
+    if doc_kind == "invoice" and confidence < 0.45 and _normalized_lower(resolved_action) == "оплатить" and payment_action_hits < 2:
+        resolved_action = "Проверить"
+
     if (
         context == "CONFIRMATION"
         and message_facts.get("invoice_signal")
-        and any(marker in resolved_action.lower() for marker in _PAYMENT_ACTION_MARKERS)
+        and _contains_any(_normalized_lower(resolved_action), _PAYMENT_ACTION_MARKERS)
     ):
-        resolved_action = "Р—Р°С„РёРєСЃРёСЂРѕРІР°С‚СЊ"
+        resolved_action = "Зафиксировать"
     if (
         context == "DISCUSSION"
         and message_facts.get("contract_signal")
-        and any(marker in resolved_action.lower() for marker in _CONTRACT_FINAL_ACTION_MARKERS)
+        and _contains_any(_normalized_lower(resolved_action), _CONTRACT_FINAL_ACTION_MARKERS)
     ):
-        resolved_action = "РћР±СЃСѓРґРёС‚СЊ РїСЂР°РІРєРё"
+        resolved_action = "Обсудить правки"
 
-    resolved_summary = summary
+    resolved_summary = _normalize_mojibake_text(summary)
     if doc_kind == "invoice":
         tokens = " ".join(
             str(value)
             for value in (message_facts.get("amount"), message_facts.get("due_date"))
             if value
         )
-        if tokens and not summary:
-            resolved_summary = f"РЎС‡РµС‚ Рє РѕРїР»Р°С‚Рµ: {tokens}".strip()
+        if tokens and not resolved_summary:
+            resolved_summary = f"Счёт к оплате: {tokens}".strip()
     if doc_kind == "payroll":
         message_facts["due_date"] = ""
         if not str(message_facts.get("amount") or "").strip():
-            resolved_summary = summary or ""
+            resolved_summary = resolved_summary or ""
 
     return MessageDecision(
-        priority=priority,
-        action=resolved_action,
+        priority=_normalize_mojibake_text(priority),
+        action=_normalize_mojibake_text(resolved_action),
         facts=message_facts,
-        summary=resolved_summary,
+        summary=_normalize_mojibake_text(resolved_summary),
         doc_kind=doc_kind,
         amount=str(message_facts.get("amount") or ""),
         due_date=str(message_facts.get("due_date") or ""),
@@ -4259,17 +4364,16 @@ def _build_heuristic_attachment_summaries(attachments: list[dict[str, Any]]) -> 
 
 def _detect_attachment_doc_type(*, filename: str, content_type: Any) -> str:
     lowered_filename = (filename or "").casefold()
-    lowered_type = str(content_type or "").lower()
+    lowered_filename_norm = _normalized_lower(lowered_filename)
+    lowered_type = _normalized_lower(str(content_type or ""))
     if lowered_filename.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")) or "excel" in lowered_type:
         return "TABLE"
     contract_tokens = ("contract", "agreement", "договор")
-    invoice_tokens = ("invoice", "bill", "счет", "счёт")
+    invoice_tokens = ("invoice", "bill", "счёт", "счет")
     table_doc_tokens = ("акт", "накладная", "листок")
     if lowered_filename.endswith((".doc", ".docx")) or "word" in lowered_type:
-        return "CONTRACT" if any(token in lowered_filename for token in contract_tokens) else "OTHER"
-    if lowered_filename.endswith(".pdf") and any(
-        token in lowered_filename for token in (*invoice_tokens, *table_doc_tokens)
-    ):
+        return "CONTRACT" if _contains_any(lowered_filename_norm, contract_tokens) else "OTHER"
+    if lowered_filename.endswith(".pdf") and _contains_any(lowered_filename_norm, (*invoice_tokens, *table_doc_tokens)):
         return "TABLE"
     return "OTHER"
 
@@ -4300,13 +4404,13 @@ def _compute_heuristic_priority(
         return None
 
 
-_PRIORITY_LEVEL_TO_SCORE = {"рџ”µ": 25, "рџџЎ": 45, "рџ”ґ": 80}
-_PRIORITY_SCORE_TO_LEVEL = ((70, "рџ”ґ"), (35, "рџџЎ"), (0, "рџ”µ"))
+_PRIORITY_LEVEL_TO_SCORE = {_PRIORITY_BLUE: 25, _PRIORITY_YELLOW: 45, _PRIORITY_RED: 80}
+_PRIORITY_SCORE_TO_LEVEL = ((70, _PRIORITY_RED), (35, _PRIORITY_YELLOW), (0, _PRIORITY_BLUE))
 _SENDER_MEMORY_WINDOW_DAYS = 45
 _SENDER_MEMORY_MIN_CORRECTIONS = 3
 _SENDER_MEMORY_MAX_ABS_BIAS = 12
 _SENDER_MEMORY_STEP = 4
-_SENDER_MEMORY_CORRECTION_SCORES = {"рџ”µ": -1, "рџџЎ": 0, "рџ”ґ": 1}
+_SENDER_MEMORY_CORRECTION_SCORES = {_PRIORITY_BLUE: -1, _PRIORITY_YELLOW: 0, _PRIORITY_RED: 1}
 
 
 def _sender_memory_bias_for_priority(*, sender_email: str) -> tuple[int, int]:
@@ -4334,7 +4438,7 @@ def _sender_memory_bias_for_priority(*, sender_email: str) -> tuple[int, int]:
 
     corrections: list[int] = []
     for row in rows:
-        token = str(row[0] or "").strip()
+        token = _normalize_priority_value(str(row[0] or "").strip())
         if token not in _SENDER_MEMORY_CORRECTION_SCORES:
             continue
         score = _SENDER_MEMORY_CORRECTION_SCORES[token]
@@ -4379,6 +4483,8 @@ def _apply_sender_memory_to_priority(
     priority_v2_result: PriorityResultV2 | None,
     email_id: int,
 ) -> str:
+    priority = _normalize_priority_value(priority)
+    priority = _normalize_priority_value(priority)
     if priority not in _PRIORITY_LEVEL_TO_SCORE:
         return priority
     bias, sample_count = _sender_memory_bias_for_priority(sender_email=sender_email)
@@ -4407,8 +4513,8 @@ def _apply_sender_memory_to_priority(
             adjusted_priority = level
             break
 
-    if priority != "рџ”ґ" and adjusted_priority == "рџ”ґ":
-        adjusted_priority = "рџџЎ"
+    if priority != _PRIORITY_RED and adjusted_priority == _PRIORITY_RED:
+        adjusted_priority = _PRIORITY_YELLOW
 
     if adjusted_priority != priority:
         logger.info(
@@ -4524,8 +4630,8 @@ def _enqueue_llm_request_with_retry(request: LLMRequest, *, email_id: int) -> bo
 
 
 
-_PREVIEW_DECISION_LINE = "[РџСЂРёРЅСЏС‚СЊ] [РћС‚РєР»РѕРЅРёС‚СЊ]"
-_PREVIEW_PRIORITY_LINE = "[РЎРґРµР»Р°С‚СЊ Р’С‹СЃРѕРєРёР№] [РЎРґРµР»Р°С‚СЊ РЎСЂРµРґРЅРёР№] [РЎРґРµР»Р°С‚СЊ РќРёР·РєРёР№]"
+_PREVIEW_DECISION_LINE = "[Принять] [Отклонить]"
+_PREVIEW_PRIORITY_LINE = "[Сделать Высокий] [Сделать Средний] [Сделать Низкий]"
 
 
 def _normalize_reason_code(reason: str) -> str:
@@ -4739,7 +4845,7 @@ def _append_insights_preview(
         recommendation = _sanitize_preview_line(insight.recommendation)
         lines.append(f"• {title} ({severity})")
         lines.append(f"  {explanation}")
-        lines.append(f"  Р РµРєРѕРјРµРЅРґР°С†РёСЏ: {recommendation}")
+        lines.append(f"  Рекомендация: {recommendation}")
     return "\n".join(lines)
 
 
@@ -4801,12 +4907,12 @@ def _append_anomalies_preview(
 
 
 def _build_signal_fallback(subject: str, from_email: str) -> str:
-    safe_subject = subject or "(Р±РµР· С‚РµРјС‹)"
-    safe_sender = from_email or "РЅРµРёР·РІРµСЃС‚РЅРѕ"
+    safe_subject = subject or "(без темы)"
+    safe_sender = from_email or "неизвестно"
     return (
-        "РўРµР»Рѕ РїРёСЃСЊРјР° РЅРµРґРѕСЃС‚СѓРїРЅРѕ (РЅРёР·РєРѕРµ РєР°С‡РµСЃС‚РІРѕ РёР·РІР»РµС‡РµРЅРёСЏ).\n"
-        f"РўРµРјР°: {safe_subject}\n"
-        f"РћС‚: {safe_sender}"
+        "Тело письма недоступно (низкое качество извлечения).\n"
+        f"Тема: {safe_subject}\n"
+        f"От: {safe_sender}"
     )
 
 
@@ -6971,7 +7077,7 @@ def process_message(
         )
         action_text = strip_disallowed_emojis(_resolve_action_line(action_line))
         high_impact = (
-            priority == "рџ”ґ"
+            priority == "🔴"
             or _deadline_within_days(commitments, received_at=received_at, days=3)
             or _is_urgent_action(action_text)
         )

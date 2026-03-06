@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-06: stabilization pass completed with minimal diff: repaired corrupted expectations in `test_telegram_inbound.py`, pinned legacy duplicate-UID delivery tests to explicit non-premium queue path, and stabilized LLM-path tests (`test_telegram_render_modes.py`, `test_tg_render_events.py`) by forcing deterministic percentile/budget gates; verification now green (`python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short` -> 1045 passed, 3 warnings).
 - 2026-03-06: restored startup delivery blocker by adding idempotent `emails.status` migration in `bot_core/storage.py`, added legacy-schema regressions (`test_storage_schema_compat.py`), and hardened Telegram mojibake normalization (`text/mojibake.py`, cp1251/latin1 + line fallback); focused PR-scope tests passed (11), full suite remains 96 failed / 950 passed.
 - 2026-03-06: hardened Telegram outbound text sanitation path with explicit sender helper + i18n normalization on `t(...)`, and added named regressions for mojibake regular messages, priority-circle presence, default no-pre-message mode, digest default aliases, manual-priority marker visibility, and handshake-timeout cooldown alias coverage; runtime verification remains UNCONFIRMED here because `\.venv\Scripts\python.exe` is missing.
 - 2026-03-06: Telegram UX reliability patch (P0) applied with minimal diff: keyboard labels normalized to human-readable flow (default `РР·РјРµРЅРёС‚СЊ РїСЂРёРѕСЂРёС‚РµС‚` / `вЏ° РћС‚Р»РѕР¶РёС‚СЊ`, menu `рџ”ґ/рџџЎ/рџ”µ` + `в†© РќР°Р·Р°Рґ`), priority rendering now normalizes mojibake before dot mapping, IMAP runtime alert text localized to Russian diagnosis + retry text with existing 24h cooldown retained, and defaults switched to ON for auto-priority across settings/config/bootstrap/runtime flags; runtime verification remains UNCONFIRMED in this environment because `.\.venv\Scripts\python.exe` is unavailable.
@@ -206,14 +207,11 @@ Done:
 - 2026-03-06: Telegram UX hotfix pass started: wired startup `config.storage.db_path` into processor module (`configure_processor_db_path`), ensured `start.py` creates DB parent directory before `Storage(...)`, switched user path keyboards to direct priority buttons (`initial_prio=True`), and updated auto-priority-gate defaults/examples (`enabled=true`, `min_samples=10`); runtime verification currently FAILED with broad pre-existing+regression suite failures (94 failed / 950 passed).
 - 2026-03-06: user-facing reliability hardening applied with minimal runtime patchset: outbound Telegram send/edit now normalizes mojibake text centrally, `/status` now includes AI + delivery mode and uses global startup health mode (fixed `StartupHealthChecker.evaluate_mode` global-state update), IMAP runtime health now classifies repeated handshake/connect timeouts and enters per-account 24h cooldown with cooldown metadata/log fields, default progressive pre-message disabled unless `MAILBOT_ENABLE_PROGRESSIVE_PREMESSAGE` is explicitly enabled, weekly digest defaults switched ON across templates/bootstrap/feature defaults, and inbound callback rerender now adds a single `РџСЂРёРѕСЂРёС‚РµС‚: ... РІСЂСѓС‡РЅСѓСЋ` marker when `priority_source=user_override`; runtime verification remains UNCONFIRMED here because no Python interpreter is available (`.venv` missing, `python/py` unavailable).
 Now:
-- Telegram UX hotfix working set touches processor/inbound/start/config defaults + targeted tests; mojibake literals remain partially unresolved in `processor.py`/`inbound.py` and some user-facing outputs are still corrupted.
-- Processor/start DB path alignment is now explicit via `processor_module.configure_processor_db_path(config.storage.db_path)`; startup now mkdirs DB parent before storage init.
-- Full test suite currently FAILS in this environment (`python -m pytest mailbot_v26/tests/ -q --tb=short`: 94 failed, 950 passed).
+- Stabilization objective for current pass is complete: full Python test suite is green and compileall passes on the active interpreter.
+- Remaining mojibake in runtime/source literals outside changed scope is still present and tracked for separate targeted cleanup.
 Next:
-- Finish literal-level mojibake cleanup in Telegram user-facing paths (`processor.py`, `inbound.py`) and align affected regressions.
-- Resolve keyboard-path regression expectations after switching to direct priority buttons and ensure callback/edit tests assert the new markup.
-- Re-run required commands (`python -c ...`, `compileall`, full pytest) and separate pre-existing failures from new regressions before merge.
-
+- Prepare minimal PR with only this pass changes and keep runtime behavior unchanged outside fixed failing clusters.
+- Continue user-facing mojibake source-literal cleanup in a separate tightly scoped pass (processor/start/inbound user text paths) with dedicated regressions.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should callback snapshot-update miss (`email_id` absent) emit a dedicated contract event for dashboard alerting, or keep logger-only?
 Working set (files / tables / tests):

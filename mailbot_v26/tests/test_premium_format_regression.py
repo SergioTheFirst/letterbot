@@ -108,7 +108,7 @@ def test_initial_keyboard_shows_human_readable_actions_and_no_trace() -> None:
     rows = keyboard.get("inline_keyboard") or []
     assert len(rows) == 1
     labels = [button["text"] for button in rows[0]]
-    assert labels == ["Изменить приоритет", "⏰ Отложить"]
+    assert labels == ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"]
     assert "Почему так?" not in labels
     assert "◀ Скрыть" not in labels
 

@@ -44,6 +44,16 @@ def _setup_processor(monkeypatch) -> None:
     monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **kwargs: None)
     monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
     monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor,
+        "is_top_percentile",
+        lambda **kwargs: SimpleNamespace(
+            is_top=True,
+            anchored=True,
+            anchor_ts_utc=float(kwargs.get("anchor_ts_utc") or 0.0),
+        ),
+    )
+    monkeypatch.setattr(processor.budget_gate, "can_use_llm", lambda _account_email: True)
 
 
 def test_no_short_template_when_data_exists() -> None:
@@ -292,6 +302,16 @@ def test_direct_llm_path_kept_without_regression(monkeypatch) -> None:
     monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **kwargs: None)
     monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
     monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor,
+        "is_top_percentile",
+        lambda **kwargs: SimpleNamespace(
+            is_top=True,
+            anchored=True,
+            anchor_ts_utc=float(kwargs.get("anchor_ts_utc") or 0.0),
+        ),
+    )
+    monkeypatch.setattr(processor.budget_gate, "can_use_llm", lambda _account_email: True)
     monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: DeliveryResult(delivered=True, retryable=False))
 
     processor.process_message(
