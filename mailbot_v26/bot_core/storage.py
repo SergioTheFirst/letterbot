@@ -51,6 +51,11 @@ class Storage:
                 str(row[1])
                 for row in self.conn.execute("PRAGMA table_info(emails);").fetchall()
             }
+            if "status" not in email_columns:
+                self.conn.execute(
+                    "ALTER TABLE emails ADD COLUMN status TEXT NOT NULL DEFAULT 'NEW';"
+                )
+                email_columns.add("status")
             if "telegram_delivered_at" not in email_columns:
                 self.conn.execute(
                     "ALTER TABLE emails ADD COLUMN telegram_delivered_at TEXT;"
