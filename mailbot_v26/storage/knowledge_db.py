@@ -48,9 +48,13 @@ class KnowledgeDB:
         try:
             with self._connect() as conn:
                 conn.execute("PRAGMA journal_mode=WAL;")
+                # Run column migrations FIRST — schema.sql creates indexes on
+                # priority/action_line/body_summary; if Storage created the
+                # emails table first those columns may be missing, causing
+                # executescript(schema_sql) to fail on the index statements.
+                self._ensure_optional_columns(conn)
                 if schema_sql:
                     conn.executescript(schema_sql)
-                self._ensure_optional_columns(conn)
                 self._ensure_priority_feedback_index(conn)
                 self._ensure_auto_priority_gate_state_table(conn)
                 if views_sql:
@@ -118,6 +122,16 @@ class KnowledgeDB:
             columns = {row[1] for row in cur.fetchall()}
 
             migrations: list[str] = []
+            # Core columns: present in schema.sql but may be missing if Storage
+            # created the emails table first (Storage schema lacks these columns).
+            if "priority" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN priority TEXT;")
+            if "action_line" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN action_line TEXT NOT NULL DEFAULT '';")
+            if "body_summary" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN body_summary TEXT NOT NULL DEFAULT '';")
+            if "raw_body_hash" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN raw_body_hash TEXT;")
             if "priority_source" not in columns:
                 migrations.append("ALTER TABLE emails ADD COLUMN priority_source TEXT DEFAULT 'auto';")
             if "priority_reason" not in columns:
@@ -258,6 +272,7 @@ class KnowledgeDB:
     def save_email(
         self,
         *,
+        storage_email_id: int | None = None,
         account_email: str,
         from_email: str,
         subject: str,
@@ -292,69 +307,133 @@ class KnowledgeDB:
 
                 raw_body_hash = self._hash_text(raw_body)
 
-                cur.execute(
-                    """
-                    INSERT INTO emails (
-                        account_email,
-                        from_email,
-                        subject,
-                        received_at,
-                        priority,
-                        priority_source,
-                        original_priority,
-                        priority_reason,
-                        shadow_priority,
-                        shadow_priority_reason,
-                        shadow_action_line,
-                        shadow_action_reason,
-                        confidence_score,
-                        confidence_decision,
-                        proposed_action_type,
-                        proposed_action_text,
-                        proposed_action_confidence,
-                        llm_provider,
-                        deferred_for_digest,
-                        action_line,
-                        body_summary,
-                        raw_body_hash,
-                        rfc_message_id,
-                        in_reply_to,
-                        "references",
-                        thread_key
+                if storage_email_id is not None:
+                    # UPDATE the existing row that Storage already created —
+                    # this keeps the Storage id stable so Telegram button callbacks
+                    # (which carry that id) resolve correctly.
+                    cur.execute(
+                        """
+                        UPDATE emails SET
+                            from_email             = COALESCE(?, from_email),
+                            subject                = COALESCE(?, subject),
+                            received_at            = COALESCE(?, received_at),
+                            priority               = ?,
+                            priority_source        = ?,
+                            original_priority      = ?,
+                            priority_reason        = ?,
+                            shadow_priority        = ?,
+                            shadow_priority_reason = ?,
+                            shadow_action_line     = ?,
+                            shadow_action_reason   = ?,
+                            confidence_score       = ?,
+                            confidence_decision    = ?,
+                            proposed_action_type   = ?,
+                            proposed_action_text   = ?,
+                            proposed_action_confidence = ?,
+                            llm_provider           = ?,
+                            deferred_for_digest    = ?,
+                            action_line            = ?,
+                            body_summary           = ?,
+                            raw_body_hash          = ?,
+                            rfc_message_id         = COALESCE(?, rfc_message_id),
+                            in_reply_to            = COALESCE(?, in_reply_to),
+                            "references"           = COALESCE(?, "references"),
+                            thread_key             = COALESCE(?, thread_key)
+                        WHERE id = ?
+                        """,
+                        (
+                            from_email,
+                            subject,
+                            received_at,
+                            priority,
+                            priority_source,
+                            original_priority,
+                            priority_reason,
+                            shadow_priority,
+                            shadow_priority_reason,
+                            shadow_action_line,
+                            shadow_action_reason,
+                            confidence_score,
+                            confidence_decision,
+                            proposed_action_type,
+                            proposed_action_text,
+                            proposed_action_confidence,
+                            llm_provider,
+                            1 if deferred_for_digest else 0,
+                            action_line,
+                            body_summary,
+                            raw_body_hash,
+                            rfc_message_id,
+                            in_reply_to,
+                            references,
+                            thread_key,
+                            storage_email_id,
+                        ),
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        account_email,
-                        from_email,
-                        subject,
-                        received_at,
-                        priority,
-                        priority_source,
-                        original_priority,
-                        priority_reason,
-                        shadow_priority,
-                        shadow_priority_reason,
-                        shadow_action_line,
-                        shadow_action_reason,
-                        confidence_score,
-                        confidence_decision,
-                        proposed_action_type,
-                        proposed_action_text,
-                        proposed_action_confidence,
-                        llm_provider,
-                        1 if deferred_for_digest else 0,
-                        action_line,
-                        body_summary,
-                        raw_body_hash,
-                        rfc_message_id,
-                        in_reply_to,
-                        references,
-                        thread_key,
-                    ),
-                )
-
-                email_id = cur.lastrowid
+                    email_id = storage_email_id
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO emails (
+                            account_email,
+                            from_email,
+                            subject,
+                            received_at,
+                            priority,
+                            priority_source,
+                            original_priority,
+                            priority_reason,
+                            shadow_priority,
+                            shadow_priority_reason,
+                            shadow_action_line,
+                            shadow_action_reason,
+                            confidence_score,
+                            confidence_decision,
+                            proposed_action_type,
+                            proposed_action_text,
+                            proposed_action_confidence,
+                            llm_provider,
+                            deferred_for_digest,
+                            action_line,
+                            body_summary,
+                            raw_body_hash,
+                            rfc_message_id,
+                            in_reply_to,
+                            "references",
+                            thread_key
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            account_email,
+                            from_email,
+                            subject,
+                            received_at,
+                            priority,
+                            priority_source,
+                            original_priority,
+                            priority_reason,
+                            shadow_priority,
+                            shadow_priority_reason,
+                            shadow_action_line,
+                            shadow_action_reason,
+                            confidence_score,
+                            confidence_decision,
+                            proposed_action_type,
+                            proposed_action_text,
+                            proposed_action_confidence,
+                            llm_provider,
+                            1 if deferred_for_digest else 0,
+                            action_line,
+                            body_summary,
+                            raw_body_hash,
+                            rfc_message_id,
+                            in_reply_to,
+                            references,
+                            thread_key,
+                        ),
+                    )
+                    email_id = cur.lastrowid
 
                 for filename, summary in attachment_summaries:
                     cur.execute(
