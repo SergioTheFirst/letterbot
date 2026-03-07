@@ -51,6 +51,39 @@ class Storage:
                 str(row[1])
                 for row in self.conn.execute("PRAGMA table_info(emails);").fetchall()
             }
+            # Migration: if uid column is missing the schema is incompatible —
+            # recreate emails and all dependent tables from scratch.
+            # (This only happens once on first run after schema upgrade.)
+            if "uid" not in email_columns:
+                self.conn.execute("DROP TABLE IF EXISTS queue;")
+                self.conn.execute("DROP TABLE IF EXISTS telegram_delivery_log;")
+                self.conn.execute("DROP TABLE IF EXISTS telegram_snooze;")
+                self.conn.execute("DROP TABLE IF EXISTS emails;")
+                self.conn.execute(
+                    """
+                    CREATE TABLE emails (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_email TEXT NOT NULL,
+                        uid INTEGER NOT NULL,
+                        message_id TEXT,
+                        from_email TEXT,
+                        from_name TEXT,
+                        subject TEXT,
+                        received_at TEXT,
+                        attachments_count INTEGER DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'NEW',
+                        error_last TEXT,
+                        created_at TEXT NOT NULL DEFAULT '',
+                        updated_at TEXT NOT NULL DEFAULT '',
+                        telegram_delivered_at TEXT,
+                        UNIQUE(account_email, uid)
+                    );
+                    """
+                )
+                email_columns = {
+                    str(row[1])
+                    for row in self.conn.execute("PRAGMA table_info(emails);").fetchall()
+                }
             if "status" not in email_columns:
                 self.conn.execute(
                     "ALTER TABLE emails ADD COLUMN status TEXT NOT NULL DEFAULT 'NEW';"
