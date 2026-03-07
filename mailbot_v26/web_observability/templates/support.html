@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title or "Support" }}{% endblock %}
+
+{% block content %}
+<section class="support-hero card">
+  <h2>Support Letterbot</h2>
+  <p>Letterbot остаётся бесплатным и локальным инструментом для вашей почты.</p>
+  <p>Если хотите поддержать развитие, выберите удобный способ ниже — это помогает развивать продукт без навязчивых paywall.</p>
+  {% if support_text %}<p class="support-hero-note">{{ support_text }}</p>{% endif %}
+</section>
+
+{% if support_methods %}
+<div class="support-methods-grid">
+{% for method in support_methods %}
+<section class="support-method-card card">
+  <h3>{{ method.label or method.type|upper }}</h3>
+  {% if method.details %}<p class="support-method-details">{{ method.details }}</p>{% endif %}
+
+  <ul class="support-method-list">
+    {% if method.phone %}
+      <li>
+        <span class="support-field-label">Телефон</span>
+        <code id="phone-{{ loop.index }}">{{ method.phone }}</code>
+        <button type="button" class="ghost" onclick="copySupportValue('phone-{{ loop.index }}', this)">Скопировать</button>
+      </li>
+    {% endif %}
+    {% if method.number %}
+      <li>
+        <span class="support-field-label">Карта</span>
+        <code id="card-{{ loop.index }}">{{ method.number }}</code>
+        <button type="button" class="ghost" onclick="copySupportValue('card-{{ loop.index }}', this)">Скопировать</button>
+      </li>
+    {% endif %}
+    {% if method.url %}
+      <li>
+        <span class="support-field-label">Ссылка</span>
+        <a class="btn support-url-cta" href="{{ method.url }}" target="_blank" rel="noopener noreferrer">Open support link</a>
+      </li>
+    {% endif %}
+  </ul>
+
+  {% if method.qr_image_data_uri %}
+    <figure class="support-qr-frame">
+      <img src="{{ method.qr_image_data_uri }}" alt="QR {{ method.label }}">
+      <figcaption>Сканируйте QR для быстрого перевода</figcaption>
+    </figure>
+  {% endif %}
+</section>
+{% endfor %}
+</div>
+{% else %}
+<section class="support-empty card">
+  <h3>Способы поддержки ещё не настроены</h3>
+  <p>Страница доступна, но методы поддержки пока не заполнены в конфигурации.</p>
+</section>
+{% endif %}
+
+<script>
+function copySupportValue(elementId, button) {
+  const node = document.getElementById(elementId);
+  if (!node) return;
+  const value = (node.textContent || '').trim();
+  if (!value) return;
+  const success = function() {
+    const oldText = button.textContent;
+    button.textContent = 'Скопировано';
+    setTimeout(function() { button.textContent = oldText; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(value).then(success);
+    return;
+  }
+  const input = document.createElement('textarea');
+  input.value = value;
+  document.body.appendChild(input);
+  input.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(input);
+  success();
+}
+</script>
+{% endblock %}

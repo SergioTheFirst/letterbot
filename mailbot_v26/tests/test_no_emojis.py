@@ -1,0 +1,72 @@
+from datetime import datetime
+
+from mailbot_v26.insights.aggregator import Insight
+from mailbot_v26.pipeline import processor, tg_renderer
+from mailbot_v26.ui.emoji_whitelist import (
+    ALLOWED_EMOJIS,
+    find_disallowed_emojis,
+    strip_disallowed_emojis,
+)
+
+
+def _assert_whitelist(text: str) -> None:
+    assert not find_disallowed_emojis(text)
+    assert any(emoji in text for emoji in ALLOWED_EMOJIS)
+
+
+def test_telegram_render_emoji_whitelist_premium_clarity() -> None:
+    rendered = processor._build_premium_clarity_text(
+        priority="🔴",
+        received_at=datetime(2026, 1, 1),
+        from_email="Анна 😊 <anna@example.com>",
+        from_name="Анна 😊",
+        subject="Срочно: счет 😊",
+        mail_type="",
+        action_line="Ответить клиенту 😊",
+        body_summary="Нужно оплатить счет до завтра 😊",
+        body_text="Нужно оплатить счет до завтра 😊",
+        attachments=[
+            {"filename": "invoice😊.pdf", "text": "Счет на оплату 10 000"},
+            {"filename": "notes.txt", "text": ""},
+        ],
+        attachment_summaries=[],
+        insights=[Insight(type="Risk", severity="HIGH", explanation="", recommendation="")],
+        insight_digest=None,
+        commitments=[],
+        attachments_count=2,
+        extracted_text_len=120,
+        confidence_percent=80,
+        confidence_available=True,
+        confidence_dots_mode="auto",
+        confidence_dots_threshold=75,
+        confidence_dots_scale=10,
+        extraction_failed=False,
+    )
+    _assert_whitelist(rendered)
+
+
+def test_telegram_render_emoji_whitelist_legacy() -> None:
+    rendered = tg_renderer.build_telegram_text(
+        priority="🟠",
+        from_email="Sender 😄 <sender@example.com>",
+        subject="Тема 😄",
+        action_line="Ответить 😄",
+        attachments=[{"filename": "file😄.txt", "text": "ok"}],
+    )
+    _assert_whitelist(rendered)
+
+
+def test_new_doc_type_emojis_allowed() -> None:
+    text = "Документы: 💰 📄 ⏰ ⚠️ 📦 📧"
+    cleaned = strip_disallowed_emojis(text)
+    assert cleaned == text
+    assert not find_disallowed_emojis(cleaned)
+
+
+def test_disallowed_emoji_removed() -> None:
+    text = "Привет 🚀⌛"
+    cleaned = strip_disallowed_emojis(text)
+    assert "🚀" not in cleaned
+    assert "⌛" not in cleaned
+    assert cleaned != text
+    assert not find_disallowed_emojis(cleaned)

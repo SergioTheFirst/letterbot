@@ -1,0 +1,32 @@
+"""Utilities for safe Telegram HTML payloads."""
+from __future__ import annotations
+
+import re
+
+
+def escape_tg_html(text: str) -> str:
+    """Escape Telegram HTML entities for dynamic fields."""
+    cleaned = text or ""
+    cleaned = re.sub(r"&(?!(?:[a-zA-Z]+|#\d+);)", "&amp;", cleaned)
+    cleaned = cleaned.replace("<", "&lt;").replace(">", "&gt;")
+    return cleaned
+
+
+def telegram_safe(text: str) -> str:
+    """Escape Telegram HTML entities and remove backslashes."""
+    cleaned = (text or "").replace("\\", "")
+    allowed_tags = {
+        "<b>": "__TG_TAG_B_OPEN__",
+        "</b>": "__TG_TAG_B_CLOSE__",
+        "<i>": "__TG_TAG_I_OPEN__",
+        "</i>": "__TG_TAG_I_CLOSE__",
+    }
+    for tag, placeholder in allowed_tags.items():
+        cleaned = cleaned.replace(tag, placeholder)
+    escaped = escape_tg_html(cleaned)
+    for tag, placeholder in allowed_tags.items():
+        escaped = escaped.replace(placeholder, tag)
+    return escaped
+
+
+__all__ = ["escape_tg_html", "telegram_safe"]

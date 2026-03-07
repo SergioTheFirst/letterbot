@@ -1,0 +1,43 @@
+{
+  "build_date_utc": "2026-02-28T22:21:26Z",
+  "commit": null,
+  "files": [
+    {
+      "path": "requirements.txt",
+      "sha256": "9060a93bf6852181702f2bac92e0691473fccdc4e55a69a637cbd3d34d20430d"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "1bd10212d602671d8ce563550cd238ba4d2378ba765884aa4f19f33159563a01"
+    },
+    {
+      "path": "CONTINUITY.md",
+      "sha256": "80cd6ab0c06e5c6a7f1ffe5a970cbfe059707dbe4d89577b756b84b97710f090"
+    },
+    {
+      "path": "update_and_run.bat",
+      "sha256": "e74a1fecaed020bb0145e48e7e7fabeaff30b38ec2a11ba2d0eceee4675cd201"
+    },
+    {
+      "path": "install_and_run.bat",
+      "sha256": "3256dab0f4e293b8213caf7ca80b63ba2bcaf8626188297fa89e159968af80a2"
+    },
+    {
+      "path": "mailbot_v26/version.py",
+      "sha256": "0507ac64ece51cb5bc38dbc181b43528ce224000514523bbaa76e81e5c3cb84c"
+    },
+    {
+      "path": "mailbot_v26/config/settings.ini.example",
+      "sha256": "7a66a124bab6e8ba3539788ce984f8ceb51afbd2001735620fb9c8880cb3b516"
+    },
+    {
+      "path": "mailbot_v26/config/accounts.ini.example",
+      "sha256": "201b1fab9302d5da602ce5936e341ec2c3ff727fe487479e8aab4515ff8673e3"
+    },
+    {
+      "path": "RELEASE_ARTIFACT.md",
+      "sha256": "02148a3f64165c809f43ba1672772850e4472e729d03044c5d02037efb738391"
+    }
+  ],
+  "version": "28.0.0-rc"
+}

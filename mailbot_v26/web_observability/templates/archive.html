@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block page_actions %}
+  <div class="mode-toggle">
+    <a class="mode-pill {% if cockpit_mode == 'basic' %}active{% endif %}" href="{{ mode_basic_url }}">Basic</a>
+    <a class="mode-pill {% if cockpit_mode == 'engineer' %}active{% endif %}" href="{{ mode_engineer_url }}">Engineer</a>
+  </div>
+{% endblock %}
+{% block content %}
+  <div class="card filters surface-panel archive-filters">
+    <div class="section-title compact">
+      <h2>Archive</h2>
+      <div class="hint">Review recent email outcomes with stable filters.</div>
+    </div>
+    <form method="get" action="{{ url_for('archive') }}" class="filters-form">
+      <div class="filter-group">
+        <label for="account_emails">Account scope</label>
+        <input id="account_emails" name="account_emails" type="text" value="{{ account_emails|join(',') }}" placeholder="comma-separated">
+      </div>
+      <div class="filter-group">
+        <label for="window_days">Window</label>
+        <select id="window_days" name="window_days">
+          {{ window_options|safe }}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          {% for option in ['any', 'ok', 'warn', 'fail'] %}
+          <option value="{{ option }}" {% if option == status %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if pii_enabled %}
+      <input type="hidden" name="pii" value="1">
+      {% endif %}
+      {% if lane is defined %}
+      <input type="hidden" name="lane" value="{{ lane }}">
+      {% endif %}
+      {% if cockpit_mode %}<input type="hidden" name="mode" value="{{ cockpit_mode }}">{% endif %}
+      <div class="filter-actions">
+        <button type="submit">Apply</button>
+      </div>
+    </form>
+    <div class="filter-meta">
+      <span class="badge">{{ total_count }} emails</span>
+      <span class="muted">Page {{ page }} of {{ total_pages }}</span>
+    </div>
+  </div>
+
+  {% if lane_pills %}
+  <div class="lane-pills" aria-label="Lane filters">
+    {% for lane in lane_pills %}
+    <a class="lane-pill {% if lane.active %}active{% endif %}" href="{{ lane.url }}">
+      <span class="lane-label">{{ lane.label }}</span>
+      <span class="lane-count">{{ lane.count }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if archive_rows %}
+  <div class="table-scroll archive-table">
+    <table class="table compact fixed">
+      <thead>
+        <tr>
+          <th class="col-time">Time (UTC)</th>
+          <th class="col-from">From</th>
+          <th class="col-account">Account</th>
+          <th class="col-preview">Preview</th>
+          <th class="col-status">TG status</th>
+          <th class="col-latency">E2E latency</th>
+          {% if engineer_mode %}
+          <th class="col-mode">Delivery mode</th>
+          <th class="col-failure">Failure reason</th>
+          <th class="col-stage">Pipeline stages</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in archive_rows %}
+        {% set status_label = row.status|lower %}
+        {% set status_class = 'muted' %}
+        {% if status_label == 'delivered' %}
+          {% set status_class = 'success' %}
+        {% elif status_label == 'failed' %}
+          {% set status_class = 'danger' %}
+        {% elif status_label == 'in-flight' %}
+          {% set status_class = 'warn' %}
+        {% endif %}
+        <tr class="clickable-row" data-row-link="{{ url_for('email_details', email_id=row.email_id, **detail_params) }}" data-email-id="{{ row.email_id }}">
+          <td class="col-time">{{ row.received }}</td>
+          <td class="col-from"><span class="truncate">{{ row.from_label }}</span></td>
+          <td class="col-account"><span class="truncate">{{ row.account_label }}</span></td>
+          <td class="col-preview"><span class="truncate">{{ row.preview }}</span></td>
+          <td class="col-status"><span class="badge {{ status_class }}">{{ row.status }}</span></td>
+          <td class="col-latency">{{ row.e2e_ms }}</td>
+          {% if engineer_mode %}
+          <td class="col-mode"><span class="badge muted">{{ row.delivery_mode }}</span></td>
+          <td class="col-failure"><span class="truncate">{{ row.failure_reason }}</span></td>
+          <td class="col-stage"><span class="truncate">{{ row.stage_hint }}</span></td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state card">
+    <strong>No archive entries found.</strong>
+    <div class="hint">Try a wider window or remove account/status filters.</div>
+  </div>
+  {% endif %}
+
+  <div class="pagination">
+    {% if prev_url %}<a class="btn ghost" href="{{ prev_url }}">Previous</a>{% endif %}
+    {% if next_url %}<a class="btn ghost" href="{{ next_url }}">Next</a>{% endif %}
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('[data-row-link]').forEach(function(row) {
+        row.addEventListener('click', function() {
+          const target = row.getAttribute('data-row-link');
+          if (target) {
+            window.location.href = target;
+          }
+        });
+      });
+    });
+  </script>
+{% endblock %}

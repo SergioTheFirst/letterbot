@@ -1,0 +1,26 @@
+{
+  "accounts": {
+    "HQ\\MedvedevSS": {
+      "last_uid": 0,
+      "last_check_time": null,
+      "imap_status": "error",
+      "last_error": "[Errno 11001] getaddrinfo failed"
+    },
+    "mss777@mail.ru": {
+      "last_uid": 109987,
+      "last_check_time": "2025-12-12T16:36:10.916673",
+      "imap_status": "ok",
+      "last_error": ""
+    }
+  },
+  "llm": {
+    "tokens_used_today": 0,
+    "date": "2025-12-11",
+    "unavailable": false,
+    "last_error": ""
+  },
+  "meta": {
+    "version": "v26",
+    "last_save": "2025-12-12T16:36:11.279317"
+  }
+}

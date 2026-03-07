@@ -1,0 +1,3 @@
+-r mailbot_v26/requirements.txt
+PyMuPDF
+mammoth

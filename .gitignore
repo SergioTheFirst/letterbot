@@ -1,0 +1,31 @@
+# venv / python junk
+**/venv/
+**/.venv/
+__pycache__/
+*.pyc
+
+# logs
+*.log
+
+# secrets / local configs
+mailbot_v26/config/accounts.ini
+mailbot_v26/config/keys.ini
+mailbot_v26/config/config.ini
+mailbot_v26/config/*.zip
+
+# venv
+venv/
+mailbot_v26/venv/
+
+# secrets/config
+
+# runtime
+*.sqlite
+database.sqlite
+mailbot_v26/database.sqlite
+data/
+
+# runtime artifacts
+*.sqlite3
+*.db
+runtime/logs/

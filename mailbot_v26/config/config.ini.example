@@ -1,0 +1,117 @@
+; Letterbot INI template (Windows-safe for `copy ... config.ini`)
+; Quick start (edit these first):
+; 1) [general] check_interval
+; 2) accounts.ini -> account login/password/imap_host/imap_port/telegram_chat_id
+; 3) keys.ini -> telegram_bot_token + LLM API keys
+; 4) config.yaml -> web_ui.bind / web_ui.password (used by Web UI)
+; 5) [support] enabled = true|false (user-facing support switch)
+; Legacy compatibility: [features] donate_enabled is still accepted,
+; but [support] enabled has higher priority when both are present.
+; Compact template: mailbot_v26/config/config.ini.compact.example
+
+; =====================
+; Core runtime settings
+; =====================
+[general]
+check_interval = 120
+max_email_mb = 15
+max_attachment_mb = 15
+max_zip_uncompressed_mb = 80
+max_extracted_chars = 50000
+max_extracted_total_chars = 120000
+admin_chat_id =
+attention_cost_per_hour = 0
+
+[storage]
+db_path = mailbot.sqlite
+
+[ingest]
+allow_prestart_emails = false
+
+[maintenance]
+maintenance_mode = 0
+
+[ui]
+locale = ru
+
+; =====================
+; LLM providers
+; =====================
+[llm]
+primary = gigachat
+fallback = cloudflare
+
+[gigachat]
+enabled = true
+api_key = CHANGE_ME
+
+[cloudflare]
+enabled = true
+
+[llm_safety]
+gigachat_max_consecutive_errors = 3
+gigachat_max_latency_sec = 10
+gigachat_cooldown_sec = 600
+
+[llm_usage]
+llm_percentile_threshold = 80
+llm_usage_window_days = 7
+force_llm_always = false
+
+; =====================
+; User-facing support switch
+; =====================
+[support]
+enabled = false
+
+; =====================
+; Feature flags (advanced)
+; =====================
+[features]
+enable_auto_priority = true
+enable_daily_digest = true
+enable_weekly_digest = true
+enable_quality_metrics = false
+enable_priority_v2 = true
+enable_narrative_binding = true
+enable_narrative_patterns = true
+enable_flow_protection = false
+enable_attention_debt = true
+enable_surprise_budget = true
+enable_silence_as_signal = shadow
+enable_deadlock_detection = shadow
+enable_premium_processor = false
+enable_premium_clarity_v1 = false
+enable_behavior_metrics_digest = false
+enable_trust_bootstrap = false
+enable_regret_minimization = false
+enable_uncertainty_queue = false
+enable_commitment_chain_digest = false
+support = false
+; legacy fallback (kept for backward compatibility):
+donate_enabled = false
+
+; =====================
+; Advanced tuning
+; =====================
+[auto_priority_gate]
+enabled = true
+window_days = 30
+min_samples = 10
+max_correction_rate = 0.15
+cooldown_hours = 24
+
+[priority_v2]
+urgency_weight_default = 12
+urgency_weight_by_type = 30
+priority_red_threshold = 70
+priority_yellow_threshold = 35
+
+[vip_senders]
+; Example:
+; @important-client.com = true
+
+[donate]
+enabled = 0
+url = https://...
+text = Поддержать проект

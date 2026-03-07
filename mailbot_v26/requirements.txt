@@ -1,0 +1,25 @@
+# Windows / Python 3.10 compatible requirements (avoid building from source)
+
+imapclient==2.2.0
+PyYAML>=6.0.1
+requests>=2.31.0
+
+# Used by exports / reports in some setups (wheels exist for Py3.10)
+numpy>=1.23.0
+pandas>=1.5.0
+
+openpyxl>=3.1.2
+xlrd>=2.0.1
+python-docx>=1.1.2
+pdfminer.six>=20221105
+
+langdetect>=1.0.9
+nltk>=3.8.1
+pyttsx3>=2.90
+
+python-dotenv>=1.0.1
+Flask>=2.2.5
+
+# Doctor checks `import ldap` (we try the simplest pip package first).
+# If it doesn't satisfy import, we’ll handle it in the next step.
+# ldap

@@ -1,0 +1,45 @@
+; Letterbot compact INI template.
+; Full template with all options: mailbot_v26/config/config.ini.example
+
+[general]
+check_interval = 120
+admin_chat_id =
+
+[storage]
+db_path = data/mailbot.sqlite
+
+[llm]
+primary = gigachat
+fallback = cloudflare
+
+[gigachat]
+enabled = true
+api_key = CHANGE_ME
+
+[cloudflare]
+enabled = true
+
+[ui]
+locale = ru
+
+; Advanced / Rare / Debug
+[maintenance]
+maintenance_mode = 0
+
+[llm_safety]
+gigachat_max_consecutive_errors = 3
+gigachat_max_latency_sec = 10
+gigachat_cooldown_sec = 600
+
+[llm_usage]
+llm_percentile_threshold = 80
+llm_usage_window_days = 7
+force_llm_always = false
+
+[features]
+enable_daily_digest = true
+enable_weekly_digest = true
+; Support features (donate/support UI). Keep false for private/self-hosted.
+support = false
+; Backward-compatible key (optional):
+donate_enabled = false

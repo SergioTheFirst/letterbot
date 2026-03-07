@@ -1,0 +1,65 @@
+<div class="card health-section" data-testid="health-component-matrix">
+  <div class="section-title">
+    <h2>Component matrix</h2>
+    <div class="hint">Current health across core systems</div>
+  </div>
+  {% if component_matrix %}
+  <div class="table-scroll">
+    <table class="table compact fixed">
+      <thead>
+        <tr>
+          <th>Component</th>
+          <th>Status</th>
+          <th>Last check</th>
+          <th>Last issue summary</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in component_matrix %}
+        <tr data-testid="component-row">
+          <td>{{ row.component }}</td>
+          <td><span class="badge {{ row.status_class }}">{{ row.status }}</span></td>
+          <td class="mono">{{ row.last_check }}</td>
+          <td class="truncate">{{ row.last_issue }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="hint">Adjust account scope to populate components.</div>
+  {% endif %}
+</div>
+
+<div class="card health-section" data-testid="health-incidents">
+  <div class="section-title">
+    <h2>Incidents</h2>
+    <div class="hint">Recent degradations and recovery signals</div>
+  </div>
+  {% if incidents %}
+  <div class="table-scroll">
+    <table class="table compact fixed">
+      <thead>
+        <tr>
+          <th>Time (UTC)</th>
+          <th>Component</th>
+          <th>Symptom</th>
+          <th>Outcome</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in incidents %}
+        <tr data-testid="incident-row">
+          <td class="mono">{{ row.ts }}</td>
+          <td>{{ row.component }}</td>
+          <td class="truncate">{{ row.symptom }}</td>
+          <td class="truncate">{{ row.outcome }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="hint">No recent incidents recorded in this window.</div>
+  {% endif %}
+</div>

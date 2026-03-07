@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Attention economics — {{ title }}{% endblock %}
+
+{% block page_actions %}
+  <a class="btn" href="{{ attention_csv_url }}">Export CSV</a>
+{% endblock %}
+
+{% block content %}
+  <section class="card filters">
+    <form method="get" action="{{ attention_url }}" class="filters-form">
+      <div class="filter-group">
+        <label for="account_emails">Account scope</label>
+        <input id="account_emails" name="account_emails" type="text" value="{{ account_emails_value }}" placeholder="comma-separated">
+      </div>
+      <div class="filter-group">
+        <label for="window_days">Window</label>
+        <select id="window_days" name="window_days">
+          {% for option in [7, 30, 90] %}
+          <option value="{{ option }}" {% if option == window_days %}selected{% endif %}>{{ option }}d</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="sort">Sort</label>
+        <select id="sort" name="sort">
+          {% for option in sort_options %}
+          <option value="{{ option.value }}" {% if option.selected %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filter-actions">
+        <button type="submit">Apply</button>
+      </div>
+    </form>
+    <div class="filter-meta">
+      <span class="badge muted">limit 50</span>
+      <span class="hint">Оценка времени: по длине текста (или 30 сек/письмо, если длина недоступна).</span>
+    </div>
+  </section>
+
+  <section class="metric-grid compact-metrics">
+    <div class="metric-card">
+      <div class="label">Total attention time</div>
+      <div class="value">{{ total_hours }} h</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">Estimated cost</div>
+      <div class="value">{{ summary.totals.estimated_cost if summary.totals.estimated_cost is defined else 0 }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">Emails counted</div>
+      <div class="value">{{ summary.totals.message_count }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">Top leak</div>
+      <div class="value">{{ summary.top_contact_label if summary.top_contact_label else "—" }}</div>
+    </div>
+  </section>
+
+  <div class="divider-title">Top contacts</div>
+  {% if summary.entities %}
+    <div class="table-scroll">
+      <table class="table compact fixed attention-table">
+        <thead>
+          <tr>
+            <th>Contact</th>
+            <th class="numeric">Emails</th>
+            <th class="numeric">Attention min</th>
+            <th class="numeric">Cost</th>
+            <th>Signals</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entity in summary.entities %}
+          <tr>
+            <td class="truncate">{{ entity.entity_label }}</td>
+            <td class="numeric">{{ entity.message_count }}</td>
+            <td class="numeric">{{ entity.estimated_read_minutes|round(2) }}</td>
+            <td class="numeric">{% if entity.estimated_cost is defined %}{{ entity.estimated_cost }}{% else %}—{% endif %}</td>
+            <td>{{ entity.signals }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="hint">Расширьте окно или добавьте больше почты, чтобы увидеть потоки внимания.</div>
+  {% endif %}
+
+  <div class="divider-title">By lane</div>
+  {% if summary.lane_breakdown %}
+    <div class="card attention-lanes">
+      {% for lane in summary.lane_breakdown %}
+      <div class="lane-row">
+        <div class="lane-label">{{ lane_labels.get(lane.lane, lane.lane) }}</div>
+        <div class="lane-bar">
+          <div class="lane-bar-fill" style="width: {{ lane.share_percent }}%;"></div>
+        </div>
+        <div class="lane-metrics">{{ lane.count }} • {{ lane.estimated_read_minutes|round(1) }}m</div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="hint">Подсчёты по потокам появятся после накопления статистики.</div>
+  {% endif %}
+
+  {% if generated_at %}
+    <div class="hint" style="margin-top: 12px;">Updated: {{ generated_at }}</div>
+  {% endif %}
+{% endblock %}
