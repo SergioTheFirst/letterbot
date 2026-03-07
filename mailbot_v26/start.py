@@ -233,8 +233,8 @@ def _load_yaml_config_or_defaults(config_path: Path, config_dir: Path) -> tuple[
         logger.warning("config_invalid %s", message)
         print(f"[INFO] {message}. Falling back to INI configuration.")
         if message == SCHEMA_NEWER_MESSAGE and bool(getattr(sys, "frozen", False)):
-            print("[WARN] Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎвЂќР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В±Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ: Р В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р вЂ™Р’В Р В Р вЂ Р Р†Р вЂљРЎвЂєР Р†Р вЂљРІР‚СљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р Р†РІР‚С›РІР‚вЂњР В Р’В Р вЂ™Р’В Р В Р вЂ Р Р†Р вЂљРЎвЂєР Р†Р вЂљРІР‚Сљ ZIP Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В  Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРІвЂћвЂ“ Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™.")
-            print("[WARN] Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎвЂќР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В±Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ: Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р вЂ™Р’В Р В Р вЂ Р Р†Р вЂљРЎвЂєР Р†Р вЂљРІР‚СљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р Р†РІР‚С›РІР‚вЂњР В Р’В Р вЂ™Р’В Р В Р вЂ Р Р†Р вЂљРЎвЂєР Р†Р вЂљРІР‚Сљ config.yaml Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В·Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ run.bat.")
+            print("[WARN] Обновление: распакуйте новый ZIP в новую папку.")
+            print("[WARN] Обновление: скопируйте старый config.yaml и запустите run.bat.")
         return raw_config, _load_ini_config_or_defaults(config_dir)
     config = build_bot_config(raw_config, repo_root=REPO_ROOT)
     return raw_config, config
@@ -245,7 +245,7 @@ def _build_system_payload(
     text: str,
     bot_token: str,
     chat_id: str,
-    priority: str = "Р В Р Р‹Р В РІР‚С™Р В Р Р‹Р РЋРЎСџР В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В РІР‚в„ўР вЂ™Р’Вµ",
+    priority: str = "🔵",
 ) -> TelegramPayload:
     text = append_watermark(text, html=True)
     return TelegramPayload(
@@ -608,7 +608,7 @@ def _process_queue(
                             text=notice,
                             bot_token=config.keys.telegram_bot_token,
                             chat_id=account.telegram_chat_id,
-                            priority="Р В Р Р‹Р В РІР‚С™Р В Р Р‹Р РЋРЎСџР В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В РЎС›Р Р†Р вЂљР’В",
+                            priority="🔴",
                         )
                         fallback_result = send_telegram(payload)
                         if not fallback_result.delivered:
@@ -658,7 +658,7 @@ def _process_queue(
                             text=notice,
                             bot_token=config.keys.telegram_bot_token,
                             chat_id=account.telegram_chat_id,
-                            priority="Р В Р Р‹Р В РІР‚С™Р В Р Р‹Р РЋРЎСџР В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В РЎС›Р Р†Р вЂљР’В",
+                            priority="🔴",
                         )
                         result = send_telegram(payload)
                         if not result.delivered:
@@ -725,12 +725,12 @@ def _render_snooze_reminder_text(storage: Storage, *, email_id: int, reminder_te
         (email_id,),
     ).fetchone()
     if not row:
-        return f"Р В Р’В Р вЂ™Р’В Р В Р Р‹Р РЋРЎСџР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р’В Р В РІР‚В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС› #{email_id}"
-    priority = str(row[0] or "Р В Р Р‹Р В РІР‚С™Р В Р Р‹Р РЋРЎСџР В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В РІР‚в„ўР вЂ™Р’Вµ")
-    from_email = str(row[1] or "Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В·Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›")
-    subject = str(row[2] or "(Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В±Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В· Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’ВР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р Р†РІР‚С›РІР‚вЂњ)")
-    action_line = str(row[3] or "Р В Р’В Р вЂ™Р’В Р В Р Р‹Р РЋРЎСџР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р В Р вЂ№Р В Р’В Р В РІР‚В°")
-    return f"{priority} Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћ {from_email}:\n{subject}\n{action_line}"
+        return f"Письмо #{email_id}"
+    priority = str(row[0] or "🔵")
+    from_email = str(row[1] or "неизвестно")
+    subject = str(row[2] or "(без темы)")
+    action_line = str(row[3] or "Проверить")
+    return f"{priority} от {from_email}:\n{subject}\n{action_line}"
 
 
 def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
@@ -768,8 +768,8 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
             storage.mark_snooze_delivered(snooze_id=snooze_id)
             continue
         payload = TelegramPayload(
-            html_text=telegram_safe(f"Р В Р Р‹Р В РІР‚С™Р В Р Р‹Р РЋРЎСџР В Р вЂ Р В РІР‚С™Р РЋРЎв„ўР В Р’В Р В РІР‚В° Р В Р’В Р вЂ™Р’В Р В Р Р‹Р РЋРЎв„ўР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ\n\n{reminder_text}"),
-            priority="Р В Р Р‹Р В РІР‚С™Р В Р Р‹Р РЋРЎСџР В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В РІР‚в„ўР вЂ™Р’Вµ",
+            html_text=telegram_safe(f"📌 Напоминание\n\n{reminder_text}"),
+            priority="🔵",
             metadata={
                 "bot_token": config.keys.telegram_bot_token,
                 "chat_id": account.telegram_chat_id,
@@ -1126,17 +1126,17 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             )
 
                             if not new_messages:
-                                print("   Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р’В Р Р†Р вЂљРЎв„ў no new messages")
+                                print("   в””в”Ђ no new messages")
                                 continue
 
-                            print(f"   Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р’В Р Р†Р вЂљРЎв„ў received {len(new_messages)} new messages")
+                            print(f"   в””в”Ђ received {len(new_messages)} new messages")
 
                             for uid, raw in new_messages:
-                                print(f"      Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р Р‹Р РЋРІвЂћСћР В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р’В Р Р†Р вЂљРЎв„ў UID {uid}")
+                                print(f"      в”њв”Ђ UID {uid}")
                                 try:
                                     inbound = parse_raw_email(raw, config)
                                     subject = inbound.subject[:60] if inbound.subject else "(no subject)"
-                                    print(f"      Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћ  Subject: {subject}")
+                                    print(f"      в”‚  Subject: {subject}")
 
                                     message_obj = message_from_bytes(raw)
                                     message_id = message_obj.get("Message-ID") if message_obj else None
@@ -1160,9 +1160,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                             inbound=inbound,
                                         )
                                         if enqueued:
-                                            print(f"      Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћ  Enqueued PARSE for email_id={email_id}")
+                                            print(f"      в”‚  Enqueued PARSE for email_id={email_id}")
                                         else:
-                                            print(f"      Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћ  Duplicate ingest skipped for email_id={email_id}")
+                                            print(f"      в”‚  Duplicate ingest skipped for email_id={email_id}")
                                     else:
                                         final_text = processor.process(login, inbound)
                                         if final_text and final_text.strip():
@@ -1178,17 +1178,17 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                             result = send_telegram(payload)
                                             ok = result.delivered
                                             status = "[OK] sent" if ok else "[FAIL] failed"
-                                            print(f"      Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћ  Telegram: {status}")
+                                            print(f"      в”‚  Telegram: {status}")
                                             logger.info(
                                                 "UID %s: Telegram %s",
                                                 uid,
                                                 "OK" if ok else "FAIL",
                                             )
                                         else:
-                                            print("      Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћ  Result: empty")
+                                            print("      в”‚  Result: empty")
 
                                 except Exception as e:
-                                    print(f"      Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р’В Р Р†Р вЂљРЎв„ў [ERROR] {e}")
+                                    print(f"      в””в”Ђ [ERROR] {e}")
                                     logger.exception("Processing error for UID %s", uid)
 
                             state.save()
@@ -1199,7 +1199,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 account.account_id, e, now_utc
                             )
                             state_snapshot = runtime_health.get_state(account.account_id)
-                            print(f"   Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р’В Р В РІР‚В Р В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В Р’В Р Р†Р вЂљРЎв„ў [IMAP ERROR] {e}")
+                            print(f"   в””в”Ђ [IMAP ERROR] {e}")
                             backoff_minutes = 0
                             if state_snapshot.next_retry_at_utc:
                                 backoff_minutes = int(
@@ -1246,7 +1246,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                     text=alert_text,
                                     bot_token=config.keys.telegram_bot_token,
                                     chat_id=account.telegram_chat_id,
-                                    priority="Р В Р Р‹Р В РІР‚С™Р В Р Р‹Р РЋРЎСџР В Р вЂ Р В РІР‚С™Р РЋРЎС™Р В РЎС›Р Р†Р вЂљР’В",
+                                    priority="🔴",
                                 )
                                 result = send_telegram(payload)
                                 digest_logger.warning(

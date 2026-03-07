@@ -221,13 +221,17 @@ def _normalize_priority_value(priority: str) -> str:
     if normalized in {_PRIORITY_RED, _PRIORITY_YELLOW, _PRIORITY_BLUE}:
         return normalized
     aliases = {
-        "рџ”ґ": _PRIORITY_RED,
-        "СЂСџвЂќТ‘": _PRIORITY_RED,
-        "рџџЎ": _PRIORITY_YELLOW,
-        "СЂСџСџРЋ": _PRIORITY_YELLOW,
-        "рџ”µ": _PRIORITY_BLUE,
-        "СЂСџвЂќВµ": _PRIORITY_BLUE,
+        "🔴": _PRIORITY_RED,
+        "🟡": _PRIORITY_YELLOW,
+        "🔵": _PRIORITY_BLUE,
+        "red": _PRIORITY_RED,
+        "yellow": _PRIORITY_YELLOW,
+        "blue": _PRIORITY_BLUE,
+        "high": _PRIORITY_RED,
+        "medium": _PRIORITY_YELLOW,
+        "low": _PRIORITY_BLUE,
     }
+
     lowered = str(priority or "").casefold()
     for token, value in aliases.items():
         if token.casefold() == lowered:
@@ -278,7 +282,7 @@ class _LazyFeatureFlags:
         return getattr(self._resolve(), name)
 
 
-# === РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ write-only Р‘Р” ===
+# === Инициализация write-only БД ===
 DB_PATH = Path("database.sqlite")
 knowledge_db = KnowledgeDB(DB_PATH)
 analytics = KnowledgeAnalytics(DB_PATH)
@@ -886,16 +890,16 @@ def _maybe_alert_notification_sla(
     ):
         return
     delivery_pct = (
-        f"{sla_result.delivery_rate_24h * 100:.1f}%" if sla_result else "РЅ/Рґ"
+        f"{sla_result.delivery_rate_24h * 100:.1f}%" if sla_result else "н/д"
     )
     p90_latency = (
-        f"{int(sla_result.p90_latency_24h)}СЃ" if sla_result and sla_result.p90_latency_24h is not None else "РЅ/Рґ"
+        f"{int(sla_result.p90_latency_24h)}с" if sla_result and sla_result.p90_latency_24h is not None else "н/д"
     )
-    top_error = "РЅ/Рґ"
+    top_error = "н/д"
     if sla_result and sla_result.top_error_reasons_24h:
         top = sla_result.top_error_reasons_24h[0]
         top_error = f"{top.reason} ({top.share * 100:.1f}%)"
-    action_hint = "С‚РµРєСЃС‚ Р±РµР· С„РѕСЂРјР°С‚РёСЂРѕРІР°РЅРёСЏ" if consecutive_failures >= 3 else "РїРѕРІС‚РѕСЂСЏРµРј"
+    action_hint = "текст без форматирования" if consecutive_failures >= 3 else "повторяем"
     alert_prefix = t("sla.alert.title", locale=_UI_LOCALE)
     alert_text = (
         f"{alert_prefix}\n"
@@ -1094,13 +1098,13 @@ class MessageProcessor:
 
     def process(self, account_login: str, message: InboundMessage) -> str:
         """Lightweight placeholder processor to keep imports stable."""
-        sender = message.sender or "РЅРµРёР·РІРµСЃС‚РЅРѕ"
+        sender = message.sender or "неизвестно"
         display_sender = sender
         if "@" in sender:
             local = sender.split("@", 1)[0].replace(".", " ").replace("_", " ").strip()
             if local:
                 display_sender = local.title()
-        subject = message.subject or "(Р±РµР· С‚РµРјС‹)"
+        subject = message.subject or "(без темы)"
         body_text = message.body or ""
         priority = self._choose_priority(subject, body_text, message.attachments or [])
         action_line = self._normalize_action_subject(
@@ -1126,7 +1130,7 @@ class MessageProcessor:
             lines.append(f"<i>{safe_summary}</i>")
         if attachments:
             lines.extend(self._render_attachments(attachments))
-        lines.append(f"<i>Р°РєРєР°СѓРЅС‚: {safe_account_login}</i>")
+        lines.append(f"<i>аккаунт: {safe_account_login}</i>")
         text = _normalize_mojibake_text("\n".join(lines))
         self._last_ordinary_result = {
             "text": text,
@@ -1204,7 +1208,7 @@ class MessageProcessor:
         doc_type = "OTHER"
         if kind in {"XLS", "XLSX", "XLSM", "XLSB", "TABLE"}:
             doc_type = "TABLE"
-        elif kind in {"DOC", "DOCX"} and any(token in lowered_subject for token in ("РґРѕРіРѕРІРѕСЂ", "contract")):
+        elif kind in {"DOC", "DOCX"} and any(token in lowered_subject for token in ("договор", "contract")):
             doc_type = "CONTRACT"
         snippet = pick_attachment_fact(text, attachment.filename, doc_type) or ""
         snippet = snippet.replace('"', "").replace("В«", "").replace("В»", "")
@@ -1259,7 +1263,7 @@ class MessageProcessor:
 
     @staticmethod
     def _is_greeting_only(text: str) -> bool:
-        greetings = ("РґРѕР±СЂС‹Р№ РґРµРЅСЊ", "РґРѕР±СЂС‹Р№ РІРµС‡РµСЂ", "Р·РґСЂР°РІСЃС‚РІСѓР№С‚Рµ", "РїСЂРёРІРµС‚", "hello", "hi")
+        greetings = ("добрый день", "добрый вечер", "здравствуйте", "привет", "hello", "hi")
         lowered = text.lower().strip()
         if any(lowered.startswith(greet) for greet in greetings) and len(lowered.split()) <= 4:
             return True
@@ -1467,8 +1471,8 @@ _MIN_SUMMARY_WORDS = 2
 _MIN_SUMMARY_CHARS = 12
 _ALLOWED_TG_TAGS = {"<b>", "</b>", "<i>", "</i>", "<tg-spoiler>", "</tg-spoiler>"}
 _SUMMARY_PLACEHOLDER_PATTERNS = (
-    "РїСЂРѕРІРµСЂРёС‚СЊ РїРёСЃСЊРјРѕ",
-    "РїСЂРѕРІРµСЂСЊ РїРёСЃСЊРјРѕ",
+    "проверить письмо",
+    "проверь письмо",
     "check email",
     "check mail",
 )
@@ -1538,7 +1542,7 @@ def _build_attachment_summary(details: list[dict[str, Any]]) -> str:
     if not details:
         return ""
     total_chars = sum(detail["chars"] for detail in details)
-    lines = [f"Р’Р»РѕР¶РµРЅРёСЏ: {len(details)}", f"Р’СЃРµРіРѕ С‚РµРєСЃС‚Р°: {total_chars} chars"]
+    lines = [f"Вложения: {len(details)}", f"Всего текста: {total_chars} chars"]
     lines.extend(f"- {detail['kind']}: {detail['chars']} chars" for detail in details)
     return "\n".join(lines)
 
@@ -1590,8 +1594,8 @@ def _build_no_llm_summary(
             marker in lowered
             for marker in (
                 "disclaimer",
-                "РєРѕРЅС„РёРґРµРЅС†РёР°Р»СЊ",
-                "РЅРµ СЏРІР»СЏРµС‚СЃСЏ РїСѓР±Р»РёС‡РЅРѕР№ РѕС„РµСЂС‚РѕР№",
+                "конфиденциаль",
+                "не является публичной офертой",
             )
         ):
             continue
@@ -1600,10 +1604,10 @@ def _build_no_llm_summary(
             break
 
     if meaningful:
-        return "РљРѕСЂРѕС‚РєРѕ: " + " ".join(meaningful)
+        return "Коротко: " + " ".join(meaningful)
     fallback = cleaned[:220].rstrip()
     if fallback:
-        return f"РљРѕСЂРѕС‚РєРѕ: {fallback}"
+        return f"Коротко: {fallback}"
     return ""
 
 
@@ -1632,15 +1636,15 @@ def _fact_items_from_text(text: str, *, tag: str) -> list[_FactItem]:
         if value:
             if date_matches and any(value in date for date in date_matches):
                 continue
-            items.append(_FactItem(label="РЎСѓРјРјР°", value=value, tag=tag))
+            items.append(_FactItem(label="Сумма", value=value, tag=tag))
     for date_value in facts.dates:
         value = _normalize_fact_value(date_value)
         if value:
-            items.append(_FactItem(label="Р”Р°С‚Р°", value=value, tag=tag))
+            items.append(_FactItem(label="Дата", value=value, tag=tag))
     for doc_number in facts.doc_numbers:
         value = _normalize_fact_value(doc_number)
         if value:
-            items.append(_FactItem(label="РќРѕРјРµСЂ", value=value, tag=tag))
+            items.append(_FactItem(label="Номер", value=value, tag=tag))
     return items
 
 
@@ -1662,8 +1666,8 @@ def _collect_fact_items(
     attachments: list[dict[str, Any]],
 ) -> list[_FactItem]:
     items: list[_FactItem] = []
-    items.extend(_fact_items_from_text(subject, tag="С‚РµРјР°"))
-    items.extend(_fact_items_from_text(body_text, tag="РїРёСЃСЊРјРѕ"))
+    items.extend(_fact_items_from_text(subject, tag="тема"))
+    items.extend(_fact_items_from_text(body_text, tag="письмо"))
     attachment_items: list[_FactItem] = []
     attachment_tags: dict[tuple[str, str], set[str]] = {}
     for attachment in attachments:
@@ -2438,7 +2442,7 @@ def _build_progressive_telegram_payload(
 
 def _normalize_action_line(action_line: str) -> str:
     cleaned = (action_line or "").strip()
-    if cleaned.lower().startswith("СЃРґРµР»Р°С‚СЊ:"):
+    if cleaned.lower().startswith("сделать:"):
         cleaned = cleaned.split(":", 1)[1].strip()
     return cleaned
 
@@ -2852,7 +2856,7 @@ def _validate_message_facts(
 
     doc_number = str(validated.get("doc_number") or "").strip()
     if doc_number:
-        normalized_doc = re.sub(r"[^0-9a-zР°-СЏ]", "", doc_number.lower())
+        normalized_doc = re.sub(r"[^0-9a-zа-я]", "", doc_number.lower())
         if len(normalized_doc) < 3 or len(normalized_doc) > 24:
             validated["doc_number"] = ""
         else:
@@ -3382,7 +3386,7 @@ def _detect_conversation_context(
         return "FORWARD"
     if any(normalized_subject.startswith(marker) for marker in _CONTEXT_REPLY_SUBJECT_MARKERS):
         return "REPLY"
-    if message_facts.get("contract_signal") and any(token in normalized_body for token in ("РїСЂР°РІРє", "РєРѕРјРјРµРЅС‚", "РѕР±СЃСѓРґ")):
+    if message_facts.get("contract_signal") and any(token in normalized_body for token in ("правк", "коммент", "обсуд")):
         return "DISCUSSION"
     return "NEW_MESSAGE"
 
@@ -3394,11 +3398,11 @@ def _build_document_identity(
     subject: str,
 ) -> str:
     sender_local = (sender_email or "").split("@", 1)[0].strip().lower()
-    sender_token = re.sub(r"[^0-9a-zР°-СЏ]+", "_", sender_local).strip("_") or "unknown"
+    sender_token = re.sub(r"[^0-9a-zа-я]+", "_", sender_local).strip("_") or "unknown"
     normalized_subject = _normalize_subject_for_compare(subject)
-    subject_token = re.sub(r"[^0-9a-zР°-СЏ]+", "_", normalized_subject).strip("_")[:40] or "no_subject"
+    subject_token = re.sub(r"[^0-9a-zа-я]+", "_", normalized_subject).strip("_")[:40] or "no_subject"
     doc_number = re.sub(
-        r"[^0-9a-zР°-СЏ]+",
+        r"[^0-9a-zа-я]+",
         "",
         str(message_facts.get("doc_number") or "").lower(),
     )
@@ -4010,7 +4014,7 @@ def build_telegram_payload(
             show_decision_trace=False,
         ),
     )
-    assert "РЎРґРµР»Р°С‚СЊ:" not in payload.html_text
+    assert "Сделать:" not in payload.html_text
     return payload, render_mode, payload_invalid
 
 
@@ -4227,9 +4231,9 @@ def _build_heuristic_summary(
     if facts.get("doc_kind") == "invoice":
         additions: list[str] = []
         if facts.get("amount") and facts["amount"] not in text:
-            additions.append(f"СЃСѓРјРјР° {facts['amount']}")
+            additions.append(f"сумма {facts['amount']}")
         if facts.get("due_date") and facts["due_date"] not in text:
-            additions.append(f"РѕРїР»Р°С‚РёС‚СЊ РґРѕ {facts['due_date']}")
+            additions.append(f"оплатить до {facts['due_date']}")
         if additions:
             text = "; ".join(part for part in (text, ", ".join(additions)) if part)
     return text[:200]
@@ -4649,14 +4653,14 @@ def _format_amount_value(value: int) -> str:
 
 def _format_deadline_days(days_out: int) -> str:
     if days_out < 0:
-        return "РїСЂРѕСЃСЂРѕС‡РµРЅРѕ"
+        return "просрочено"
     if days_out == 0:
-        return "СЃРµРіРѕРґРЅСЏ"
+        return "сегодня"
     if days_out == 1:
-        return "С‡РµСЂРµР· 1 РґРµРЅСЊ"
+        return "через 1 день"
     if 2 <= days_out <= 4:
-        return f"С‡РµСЂРµР· {days_out} РґРЅСЏ"
-    return f"С‡РµСЂРµР· {days_out} РґРЅРµР№"
+        return f"через {days_out} дня"
+    return f"через {days_out} дней"
 
 
 def _parse_deadline_iso(deadline_iso: str | None) -> datetime | None:
@@ -4695,9 +4699,9 @@ def _build_priority_explain_lines(
             mail_type_item = _select_breakdown_item(breakdown, "mail_type")
             reason = mail_type_item.reason_code if mail_type_item else None
         reason_label = _normalize_reason_code(reason or "")
-        line = f"РўРёРї: {_format_mail_type_label(mail_type)}"
+        line = f"Тип: {_format_mail_type_label(mail_type)}"
         if reason_label:
-            line = f"{line} (РїСЂРёС‡РёРЅР°: {reason_label})"
+            line = f"{line} (причина: {reason_label})"
         lines.append(line)
 
     deadline_item = _select_breakdown_item(breakdown, "deadline")
@@ -4706,10 +4710,10 @@ def _build_priority_explain_lines(
             days_out = int(deadline_item.detail)
         except ValueError:
             days_out = 0
-        line = f"Р”РµРґР»Р°Р№РЅ: {_format_deadline_days(days_out)}"
+        line = f"Дедлайн: {_format_deadline_days(days_out)}"
         reason_label = _normalize_reason_code(deadline_item.reason_code)
         if reason_label:
-            line = f"{line} (РїСЂРёС‡РёРЅР°: {reason_label})"
+            line = f"{line} (причина: {reason_label})"
         lines.append(line)
     elif commitments:
         parsed_deadlines = [
@@ -4721,7 +4725,7 @@ def _build_priority_explain_lines(
         if parsed_deadlines:
             nearest = min(parsed_deadlines)
             days_out = (nearest.date() - received_at.date()).days
-            line = f"Р”РµРґР»Р°Р№РЅ: {_format_deadline_days(days_out)}"
+            line = f"Дедлайн: {_format_deadline_days(days_out)}"
             lines.append(line)
 
     amount_item = _select_breakdown_item(breakdown, "amount")
@@ -4732,24 +4736,24 @@ def _build_priority_explain_lines(
             amount_value = 0
         if amount_value > 0:
             amount_label = _format_amount_value(amount_value)
-            line = f"РЎСѓРјРјР°: {amount_label}"
+            line = f"Сумма: {amount_label}"
             reason_label = _normalize_reason_code(amount_item.reason_code)
             if reason_label:
-                line = f"{line} (РїСЂРёС‡РёРЅР°: {reason_label})"
+                line = f"{line} (причина: {reason_label})"
             lines.append(line)
 
     if len(lines) < 3:
         urgency_item = _select_breakdown_item(breakdown, "urgency")
         if urgency_item and urgency_item.detail:
             detail = _sanitize_preview_line(str(urgency_item.detail))
-            line = f"РЎСЂРѕС‡РЅРѕСЃС‚СЊ: {detail}"
+            line = f"Срочность: {detail}"
             reason_label = _normalize_reason_code(urgency_item.reason_code)
             if reason_label:
-                line = f"{line} (РїСЂРёС‡РёРЅР°: {reason_label})"
+                line = f"{line} (причина: {reason_label})"
             lines.append(line)
 
     if not lines:
-        lines.append("РЅРµС‚ РґР°РЅРЅС‹С…")
+        lines.append("нет данных")
 
     return [_sanitize_preview_line(line) for line in lines[:3]]
 
@@ -4767,7 +4771,7 @@ def _build_preview_message(
         _sanitize_preview_line(reason) for reason in (localized_reasons or reasons) if reason
     ]
     if not safe_reasons:
-        safe_reasons = ["РЅРµС‚ РґР°РЅРЅС‹С…"]
+        safe_reasons = ["нет данных"]
     confidence_value = confidence if confidence is not None else 0.0
     lines = [
         t("preview.title", locale=_UI_LOCALE),
@@ -4793,17 +4797,17 @@ def _append_commitments_preview(
 ) -> str:
     if not commitments:
         return preview_text
-    lines = [preview_text, "", "РћР±СЏР·Р°С‚РµР»СЊСЃС‚РІР°"]
+    lines = [preview_text, "", "Обязательства"]
     status_labels = {
-        "pending": ("", "РѕР¶РёРґР°РµС‚СЃСЏ"),
-        "fulfilled": ("", "РІС‹РїРѕР»РЅРµРЅРѕ"),
-        "expired": ("", "РїСЂРѕСЃСЂРѕС‡РµРЅРѕ"),
-        "unknown": ("", "РЅРµРёР·РІРµСЃС‚РЅРѕ"),
+        "pending": ("", "ожидается"),
+        "fulfilled": ("", "выполнено"),
+        "expired": ("", "просрочено"),
+        "unknown": ("", "неизвестно"),
     }
     for commitment in commitments:
         safe_text = _sanitize_preview_line(commitment.commitment_text)
         icon, label = status_labels.get(
-            commitment.status, ("", commitment.status or "РЅРµРёР·РІРµСЃС‚РЅРѕ")
+            commitment.status, ("", commitment.status or "неизвестно")
         )
         line = f"• \"{safe_text}\" — {label}".replace("  ", " ").strip()
         lines.append(line)
@@ -4819,14 +4823,14 @@ def _append_commitment_signal_preview(
     fulfilled_count: int,
     expired_count: int,
 ) -> str:
-    safe_sender = _sanitize_preview_line(from_email or "РЅРµРёР·РІРµСЃС‚РЅРѕ")
+    safe_sender = _sanitize_preview_line(from_email or "неизвестно")
     lines = [
         preview_text,
         "",
-        "РљРѕРЅС‚РµРєСЃС‚ РѕС‚РЅРѕС€РµРЅРёР№:",
-        f"  РљРѕРЅС‚СЂР°РіРµРЅС‚: {safe_sender}",
-        f"  РќР°РґС‘Р¶РЅРѕСЃС‚СЊ РѕР±СЏР·Р°С‚РµР»СЊСЃС‚РІ: {label} {score}/100",
-        f"  (РІС‹РїРѕР»РЅРµРЅРѕ: {fulfilled_count}, РїСЂРѕСЃСЂРѕС‡РµРЅРѕ: {expired_count} Р·Р° 30 РґРЅРµР№)",
+        "Контекст отношений:",
+        f"  Контрагент: {safe_sender}",
+        f"  Надёжность обязательств: {label} {score}/100",
+        f"  (выполнено: {fulfilled_count}, просрочено: {expired_count} за 30 дней)",
     ]
     return "\n".join(lines)
 
@@ -4863,11 +4867,11 @@ def _append_narrative_preview(
             insert_at = idx
             break
     narrative_lines = ["", t("preview.narrative", locale=_UI_LOCALE)]
-    narrative_lines.append(f"Р¤Р°РєС‚: {_sanitize_preview_line(narrative.fact)}")
+    narrative_lines.append(f"Факт: {_sanitize_preview_line(narrative.fact)}")
     if narrative.pattern:
-        narrative_lines.append(f"РљРѕРЅС‚РµРєСЃС‚: {_sanitize_preview_line(narrative.pattern)}")
+        narrative_lines.append(f"Контекст: {_sanitize_preview_line(narrative.pattern)}")
     if narrative.action:
-        narrative_lines.append(f"Р”РµР№СЃС‚РІРёРµ: {_sanitize_preview_line(narrative.action)}")
+        narrative_lines.append(f"Действие: {_sanitize_preview_line(narrative.action)}")
     lines[insert_at:insert_at] = narrative_lines
     return "\n".join(lines)
 
@@ -5855,10 +5859,10 @@ def process_message(
     references: str | None = None,
 ) -> None:
     """
-    Р“Р»Р°РІРЅС‹Р№ pipeline:
+    Главный pipeline:
     PARSE в†’ LLM в†’ (SAVE TO DB) в†’ TELEGRAM
 
-    NOTE: РџРѕРІРµРґРµРЅРёРµ Telegram Рё LLM РќР• РњР•РќРЇР•Рњ
+    NOTE: Поведение Telegram и LLM НЕ МЕНЯЕМ
     """
 
     anchor_received_at: datetime | None = received_at
@@ -7107,7 +7111,7 @@ def process_message(
             if source and source not in fact_sources:
                 fact_sources.append(source)
         has_attachment_fact_provenance = any(
-            item.tag and item.tag not in {"С‚РµРјР°", "РїРёСЃСЊРјРѕ"}
+            item.tag and item.tag not in {"тема", "письмо"}
             for item in shown_fact_items
         )
         if high_impact or low_confidence or extraction_failed:
