@@ -175,7 +175,7 @@ from mailbot_v26.ui.i18n import (
 
 logger = get_logger("mailbot")
 
-_SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd|отв|пер|РѕС‚РІ|РїРµСЂ)\s*:\s*)+", re.IGNORECASE)
+_SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd|отв|пер|ответ|перес)\s*:\s*)+", re.IGNORECASE)
 
 
 @lru_cache(maxsize=2048)
