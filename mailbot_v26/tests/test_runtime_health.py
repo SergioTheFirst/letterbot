@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from mailbot_v26.config_loader import AccountConfig
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
+from mailbot_v26.text.mojibake import normalize_mojibake_text
 
 
 def _account(account_id: str = "acc1") -> AccountConfig:
@@ -156,6 +157,19 @@ def test_imap_runtime_failure_is_localized_for_user(tmp_path):
     assert "Причина:" in text
     assert "Следующая попытка:" in text
     assert "IMAP RUNTIME FAILURE" not in text
+
+
+def test_no_mojibake_in_imap_runtime_failure_message(tmp_path):
+    mgr = _manager(tmp_path)
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    _should_alert, text = mgr.on_failure(
+        "acc1", TimeoutError("SSL handshake timed out"), now
+    )
+
+    assert normalize_mojibake_text(text) == text
+    for token in ("Р Р†Р вЂљ", "Р В РЎвЂўР РЋРІР‚С™", "РЎР‚РЎСџ", "вЂ"):
+        assert token not in text
 
 
 def test_auth_error_has_human_readable_russian_diagnosis(tmp_path):
