@@ -1,5 +1,5 @@
 """
-PDF extractor for MailBot v26.
+PDF extractor for Letterbot v26.
 
 DLL-free, Windows-friendly, RAM-safe.
 

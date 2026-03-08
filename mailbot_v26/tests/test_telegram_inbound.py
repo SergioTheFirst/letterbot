@@ -824,6 +824,37 @@ def test_help_contains_support_command(tmp_path: Path) -> None:
     assert _norm("/stats — качество автоприоритизации") in _norm(sent[-1])
 
 
+def test_help_shows_digest_and_autopriority_as_separate_commands(
+    tmp_path: Path,
+) -> None:
+    """Help text must list /digest on and /digest off as separate lines,
+    and /autopriority on and /autopriority off as separate lines.
+    The old combined on|off format must not appear.
+    """
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/help"})
+
+    help_text = sent[-1]
+    # Separate entries must be present
+    assert _norm("/digest on") in _norm(help_text)
+    assert _norm("/digest off") in _norm(help_text)
+    assert _norm("/autopriority on") in _norm(help_text)
+    assert _norm("/autopriority off") in _norm(help_text)
+    # Old combined format must NOT appear
+    assert "on|off" not in help_text
+
+
 def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
     sent: list[str] = []
     gate_result = GateResult(

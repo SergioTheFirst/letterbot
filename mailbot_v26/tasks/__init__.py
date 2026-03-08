@@ -1,3 +1,3 @@
-"""Task-oriented utilities for MailBot v26."""
+"""Task-oriented utilities for Letterbot v26."""
 
 __all__ = ["shadow_actions"]

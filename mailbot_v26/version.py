@@ -1,4 +1,4 @@
-"""Single source of truth for MailBot app version."""
+"""Single source of truth for Letterbot app version."""
 
 __version__ = "28.0.0-rc"
 BUILD_METADATA = ""

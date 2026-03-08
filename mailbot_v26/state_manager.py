@@ -1,4 +1,4 @@
-"""Thread-safe persistence for MailBot Premium v26.
+"""Thread-safe persistence for Letterbot v26.
 
 The state file keeps track of processed UIDs and service health so the
 pipeline can resume after restarts without duplicating work. The design

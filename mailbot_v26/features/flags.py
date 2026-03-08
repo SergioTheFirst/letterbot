@@ -1,4 +1,4 @@
-"""Feature flag definitions for MailBot.
+"""Feature flag definitions for Letterbot.
 
 Flags are loaded from ``settings.ini`` in 2-file mode and may fall back to
 legacy ``config.ini`` when running legacy config layouts. Missing files,
