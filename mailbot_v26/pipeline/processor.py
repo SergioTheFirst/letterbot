@@ -55,6 +55,7 @@ from mailbot_v26.config_loader import (
     resolve_account_scope,
 )
 from mailbot_v26.facts.fact_extractor import FactExtractor
+from mailbot_v26.domain.document_templates import select_document_template
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
 from mailbot_v26.features import FeatureFlags
@@ -2320,6 +2321,7 @@ def _build_premium_clarity_text(
         action_line=short_action,
         summary=body_summary,
         message_facts=message_facts,
+        sender_email=from_email,
         subject=subject,
         body_text=body_text,
         attachments=attachments,
@@ -2668,7 +2670,7 @@ _FACT_AMOUNT_RE = re.compile(
     re.IGNORECASE,
 )
 _FACT_DUE_RE = re.compile(
-    r"(?:\u043e\u043f\u043b\u0430\u0442(?:\u0438\u0442\u044c|\u0430|\u0435)?\s*\u0434\u043e|\u0441\u0440\u043e\u043a\s*\u043e\u043f\u043b\u0430\u0442[\u044b\u0438]?|\u0434\u043e)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
+    r"(?:\u043e\u043f\u043b\u0430\u0442(?:\u0438\u0442\u044c|\u0430|\u0435)?\s*\u0434\u043e|\u0443\u043f\u043b\u0430\u0442\u0438\u0442\u044c\s*\u0434\u043e|\u0441\u0440\u043e\u043a\s*\u043e\u043f\u043b\u0430\u0442[\u044b\u0438]?|due\s*date|payment\s*due)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
     re.IGNORECASE,
 )
 _FACT_DATE_RE = re.compile(r"\b\d{2}\.\d{2}(?:\.\d{2,4})?\b")
@@ -2694,6 +2696,10 @@ _FACT_PAYROLL_MARKERS = (
     "оклад",
     "табель",
     "ведомость",
+    "reconciliation statement",
+    "акт сверки",
+    "взаимных расчетов",
+    "взаимных расчётов",
 )
 _FACT_CONTRACT_MARKERS = ("договор", "contract", "agreement", "подпис", "signature")
 _FACT_INCIDENT_MARKERS = (
@@ -2729,6 +2735,9 @@ _PAYROLL_AMOUNT_NEGATIVE_MARKERS = (
     "налог",
     "страховые",
     "к выплате",
+    "акт сверки",
+    "взаимных расчетов",
+    "взаимных расчётов",
 )
 _PAYROLL_AMOUNT_POSITIVE_MARKERS = ("к выплате", "итого к выплате", "начислено")
 _CONTEXT_REPLY_SUBJECT_MARKERS = ("re:", "отв:", "reply:")
@@ -2783,6 +2792,21 @@ _AMOUNT_EVIDENCE_KEYWORDS = tuple(
         )
     )
 )
+_DUE_DATE_EVIDENCE_KEYWORDS = (
+    "\u043e\u043f\u043b\u0430\u0442\u0438\u0442\u044c \u0434\u043e",
+    "\u0441\u0440\u043e\u043a \u043e\u043f\u043b\u0430\u0442\u044b",
+    "\u0443\u043f\u043b\u0430\u0442\u0438\u0442\u044c \u0434\u043e",
+    "due date",
+    "payment due",
+)
+_DOC_NUMBER_EVIDENCE_KEYWORDS = (
+    "\u0441\u0447\u0435\u0442",
+    "\u0441\u0447\u0451\u0442",
+    "invoice",
+    "\u0434\u043e\u0433\u043e\u0432\u043e\u0440",
+    "contract",
+    "\u0430\u043a\u0442",
+)
 _TABLE_TOTAL_ANCHORS = (
     "\u0438\u0442\u043e\u0433\u043e",
     "\u043a \u043e\u043f\u043b\u0430\u0442\u0435",
@@ -2801,6 +2825,13 @@ _ATTACHMENT_CONTEXT_KEYWORDS = tuple(
         )
     )
 )
+_STRONG_CONSISTENCY_ISSUES = {
+    "payroll_overrides_invoice",
+    "subtotal_tax_total_mismatch",
+    "line_total_mismatch",
+    "due_date_not_after_invoice_date",
+    "due_date_header_not_payment",
+}
 
 
 def _has_keyword_context(text: str, keywords: tuple[str, ...]) -> bool:
@@ -2883,6 +2914,82 @@ def _extract_numbers_in_evidence_window(
     return candidates
 
 
+def _extract_pattern_candidates_in_window(
+    text: str,
+    *,
+    anchors: tuple[str, ...],
+    pattern: re.Pattern[str],
+    window: int = 120,
+    group: int = 0,
+) -> list[dict[str, Any]]:
+    source = _normalize_mojibake_text(str(text or ""))
+    if not source.strip():
+        return []
+
+    lowered = _normalized_lower(source)
+    normalized_anchors = [
+        _normalize_token(str(anchor)) for anchor in anchors if str(anchor).strip()
+    ]
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[int, int, str]] = set()
+
+    for anchor in normalized_anchors:
+        scan_offset = 0
+        anchor_len = len(anchor)
+        while True:
+            index = lowered.find(anchor, scan_offset)
+            if index < 0:
+                break
+            left = max(0, index - window)
+            right = min(len(source), index + anchor_len + window)
+            segment = source[left:right]
+            for match in pattern.finditer(segment):
+                value = str(match.group(group) or "").strip()
+                if not value:
+                    continue
+                global_start = left + match.start(group)
+                global_end = left + match.end(group)
+                dedupe_key = (global_start, global_end, value)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                context = lowered[
+                    max(0, global_start - 36) : min(len(lowered), global_end + 36)
+                ]
+                candidates.append(
+                    {
+                        "value": value,
+                        "start": global_start,
+                        "end": global_end,
+                        "context": context,
+                        "window_hit": True,
+                    }
+                )
+            scan_offset = index + anchor_len
+
+    if candidates:
+        candidates.sort(key=lambda item: (int(item["start"]), int(item["end"])))
+        return candidates
+
+    for match in pattern.finditer(source):
+        value = str(match.group(group) or "").strip()
+        if not value:
+            continue
+        global_start = match.start(group)
+        global_end = match.end(group)
+        context = lowered[max(0, global_start - 36) : min(len(lowered), global_end + 36)]
+        candidates.append(
+            {
+                "value": value,
+                "start": global_start,
+                "end": global_end,
+                "context": context,
+                "window_hit": False,
+            }
+        )
+    return candidates
+
+
 def _compute_decision_confidence(
     *,
     message_facts: dict[str, Any],
@@ -2893,6 +3000,9 @@ def _compute_decision_confidence(
     amount = str(message_facts.get("amount") or "").strip()
     due_date = str(message_facts.get("due_date") or "").strip()
     doc_number = str(message_facts.get("doc_number") or "").strip()
+    amount_window_hit = bool(message_facts.get("amount_window_hit", not amount))
+    due_date_window_hit = bool(message_facts.get("due_date_window_hit", not due_date))
+    doc_number_window_hit = bool(message_facts.get("doc_number_window_hit", not doc_number))
     attachment_facts = [
         str(item).strip()
         for item in (message_facts.get("attachment_facts") or [])
@@ -2934,9 +3044,28 @@ def _compute_decision_confidence(
         confidence += 0.35
     if bool(message_facts.get("amount_context_missing")):
         confidence -= 0.2
+    if amount and not amount_window_hit:
+        confidence -= 0.12
+    if due_date and not due_date_window_hit:
+        confidence -= 0.08
+    if doc_number and not doc_number_window_hit:
+        confidence -= 0.08
     consistency_penalty = float(message_facts.get("consistency_penalty") or 0.0)
     if consistency_penalty > 0:
         confidence -= min(max(consistency_penalty, 0.0), 0.6)
+    consistency_boost = float(message_facts.get("consistency_boost") or 0.0)
+    if consistency_boost > 0:
+        confidence += min(max(consistency_boost, 0.0), 0.2)
+    template_boost = float(message_facts.get("template_confidence_boost") or 0.0)
+    if template_boost > 0:
+        confidence += min(max(template_boost, 0.0), 0.2)
+    consistency_issues = {
+        str(item) for item in (message_facts.get("consistency_issues") or []) if item
+    }
+    if doc_kind == "invoice" and any(
+        issue in consistency_issues for issue in _STRONG_CONSISTENCY_ISSUES
+    ):
+        confidence = min(confidence, 0.42)
     if (
         doc_kind == "invoice"
         and filename_signal
@@ -3010,6 +3139,23 @@ def _validate_message_facts(
             )
             if amount_for_compare and normalized_doc == amount_for_compare:
                 validated["doc_number"] = ""
+            else:
+                lowered_evidence = _normalized_lower(str(evidence_text or ""))
+                doc_value = _normalized_lower(doc_number)
+                doc_index = lowered_evidence.find(doc_value) if doc_value else -1
+                if doc_index >= 0:
+                    context = lowered_evidence[
+                        max(0, doc_index - 40) : min(
+                            len(lowered_evidence), doc_index + len(doc_value) + 40
+                        )
+                    ]
+                    has_doc_anchor = _contains_any(context, _DOC_NUMBER_EVIDENCE_KEYWORDS)
+                    if (
+                        not has_doc_anchor
+                        and re.fullmatch(r"\d{1,4}", normalized_doc) is not None
+                    ):
+                        validated["doc_number"] = ""
+                        validated["doc_number_window_hit"] = False
 
     return validated
 
@@ -3113,6 +3259,7 @@ def _score_message_facts(
     best_amount = ""
     best_score: int | None = None
     best_currency_hit = False
+    best_window_hit = False
     lower_source = _normalized_lower(source)
     doc_kind = _normalized_lower(str(scored.get("doc_kind") or "")).strip()
     attachment_lower = _normalized_lower(attachment_source)
@@ -3217,20 +3364,24 @@ def _score_message_facts(
             best_amount = candidate
             best_score = candidate_score
             best_currency_hit = candidate_currency_hit
+            best_window_hit = bool(window_hit)
         elif candidate_score == best_score:
             if candidate_currency_hit and not best_currency_hit:
                 best_amount = candidate
                 best_currency_hit = True
+                best_window_hit = bool(window_hit)
             elif candidate_currency_hit == best_currency_hit and len(candidate) > len(
                 best_amount
             ):
                 best_amount = candidate
+                best_window_hit = bool(window_hit)
 
     if best_score is None:
         return scored
 
     scored["amount"] = best_amount
     scored["amount_context_missing"] = not bool(_FACT_CURRENCY_RE.search(lower_source))
+    scored["amount_window_hit"] = best_window_hit
     return scored
 
 
@@ -3323,6 +3474,7 @@ def _consistency_check_message_facts(
         if str(item).strip()
     ]
     penalty = float(checked.get("consistency_penalty") or 0.0)
+    boost = float(checked.get("consistency_boost") or 0.0)
 
     if bool(checked.get("payroll_signal")) and (
         bool(checked.get("invoice_signal"))
@@ -3367,6 +3519,8 @@ def _consistency_check_message_facts(
         if abs(expected_total - total) > tolerance:
             issues.append("subtotal_tax_total_mismatch")
             penalty += 0.2
+        else:
+            boost += 0.1
 
     line_match = re.search(
         r"(\d+(?:[\.,]\d+)?)\s*(?:x|\*|×)\s*(\d+(?:[\.,]\d+)?)\s*(?:=|≈|~)\s*(\d+(?:[\.,]\d+)?)",
@@ -3389,6 +3543,45 @@ def _consistency_check_message_facts(
     ):
         issues.append("amount_without_currency")
         penalty += 0.15
+    if str(checked.get("amount") or "").strip() and not bool(
+        checked.get("amount_window_hit", True)
+    ):
+        issues.append("amount_weak_window")
+        penalty += 0.1
+    if str(checked.get("doc_number") or "").strip() and not bool(
+        checked.get("doc_number_window_hit", True)
+    ):
+        issues.append("doc_number_weak_context")
+        penalty += 0.08
+
+    due_date_raw = str(checked.get("due_date") or "").strip()
+    lower_source = _normalized_lower(source_text)
+    if due_date_raw:
+        due_idx = lower_source.find(_normalized_lower(due_date_raw))
+        due_context = ""
+        if due_idx >= 0:
+            due_context = lower_source[
+                max(0, due_idx - 40) : min(
+                    len(lower_source), due_idx + len(due_date_raw) + 40
+                )
+            ]
+        has_due_anchor = _contains_any(due_context, _DUE_DATE_EVIDENCE_KEYWORDS)
+        has_invoice_header_anchor = _contains_any(
+            due_context,
+            (
+                "invoice date",
+                "\u0434\u0430\u0442\u0430 \u0441\u0447\u0435\u0442\u0430",
+                "\u0434\u0430\u0442\u0430 \u0441\u0447\u0451\u0442\u0430",
+                "\u0434\u0430\u0442\u0430 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430",
+            ),
+        )
+        if has_invoice_header_anchor and not has_due_anchor:
+            checked["due_date"] = ""
+            issues.append("due_date_header_not_payment")
+            penalty += 0.2
+        elif not has_due_anchor and not bool(checked.get("due_date_window_hit", True)):
+            issues.append("due_date_weak_context")
+            penalty += 0.1
 
     due_date = _parse_ddmmyyyy(str(checked.get("due_date") or ""))
     invoice_date_match = re.search(
@@ -3404,8 +3597,10 @@ def _consistency_check_message_facts(
             _parse_ddmmyyyy(token) for token in _FACT_DATE_RE.findall(source_text)
         ]
         date_candidates = [item for item in date_candidates if item is not None]
-        if date_candidates:
-            invoice_date = date_candidates[0]
+        for candidate in date_candidates:
+            if candidate != due_date:
+                invoice_date = candidate
+                break
     if due_date is not None and invoice_date is not None and due_date <= invoice_date:
         checked["due_date"] = ""
         issues.append("due_date_not_after_invoice_date")
@@ -3413,6 +3608,7 @@ def _consistency_check_message_facts(
 
     checked["consistency_issues"] = list(dict.fromkeys(issues))
     checked["consistency_penalty"] = round(max(0.0, penalty), 3)
+    checked["consistency_boost"] = round(max(0.0, boost), 3)
     return checked
 
 
@@ -3512,6 +3708,7 @@ def _collect_message_facts(
     explicit_payroll = normalized_mail_type.startswith("payroll")
 
     amount = ""
+    amount_window_hit = False
     amount_candidates = _extract_numbers_in_evidence_window(
         evidence_text,
         _AMOUNT_EVIDENCE_KEYWORDS,
@@ -3542,27 +3739,48 @@ def _collect_message_facts(
             continue
         if has_positive or has_currency:
             amount = candidate_value
+            amount_window_hit = bool(candidate_item.get("window_hit"))
             break
     if not amount and amount_candidates and not explicit_invoice:
         amount = _normalize_amount_candidate(
             str(amount_candidates[0].get("amount") or "").strip()
         )
+        amount_window_hit = bool(amount_candidates[0].get("window_hit"))
 
     due_date = ""
+    due_date_window_hit = False
     due_match = _FACT_DUE_RE.search(evidence_text)
     if due_match:
         due_date = due_match.group(1)
-    elif _contains_any(lowered, ("до", "срок", "deadline")):
+        due_date_window_hit = True
+    else:
+        due_candidates = _extract_pattern_candidates_in_window(
+            evidence_text,
+            anchors=_DUE_DATE_EVIDENCE_KEYWORDS,
+            pattern=_FACT_DATE_RE,
+            window=120,
+            group=0,
+        )
+        if due_candidates:
+            due_date = str(due_candidates[0].get("value") or "").strip()
+            due_date_window_hit = bool(due_candidates[0].get("window_hit"))
+    if not due_date and _contains_any(lowered, _FACT_INVOICE_MARKERS):
         generic_date = _FACT_DATE_RE.search(evidence_text)
         due_date = generic_date.group(0) if generic_date else ""
-    if not due_date and _contains_any(
-        lowered, ("счет", "счёт", "invoice", "оплат", "due")
-    ):
-        generic_date = _FACT_DATE_RE.search(evidence_text)
-        due_date = generic_date.group(0) if generic_date else ""
+        due_date_window_hit = False
 
-    doc_number_match = _FACT_DOC_NUMBER_RE.search(evidence_text)
-    doc_number = doc_number_match.group(1) if doc_number_match else ""
+    doc_number = ""
+    doc_number_window_hit = False
+    doc_number_candidates = _extract_pattern_candidates_in_window(
+        evidence_text,
+        anchors=_DOC_NUMBER_EVIDENCE_KEYWORDS,
+        pattern=_FACT_DOC_NUMBER_RE,
+        window=120,
+        group=1,
+    )
+    if doc_number_candidates:
+        doc_number = str(doc_number_candidates[0].get("value") or "").strip()
+        doc_number_window_hit = bool(doc_number_candidates[0].get("window_hit"))
     payroll_signal = explicit_payroll or (
         not explicit_invoice and _contains_any(lowered, _FACT_PAYROLL_MARKERS)
     )
@@ -3591,11 +3809,15 @@ def _collect_message_facts(
 
     if payroll_signal:
         due_date = ""
+        due_date_window_hit = False
 
     return {
         "amount": amount,
+        "amount_window_hit": amount_window_hit,
         "due_date": due_date,
+        "due_date_window_hit": due_date_window_hit,
         "doc_number": doc_number,
+        "doc_number_window_hit": doc_number_window_hit,
         "doc_kind": doc_kind,
         "invoice_signal": invoice_signal,
         "payroll_signal": payroll_signal,
@@ -4551,23 +4773,127 @@ def _build_heuristic_action_line(
     return "Ознакомиться"
 
 
+def _set_message_doc_kind(
+    message_facts: dict[str, Any], *, doc_kind: str
+) -> dict[str, Any]:
+    normalized_doc_kind = _normalized_lower(doc_kind).strip()
+    message_facts["doc_kind"] = normalized_doc_kind
+    message_facts["invoice_signal"] = normalized_doc_kind == "invoice"
+    message_facts["payroll_signal"] = normalized_doc_kind == "payroll"
+    message_facts["contract_signal"] = normalized_doc_kind == "contract"
+    message_facts["incident_signal"] = normalized_doc_kind == "incident"
+    return message_facts
+
+
+def _apply_document_template_layer(
+    *,
+    message_facts: dict[str, Any],
+    sender_email: str,
+    subject: str,
+    body_text: str,
+    attachments: list[dict[str, Any]],
+    action_line: str,
+) -> tuple[dict[str, Any], str]:
+    facts = dict(message_facts or {})
+    attachment_names = [
+        str(item.get("filename") or "").strip() for item in (attachments or [])
+    ]
+    attachment_text = " ".join(
+        str(item.get("text") or "")[:240] for item in (attachments or [])
+    )
+    match = select_document_template(
+        sender_email=sender_email,
+        subject=subject,
+        body_text=body_text,
+        attachment_names=attachment_names,
+        attachment_text=attachment_text,
+    )
+    if match is None:
+        return facts, action_line
+
+    template = match.template
+    facts["template_id"] = template.id
+    facts["template_strong_match"] = bool(match.strong_match)
+    facts["template_sender_match"] = bool(match.sender_match)
+    if match.preferred_amount_anchor_hit and str(facts.get("amount") or "").strip():
+        facts["amount_window_hit"] = True
+    if match.preferred_due_date_anchor_hit and str(facts.get("due_date") or "").strip():
+        facts["due_date_window_hit"] = True
+
+    confidence_boost = float(template.confidence_boost or 0.0)
+    if confidence_boost > 0:
+        if match.strong_match:
+            facts["template_confidence_boost"] = min(confidence_boost, 0.2)
+        elif match.sender_match:
+            # Sender-only confidence influence must stay weak.
+            facts["template_confidence_boost"] = min(confidence_boost, 0.04)
+
+    if template.doc_kind_override and match.strong_match:
+        _set_message_doc_kind(facts, doc_kind=template.doc_kind_override)
+
+    normalized_action = _normalize_mojibake_text((action_line or "").strip())
+    resolved_action = normalized_action or str(action_line or "").strip()
+    if template.action_override and match.strong_match:
+        resolved_action = template.action_override
+    elif template.action_hint and match.strong_match:
+        lowered = _normalized_lower(resolved_action)
+        if not resolved_action or _contains_any(
+            lowered,
+            (
+                "\u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c",
+                "\u043e\u0437\u043d\u0430\u043a\u043e\u043c",
+                "check",
+                "review",
+            ),
+        ):
+            resolved_action = template.action_hint
+
+    suppression_flags = {
+        str(flag).strip()
+        for flag in (template.strong_suppression_flags or ())
+        if str(flag).strip()
+    }
+    if (
+        "suppress_invoice_payment_action" in suppression_flags
+        and _contains_any(_normalized_lower(resolved_action), _PAYMENT_ACTION_MARKERS)
+    ):
+        if match.strong_match and template.action_override:
+            resolved_action = template.action_override
+        elif str(facts.get("doc_kind") or "").strip().lower() == "contract":
+            resolved_action = "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0434\u043e\u0433\u043e\u0432\u043e\u0440"
+        else:
+            resolved_action = "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c"
+
+    return facts, resolved_action
+
+
 def _build_message_decision(
     *,
     priority: str,
     action_line: str,
     summary: str,
     message_facts: dict[str, Any],
+    sender_email: str = "",
     subject: str = "",
     body_text: str = "",
     attachments: list[dict[str, Any]] | None = None,
     context: str = "NEW_MESSAGE",
 ) -> MessageDecision:
+    attachment_items = attachments or []
+    message_facts, action_line = _apply_document_template_layer(
+        message_facts=message_facts,
+        sender_email=sender_email,
+        subject=subject,
+        body_text=body_text,
+        attachments=attachment_items,
+        action_line=action_line,
+    )
     doc_kind = str(message_facts.get("doc_kind") or "")
     confidence = _compute_decision_confidence(
         message_facts=message_facts,
         subject=subject,
         body_text=body_text,
-        attachments=attachments or [],
+        attachments=attachment_items,
     )
     resolved_action = _normalize_mojibake_text(
         (action_line or "").strip()
@@ -4576,11 +4902,22 @@ def _build_message_decision(
         message_facts=message_facts,
     )
     resolved_action_lower = _normalized_lower(resolved_action)
+    consistency_issues = {
+        str(item) for item in (message_facts.get("consistency_issues") or []) if item
+    }
+    if (
+        doc_kind == "invoice"
+        and any(issue in consistency_issues for issue in _STRONG_CONSISTENCY_ISSUES)
+        and _contains_any(resolved_action_lower, _PAYMENT_ACTION_MARKERS)
+    ):
+        resolved_action = "Проверить"
+        resolved_action_lower = _normalized_lower(resolved_action)
 
-    if doc_kind == "invoice" and resolved_action_lower in {
-        "проверить",
-        "проверить письмо",
-    }:
+    if (
+        doc_kind == "invoice"
+        and resolved_action_lower in {"проверить", "проверить письмо"}
+        and not any(issue in consistency_issues for issue in _STRONG_CONSISTENCY_ISSUES)
+    ):
         resolved_action = "Оплатить"
     if doc_kind == "contract" and resolved_action_lower in {
         "проверить",
@@ -6830,6 +7167,7 @@ def process_message(
             action_line=action_line,
             summary=body_summary,
             message_facts=message_facts,
+            sender_email=from_email,
             subject=subject,
             body_text=body_text,
             attachments=attachments,

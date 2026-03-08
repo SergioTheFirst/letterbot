@@ -255,6 +255,10 @@ def test_dashboard_uses_interpretation_events_only(tmp_path: Path) -> None:
     test_dashboard_uses_interpretation_events(tmp_path)
 
 
+def test_dashboard_uses_interpretation_not_raw_text(tmp_path: Path) -> None:
+    test_dashboard_uses_interpretation_events(tmp_path)
+
+
 def test_dashboard_uses_interpretation_events(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard-interpretation.sqlite"
     KnowledgeDB(db_path)

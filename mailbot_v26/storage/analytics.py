@@ -4461,19 +4461,34 @@ class KnowledgeAnalytics:
         contract_count = 0
         last_contact_ts = 0.0
         for row in email_rows:
-            text = " ".join(
-                str(row.get(key) or "") for key in ("subject", "body_summary")
-            ).lower()
-            if _REL_INVOICE_RE.search(text):
-                invoice_count += 1
-            if _REL_CONTRACT_RE.search(text):
-                contract_count += 1
             raw_ts = row.get("received_at") or row.get("created_at")
             parsed_ts = parse_sqlite_datetime(str(raw_ts or ""))
             if parsed_ts is not None:
                 last_contact_ts = max(last_contact_ts, parsed_ts.timestamp())
 
         event_clause, event_params = self._account_scope_clause(account_ids)
+        interpretation_rows = self._execute_select(
+            (
+                "SELECT payload_json, payload "
+                "FROM events_v1 "
+                "WHERE event_type = ? "
+                f"{event_clause}"
+            ),
+            [EventType.MESSAGE_INTERPRETATION.value, *event_params],
+        )
+        for row in interpretation_rows:
+            payload = self._event_payload(row)
+            event_sender = str(
+                payload.get("sender_email") or payload.get("from_email") or ""
+            ).strip().lower()
+            if event_sender != normalized_sender:
+                continue
+            doc_kind = str(payload.get("doc_kind") or "").strip().lower()
+            if doc_kind == "invoice":
+                invoice_count += 1
+            elif doc_kind == "contract":
+                contract_count += 1
+
         sender_like = f'%"sender_email": "{normalized_sender}"%'
         sender_like_alt = f'%"from_email": "{normalized_sender}"%'
         event_rows = self._execute_select(

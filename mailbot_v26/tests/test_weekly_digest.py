@@ -420,6 +420,10 @@ def test_weekly_uses_interpretation_events_only(tmp_path) -> None:
     test_weekly_uses_interpretation_events(tmp_path)
 
 
+def test_weekly_uses_interpretation_not_raw_text(tmp_path) -> None:
+    test_weekly_uses_interpretation_events(tmp_path)
+
+
 def test_weekly_uses_interpretation_events(tmp_path) -> None:
     db_path = tmp_path / "weekly-interpretation.sqlite"
     KnowledgeDB(db_path)
