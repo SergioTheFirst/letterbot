@@ -238,3 +238,162 @@ def test_fetch_uses_normalized_state_login_key(monkeypatch, tmp_path: Path, acco
     assert [uid for uid, _ in messages] == [6]
     assert fake_client.search_calls[0] == ["UID", "6:*"]
     assert state.get_last_uid("user@example.com") == 6
+
+
+def test_first_run_bootstrap_allows_recent_prestart_messages(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+
+    fake_client.set_messages(
+        {
+            1: {b"RFC822": b"recent-1", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
+            2: {b"RFC822": b"recent-2", b"INTERNALDATE": datetime(2024, 1, 2, 11, 30, 0, tzinfo=timezone.utc)},
+        }
+    )
+
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(
+        account,
+        state,
+        start_time=start_time,
+        allow_prestart_emails=False,
+        first_run_bootstrap=True,
+        first_run_bootstrap_hours=24,
+        first_run_bootstrap_max_messages=20,
+    )
+    messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [1, 2]
+    assert client.last_fetch_included_prestart is True
+    assert state.get_last_uid(account.login) == 2
+    assert "SINCE" in fake_client.search_calls[1]
+
+
+def test_non_first_run_still_blocks_prestart_messages_when_disabled(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+
+    fake_client.set_messages(
+        {
+            6: {b"RFC822": b"prestart", b"INTERNALDATE": datetime(2024, 1, 2, 11, 0, 0, tzinfo=timezone.utc)},
+        }
+    )
+
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    state = StateManager(tmp_path / "state.json")
+    state.update_last_uid(account.login, 5)
+
+    client = ResilientIMAP(
+        account,
+        state,
+        start_time=start_time,
+        allow_prestart_emails=False,
+        first_run_bootstrap=False,
+    )
+    messages = client.fetch_new_messages()
+
+    assert messages == []
+    assert state.get_last_uid(account.login) == 6
+
+
+def test_first_run_bootstrap_is_limited_by_hours_window(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+
+    fake_client.set_messages(
+        {
+            1: {b"RFC822": b"too-old", b"INTERNALDATE": datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc)},
+            2: {b"RFC822": b"recent", b"INTERNALDATE": datetime(2024, 1, 1, 14, 0, 0, tzinfo=timezone.utc)},
+        }
+    )
+
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(
+        account,
+        state,
+        start_time=start_time,
+        allow_prestart_emails=False,
+        first_run_bootstrap=True,
+        first_run_bootstrap_hours=24,
+        first_run_bootstrap_max_messages=20,
+    )
+    messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [2]
+
+
+def test_first_run_bootstrap_is_limited_by_message_count(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+
+    fake_client.set_messages(
+        {
+            1: {b"RFC822": b"m1", b"INTERNALDATE": datetime(2024, 1, 2, 8, 0, 0, tzinfo=timezone.utc)},
+            2: {b"RFC822": b"m2", b"INTERNALDATE": datetime(2024, 1, 2, 8, 30, 0, tzinfo=timezone.utc)},
+            3: {b"RFC822": b"m3", b"INTERNALDATE": datetime(2024, 1, 2, 9, 0, 0, tzinfo=timezone.utc)},
+            4: {b"RFC822": b"m4", b"INTERNALDATE": datetime(2024, 1, 2, 9, 30, 0, tzinfo=timezone.utc)},
+            5: {b"RFC822": b"m5", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
+        }
+    )
+
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(
+        account,
+        state,
+        start_time=start_time,
+        allow_prestart_emails=False,
+        first_run_bootstrap=True,
+        first_run_bootstrap_hours=24,
+        first_run_bootstrap_max_messages=2,
+    )
+    messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [4, 5]
+    assert state.get_last_uid(account.login) == 5
+
+
+def test_bootstrap_does_not_duplicate_already_seen_messages(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+
+    fake_client.set_messages(
+        {
+            1: {b"RFC822": b"first", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
+            2: {b"RFC822": b"second", b"INTERNALDATE": datetime(2024, 1, 2, 11, 0, 0, tzinfo=timezone.utc)},
+        }
+    )
+
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(
+        account,
+        state,
+        start_time=start_time,
+        allow_prestart_emails=False,
+        first_run_bootstrap=True,
+        first_run_bootstrap_hours=24,
+        first_run_bootstrap_max_messages=20,
+    )
+    first_pass = client.fetch_new_messages()
+    second_pass = client.fetch_new_messages()
+
+    assert [uid for uid, _ in first_pass] == [1, 2]
+    assert second_pass == []
+    assert fake_client.search_calls[2] == ["UID", "3:*"]

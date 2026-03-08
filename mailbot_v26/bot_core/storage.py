@@ -249,6 +249,18 @@ class Storage:
             return None
         return int(row[0])
 
+    def has_email_history(self, account_email: str) -> bool:
+        row = self.conn.execute(
+            """
+            SELECT 1
+            FROM emails
+            WHERE account_email = ? COLLATE NOCASE
+            LIMIT 1;
+            """,
+            (account_email,),
+        ).fetchone()
+        return bool(row)
+
     def is_telegram_delivered(self, email_id: int) -> bool:
         row = self.conn.execute(
             "SELECT telegram_delivered_at FROM emails WHERE id = ?;",

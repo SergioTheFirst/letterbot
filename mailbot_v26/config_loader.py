@@ -67,7 +67,9 @@ class KeysConfig:
 class IngestConfig:
     """Mail ingest policies."""
 
-    allow_prestart_emails: bool
+    allow_prestart_emails: bool = False
+    first_run_bootstrap_hours: int = 24
+    first_run_bootstrap_max_messages: int = 20
 
 
 @dataclass
@@ -422,18 +424,22 @@ def load_storage_config(base_dir: Path = CONFIG_DIR) -> StorageConfig:
 def load_ingest_config(base_dir: Path = CONFIG_DIR) -> IngestConfig:
     parser = _read_settings_with_legacy_fallback(base_dir, section="ingest")
     if "ingest" not in parser:
-        return IngestConfig(allow_prestart_emails=False)
+        return IngestConfig()
     section = parser["ingest"]
     try:
+        hours = section.getint("first_run_bootstrap_hours", fallback=24)
+        max_messages = section.getint("first_run_bootstrap_max_messages", fallback=20)
         return IngestConfig(
             allow_prestart_emails=section.getboolean(
                 "allow_prestart_emails",
                 fallback=False,
-            )
+            ),
+            first_run_bootstrap_hours=max(0, hours),
+            first_run_bootstrap_max_messages=max(0, max_messages),
         )
     except ValueError as exc:
         _LOGGER.warning("Invalid [ingest] config, using defaults: %s", exc)
-        return IngestConfig(allow_prestart_emails=False)
+        return IngestConfig()
 
 
 def load_maintenance_config(base_dir: Path = CONFIG_DIR) -> MaintenanceConfig:

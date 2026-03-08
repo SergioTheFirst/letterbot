@@ -11,6 +11,11 @@ attention_cost_per_hour = 0
 [maintenance]
 maintenance_mode = 0
 
+[ingest]
+allow_prestart_emails = false
+first_run_bootstrap_hours = 24
+first_run_bootstrap_max_messages = 20
+
 [storage]
 db_path = data/mailbot.sqlite
 

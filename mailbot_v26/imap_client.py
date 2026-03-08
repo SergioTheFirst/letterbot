@@ -118,6 +118,9 @@ class ResilientIMAP:
         state: Optional[StateManager] = None,
         start_time: Optional[datetime] = None,
         allow_prestart_emails: bool = False,
+        first_run_bootstrap: bool = False,
+        first_run_bootstrap_hours: int = 24,
+        first_run_bootstrap_max_messages: int = 20,
         max_email_mb: Optional[int] = None,
         *,
         connect_timeout: float = 15.0,
@@ -141,6 +144,10 @@ class ResilientIMAP:
         self._state = state
         self._start_time_utc = _safe_dt(start_time)
         self._allow_prestart_emails = bool(allow_prestart_emails)
+        self._first_run_bootstrap = bool(first_run_bootstrap)
+        self._bootstrap_hours = max(0, int(first_run_bootstrap_hours))
+        self._bootstrap_max_messages = max(0, int(first_run_bootstrap_max_messages))
+        self._last_fetch_included_prestart = False
         self.connect_timeout = float(connect_timeout)
         self.io_timeout = float(io_timeout)
         self.retries = int(retries)
@@ -200,6 +207,18 @@ class ResilientIMAP:
                     pass
         finally:
             self._client = None
+
+    @property
+    def last_fetch_included_prestart(self) -> bool:
+        return self._last_fetch_included_prestart
+
+    def _resolve_search_scope(self, start_time_utc: datetime) -> tuple[list[str], Optional[datetime], bool]:
+        if self._allow_prestart_emails:
+            return [], None, False
+        if self._first_run_bootstrap and self._bootstrap_hours > 0 and self._bootstrap_max_messages > 0:
+            cutoff = start_time_utc - timedelta(hours=self._bootstrap_hours)
+            return ["SINCE", cutoff.strftime("%d-%b-%Y")], cutoff, True
+        return ["SINCE", start_time_utc.strftime("%d-%b-%Y")], start_time_utc, False
 
     def _with_retries(self, fn, *args, **kwargs):
         last_exc: Optional[Exception] = None
@@ -349,6 +368,7 @@ class ResilientIMAP:
                 yield uid, msg
 
     def fetch_new_messages(self, *, limit: int = 50) -> List[Tuple[int, bytes]]:
+        self._last_fetch_included_prestart = False
         start_time_utc = self._start_time_utc or _utcnow()
         state_login = normalize_login(self.account.user)
         range_start = 1
@@ -361,22 +381,35 @@ class ResilientIMAP:
         base_criteria = ["UID", f"{range_start}:*"]
         all_uids = sorted(int(uid) for uid in (self._with_retries(_search, base_criteria) or []))
 
-        since_criteria = [*base_criteria, "SINCE", start_time_utc.strftime("%d-%b-%Y")]
-        scoped_uids = sorted(int(uid) for uid in (self._with_retries(_search, since_criteria) or []))
+        search_scope, internaldate_cutoff, bootstrap_active = self._resolve_search_scope(start_time_utc)
+        scoped_criteria = [*base_criteria, *search_scope]
+        scoped_uids = sorted(int(uid) for uid in (self._with_retries(_search, scoped_criteria) or []))
         highest_seen = max(all_uids) if all_uids else None
 
-        messages: List[Tuple[int, bytes]] = []
-        max_bytes = int(self.account.max_email_mb) * 1024 * 1024
+        eligible: list[tuple[int, dict[bytes, Any], Optional[datetime]]] = []
         for uid in scoped_uids:
-            if len(messages) >= limit:
-                break
             try:
                 meta = self.fetch_headers_and_size([uid]).get(uid, {})
             except Exception:
                 continue
             internal_date = _safe_dt(meta.get(b"INTERNALDATE") or meta.get("INTERNALDATE"))
-            if (not self._allow_prestart_emails) and internal_date and internal_date < start_time_utc:
+            if internaldate_cutoff and internal_date and internal_date < internaldate_cutoff:
                 continue
+            eligible.append((uid, meta, internal_date))
+
+        fetch_cap = max(0, int(limit))
+        if bootstrap_active:
+            fetch_cap = min(fetch_cap, self._bootstrap_max_messages)
+            if len(eligible) > fetch_cap:
+                eligible = eligible[-fetch_cap:]
+
+        messages: List[Tuple[int, bytes]] = []
+        max_bytes = int(self.account.max_email_mb) * 1024 * 1024
+        for uid, meta, internal_date in eligible:
+            if len(messages) >= fetch_cap:
+                break
+            if internal_date and internal_date < start_time_utc:
+                self._last_fetch_included_prestart = True
             size = _parse_rfc822_size(meta)
             if size is not None and size > max_bytes:
                 header_map = self._with_retries(

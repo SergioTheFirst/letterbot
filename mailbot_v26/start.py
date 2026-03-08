@@ -255,6 +255,36 @@ def _build_system_payload(
     )
 
 
+def _storage_has_account_history(storage: Storage | None, account_email: str) -> bool:
+    if storage is None:
+        return False
+    probe = getattr(storage, "has_email_history", None)
+    if not callable(probe):
+        return False
+    try:
+        return bool(probe(account_email))
+    except Exception:
+        logger.exception("first_run_history_probe_failed account=%s", account_email)
+        return False
+
+
+def _is_first_run_account(
+    *,
+    state: StateManager,
+    storage: Storage | None,
+    account_email: str,
+) -> bool:
+    last_uid = state.get_last_uid(account_email)
+    last_check = state.get_last_check_time(account_email)
+    has_state_cursor = last_uid > 0 or last_check is not None
+    has_db_history = _storage_has_account_history(storage, account_email)
+    return (not has_state_cursor) and (not has_db_history)
+
+
+def _build_first_run_bootstrap_note(hours: int, max_messages: int) -> str:
+    return f"First run: showing messages from last {hours}h (up to {max_messages} messages)."
+
+
 def _cleanup_pipeline_cache(email_id: int) -> None:
     PIPELINE_CACHE.pop(email_id, None)
     PIPELINE_INBOUND_CACHE.pop(email_id, None)
@@ -1010,6 +1040,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         inbound_client, inbound_processor, allowed_chat_ids = _build_inbound_stack(config)
         print("[OK] Ready to work\n")
 
+        bootstrap_notice_sent = False
         cycle = 0
         try:
             while True:
@@ -1104,11 +1135,38 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                         )
 
                         try:
+                            state_last_uid = state.get_last_uid(login)
+                            state_last_check = state.get_last_check_time(login)
+                            has_db_history = _storage_has_account_history(storage, login)
+                            state_file_exists = bool(getattr(getattr(state, "state_file", None), "exists", lambda: False)())
+                            first_run_detected = _is_first_run_account(
+                                state=state,
+                                storage=storage,
+                                account_email=login,
+                            )
+                            digest_logger.info(
+                                "imap_ingest_policy",
+                                account_id=account.account_id,
+                                login=login,
+                                first_run_detected=first_run_detected,
+                                bootstrap_window_hours=config.ingest.first_run_bootstrap_hours,
+                                bootstrap_max_messages=config.ingest.first_run_bootstrap_max_messages,
+                                allow_prestart_emails=config.ingest.allow_prestart_emails,
+                                state_file_exists=state_file_exists,
+                                state_last_uid=state_last_uid,
+                                state_last_check=(
+                                    state_last_check.isoformat() if state_last_check else None
+                                ),
+                                db_history_detected=has_db_history,
+                            )
                             imap = ResilientIMAP(
                                 account,
                                 state,
                                 RUN_STARTED_AT_UTC,
                                 allow_prestart_emails=config.ingest.allow_prestart_emails,
+                                first_run_bootstrap=first_run_detected,
+                                first_run_bootstrap_hours=config.ingest.first_run_bootstrap_hours,
+                                first_run_bootstrap_max_messages=config.ingest.first_run_bootstrap_max_messages,
                                 max_email_mb=config.general.max_email_mb,
                             )
                             new_messages = imap.fetch_new_messages()
@@ -1126,10 +1184,36 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             )
 
                             if not new_messages:
-                                print("   в””в”Ђ no new messages")
+                                print("   -- no new messages")
                                 continue
 
-                            print(f"   в””в”Ђ received {len(new_messages)} new messages")
+                            if (
+                                not bootstrap_notice_sent
+                                and first_run_detected
+                                and (not config.ingest.allow_prestart_emails)
+                                and imap.last_fetch_included_prestart
+                                and account.telegram_chat_id
+                            ):
+                                note_payload = _build_system_payload(
+                                    text=_build_first_run_bootstrap_note(
+                                        config.ingest.first_run_bootstrap_hours,
+                                        config.ingest.first_run_bootstrap_max_messages,
+                                    ),
+                                    bot_token=config.keys.telegram_bot_token,
+                                    chat_id=account.telegram_chat_id,
+                                )
+                                note_result = send_telegram(note_payload)
+                                bootstrap_notice_sent = True
+                                digest_logger.info(
+                                    "first_run_bootstrap_notice_sent",
+                                    account_id=account.account_id,
+                                    login=login,
+                                    delivered=note_result.delivered,
+                                    bootstrap_window_hours=config.ingest.first_run_bootstrap_hours,
+                                    bootstrap_max_messages=config.ingest.first_run_bootstrap_max_messages,
+                                )
+
+                            print(f"   -- received {len(new_messages)} new messages")
 
                             for uid, raw in new_messages:
                                 print(f"      в”њв”Ђ UID {uid}")

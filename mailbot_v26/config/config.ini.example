@@ -27,6 +27,8 @@ db_path = mailbot.sqlite
 
 [ingest]
 allow_prestart_emails = false
+first_run_bootstrap_hours = 24
+first_run_bootstrap_max_messages = 20
 
 [maintenance]
 maintenance_mode = 0
