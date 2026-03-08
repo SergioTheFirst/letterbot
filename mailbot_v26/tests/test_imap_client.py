@@ -19,6 +19,7 @@ class _FakeIMAPClient:
         self._uids: list[int] = []
         self._data: dict[int, dict[bytes, object]] = {}
         self.search_calls: list[list[str]] = []
+        self.uidvalidity: int | None = None
 
     def set_messages(self, messages: dict[int, dict[bytes, object]]) -> None:
         self._uids = sorted(messages.keys())
@@ -57,6 +58,12 @@ class _FakeIMAPClient:
 
     def fetch(self, uids, fields):  # type: ignore[override]
         return {uid: self._data[uid] for uid in uids}
+
+    def folder_status(self, folder, items):  # type: ignore[override]
+        _ = (folder, items)
+        if self.uidvalidity is None:
+            return {}
+        return {"UIDVALIDITY": self.uidvalidity}
 
 
 @pytest.fixture()
@@ -382,6 +389,14 @@ def test_non_first_run_still_blocks_prestart_messages_when_disabled(
     assert state.get_last_uid(account.login) == 6
 
 
+def test_non_first_run_blocks_prestart_messages_when_disabled(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    test_non_first_run_still_blocks_prestart_messages_when_disabled(
+        monkeypatch, tmp_path, account
+    )
+
+
 def test_first_run_bootstrap_is_limited_by_hours_window(
     monkeypatch, tmp_path: Path, account: AccountConfig
 ) -> None:
@@ -510,3 +525,107 @@ def test_bootstrap_does_not_duplicate_already_seen_messages(
     assert [uid for uid, _ in first_pass] == [1, 2]
     assert second_pass == []
     assert fake_client.search_calls[2] == ["UID", "3:*"]
+
+
+def test_uidvalidity_change_resets_mailbox_state(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    fake_client.uidvalidity = 2
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"fresh-1",
+                b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc),
+            },
+            2: {
+                b"RFC822": b"fresh-2",
+                b"INTERNALDATE": datetime(2024, 1, 2, 11, 0, 0, tzinfo=timezone.utc),
+            },
+        }
+    )
+
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
+    state = StateManager(tmp_path / "state.json")
+    state.update_last_uid(account.login, 5)
+    state.update_uidvalidity(account.login, 1, mailbox="INBOX")
+
+    client = ResilientIMAP(
+        account,
+        state,
+        start_time=start_time,
+        allow_prestart_emails=False,
+        first_run_bootstrap=False,
+        first_run_bootstrap_hours=24,
+        first_run_bootstrap_max_messages=20,
+    )
+    messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [1, 2]
+    assert fake_client.search_calls[0] == ["UID", "1:*"]
+    assert state.get_last_uid(account.login) == 2
+    assert state.get_uidvalidity(account.login) == 2
+    assert client.last_uidvalidity_changed is True
+    assert client.last_resync_reason == "uidvalidity_change"
+
+
+def test_uidvalidity_change_triggers_bounded_resync_not_full_replay(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    fake_client.uidvalidity = 20
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"too-old",
+                b"INTERNALDATE": datetime(2023, 12, 31, 11, 0, 0, tzinfo=timezone.utc),
+            },
+            2: {
+                b"RFC822": b"m2",
+                b"INTERNALDATE": datetime(2024, 1, 2, 8, 0, 0, tzinfo=timezone.utc),
+            },
+            3: {
+                b"RFC822": b"m3",
+                b"INTERNALDATE": datetime(2024, 1, 2, 9, 0, 0, tzinfo=timezone.utc),
+            },
+            4: {
+                b"RFC822": b"m4",
+                b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc),
+            },
+            5: {
+                b"RFC822": b"m5",
+                b"INTERNALDATE": datetime(2024, 1, 2, 11, 0, 0, tzinfo=timezone.utc),
+            },
+        }
+    )
+
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
+    state = StateManager(tmp_path / "state.json")
+    state.update_last_uid(account.login, 777)
+    state.update_uidvalidity(account.login, 10, mailbox="INBOX")
+
+    client = ResilientIMAP(
+        account,
+        state,
+        start_time=start_time,
+        allow_prestart_emails=False,
+        first_run_bootstrap=False,
+        first_run_bootstrap_hours=24,
+        first_run_bootstrap_max_messages=2,
+    )
+    messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [4, 5]
+    assert fake_client.search_calls[0] == ["UID", "1:*"]
+    assert "SINCE" in fake_client.search_calls[1]
+    assert client.last_uidvalidity_changed is True
+    assert client.last_bootstrap_active is True
+    assert client.last_resync_reason == "uidvalidity_change"
