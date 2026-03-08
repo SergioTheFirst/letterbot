@@ -14,6 +14,7 @@ from mailbot_v26.pipeline.processor import (
     _build_heuristic_attachment_summaries,
     _build_priority_signal_text,
     _build_message_decision,
+    _build_message_interpretation,
     _build_document_identity,
     _build_telegram_text,
     _build_sender_relationship_profile,
@@ -25,6 +26,10 @@ from mailbot_v26.pipeline.processor import (
     _soften_duplicate_action,
     _score_message_facts,
     _validate_message_facts,
+)
+from mailbot_v26.domain.document_templates import (
+    DocumentTemplate,
+    select_document_template,
 )
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
@@ -937,6 +942,69 @@ def test_amount_scoring_attachment_context() -> None:
     assert scored["amount"] == "87500"
 
 
+def test_amount_prefers_invoice_total_anchor_window() -> None:
+    facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}
+
+    scored = _score_message_facts(
+        facts,
+        evidence_text=(
+            "line 1 amount 91000 USD. "
+            "Invoice total payable 87500 USD. "
+            "Random number 300."
+        ),
+        attachment_text="",
+    )
+
+    assert scored["amount"] == "87500"
+    assert scored["amount_window_hit"] is True
+
+
+def test_amount_does_not_take_payroll_amount_as_invoice_total() -> None:
+    facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}
+
+    scored = _score_message_facts(
+        facts,
+        evidence_text=(
+            "Начислено 4848150 руб. Удержано 120000 руб. "
+            "Итого к оплате 87500 руб."
+        ),
+        attachment_text="",
+    )
+
+    assert scored["amount"].startswith("87500")
+
+
+def test_due_date_prefers_payment_anchor_window() -> None:
+    facts = _collect_message_facts(
+        subject="Invoice #77",
+        body_text=(
+            "Invoice date 01.03.2026. "
+            "Payment due 15.03.2026. "
+            "Document date 28.02.2026."
+        ),
+        attachments=[],
+        mail_type="INVOICE",
+    )
+
+    assert facts["due_date"] == "15.03.2026"
+    assert facts["due_date_window_hit"] is True
+
+
+def test_doc_number_prefers_invoice_anchor_over_random_number() -> None:
+    facts = _collect_message_facts(
+        subject="Documents",
+        body_text="UID 778899, row 12, invoice no INV-55 total payable 1200 USD",
+        attachments=[],
+        mail_type="INVOICE",
+    )
+
+    assert facts["doc_number"] == "INV-55"
+
+
+def test_currency_context_increases_amount_confidence() -> None:
+    test_amount_scoring_prefers_currency_context()
+
+
 def test_validate_amount_filters_table_numbers() -> None:
     facts = {
         "amount": "150",
@@ -992,6 +1060,24 @@ def test_valid_invoice_facts_preserved() -> None:
     assert validated["amount"]
     assert validated["due_date"] == "15.04.2026"
     assert validated["doc_number"] == "445"
+
+
+def test_simple_invoice_still_extracts_cleanly() -> None:
+    body = "Invoice no 445 total payable 87500 USD. Payment due 15.04.2026."
+    facts = _collect_message_facts(
+        subject="Invoice no 445",
+        body_text=body,
+        attachments=[],
+        mail_type="INVOICE",
+    )
+    facts = _validate_message_facts(facts, evidence_text=body)
+    facts = _score_message_facts(facts, evidence_text=body, attachment_text="")
+    facts = _consistency_check_message_facts(facts, evidence_text=body)
+
+    assert facts["doc_kind"] == "invoice"
+    assert facts["amount"] == "87500"
+    assert facts["due_date"] == "15.04.2026"
+    assert facts["doc_number"] == "445"
 
 
 def test_reply_payment_confirmation_not_pay_action() -> None:
@@ -1208,6 +1294,41 @@ def test_relationship_profile_counts(tmp_path) -> None:
                 "rel-counts-overdue",
             ),
         )
+        for event_type, payload, fingerprint in (
+            (
+                "message_interpretation",
+                '{"sender_email":"vendor@example.com","doc_kind":"invoice","amount":1000}',
+                "rel-counts-int-invoice",
+            ),
+            (
+                "message_interpretation",
+                '{"sender_email":"vendor@example.com","doc_kind":"contract","amount":null}',
+                "rel-counts-int-contract",
+            ),
+            (
+                "message_interpretation",
+                '{"sender_email":"other@example.com","doc_kind":"invoice","amount":500}',
+                "rel-counts-int-other",
+            ),
+        ):
+            conn.execute(
+                """
+                INSERT INTO events_v1 (event_type, ts_utc, ts, account_id, entity_id, email_id, payload, payload_json, schema_version, fingerprint)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_type,
+                    now.timestamp(),
+                    now.isoformat(),
+                    "user@example.com",
+                    "vendor",
+                    1,
+                    payload,
+                    payload,
+                    1,
+                    fingerprint,
+                ),
+            )
         conn.commit()
 
     analytics = KnowledgeAnalytics(db_path)
@@ -1356,6 +1477,30 @@ def test_relationship_invoice_tracking(tmp_path) -> None:
                 now.isoformat(),
             ),
         )
+        for idx in range(1, 3):
+            payload = (
+                '{"sender_email":"vendor@example.com","doc_kind":"invoice","amount":'
+                + str(1000 * idx)
+                + "}"
+            )
+            conn.execute(
+                """
+                INSERT INTO events_v1 (event_type, ts_utc, ts, account_id, entity_id, email_id, payload, payload_json, schema_version, fingerprint)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "message_interpretation",
+                    now.timestamp(),
+                    now.isoformat(),
+                    "user@example.com",
+                    "vendor",
+                    idx,
+                    payload,
+                    payload,
+                    1,
+                    f"rel-invoice-interpretation-{idx}",
+                ),
+            )
         conn.commit()
 
     analytics = KnowledgeAnalytics(db_path)
@@ -1366,6 +1511,48 @@ def test_relationship_invoice_tracking(tmp_path) -> None:
     )
     assert profile is not None
     assert profile["invoice_count"] == 2
+
+
+def test_interpretation_is_single_source_of_truth_for_telegram() -> None:
+    test_telegram_uses_interpretation_not_raw_facts()
+
+
+def test_no_duplicate_semantic_parsing_after_interpretation(monkeypatch) -> None:
+    interpretation = MessageInterpretation(
+        email_id="42",
+        sender_email="vendor@example.com",
+        doc_kind="invoice",
+        amount=87500.0,
+        due_date="15.04.2026",
+        action="Pay now",
+        priority="🔴",
+        confidence=0.91,
+        context="NEW_MESSAGE",
+        document_id="invoice_42_vendor",
+    )
+
+    def _unexpected_reparse(*_args, **_kwargs):
+        raise AssertionError("semantic parsing should not run after interpretation")
+
+    monkeypatch.setattr(
+        pipeline_processor,
+        "_collect_message_facts",
+        _unexpected_reparse,
+    )
+
+    rendered = _build_telegram_text(
+        priority="🔴",
+        from_email="vendor@example.com",
+        subject="Invoice",
+        action_line="Review manually",
+        mail_type="PAYROLL",
+        body_summary="Начислено 120 000 руб",
+        body_text="Начислено 120 000 руб",
+        attachments=[],
+        interpretation=interpretation,
+    )
+
+    assert "Pay now" in rendered
 
 
 def test_payroll_never_classified_as_invoice_action() -> None:
@@ -1761,6 +1948,31 @@ def test_invoice_math_consistency() -> None:
     assert inconsistent_decision.confidence < consistent_decision.confidence
 
 
+def test_amount_conflict_reduces_confidence() -> None:
+    test_invoice_math_consistency()
+
+
+def test_subtotal_plus_tax_validates_total() -> None:
+    facts = {
+        "amount": "120 USD",
+        "due_date": "15.03.2026",
+        "doc_number": "INV-99",
+        "doc_kind": "invoice",
+        "invoice_signal": True,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+    }
+    checked = _consistency_check_message_facts(
+        facts,
+        evidence_text="Subtotal 100 USD Tax 20 USD Total 120 USD",
+    )
+
+    assert "subtotal_tax_total_mismatch" not in checked["consistency_issues"]
+    assert checked["consistency_boost"] > 0
+
+
 def test_currency_context_required() -> None:
     with_currency = {
         "amount": "87 500 USD",
@@ -1859,6 +2071,47 @@ def test_table_numbers_not_selected() -> None:
     assert scored["amount"] == ""
 
 
+def test_invoice_action_suppressed_when_cross_field_consistency_fails() -> None:
+    facts = {
+        "amount": "170 USD",
+        "due_date": "05.03.2026",
+        "doc_number": "INV-8",
+        "doc_kind": "invoice",
+        "invoice_signal": True,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+        "amount_window_hit": True,
+        "due_date_window_hit": True,
+        "doc_number_window_hit": True,
+    }
+    checked = _consistency_check_message_facts(
+        facts,
+        evidence_text=(
+            "Subtotal 100 USD Tax 20 USD Total 170 USD "
+            "Invoice date: 10.03.2026 Due date: 05.03.2026"
+        ),
+    )
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Оплатить invoice",
+        summary="",
+        message_facts=checked,
+        subject="Invoice",
+        body_text="Subtotal 100 USD Tax 20 USD Total 170 USD",
+        attachments=[],
+        context="NEW_MESSAGE",
+    )
+
+    assert "subtotal_tax_total_mismatch" in checked["consistency_issues"]
+    assert decision.action == "Проверить"
+
+
+def test_attachment_table_like_numbers_do_not_override_relevant_total() -> None:
+    test_pdf_table_total_preferred_over_global_number_match()
+
+
 def test_forwarded_thread_not_used() -> None:
     body = (
         "Новый статус по письму. Проверьте детали.\n"
@@ -1914,3 +2167,254 @@ def test_main_body_numbers_detected() -> None:
     )
 
     assert facts["amount"].startswith("87 500")
+
+
+def test_invoice_template_strengthens_payment_action() -> None:
+    facts = {
+        "amount": "87 500 \u0440\u0443\u0431",
+        "due_date": "15.04.2026",
+        "doc_number": "INV-77",
+        "doc_kind": "invoice",
+        "invoice_signal": True,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+    }
+
+    decision = _build_message_decision(
+        priority="\U0001f7e1",
+        action_line="\u041e\u0437\u043d\u0430\u043a\u043e\u043c\u0438\u0442\u044c\u0441\u044f",
+        summary="",
+        message_facts=facts,
+        sender_email="billing@billing.vendor.test",
+        subject="\u0421\u0447\u0435\u0442 INV-77",
+        body_text=(
+            "\u0421\u0447\u0435\u0442 \u043d\u0430 \u043e\u043f\u043b\u0430\u0442\u0443. "
+            "\u0418\u0442\u043e\u0433\u043e \u043a \u043e\u043f\u043b\u0430\u0442\u0435 87 500 \u0440\u0443\u0431. "
+            "\u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c \u0434\u043e 15.04.2026"
+        ),
+        attachments=[
+            {
+                "filename": "invoice_INV-77.pdf",
+                "text": "invoice total 87 500 rub amount due 87 500 rub",
+            }
+        ],
+        context="NEW_MESSAGE",
+    )
+
+    assert decision.facts.get("template_id") == "russian_invoice_common"
+    assert decision.doc_kind == "invoice"
+    assert decision.action == "\u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c"
+
+
+def test_payroll_template_suppresses_invoice_action() -> None:
+    facts = {
+        "amount": "120 000 \u0440\u0443\u0431",
+        "due_date": "",
+        "doc_number": "",
+        "doc_kind": "invoice",
+        "invoice_signal": True,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+    }
+
+    decision = _build_message_decision(
+        priority="\U0001f7e1",
+        action_line="\u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c",
+        summary="",
+        message_facts=facts,
+        sender_email="hr@hr.vendor.test",
+        subject="\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a \u0437\u0430 \u043c\u0430\u0440\u0442",
+        body_text=(
+            "\u041d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e 120 000 \u0440\u0443\u0431, "
+            "\u0443\u0434\u0435\u0440\u0436\u0430\u043d\u043e 15 000 \u0440\u0443\u0431, "
+            "\u043a \u0432\u044b\u043f\u043b\u0430\u0442\u0435 105 000 \u0440\u0443\u0431"
+        ),
+        attachments=[{"filename": "payroll_march.xlsx", "text": ""}],
+        context="NEW_MESSAGE",
+    )
+
+    assert decision.facts.get("template_id") == "russian_payroll_common"
+    assert decision.doc_kind == "payroll"
+    assert "\u043e\u043f\u043b\u0430\u0442" not in decision.action.lower()
+
+
+def test_reconciliation_template_prevents_payment_action() -> None:
+    facts = {
+        "amount": "55 000 \u0440\u0443\u0431",
+        "due_date": "",
+        "doc_number": "AC-15",
+        "doc_kind": "invoice",
+        "invoice_signal": True,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+    }
+
+    decision = _build_message_decision(
+        priority="\U0001f7e1",
+        action_line="\u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c",
+        summary="",
+        message_facts=facts,
+        sender_email="ops@reconciliation.vendor.test",
+        subject="\u0410\u043a\u0442 \u0441\u0432\u0435\u0440\u043a\u0438 \u0432\u0437\u0430\u0438\u043c\u043d\u044b\u0445 \u0440\u0430\u0441\u0447\u0435\u0442\u043e\u0432",
+        body_text=(
+            "\u0410\u043a\u0442 \u0441\u0432\u0435\u0440\u043a\u0438 \u0432\u0437\u0430\u0438\u043c\u043d\u044b\u0445 "
+            "\u0440\u0430\u0441\u0447\u0435\u0442\u043e\u0432 \u0437\u0430 \u043a\u0432\u0430\u0440\u0442\u0430\u043b"
+        ),
+        attachments=[{"filename": "act_sverki.pdf", "text": ""}],
+        context="NEW_MESSAGE",
+    )
+
+    assert decision.facts.get("template_id") == "russian_reconciliation_common"
+    assert decision.doc_kind == "reconciliation"
+    assert decision.action == "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c"
+
+
+def test_contract_template_prefers_contract_action() -> None:
+    facts = {
+        "amount": "",
+        "due_date": "",
+        "doc_number": "",
+        "doc_kind": "",
+        "invoice_signal": False,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+    }
+
+    decision = _build_message_decision(
+        priority="\U0001f7e1",
+        action_line="\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c",
+        summary="",
+        message_facts=facts,
+        sender_email="legal@legal.vendor.test",
+        subject="\u0414\u043e\u0433\u043e\u0432\u043e\u0440 \u0438 \u0434\u043e\u043f\u0441\u043e\u0433\u043b\u0430\u0448\u0435\u043d\u0438\u0435",
+        body_text=(
+            "\u041d\u0443\u0436\u043d\u043e \u0441\u043e\u0433\u043b\u0430\u0441\u043e\u0432\u0430\u0442\u044c "
+            "\u0434\u043e\u0433\u043e\u0432\u043e\u0440 \u0438 amendment"
+        ),
+        attachments=[{"filename": "contract_amendment.docx", "text": ""}],
+        context="NEW_MESSAGE",
+    )
+
+    assert decision.facts.get("template_id") == "contract_or_amendment_common"
+    assert decision.doc_kind == "contract"
+    assert decision.action == "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0434\u043e\u0433\u043e\u0432\u043e\u0440"
+
+
+def test_sender_match_alone_is_not_enough_for_strong_invoice_action() -> None:
+    facts = {
+        "amount": "",
+        "due_date": "",
+        "doc_number": "",
+        "doc_kind": "",
+        "invoice_signal": False,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+    }
+
+    decision = _build_message_decision(
+        priority="\U0001f535",
+        action_line="\u041e\u0437\u043d\u0430\u043a\u043e\u043c\u0438\u0442\u044c\u0441\u044f",
+        summary="",
+        message_facts=facts,
+        sender_email="billing@billing.vendor.test",
+        subject="\u0412\u0441\u0442\u0440\u0435\u0447\u0430 \u043a\u043e\u043c\u0430\u043d\u0434\u044b",
+        body_text="\u041e\u0431\u0441\u0443\u0434\u0438\u043c \u0441\u0442\u0430\u0442\u0443\u0441 \u043f\u0440\u043e\u0435\u043a\u0442\u0430",
+        attachments=[],
+        context="NEW_MESSAGE",
+    )
+
+    assert decision.facts.get("template_id") in ("", None)
+    assert decision.doc_kind != "invoice"
+    assert decision.action != "\u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c"
+
+
+def test_template_layer_updates_interpretation_not_parallel_semantics() -> None:
+    facts = {
+        "amount": "120 000 \u0440\u0443\u0431",
+        "due_date": "",
+        "doc_number": "",
+        "doc_kind": "invoice",
+        "invoice_signal": True,
+        "payroll_signal": False,
+        "contract_signal": False,
+        "incident_signal": False,
+        "amount_context_missing": False,
+    }
+
+    decision = _build_message_decision(
+        priority="\U0001f7e1",
+        action_line="\u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c",
+        summary="",
+        message_facts=facts,
+        sender_email="hr@hr.vendor.test",
+        subject="\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a",
+        body_text=(
+            "\u041d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e 120 000 \u0440\u0443\u0431, "
+            "\u0443\u0434\u0435\u0440\u0436\u0430\u043d\u043e 15 000 \u0440\u0443\u0431"
+        ),
+        attachments=[{"filename": "payroll.pdf", "text": ""}],
+        context="NEW_MESSAGE",
+    )
+    interpretation = _build_message_interpretation(
+        email_id=17,
+        sender_email="hr@hr.vendor.test",
+        message_facts=decision.facts,
+        decision=decision,
+        document_id="doc-17",
+    )
+
+    assert decision.facts.get("template_id") == "russian_payroll_common"
+    assert interpretation.doc_kind == "payroll"
+    assert interpretation.action == decision.action
+
+
+def test_template_priority_prefers_more_specific_match() -> None:
+    templates = (
+        DocumentTemplate(
+            id="generic_invoice",
+            priority=10,
+            required_anchors=("invoice",),
+            subject_keywords=("invoice",),
+        ),
+        DocumentTemplate(
+            id="specific_invoice",
+            priority=80,
+            required_anchors=("invoice",),
+            subject_keywords=("invoice",),
+        ),
+    )
+
+    match = select_document_template(
+        sender_email="",
+        subject="Invoice INV-9",
+        body_text="Invoice total 100 USD",
+        templates=templates,
+    )
+
+    assert match is not None
+    assert match.template.id == "specific_invoice"
+
+
+def test_template_forbidden_anchors_block_wrong_classification() -> None:
+    match = select_document_template(
+        sender_email="billing@billing.vendor.test",
+        subject="\u0421\u0447\u0435\u0442 \u043d\u0430 \u043e\u043f\u043b\u0430\u0442\u0443",
+        body_text=(
+            "\u0421\u0447\u0435\u0442 \u043d\u0430 \u043e\u043f\u043b\u0430\u0442\u0443 87 500 \u0440\u0443\u0431. "
+            "\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a: "
+            "\u043d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e, \u0443\u0434\u0435\u0440\u0436\u0430\u043d\u043e."
+        ),
+    )
+
+    assert match is not None
+    assert match.template.id == "russian_payroll_common"

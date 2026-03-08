@@ -1239,6 +1239,12 @@ def test_user_override_priority_survives_enrichment(
     test_priority_callback_updates_snapshot_priority(tmp_path, monkeypatch)
 
 
+def test_interpretation_and_snapshot_do_not_conflict_on_manual_priority(
+    tmp_path: Path, monkeypatch
+) -> None:
+    test_user_override_priority_survives_enrichment(tmp_path, monkeypatch)
+
+
 def test_no_mojibake_in_status_output(tmp_path: Path) -> None:
     sent: list[str] = []
     gate_result = GateResult(
