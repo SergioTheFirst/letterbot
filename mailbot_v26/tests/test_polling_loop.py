@@ -8,6 +8,7 @@ from mailbot_v26.config_loader import (
     KeysConfig,
     StorageConfig,
 )
+from mailbot_v26.state_manager import StateManager
 
 
 class DummyState:
@@ -155,6 +156,10 @@ def _build_imap(responses, call_log=None):
     class FakeIMAP:
         def __init__(self, account, state, start_time, **_kwargs):
             self.login = account.login
+            self.last_fetch_included_prestart = False
+            self.last_bootstrap_active = False
+            self.last_uidvalidity_changed = False
+            self.last_resync_reason = "normal_poll"
 
         def fetch_new_messages(self):
             if call_log is not None:
@@ -295,3 +300,71 @@ def test_main_enables_premium_processor_when_llm_healthy(monkeypatch, tmp_path):
     start_module.main(max_cycles=1)
 
     assert captured["premium"] is True
+
+
+def test_bootstrap_is_per_account(tmp_path):
+    state = StateManager(tmp_path / "state.json")
+    state.update_last_uid("known@example.com", 42)
+
+    assert (
+        start_module._is_first_run_account(
+            state=state, storage=None, account_email="known@example.com"
+        )
+        is False
+    )
+    assert (
+        start_module._is_first_run_account(
+            state=state, storage=None, account_email="fresh@example.com"
+        )
+        is True
+    )
+
+
+def test_first_run_notice_sent_once(monkeypatch, tmp_path):
+    account = AccountConfig(
+        account_id="acc1",
+        login="acc1@example.com",
+        password="pw",
+        host="imap.example.com",
+        port=993,
+        use_ssl=True,
+        telegram_chat_id="chat1",
+    )
+    responses = [[(1, b"raw-a")], [(2, b"raw-b")]]
+
+    class FakeIMAP:
+        def __init__(self, _account, _state, _start_time, **_kwargs):
+            self.last_fetch_included_prestart = True
+            self.last_bootstrap_active = True
+            self.last_uidvalidity_changed = False
+            self.last_resync_reason = "first_run"
+
+        def fetch_new_messages(self):
+            if responses:
+                return responses.pop(0)
+            return []
+
+    monkeypatch.setattr(start_module, "ResilientIMAP", FakeIMAP)
+    _install_common_patches(monkeypatch, [account], tmp_path)
+    monkeypatch.setattr(
+        start_module,
+        "parse_raw_email",
+        lambda _raw, _config: type(
+            "InboundStub",
+            (),
+            {"subject": "subject", "attachments": [], "sender": "sender@example.com"},
+        )(),
+    )
+
+    sent_payloads = []
+
+    def _fake_send(payload):
+        sent_payloads.append(payload)
+        return type("R", (), {"delivered": True})()
+
+    monkeypatch.setattr(start_module, "send_telegram", _fake_send)
+
+    start_module.main(max_cycles=2)
+
+    assert len(sent_payloads) == 1
+    assert "First run: showing messages from last" in sent_payloads[0].html_text

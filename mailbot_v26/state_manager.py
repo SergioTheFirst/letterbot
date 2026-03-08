@@ -26,6 +26,8 @@ class AccountState:
     last_check_time: Optional[str] = None
     imap_status: str = "unknown"
     last_error: str = ""
+    uidvalidity: Optional[int] = None
+    mailbox: str = "INBOX"
 
 
 @dataclass
@@ -89,6 +91,10 @@ class StateManager:
                 existing.last_error = candidate.last_error
             if candidate.imap_status and candidate.imap_status != "unknown":
                 existing.imap_status = candidate.imap_status
+            if candidate.uidvalidity is not None:
+                existing.uidvalidity = candidate.uidvalidity
+            if candidate.mailbox:
+                existing.mailbox = candidate.mailbox
         llm_raw = raw.get("llm", {})
         meta_raw = raw.get("meta", {})
         return BotState(
@@ -109,6 +115,34 @@ class StateManager:
         with self._lock:
             account = self._state.accounts.setdefault(key, AccountState())
             account.last_uid = uid
+            self._mark_dirty()
+
+    def reset_account_cursor(self, login: str) -> None:
+        key = normalize_login(login)
+        if not key:
+            return
+        with self._lock:
+            account = self._state.accounts.setdefault(key, AccountState())
+            account.last_uid = 0
+            account.last_check_time = None
+            self._mark_dirty()
+
+    def get_uidvalidity(self, login: str) -> Optional[int]:
+        key = normalize_login(login)
+        with self._lock:
+            return self._state.accounts.get(key, AccountState()).uidvalidity
+
+    def update_uidvalidity(
+        self, login: str, uidvalidity: Optional[int], mailbox: str | None = None
+    ) -> None:
+        key = normalize_login(login)
+        if not key:
+            return
+        with self._lock:
+            account = self._state.accounts.setdefault(key, AccountState())
+            account.uidvalidity = uidvalidity
+            if mailbox:
+                account.mailbox = mailbox
             self._mark_dirty()
 
     def update_check_time(

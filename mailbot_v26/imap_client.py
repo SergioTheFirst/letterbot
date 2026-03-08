@@ -152,6 +152,9 @@ class ResilientIMAP:
         self._bootstrap_hours = max(0, int(first_run_bootstrap_hours))
         self._bootstrap_max_messages = max(0, int(first_run_bootstrap_max_messages))
         self._last_fetch_included_prestart = False
+        self._last_uidvalidity_changed = False
+        self._last_resync_reason = "normal_poll"
+        self._last_bootstrap_active = False
         self.connect_timeout = float(connect_timeout)
         self.io_timeout = float(io_timeout)
         self.retries = int(retries)
@@ -215,6 +218,48 @@ class ResilientIMAP:
     @property
     def last_fetch_included_prestart(self) -> bool:
         return self._last_fetch_included_prestart
+
+    @property
+    def last_uidvalidity_changed(self) -> bool:
+        return self._last_uidvalidity_changed
+
+    @property
+    def last_resync_reason(self) -> str:
+        return self._last_resync_reason
+
+    @property
+    def last_bootstrap_active(self) -> bool:
+        return self._last_bootstrap_active
+
+    def _fetch_uidvalidity(self) -> Optional[int]:
+        def _status(client) -> Optional[int]:
+            folder_status = None
+            if not hasattr(client, "folder_status"):
+                return None
+            try:
+                folder_status = client.folder_status(self.account.mailbox, ["UIDVALIDITY"])
+            except TypeError:
+                folder_status = client.folder_status(
+                    self.account.mailbox, [b"UIDVALIDITY"]
+                )
+            except Exception:
+                return None
+            if not isinstance(folder_status, dict):
+                return None
+            raw = folder_status.get("UIDVALIDITY")
+            if raw is None:
+                raw = folder_status.get(b"UIDVALIDITY")
+            if raw is None:
+                return None
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                return None
+
+        try:
+            return self._with_retries(_status)
+        except Exception:
+            return None
 
     def _resolve_search_scope(
         self, start_time_utc: datetime
@@ -397,10 +442,40 @@ class ResilientIMAP:
 
     def fetch_new_messages(self, *, limit: int = 50) -> List[Tuple[int, bytes]]:
         self._last_fetch_included_prestart = False
+        self._last_uidvalidity_changed = False
+        self._last_resync_reason = "normal_poll"
+        self._last_bootstrap_active = False
         start_time_utc = self._start_time_utc or _utcnow()
         state_login = normalize_login(self.account.user)
         range_start = 1
+        previous_uidvalidity: Optional[int] = None
         if self._state is not None and state_login:
+            get_uidvalidity = getattr(self._state, "get_uidvalidity", None)
+            if callable(get_uidvalidity):
+                try:
+                    previous_uidvalidity = get_uidvalidity(state_login)
+                except Exception:
+                    previous_uidvalidity = None
+        current_uidvalidity = self._fetch_uidvalidity()
+        uidvalidity_changed = (
+            previous_uidvalidity is not None
+            and current_uidvalidity is not None
+            and previous_uidvalidity != current_uidvalidity
+        )
+        if self._state is not None and state_login:
+            if uidvalidity_changed:
+                reset_cursor = getattr(self._state, "reset_account_cursor", None)
+                if callable(reset_cursor):
+                    reset_cursor(state_login)
+                else:
+                    self._state.update_last_uid(state_login, 0)
+                log.warning(
+                    "imap_uidvalidity_changed account=%s mailbox=%s previous=%s current=%s",
+                    state_login,
+                    self.account.mailbox,
+                    previous_uidvalidity,
+                    current_uidvalidity,
+                )
             range_start = max(1, self._state.get_last_uid(state_login) + 1)
 
         def _search(client, criteria):
@@ -414,11 +489,27 @@ class ResilientIMAP:
         search_scope, internaldate_cutoff, bootstrap_active = (
             self._resolve_search_scope(start_time_utc)
         )
+        if (
+            uidvalidity_changed
+            and self._bootstrap_hours > 0
+            and self._bootstrap_max_messages > 0
+        ):
+            internaldate_cutoff = start_time_utc - timedelta(hours=self._bootstrap_hours)
+            search_scope = ["SINCE", internaldate_cutoff.strftime("%d-%b-%Y")]
+            bootstrap_active = True
         scoped_criteria = [*base_criteria, *search_scope]
         scoped_uids = sorted(
             int(uid) for uid in (self._with_retries(_search, scoped_criteria) or [])
         )
         highest_seen = max(all_uids) if all_uids else None
+        self._last_uidvalidity_changed = uidvalidity_changed
+        self._last_bootstrap_active = bootstrap_active
+        if uidvalidity_changed:
+            self._last_resync_reason = "uidvalidity_change"
+        elif bootstrap_active:
+            self._last_resync_reason = "first_run"
+        else:
+            self._last_resync_reason = "normal_poll"
 
         eligible: list[tuple[int, dict[bytes, Any], Optional[datetime]]] = []
         for uid in scoped_uids:
@@ -477,6 +568,13 @@ class ResilientIMAP:
         if self._state is not None and state_login:
             if highest_seen is not None:
                 self._state.update_last_uid(state_login, highest_seen)
+            update_uidvalidity = getattr(self._state, "update_uidvalidity", None)
+            if callable(update_uidvalidity):
+                update_uidvalidity(
+                    state_login,
+                    current_uidvalidity,
+                    mailbox=self.account.mailbox,
+                )
             self._state.update_check_time(state_login)
         return messages
 

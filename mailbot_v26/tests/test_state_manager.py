@@ -69,3 +69,18 @@ def test_state_normalizes_login_keys_and_merges_legacy_variants(tmp_path: Path) 
     reloaded = json.loads(state_path.read_text(encoding="utf-8"))
     assert set(reloaded.get("accounts", {}).keys()) == {"user@example.com"}
     assert reloaded["accounts"]["user@example.com"]["last_uid"] == 9
+
+
+def test_uidvalidity_roundtrip_and_cursor_reset(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    manager = StateManager(state_path)
+    manager.update_last_uid("user@example.com", 77)
+    manager.update_uidvalidity("user@example.com", 1234, mailbox="INBOX")
+    manager.save(force=True)
+
+    reloaded = StateManager(state_path)
+    assert reloaded.get_uidvalidity("USER@example.com") == 1234
+
+    reloaded.reset_account_cursor("user@example.com")
+    assert reloaded.get_last_uid("user@example.com") == 0
+    assert reloaded.get_last_check_time("user@example.com") is None

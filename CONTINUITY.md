@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-08: Completed reliability pass for first-run ingest + IMAP resync semantics: retained bounded first-run bootstrap (`allow_prestart_emails=false`, `first_run_bootstrap_hours=24`, `first_run_bootstrap_max_messages=20`), added persisted per-account UIDVALIDITY state with cursor reset on change, enforced bounded UIDVALIDITY resync with explicit reason flags (`first_run` / `uidvalidity_change` / `normal_poll`), emitted structured ingest/resync logs, and added regressions for UIDVALIDITY reset/bounded replay, per-account bootstrap detection, and one-time first-run notice; verification green (`python -m pytest -q --tb=short` => 1182 passed, `python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1072 passed).
 - 2026-03-08: Completed P0 source-level mojibake verification pass for Telegram-facing paths: audited non-test Python literals with AST + normalizer diff, confirmed no unexpected user-facing mojibake literals, added regression guard `test_source_mojibake_scan.py` with technical allowlist for sanitizer/detection tokens only, added explicit named regressions `test_no_mojibake_in_startup_report` and `test_no_mojibake_in_imap_runtime_failure_message`, and verified green (`python -m pytest -q --tb=short` => 1176 passed; `python -m compileall mailbot_v26 -q`; `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1066 passed).
 - 2026-03-08: Completed web-observability UI hardening pass from audit prompt: fixed dark-surface consistency (`.topbar`, `.alert`, `.surface-panel`), added missing CSS/layout classes + old-template compatibility classes, expanded base navigation (Commitments/Latency/Attention/Learning/Relationships), added favicon and cleaned footer branding, removed cockpit inline style + added visible Boosty donate affordances, migrated `learning.html`/`relationships.html`/`relationships_contact.html` to `base.html`, and added regression suite `test_web_nav_links.py`; verification green (`python -m compileall mailbot_v26 -q`, full `python -m pytest -q --tb=short` => 1167 passed, targeted web tests all passed).
 - 2026-03-08: Completed 3 independent UX/config polish tasks with zero behavior regressions: `/help` now lists `/digest on|off` and `/autopriority on|off` as separate command lines (plus new inbound regression test), MailBot→Letterbot docstring branding updated in targeted modules only, and quality feature flags enabled in both settings template sources (`enable_anomaly_alerts=true`, `enable_quality_metrics=true`, `enable_preview_actions=true`); verification green (`python -m compileall mailbot_v26 -q`, `python -m pytest -q` x3 incremental passes, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1053 passed, targeted tests for inbound/config_bootstrap/startup_health all passed).
@@ -213,17 +214,18 @@ Done:
 - 2026-03-06: Telegram UX hotfix pass started: wired startup `config.storage.db_path` into processor module (`configure_processor_db_path`), ensured `start.py` creates DB parent directory before `Storage(...)`, switched user path keyboards to direct priority buttons (`initial_prio=True`), and updated auto-priority-gate defaults/examples (`enabled=true`, `min_samples=10`); runtime verification currently FAILED with broad pre-existing+regression suite failures (94 failed / 950 passed).
 - 2026-03-06: user-facing reliability hardening applied with minimal runtime patchset: outbound Telegram send/edit now normalizes mojibake text centrally, `/status` now includes AI + delivery mode and uses global startup health mode (fixed `StartupHealthChecker.evaluate_mode` global-state update), IMAP runtime health now classifies repeated handshake/connect timeouts and enters per-account 24h cooldown with cooldown metadata/log fields, default progressive pre-message disabled unless `MAILBOT_ENABLE_PROGRESSIVE_PREMESSAGE` is explicitly enabled, weekly digest defaults switched ON across templates/bootstrap/feature defaults, and inbound callback rerender now adds a single `РџСЂРёРѕСЂРёС‚РµС‚: ... РІСЂСѓС‡РЅСѓСЋ` marker when `priority_source=user_override`; runtime verification remains UNCONFIRMED here because no Python interpreter is available (`.venv` missing, `python/py` unavailable).
 Now:
-- P0 mojibake source-level cleanup guardrails are in place for user-facing Telegram/startup/runtime paths.
-- Outbound sanitizer remains unchanged as a safety net; no runtime/storage/pipeline/web logic changed in this pass.
+- First-run bootstrap and UIDVALIDITY-safe resync are deterministic and covered by focused regression tests.
+- Runtime ingest logs now expose bootstrap/resync decisions for diagnostics without changing Telegram UX flow.
 Next:
-- Prepare minimal PR for mojibake cleanup verification and new regression tests.
-- Keep source-scan guard synced if new user-facing modules are added.
+- Prepare minimal PR for reliability pass (bounded first-run + UIDVALIDITY state reset semantics).
+- Monitor mailbox-cache behavior if additional mailboxes beyond INBOX are introduced.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should callback snapshot-update miss (`email_id` absent) emit a dedicated contract event for dashboard alerting, or keep logger-only?
 Working set (files / tables / tests):
 - mailbot_v26/pipeline/processor.py
 - mailbot_v26/telegram/inbound.py
 - mailbot_v26/start.py
+- mailbot_v26/imap_client.py
 - mailbot_v26/bot_core/pipeline.py
 - mailbot_v26/config/auto_priority_gate.py
 - mailbot_v26/config/config.ini.example
@@ -242,6 +244,9 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_startup_health.py
 - mailbot_v26/tests/test_runtime_health.py
 - mailbot_v26/tests/test_source_mojibake_scan.py
+- mailbot_v26/tests/test_imap_client.py
+- mailbot_v26/tests/test_polling_loop.py
+- mailbot_v26/tests/test_state_manager.py
 - mailbot_v26/tests/test_auto_priority_gate_loader.py
 - mailbot_v26/tests/test_feature_flags.py
 - mailbot_v26/tests/test_priority_keyboard.py

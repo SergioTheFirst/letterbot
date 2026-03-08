@@ -1235,11 +1235,19 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 storage=storage,
                                 account_email=login,
                             )
+                            bootstrap_enabled = bool(
+                                first_run_detected
+                                and (not config.ingest.allow_prestart_emails)
+                                and config.ingest.first_run_bootstrap_hours > 0
+                                and config.ingest.first_run_bootstrap_max_messages > 0
+                            )
                             digest_logger.info(
                                 "imap_ingest_policy",
                                 account_id=account.account_id,
+                                account_email=login,
                                 login=login,
                                 first_run_detected=first_run_detected,
+                                bootstrap_enabled=bootstrap_enabled,
                                 bootstrap_window_hours=config.ingest.first_run_bootstrap_hours,
                                 bootstrap_max_messages=config.ingest.first_run_bootstrap_max_messages,
                                 allow_prestart_emails=config.ingest.allow_prestart_emails,
@@ -1263,6 +1271,17 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 max_email_mb=config.general.max_email_mb,
                             )
                             new_messages = imap.fetch_new_messages()
+                            digest_logger.info(
+                                "imap_resync_state",
+                                account_id=account.account_id,
+                                account_email=login,
+                                first_run_detected=first_run_detected,
+                                bootstrap_enabled=imap.last_bootstrap_active,
+                                bootstrap_window_hours=config.ingest.first_run_bootstrap_hours,
+                                bootstrap_max_messages=config.ingest.first_run_bootstrap_max_messages,
+                                uidvalidity_changed=imap.last_uidvalidity_changed,
+                                resync_reason=imap.last_resync_reason,
+                            )
                             runtime_health.on_success(
                                 account.account_id, datetime.now(timezone.utc)
                             )
