@@ -13,6 +13,7 @@ from mailbot_v26.system.startup_health import (
     StartupHealthChecker,
     dispatch_launch_report,
 )
+from mailbot_v26.text.mojibake import normalize_mojibake_text
 from mailbot_v26.ui.branding import WATERMARK_LINE
 from mailbot_v26.worker import telegram_sender
 
@@ -249,6 +250,14 @@ def test_startup_report_default_branding_and_watermark() -> None:
     assert "Letterbot Premium" in report
     assert "MailBot Premium" not in report
     assert WATERMARK_LINE in report
+
+
+def test_no_mojibake_in_startup_report() -> None:
+    report = LaunchReportBuilder().build(results=[], mode=SimpleNamespace(value="FULL"))
+
+    assert normalize_mojibake_text(report) == report
+    for token in ("Р Р†Р вЂљ", "Р В РЎвЂўР РЋРІР‚С™", "РЎР‚РЎСџ", "вЂ"):
+        assert token not in report
 
 
 def test_startup_report_includes_mail_account_status_ok() -> None:
