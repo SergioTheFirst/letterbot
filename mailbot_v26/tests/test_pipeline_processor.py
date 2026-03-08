@@ -45,6 +45,57 @@ def _processor() -> MessageProcessor:
     return MessageProcessor(cfg, DummyState())
 
 
+def _scored_facts_from_attachment(
+    *,
+    raw_attachment_text: str,
+    filename: str = "invoice.pdf",
+    content_type: str = "application/pdf",
+    subject: str = "Invoice",
+    body_text: str = "See attachment",
+    mail_type: str = "INVOICE",
+) -> tuple[str, list[dict[str, object]], str, dict[str, object]]:
+    cleaned_attachment_text = pipeline_processor._clean_attachment_page_artifacts(
+        raw_attachment_text
+    )
+    attachments = [
+        {
+            "filename": filename,
+            "content_type": content_type,
+            "text": raw_attachment_text,
+        }
+    ]
+    evidence_text = " ".join(
+        part for part in (subject, body_text, cleaned_attachment_text) if part
+    )
+    facts = _collect_message_facts(
+        subject=subject,
+        body_text=body_text,
+        attachments=attachments,
+        mail_type=mail_type,
+    )
+    facts = _validate_message_facts(facts, evidence_text=evidence_text)
+    facts = _score_message_facts(
+        facts,
+        evidence_text=evidence_text,
+        attachment_text=raw_attachment_text,
+    )
+    return cleaned_attachment_text, attachments, evidence_text, facts
+
+
+def _checked_facts_from_attachment(
+    **kwargs: object,
+) -> tuple[str, list[dict[str, object]], str, dict[str, object]]:
+    cleaned_attachment_text, attachments, evidence_text, facts = (
+        _scored_facts_from_attachment(**kwargs)
+    )
+    checked = _consistency_check_message_facts(
+        facts,
+        evidence_text=evidence_text,
+        attachment_text=str(kwargs["raw_attachment_text"]),
+    )
+    return cleaned_attachment_text, attachments, evidence_text, checked
+
+
 def _strip_html(line: str) -> str:
     return re.sub(r"</?[^>]+>", "", line)
 
@@ -1794,6 +1845,50 @@ def test_invoice_attachment_amount_extracted_from_table_context() -> None:
     assert facts["amount"].startswith("4200")
 
 
+def test_attachment_pdf_repeated_headers_not_used_for_fact_extraction() -> None:
+    raw_attachment_text = (
+        "Company Summary Total 999 999 USD\n"
+        "Page 1 of 2\f"
+        "Company Summary Total 999 999 USD\n"
+        "Service\t1\t4 200 USD\n"
+        "Total payable\t4 200 USD\n"
+    )
+
+    cleaned_attachment_text, _, evidence_text, facts = _scored_facts_from_attachment(
+        raw_attachment_text=raw_attachment_text,
+        filename="invoice_multi_page.pdf",
+        content_type="application/pdf",
+    )
+
+    assert "999 999 USD" not in cleaned_attachment_text
+    assert "Page 1 of 2" not in cleaned_attachment_text
+    assert facts["amount"].startswith("4 200")
+    assert "999 999 USD" not in evidence_text
+
+
+def test_attachment_page_numbers_not_used_as_doc_number() -> None:
+    raw_attachment_text = (
+        "Page 1 of 3\n"
+        "Invoice no INV-55\n"
+        "\f"
+        "Page 2 of 3\n"
+        "Service\t1\t100 USD\n"
+        "\f"
+        "Page 3 of 3\n"
+        "Total payable\t100 USD\n"
+    )
+
+    cleaned_attachment_text, _, _, facts = _scored_facts_from_attachment(
+        raw_attachment_text=raw_attachment_text,
+        filename="invoice_pages.pdf",
+        content_type="application/pdf",
+    )
+
+    assert "Page 1 of 3" not in cleaned_attachment_text
+    assert facts["doc_number"] == "INV-55"
+    assert facts["doc_number"] not in {"1", "2", "3"}
+
+
 def test_attachment_without_currency_does_not_become_total() -> None:
     attachment_text = (
         "item\tqty\tprice\n" "service\t1\t12500\n" "total payable\t87500\n"
@@ -1819,6 +1914,46 @@ def test_attachment_without_currency_does_not_become_total() -> None:
     )
 
     assert facts["amount"] == ""
+
+
+def test_attachment_table_line_items_do_not_override_total() -> None:
+    raw_attachment_text = (
+        "item\tqty\tprice\tamount\n"
+        "service a\t1\t70 000 USD\t70 000 USD\n"
+        "service b\t1\t17 500 USD\t17 500 USD\n"
+        "Total payable\t87 500 USD\n"
+    )
+
+    _, _, _, facts = _scored_facts_from_attachment(
+        raw_attachment_text=raw_attachment_text,
+        filename="invoice_lines.xlsx",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    assert facts["amount"].startswith("87 500")
+
+
+def test_attachment_subtotal_plus_tax_validates_total() -> None:
+    raw_attachment_text = (
+        "item\tqty\tprice\tamount\n"
+        "service\t1\t100 USD\t100 USD\n"
+        "Subtotal\t100 USD\n"
+        "Tax\t20 USD\n"
+        "Total payable\t120 USD\n"
+    )
+
+    _, _, _, checked = _checked_facts_from_attachment(
+        raw_attachment_text=raw_attachment_text,
+        filename="invoice_totals.xlsx",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    assert "subtotal_tax_total_mismatch" not in checked["consistency_issues"]
+    assert checked["consistency_boost"] > 0
+
+
+def test_attachment_payable_anchor_beats_line_item_amount() -> None:
+    test_attachment_table_line_items_do_not_override_total()
 
 
 def test_payroll_attachment_never_invoice_action() -> None:
@@ -1849,7 +1984,11 @@ def test_payroll_attachment_never_invoice_action() -> None:
     facts = _score_message_facts(
         facts, evidence_text=evidence_text, attachment_text=attachment_text
     )
-    facts = _consistency_check_message_facts(facts, evidence_text=evidence_text)
+    facts = _consistency_check_message_facts(
+        facts,
+        evidence_text=evidence_text,
+        attachment_text=attachment_text,
+    )
 
     decision = _build_message_decision(
         priority="\U0001f7e1",
@@ -1864,6 +2003,148 @@ def test_payroll_attachment_never_invoice_action() -> None:
 
     assert facts["doc_kind"] == "payroll"
     assert "\u043e\u043f\u043b\u0430\u0442" not in decision.action.lower()
+
+
+def test_attachment_reconciliation_table_does_not_enable_invoice_action() -> None:
+    raw_attachment_text = (
+        "Акт сверки взаимных расчетов\n"
+        "Сальдо начальное\t500 000 руб\n"
+        "Обороты\t20 000 руб\n"
+        "Сальдо конечное\t520 000 руб\n"
+    )
+
+    _, attachments, _, checked = _checked_facts_from_attachment(
+        raw_attachment_text=raw_attachment_text,
+        filename="act_sverki.xlsx",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        subject="Акт сверки",
+        body_text="См. вложение",
+        mail_type="",
+    )
+
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Оплатить",
+        summary="",
+        message_facts=checked,
+        subject="Акт сверки",
+        body_text="См. вложение",
+        attachments=attachments,
+        context="NEW_MESSAGE",
+    )
+
+    assert "оплат" not in decision.action.lower()
+    assert (
+        checked["payroll_signal"] is True
+        or "attachment_non_invoice_table" in checked["consistency_issues"]
+    )
+
+
+def test_attachment_payroll_table_does_not_enable_invoice_action() -> None:
+    test_payroll_attachment_never_invoice_action()
+
+
+def test_attachment_cleanup_does_not_strip_simple_single_page_text() -> None:
+    raw_attachment_text = (
+        "Invoice no INV-77\n"
+        "Total payable 4 200 USD\n"
+        "Due date 12.03.2026"
+    )
+
+    assert (
+        pipeline_processor._clean_attachment_page_artifacts(raw_attachment_text)
+        == raw_attachment_text
+    )
+
+
+def test_attachment_table_consistency_reduces_confidence_on_conflict() -> None:
+    consistent_raw_attachment_text = (
+        "item\tqty\tprice\tamount\n"
+        "service\t1\t100 USD\t100 USD\n"
+        "Subtotal\t100 USD\n"
+        "Tax\t20 USD\n"
+        "Total payable\t120 USD\n"
+    )
+    inconsistent_raw_attachment_text = (
+        "item\tqty\tprice\tamount\n"
+        "service\t1\t100 USD\t100 USD\n"
+        "Subtotal\t100 USD\n"
+        "Tax\t20 USD\n"
+        "Total payable\t170 USD\n"
+    )
+
+    _, consistent_attachments, _, consistent_checked = _checked_facts_from_attachment(
+        raw_attachment_text=consistent_raw_attachment_text,
+        filename="invoice_consistent.xlsx",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    _, inconsistent_attachments, _, inconsistent_checked = (
+        _checked_facts_from_attachment(
+            raw_attachment_text=inconsistent_raw_attachment_text,
+            filename="invoice_inconsistent.xlsx",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    )
+
+    consistent_decision = _build_message_decision(
+        priority="🟡",
+        action_line="Оплатить",
+        summary="",
+        message_facts=consistent_checked,
+        subject="Invoice",
+        body_text="See attachment",
+        attachments=consistent_attachments,
+        context="NEW_MESSAGE",
+    )
+    inconsistent_decision = _build_message_decision(
+        priority="🟡",
+        action_line="Оплатить",
+        summary="",
+        message_facts=inconsistent_checked,
+        subject="Invoice",
+        body_text="See attachment",
+        attachments=inconsistent_attachments,
+        context="NEW_MESSAGE",
+    )
+
+    assert "subtotal_tax_total_mismatch" in inconsistent_checked["consistency_issues"]
+    assert inconsistent_decision.confidence < consistent_decision.confidence
+
+
+def test_attachment_total_flows_into_interpretation_not_parallel_semantics() -> None:
+    raw_attachment_text = (
+        "item\tqty\tprice\tamount\n"
+        "service\t1\t4 200 USD\t4 200 USD\n"
+        "Total payable\t4 200 USD\n"
+    )
+
+    _, attachments, _, checked = _checked_facts_from_attachment(
+        raw_attachment_text=raw_attachment_text,
+        filename="invoice_interpretation.xlsx",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Проверить",
+        summary="",
+        message_facts=checked,
+        sender_email="billing@example.com",
+        subject="Invoice",
+        body_text="See attachment",
+        attachments=attachments,
+        context="NEW_MESSAGE",
+    )
+    interpretation = _build_message_interpretation(
+        email_id=55,
+        sender_email="billing@example.com",
+        message_facts=decision.facts,
+        decision=decision,
+        document_id="doc-55",
+    )
+
+    assert interpretation.amount == 4200.0
+    assert interpretation.doc_kind == "invoice"
+    assert interpretation.action == decision.action
 
 
 def test_telegram_uses_interpretation_not_raw_facts() -> None:

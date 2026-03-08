@@ -2288,6 +2288,9 @@ def _build_premium_clarity_text(
     message_facts = _consistency_check_message_facts(
         message_facts,
         evidence_text=fact_text,
+        attachment_text=" ".join(
+            str(attachment.get("text") or "") for attachment in attachments
+        ),
     )
     context = _detect_conversation_context(
         subject=subject,
@@ -2493,6 +2496,9 @@ def _build_telegram_text(
         message_facts = _consistency_check_message_facts(
             message_facts,
             evidence_text=fact_text,
+            attachment_text=" ".join(
+                str(attachment.get("text") or "") for attachment in attachments
+            ),
         )
 
     if attachment_summary is None:
@@ -2583,13 +2589,18 @@ def _build_priority_signal_text(
 ) -> str:
     base = (body_text or "").strip()
     signals: list[str] = []
+    cleaned_attachment_texts: list[str] = []
     for attachment in attachments[:4]:
         filename = str(attachment.get("filename") or "").strip()
         if not filename:
             continue
         filename_lower = filename.lower()
         signals.append(filename_lower)
-        attachment_text = str(attachment.get("text") or "").strip()
+        attachment_text = _clean_attachment_page_artifacts(
+            str(attachment.get("text") or "")
+        ).strip()
+        if attachment_text:
+            cleaned_attachment_texts.append(attachment_text)
         doc_type = _detect_attachment_doc_type(
             filename=filename_lower,
             content_type=attachment.get("content_type") or attachment.get("type"),
@@ -2623,7 +2634,7 @@ def _build_priority_signal_text(
         part
         for part in (
             fact_body_text,
-            " ".join(str(attachment.get("text") or "") for attachment in attachments),
+            " ".join(cleaned_attachment_texts),
         )
         if part
     )
@@ -2637,13 +2648,12 @@ def _build_priority_signal_text(
     facts = _score_message_facts(
         facts,
         evidence_text=fact_text,
-        attachment_text=" ".join(
-            str(attachment.get("text") or "") for attachment in attachments
-        ),
+        attachment_text=" ".join(cleaned_attachment_texts),
     )
     facts = _consistency_check_message_facts(
         facts,
         evidence_text=fact_text,
+        attachment_text=" ".join(cleaned_attachment_texts),
     )
     if facts["doc_kind"]:
         signals.append(str(facts["doc_kind"]))
@@ -2815,6 +2825,39 @@ _TABLE_TOTAL_ANCHORS = (
     "total payable",
     "total due",
 )
+_ATTACHMENT_SUBTOTAL_ANCHORS = (
+    "subtotal",
+    "sub total",
+    "\u043f\u043e\u0434\u044b\u0442\u043e\u0433",
+    "\u0431\u0435\u0437 \u043d\u0434\u0441",
+    "\u0432\u0441\u0435\u0433\u043e \u0442\u043e\u0432\u0430\u0440\u043e\u0432",
+)
+_ATTACHMENT_TAX_ANCHORS = (
+    "tax",
+    "vat",
+    "\u043d\u0434\u0441",
+    "\u043d\u0430\u043b\u043e\u0433",
+)
+_ATTACHMENT_NON_TOTAL_ANCHORS = tuple(
+    dict.fromkeys(
+        (
+            *_PAYROLL_AMOUNT_NEGATIVE_MARKERS,
+            "\u043e\u0441\u0442\u0430\u0442\u043e\u043a",
+            "\u0441\u0430\u043b\u044c\u0434\u043e",
+            "balance",
+            "page",
+            "\u0441\u0442\u0440.",
+            "\u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0430",
+        )
+    )
+)
+_ATTACHMENT_STRONG_TOTAL_ANCHORS = tuple(
+    dict.fromkeys((*_TABLE_TOTAL_ANCHORS, "payable", "total"))
+)
+_ATTACHMENT_PAGE_MARKER_RE = re.compile(
+    r"^\s*(?:page|стр\.?|страница)\s*\d+(?:\s*(?:/|of|из)\s*\d+)?\s*$",
+    re.IGNORECASE,
+)
 _ATTACHMENT_CONTEXT_KEYWORDS = tuple(
     dict.fromkeys(
         (
@@ -2829,6 +2872,7 @@ _STRONG_CONSISTENCY_ISSUES = {
     "payroll_overrides_invoice",
     "subtotal_tax_total_mismatch",
     "line_total_mismatch",
+    "attachment_non_invoice_table",
     "due_date_not_after_invoice_date",
     "due_date_header_not_payment",
 }
@@ -2841,6 +2885,196 @@ def _has_keyword_context(text: str, keywords: tuple[str, ...]) -> bool:
     return any(
         keyword and _contains_any(normalized, (str(keyword),)) for keyword in keywords
     )
+
+
+def _attachment_boundary_key(line: str) -> str:
+    normalized = _normalized_lower(" ".join(str(line or "").split()))
+    if not normalized:
+        return ""
+    return re.sub(r"\d+", "#", normalized)
+
+
+def _clean_attachment_page_artifacts(text: str) -> str:
+    source = _normalize_mojibake_text(str(text or ""))
+    if not source.strip():
+        return ""
+
+    raw_pages = [page for page in re.split(r"\f+", source) if page.strip()]
+    if not raw_pages:
+        raw_pages = [source]
+
+    pages: list[list[str]] = []
+    boundary_counts: dict[str, int] = {}
+
+    for page in raw_pages:
+        lines = [
+            line.rstrip()
+            for line in page.splitlines()
+            if line.strip()
+            and not _ATTACHMENT_PAGE_MARKER_RE.fullmatch(" ".join(line.split()))
+        ]
+        pages.append(lines)
+        if len(raw_pages) <= 1:
+            continue
+        boundary_lines = lines[:2] + lines[-2:]
+        seen_page_keys: set[str] = set()
+        for line in boundary_lines:
+            key = _attachment_boundary_key(line)
+            if not key or key in seen_page_keys:
+                continue
+            seen_page_keys.add(key)
+            boundary_counts[key] = boundary_counts.get(key, 0) + 1
+
+    repeated_boundary_keys = {
+        key for key, count in boundary_counts.items() if count >= 2
+    }
+    if not repeated_boundary_keys:
+        return "\n".join(
+            "\n".join(line for line in page if line.strip())
+            for page in pages
+            if any(line.strip() for line in page)
+        ).strip()
+
+    cleaned_pages: list[str] = []
+    for page_lines in pages:
+        boundary_keys = {
+            _attachment_boundary_key(line)
+            for line in page_lines[:2] + page_lines[-2:]
+            if _attachment_boundary_key(line)
+        }
+        kept_lines = [
+            line
+            for line in page_lines
+            if _attachment_boundary_key(line) not in repeated_boundary_keys
+            or _attachment_boundary_key(line) not in boundary_keys
+        ]
+        if kept_lines:
+            cleaned_pages.append("\n".join(kept_lines))
+    return "\n".join(cleaned_pages).strip()
+
+
+def _select_attachment_line_amount(
+    line: str,
+) -> tuple[str, float] | tuple[None, None]:
+    amount_candidates: list[tuple[str, float]] = []
+    for match in _FACT_AMOUNT_RE.finditer(line):
+        candidate = " ".join(match.group(0).replace("В ", " ").split())
+        digits = re.sub(r"[^0-9]", "", candidate)
+        if not digits:
+            continue
+        try:
+            candidate_int = int(digits)
+        except ValueError:
+            continue
+        if candidate_int <= 10 or candidate_int >= _FACT_MAX_AMOUNT:
+            continue
+        parsed = _to_float_amount(candidate)
+        if parsed is None:
+            continue
+        amount_candidates.append((candidate, parsed))
+    if not amount_candidates:
+        return None, None
+    return amount_candidates[-1]
+
+
+def _extract_attachment_table_profile(text: str) -> dict[str, Any]:
+    cleaned_text = _clean_attachment_page_artifacts(text)
+    profile: dict[str, Any] = {
+        "cleaned_text": cleaned_text,
+        "total_text": "",
+        "total_value": None,
+        "subtotal_value": None,
+        "tax_value": None,
+        "line_sum": None,
+        "negative_context": False,
+        "table_like": False,
+        "has_consistent_total": False,
+        "has_conflict": False,
+        "subtotal_tax_consistent": False,
+        "subtotal_tax_conflict": False,
+        "line_sum_consistent": False,
+        "line_sum_conflict": False,
+    }
+    if not cleaned_text.strip():
+        return profile
+
+    lowered = _normalized_lower(cleaned_text)
+    profile["negative_context"] = _contains_any(lowered, _ATTACHMENT_NON_TOTAL_ANCHORS)
+
+    total_candidate: tuple[int, str, float] | None = None
+    line_totals: list[float] = []
+    for raw_line in cleaned_text.splitlines():
+        line = " ".join(raw_line.replace("|", " ").split())
+        normalized_line = _normalized_lower(line)
+        if not normalized_line:
+            continue
+        amount_text, amount_value = _select_attachment_line_amount(line)
+        if amount_text is None or amount_value is None:
+            continue
+
+        has_total_anchor = _contains_any(normalized_line, _ATTACHMENT_STRONG_TOTAL_ANCHORS)
+        has_subtotal_anchor = _contains_any(
+            normalized_line, _ATTACHMENT_SUBTOTAL_ANCHORS
+        )
+        has_tax_anchor = _contains_any(normalized_line, _ATTACHMENT_TAX_ANCHORS)
+        has_negative_anchor = _contains_any(
+            normalized_line, _ATTACHMENT_NON_TOTAL_ANCHORS
+        )
+        if has_total_anchor or has_subtotal_anchor or has_tax_anchor:
+            profile["table_like"] = True
+        if has_subtotal_anchor:
+            profile["subtotal_value"] = amount_value
+            continue
+        if has_tax_anchor:
+            profile["tax_value"] = amount_value
+            continue
+        if has_total_anchor and not has_negative_anchor:
+            priority = 2 if _contains_any(normalized_line, _TABLE_TOTAL_ANCHORS) else 1
+            if total_candidate is None or priority > total_candidate[0]:
+                total_candidate = (priority, amount_text, amount_value)
+            elif total_candidate is not None and priority == total_candidate[0]:
+                if amount_value >= total_candidate[2]:
+                    total_candidate = (priority, amount_text, amount_value)
+            continue
+        if has_negative_anchor:
+            continue
+        separators = raw_line.count("\t") + raw_line.count("|")
+        numeric_tokens = len(list(_FACT_AMOUNT_RE.finditer(raw_line)))
+        if separators > 0 or numeric_tokens >= 2:
+            profile["table_like"] = True
+            line_totals.append(amount_value)
+
+    if total_candidate is not None:
+        _, total_text, total_value = total_candidate
+        profile["total_text"] = total_text
+        profile["total_value"] = total_value
+    if line_totals:
+        profile["line_sum"] = round(sum(line_totals), 2)
+
+    subtotal = profile["subtotal_value"]
+    tax = profile["tax_value"]
+    total = profile["total_value"]
+    line_sum = profile["line_sum"]
+    if subtotal is not None and tax is not None and total is not None:
+        expected_total = subtotal + tax
+        tolerance = max(1.0, abs(total) * 0.03)
+        if abs(expected_total - total) <= tolerance:
+            profile["has_consistent_total"] = True
+            profile["subtotal_tax_consistent"] = True
+        else:
+            profile["has_conflict"] = True
+            profile["subtotal_tax_conflict"] = True
+    if line_sum is not None:
+        compare_target = subtotal if subtotal is not None else total
+        if compare_target is not None:
+            tolerance = max(1.0, abs(compare_target) * 0.03)
+            if abs(line_sum - compare_target) <= tolerance:
+                profile["has_consistent_total"] = True
+                profile["line_sum_consistent"] = True
+            else:
+                profile["has_conflict"] = True
+                profile["line_sum_conflict"] = True
+    return profile
 
 
 def _extract_numbers_in_evidence_window(
@@ -3255,7 +3489,10 @@ def _score_message_facts(
     if not source.strip():
         return scored
 
-    attachment_source = _normalize_mojibake_text(str(attachment_text or ""))
+    attachment_profile = _extract_attachment_table_profile(attachment_text)
+    attachment_source = _normalize_mojibake_text(
+        str(attachment_profile.get("cleaned_text") or "")
+    )
     best_amount = ""
     best_score: int | None = None
     best_currency_hit = False
@@ -3264,9 +3501,14 @@ def _score_message_facts(
     doc_kind = _normalized_lower(str(scored.get("doc_kind") or "")).strip()
     attachment_lower = _normalized_lower(attachment_source)
     table_total_amount = _normalize_amount_candidate(
-        _extract_table_total_amount(attachment_source)
+        str(attachment_profile.get("total_text") or "")
     )
     attachment_has_currency = bool(_FACT_CURRENCY_RE.search(attachment_lower))
+    attachment_negative_context = bool(attachment_profile.get("negative_context"))
+    attachment_has_consistent_total = bool(
+        attachment_profile.get("has_consistent_total")
+    )
+    attachment_has_conflict = bool(attachment_profile.get("has_conflict"))
     candidates = _extract_numbers_in_evidence_window(
         source,
         _AMOUNT_EVIDENCE_KEYWORDS,
@@ -3342,8 +3584,12 @@ def _score_message_facts(
         if table_total_amount and in_attachment:
             if _normalize_amount_candidate(candidate) == table_total_amount:
                 candidate_score += 12
+                if attachment_has_consistent_total:
+                    candidate_score += 4
             else:
                 candidate_score -= 6
+                if attachment_has_conflict:
+                    candidate_score -= 4
         if (
             in_attachment
             and doc_kind == "invoice"
@@ -3351,6 +3597,8 @@ def _score_message_facts(
             and candidate != table_total_amount
         ):
             candidate_score -= 2
+        if in_attachment and attachment_negative_context and candidate != table_total_amount:
+            candidate_score -= 6
 
         candidate_currency_hit = (
             bool(_FACT_CURRENCY_RE.search(candidate_raw)) or has_currency_context
@@ -3382,6 +3630,10 @@ def _score_message_facts(
     scored["amount"] = best_amount
     scored["amount_context_missing"] = not bool(_FACT_CURRENCY_RE.search(lower_source))
     scored["amount_window_hit"] = best_window_hit
+    scored["attachment_table_total"] = table_total_amount
+    scored["attachment_table_negative_context"] = attachment_negative_context
+    scored["attachment_table_has_consistent_total"] = attachment_has_consistent_total
+    scored["attachment_table_has_conflict"] = attachment_has_conflict
     return scored
 
 
@@ -3464,9 +3716,11 @@ def _consistency_check_message_facts(
     facts: dict[str, Any],
     *,
     evidence_text: str = "",
+    attachment_text: str = "",
 ) -> dict[str, Any]:
     checked = dict(facts)
     source_text = str(evidence_text or "")
+    attachment_profile = _extract_attachment_table_profile(attachment_text)
 
     issues = [
         str(item)
@@ -3484,6 +3738,11 @@ def _consistency_check_message_facts(
         checked["doc_kind"] = "payroll"
         issues.append("payroll_overrides_invoice")
         penalty += 0.25
+    if bool(attachment_profile.get("negative_context")) and str(
+        checked.get("doc_kind") or ""
+    ).strip().lower() == "invoice":
+        issues.append("attachment_non_invoice_table")
+        penalty += 0.2
 
     subtotal = _extract_amount_for_keywords(
         source_text,
@@ -3537,6 +3796,16 @@ def _consistency_check_message_facts(
             if abs(expected_line_total - line_total) > tolerance:
                 issues.append("line_total_mismatch")
                 penalty += 0.15
+    if bool(attachment_profile.get("subtotal_tax_conflict")):
+        issues.append("subtotal_tax_total_mismatch")
+        penalty += 0.2
+    elif bool(attachment_profile.get("subtotal_tax_consistent")):
+        boost += 0.1
+    if bool(attachment_profile.get("line_sum_conflict")):
+        issues.append("line_total_mismatch")
+        penalty += 0.15
+    elif bool(attachment_profile.get("line_sum_consistent")):
+        boost += 0.05
 
     if str(checked.get("amount") or "").strip() and bool(
         checked.get("amount_context_missing")
@@ -3650,7 +3919,9 @@ def _collect_message_facts(
     attachment_facts: list[str] = []
 
     for attachment in attachments[:6]:
-        text_value = _normalize_mojibake_text(str(attachment.get("text") or "")).strip()
+        text_value = _clean_attachment_page_artifacts(
+            str(attachment.get("text") or "")
+        ).strip()
         if not text_value:
             continue
 
@@ -4668,6 +4939,9 @@ def _build_heuristic_llm_result(
     message_facts = _consistency_check_message_facts(
         message_facts,
         evidence_text=fact_text,
+        attachment_text=" ".join(
+            str(attachment.get("text") or "") for attachment in attachments
+        ),
     )
     context = _detect_conversation_context(
         subject=subject,
@@ -4989,7 +5263,9 @@ def _build_heuristic_attachment_summaries(
     summaries: list[dict[str, Any]] = []
     for attachment in attachments:
         filename = str(attachment.get("filename") or "")
-        raw_text = str(attachment.get("text") or "").strip()
+        raw_text = _clean_attachment_page_artifacts(
+            str(attachment.get("text") or "")
+        ).strip()
         summary = ""
         if raw_text:
             doc_type = _detect_attachment_doc_type(
@@ -7156,6 +7432,9 @@ def process_message(
         message_facts = _consistency_check_message_facts(
             message_facts,
             evidence_text=fact_text,
+            attachment_text=" ".join(
+                str(attachment.get("text") or "") for attachment in attachments
+            ),
         )
         context = _detect_conversation_context(
             subject=subject,
