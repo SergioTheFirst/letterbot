@@ -41,6 +41,7 @@ SEGMENT_FORWARD_MARKERS = (
 SEGMENT_SIGNATURE_MARKERS = (
     "best regards",
     "kind regards",
+    "regards",
     "\u0441 \u0443\u0432\u0430\u0436\u0435\u043d\u0438\u0435\u043c",
 )
 
@@ -50,6 +51,16 @@ DISCLAIMER_MARKERS = (
     "this email was sent from outside",
     "caution: external email",
     "this message is from an external sender",
+    "this email and any attachments are confidential",
+    "this message contains confidential information",
+    "the information contained in this email",
+    "if you are not the intended recipient",
+    "\u0434\u0430\u043d\u043d\u043e\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 \u0438 \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u044f \u043f\u0440\u0435\u0434\u043d\u0430\u0437\u043d\u0430\u0447\u0435\u043d\u044b",
+)
+
+REPLY_HEADER_RE = re.compile(
+    r"^(?:on\s.+\bwrote:|в\s.+\bписал(?:а)?:)$",
+    flags=re.IGNORECASE,
 )
 
 
@@ -188,11 +199,20 @@ def _is_segment_signature_start(line: str) -> bool:
     lowered = stripped.lower()
     if stripped.startswith("--"):
         return True
+    if lowered in {"спасибо", "thanks", "thank you"}:
+        return True
     return any(lowered.startswith(marker) for marker in SEGMENT_SIGNATURE_MARKERS)
 
 
 def _is_quoted_line(line: str) -> bool:
     return line.lstrip().startswith(">")
+
+
+def _is_reply_header_start(line: str) -> bool:
+    compact = re.sub(r"\s+", " ", line.strip())
+    if not compact:
+        return False
+    return bool(REPLY_HEADER_RE.match(compact))
 
 
 def segment_email_body(text: Any) -> dict[str, str]:
@@ -212,6 +232,8 @@ def segment_email_body(text: Any) -> dict[str, str]:
         if zone == "main":
             if _is_segment_forward_start(line):
                 zone = "forwarded"
+            elif _is_reply_header_start(line):
+                zone = "quoted"
             elif _is_quoted_line(line):
                 zone = "quoted"
             elif _is_segment_signature_start(line):

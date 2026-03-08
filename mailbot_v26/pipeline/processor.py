@@ -3417,10 +3417,26 @@ def _consistency_check_message_facts(
 
 
 def _main_body_for_facts(text: str) -> str:
-    cleaned = clean_email_body(text or "").strip() or str(text or "")
-    segmented = segment_email_body(cleaned)
+    source_text = str(text or "")
+    segmented = segment_email_body(source_text)
     main_body = str(segmented.get("main_body") or "").strip()
-    return main_body or cleaned
+    cleaned = clean_email_body(source_text).strip() or source_text
+    result = main_body or cleaned
+    quoted_removed = bool(str(segmented.get("quoted_thread") or "").strip())
+    signature_removed = bool(str(segmented.get("signature_block") or "").strip())
+    disclaimer_removed = bool(str(segmented.get("disclaimer_block") or "").strip())
+    forwarded_removed = bool(str(segmented.get("forwarded_thread") or "").strip())
+    if quoted_removed or signature_removed or disclaimer_removed or forwarded_removed:
+        logger.info(
+            "email_body_segmentation",
+            segmentation_applied=True,
+            main_body_length=len(result),
+            quoted_removed=quoted_removed,
+            signature_removed=signature_removed,
+            disclaimer_removed=disclaimer_removed,
+            forwarded_removed=forwarded_removed,
+        )
+    return result
 
 
 def _collect_message_facts(
