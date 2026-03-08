@@ -188,11 +188,14 @@ def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
     assert ">Health<" in body
     assert ">Events<" in body
     assert ">Doctor<" in body
-    assert ">Commitments<" not in body
-    assert ">Latency<" not in body
-    assert ">Attention<" not in body
+    assert ">Commitments<" in body
+    assert ">Latency<" in body
+    assert ">Attention<" in body
+    assert ">Learning<" in body
+    assert ">Relationships<" in body
+    assert "<span>Commitments&nbsp;</span>" not in body
+    assert "&nbsp;" not in body
     assert 'class="nav-link active">Cockpit<' in body
-    assert ">Relationships<" not in body
 
 
 def test_cockpit_home_quality_summary_safe_empty_state(tmp_path: Path) -> None:
@@ -296,13 +299,30 @@ def test_footer_support_link_visibility(tmp_path: Path) -> None:
         db_path=db_path,
         password="pw",
         secret_key="secret",
-        support_settings=SupportSettings(enabled=True, show_in_nav=True, methods=[]),
+        support_settings=SupportSettings(
+            enabled=True,
+            show_in_nav=True,
+            methods=[
+                SupportMethod(
+                    "support",
+                    "Support",
+                    "",
+                    "",
+                    "",
+                    "https://example.com/donate",
+                    "",
+                    "",
+                )
+            ],
+        ),
     )
     with app.test_client() as client:
         login_with_csrf(client, "pw")
         resp = client.get("/")
         assert "app-footer" in resp.get_data(as_text=True)
         assert 'href="/support"' in resp.get_data(as_text=True)
+        assert 'class="footer-donate-link"' in resp.get_data(as_text=True)
+        assert 'href="https://example.com/donate"' in resp.get_data(as_text=True)
 
     app_hidden = create_app(
         db_path=db_path,
@@ -315,3 +335,58 @@ def test_footer_support_link_visibility(tmp_path: Path) -> None:
         resp = client.get("/")
         assert "app-footer" in resp.get_data(as_text=True)
         assert 'href="/support"' not in resp.get_data(as_text=True)
+        assert 'class="footer-donate-link"' not in resp.get_data(as_text=True)
+
+
+def test_cockpit_donate_surfaces_hidden_when_support_disabled(tmp_path: Path) -> None:
+    db_path = tmp_path / "donate-disabled.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        support_settings=SupportSettings(enabled=False, show_in_nav=False, methods=[]),
+    )
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        body = client.get("/").get_data(as_text=True)
+
+    assert "donate-corner" not in body
+    assert "donate-bottom-link" not in body
+    assert "footer-donate-link" not in body
+
+
+def test_cockpit_donate_surfaces_visible_when_support_enabled_with_url(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "donate-enabled.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        support_settings=SupportSettings(
+            enabled=True,
+            show_in_nav=True,
+            methods=[
+                SupportMethod(
+                    "support",
+                    "Support",
+                    "",
+                    "",
+                    "",
+                    "https://example.com/donate",
+                    "",
+                    "",
+                )
+            ],
+        ),
+    )
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        body = client.get("/").get_data(as_text=True)
+
+    assert "donate-corner" in body
+    assert "donate-bottom-link" in body
+    assert 'class="footer-donate-link"' in body
+    assert 'href="https://example.com/donate"' in body

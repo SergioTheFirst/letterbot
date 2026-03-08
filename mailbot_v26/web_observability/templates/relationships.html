@@ -1,134 +1,91 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title }}</title>
-  <link rel="stylesheet" href="{{ static_url }}">
-</head>
-<body>
-  <header class="navbar">
-    <div class="brand">{{ title }}</div>
-    <nav>
-      <a href="{{ latency_url }}">Latency</a>
-      <a href="{{ health_url }}">Health</a>
-      <a href="{{ attention_url }}">Attention</a>
-      <a href="{{ events_url }}">Events</a>
-      <a href="{{ relationships_url }}" class="active">Relationships</a>
-    </nav>
-  </header>
-  <main class="container">
-    {{ error_block|safe }}
-    <section class="filters">
-      <form method="get" action="{{ relationships_url }}" class="filter-form">
-        <div class="form-group">
-          <label for="account_email">Account</label>
-          <select id="account_email" name="account_email">{{ account_options|safe }}</select>
-        </div>
-        <div class="form-group">
-          <label for="account_emails">Scope (comma-separated)</label>
-          <input id="account_emails" name="account_emails" type="text" value="{{ account_emails_value }}" placeholder="optional, comma separated">
-        </div>
-        <div class="form-group">
-          <label for="window_days">Window</label>
-          <select id="window_days" name="window_days">{{ window_options|safe }}</select>
-        </div>
-        <div class="form-group">
-          <label for="limit">Limit</label>
-          <select id="limit" name="limit">
-            <option value="50"{% if limit_value == '50' %} selected{% endif %}>50</option>
-            <option value="100"{% if limit_value == '100' %} selected{% endif %}>100</option>
-            <option value="200"{% if limit_value == '200' %} selected{% endif %}>200</option>
-          </select>
-        </div>
-        <div class="form-actions">
-          <button type="submit">Обновить</button>
-        </div>
-      </form>
-    </section>
+{% extends "base.html" %}
+{% block title %}Relationships - {{ title }}{% endblock %}
 
-    <section>
-      <h2>Граф отношений</h2>
-      <div id="graph-container" class="card">
-        <div id="graph-empty" class="empty-state" style="display:none;">Пока недостаточно данных для графа отношений. Нужны события за выбранный период.</div>
-        <svg id="graph" width="100%" height="500" viewBox="0 0 800 500"></svg>
+{% block content %}
+  {% if error_block %}
+  <div class="alert">{{ error_block | striptags }}</div>
+  {% endif %}
+
+  <div class="card filters surface-panel">
+    <div class="section-title compact">
+      <h2>Relationships</h2>
+      <div class="hint">Contact trust graph and communication patterns.</div>
+    </div>
+    <form method="get" action="{{ relationships_url }}" class="filters-form">
+      <div class="filter-group">
+        <label for="account_email">Account</label>
+        <select id="account_email" name="account_email">{{ account_options | safe }}</select>
       </div>
-    </section>
-  </main>
+      <div class="filter-group">
+        <label for="account_emails">Scope</label>
+        <input id="account_emails" name="account_emails" type="text"
+               value="{{ account_emails_value }}" placeholder="comma-separated">
+      </div>
+      <div class="filter-group">
+        <label for="window_days">Window</label>
+        <select id="window_days" name="window_days">{{ window_options | safe }}</select>
+      </div>
+      <div class="filter-group">
+        <label for="limit">Limit</label>
+        <select id="limit" name="limit">
+          {% for opt in [20, 50, 100, 200] %}
+          <option value="{{ opt }}"{% if limit_value == opt|string %} selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filter-actions">
+        <button type="submit">Apply</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" id="relationships-data" data-graph='{{ graph_json | safe }}'>
+    <div class="section-title">
+      <h2>Contact graph</h2>
+      <div class="hint">Trust and communication volume by sender.</div>
+    </div>
+    <div id="graph-content">
+      <div class="hint">Loading graph data...</div>
+    </div>
+  </div>
+
   <script>
-    const rawGraph = {{ graph_json | safe }};
-    const svg = document.getElementById('graph');
-    const empty = document.getElementById('graph-empty');
-    if (!rawGraph || !rawGraph.nodes || rawGraph.nodes.length <= 1) {
-      empty.style.display = 'block';
-    } else {
-      const width = 800;
-      const height = 500;
-      const centerX = width / 2;
-      const centerY = height / 2;
-      svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-      const nodes = rawGraph.nodes.filter(n => n.id !== 'user:me');
-      const total = nodes.length;
-      const radius = 180;
-      const userNode = { id: 'user:me', label: 'Вы', x: centerX, y: centerY, trust: 10, size: 16 };
-      const colors = (trust) => {
-        if (trust === null || trust === undefined) return '#8b8b8b';
-        if (trust >= 8) return '#2f855a';
-        if (trust >= 5) return '#d69e2e';
-        return '#c53030';
-      };
-      const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-      rawGraph.edges.forEach(edge => {
-        const target = rawGraph.nodes.find(n => n.id === edge.target);
-        if (!target || target.id === 'user:me') return;
-        const idx = nodes.findIndex(n => n.id === target.id);
-        const angle = (2 * Math.PI * idx) / total;
-        const x = centerX + radius * Math.cos(angle);
-        const y = centerY + radius * Math.sin(angle);
-        const weight = Math.max(1, Math.min(8, edge.weight || 1));
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        line.setAttribute('x1', centerX);
-        line.setAttribute('y1', centerY);
-        line.setAttribute('x2', x);
-        line.setAttribute('y2', y);
-        line.setAttribute('stroke', '#cbd5e0');
-        line.setAttribute('stroke-width', weight / 2);
-        group.appendChild(line);
-      });
-      svg.appendChild(group);
-      const allNodes = [userNode, ...nodes.map((node, idx) => {
-        const angle = (2 * Math.PI * idx) / total;
-        const x = centerX + radius * Math.cos(angle);
-        const y = centerY + radius * Math.sin(angle);
-        return { id: node.id, label: node.label || node.domain || node.id, x, y, trust: node.trust_score, size: 10 + Math.min(8, (node.emails_total || 1) / 2) };
-      })];
-      allNodes.forEach(node => {
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', node.x);
-        circle.setAttribute('cy', node.y);
-        circle.setAttribute('r', node.size);
-        circle.setAttribute('fill', colors(node.trust));
-        circle.setAttribute('data-id', node.id);
-        circle.setAttribute('class', 'graph-node');
-        circle.addEventListener('click', () => {
-          if (node.id === 'user:me') return;
-          const url = new URL(window.location.origin + '{{ relationships_url }}' + '/contact');
-          url.searchParams.set('account_email', document.getElementById('account_email').value);
-          url.searchParams.set('account_emails', document.getElementById('account_emails').value);
-          url.searchParams.set('window_days', document.getElementById('window_days').value);
-          url.searchParams.set('contact_id', node.id);
-          window.location.href = url.toString();
-        });
-        svg.appendChild(circle);
-        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        text.setAttribute('x', node.x);
-        text.setAttribute('y', node.y + node.size + 14);
-        text.setAttribute('text-anchor', 'middle');
-        text.setAttribute('class', 'graph-label');
-        text.textContent = node.label;
-        svg.appendChild(text);
-      });
-    }
+    (function() {
+      const el = document.getElementById("relationships-data");
+      if (!el) return;
+      const raw = el.dataset.graph || "{}";
+      let graph = {};
+      try {
+        graph = JSON.parse(raw);
+      } catch (e) {
+        graph = {};
+      }
+      const nodes = Array.isArray(graph.nodes)
+        ? graph.nodes.filter((n) => n && n.id !== "user:me")
+        : [];
+      const content = document.getElementById("graph-content");
+      if (!content) return;
+      if (!nodes.length) {
+        content.innerHTML = '<div class="hint">No relationship data yet. Adjust scope or window.</div>';
+        return;
+      }
+
+      const esc = (value) => String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;");
+
+      const rows = nodes.map((n) => {
+        const name = n.display_name || n.label || n.entity_id || n.id || "unknown";
+        const trust = typeof n.trust_score === "number" ? n.trust_score.toFixed(2) : "-";
+        const count = n.email_count ?? n.emails_total ?? 0;
+        return `<tr><td>${esc(name)}</td><td>${esc(count)}</td><td>${esc(trust)}</td></tr>`;
+      }).join("");
+
+      content.innerHTML = `<div class="table-scroll"><table class="table compact">
+        <thead><tr><th>Contact</th><th>Emails</th><th>Trust</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>`;
+    })();
   </script>
-</body>
-</html>
+{% endblock %}
