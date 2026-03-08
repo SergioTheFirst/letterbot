@@ -1,4 +1,4 @@
-"""Storage package for MailBot v26."""
+"""Storage package for Letterbot v26."""
 
 from .analytics import KnowledgeAnalytics
 from .context_layer import ContextStore, normalize_name

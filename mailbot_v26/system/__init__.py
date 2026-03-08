@@ -1,1 +1,1 @@
-"""System-level helpers for MailBot Premium v26."""
+"""System-level helpers for Letterbot v26."""

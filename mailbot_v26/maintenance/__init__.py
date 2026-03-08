@@ -1,4 +1,4 @@
-"""Maintenance helpers for MailBot Premium."""
+"""Maintenance helpers for Letterbot."""
 
 from mailbot_v26.maintenance.indexes import ensure_indexes
 

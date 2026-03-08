@@ -1,4 +1,4 @@
-"""Lightweight health reporting for MailBot Premium v26.
+"""Lightweight health reporting for Letterbot v26.
 
 This module is intentionally decoupled from the main pipeline. It exposes
 helpers that can be used optionally by operators to observe recent error
