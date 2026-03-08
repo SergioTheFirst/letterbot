@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import configparser
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +37,9 @@ def load_uncertainty_queue_config(
         except ValueError:
             window_days = 1
         try:
-            min_confidence = max(0, min(100, section.getint("min_confidence", fallback=70)))
+            min_confidence = max(
+                0, min(100, section.getint("min_confidence", fallback=70))
+            )
         except ValueError:
             min_confidence = 70
         try:

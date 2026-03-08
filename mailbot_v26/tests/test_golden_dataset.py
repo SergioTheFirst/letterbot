@@ -52,14 +52,20 @@ def test_golden_dataset_accuracy(monkeypatch, tmp_path) -> None:
     expected_map = _load_expected()
     db_path = tmp_path / "golden_traces.sqlite"
 
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
-    monkeypatch.setattr(processor, "decision_trace_writer", DecisionTraceWriter(db_path))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
+    monkeypatch.setattr(
+        processor, "decision_trace_writer", DecisionTraceWriter(db_path)
+    )
     monkeypatch.setattr(
         processor,
         "shadow_priority_engine",
         SimpleNamespace(compute=lambda llm_priority, from_email: (llm_priority, None)),
     )
-    monkeypatch.setattr(processor, "shadow_action_engine", SimpleNamespace(compute=lambda **kwargs: []))
+    monkeypatch.setattr(
+        processor, "shadow_action_engine", SimpleNamespace(compute=lambda **kwargs: [])
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -74,7 +80,9 @@ def test_golden_dataset_accuracy(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         processor,
         "runtime_flag_store",
-        SimpleNamespace(get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=False), False)),
+        SimpleNamespace(
+            get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=False), False)
+        ),
     )
 
     total = 0

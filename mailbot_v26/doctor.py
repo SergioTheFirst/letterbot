@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import configparser
 import importlib
 import ipaddress
 import logging
@@ -32,11 +31,18 @@ from mailbot_v26.health.mail_accounts import check_mail_accounts
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.llm import router as llm_router
-from mailbot_v26.priority.priority_engine_v2 import load_priority_v2_config, load_vip_senders
+from mailbot_v26.priority.priority_engine_v2 import (
+    load_priority_v2_config,
+    load_vip_senders,
+)
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.version import __version__
-from mailbot_v26.worker.telegram_sender import DeliveryResult, ping_telegram, send_telegram
+from mailbot_v26.worker.telegram_sender import (
+    DeliveryResult,
+    ping_telegram,
+    send_telegram,
+)
 from mailbot_v26.tools.networking import get_primary_ipv4
 
 
@@ -66,7 +72,7 @@ REQUIRED_IMPORTS = [
     "nltk",
     "langdetect",
     "flask",
- ]
+]
 
 OPTIONAL_IMPORTS = [
     "numpy",
@@ -118,7 +124,9 @@ def run_doctor(config_dir: Path | None = None) -> DoctorReport:
             + (f" ({telegram_error})" if telegram_error else "")
         )
 
-    return DoctorReport(entries=entries, telegram_sent=telegram_sent, telegram_error=telegram_error)
+    return DoctorReport(
+        entries=entries, telegram_sent=telegram_sent, telegram_error=telegram_error
+    )
 
 
 def print_lan_url(config_dir: Path | None = None) -> int:
@@ -129,7 +137,9 @@ def print_lan_url(config_dir: Path | None = None) -> int:
 
     if _is_loopback_bind(bind):
         print(f"Local only: http://127.0.0.1:{port}/")
-        print("Not reachable from LAN. Set [web] host = 0.0.0.0 (or your LAN IP) in settings.ini.")
+        print(
+            "Not reachable from LAN. Set [web] host = 0.0.0.0 (or your LAN IP) in settings.ini."
+        )
         return 0
 
     if bind == "0.0.0.0":
@@ -138,7 +148,9 @@ def print_lan_url(config_dir: Path | None = None) -> int:
             print(f"Open from another device: http://{detected}:{port}/")
         else:
             print(f"Open from another device: http://<PC IPv4>:{port}/")
-            print("Could not detect LAN IPv4 automatically. Run ipconfig and use IPv4 Address.")
+            print(
+                "Could not detect LAN IPv4 automatically. Run ipconfig and use IPv4 Address."
+            )
         print("Firewall may block incoming connections; see docs.")
         return 0
 
@@ -222,9 +234,7 @@ def _check_dependencies() -> DoctorEntry:
     if missing_required:
         details = f"отсутствуют: {', '.join(sorted(missing_required))}"
         if missing_optional:
-            details = (
-                f"{details}; опционально отсутствуют: {', '.join(sorted(missing_optional))} (не блокирует запуск)"
-            )
+            details = f"{details}; опционально отсутствуют: {', '.join(sorted(missing_optional))} (не блокирует запуск)"
         return DoctorEntry("Dependencies", "FAIL", details)
     if missing_optional:
         return DoctorEntry(
@@ -271,7 +281,9 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
                     logger=logger,
                     scope_label="doctor legacy keys fallback",
                 )
-                token = str(legacy_keys.get("telegram", "bot_token", fallback="")).strip()
+                token = str(
+                    legacy_keys.get("telegram", "bot_token", fallback="")
+                ).strip()
                 if token:
                     details = "загружен (legacy keys.ini fallback)"
             entries.append(DoctorEntry("accounts.ini (secrets)", "OK", details))
@@ -296,7 +308,9 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
         web = load_web_config(base_dir)
         data["web_host"] = web.host
         data["web_port"] = web.port
-        entries.append(DoctorEntry("web (settings.ini)", "OK", f"host={web.host}; port={web.port}"))
+        entries.append(
+            DoctorEntry("web (settings.ini)", "OK", f"host={web.host}; port={web.port}")
+        )
         if _is_port_busy(web.host, web.port):
             entries.append(
                 DoctorEntry(
@@ -324,7 +338,9 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
     return entries, data
 
 
-def _validate_accounts_ini(base_dir: Path) -> tuple[DoctorEntry, list[dict[str, object]]]:
+def _validate_accounts_ini(
+    base_dir: Path,
+) -> tuple[DoctorEntry, list[dict[str, object]]]:
     path = base_dir / "accounts.ini"
     if not path.exists():
         repo_root = Path(__file__).resolve().parents[1]
@@ -336,7 +352,7 @@ def _validate_accounts_ini(base_dir: Path) -> tuple[DoctorEntry, list[dict[str, 
                 "FAIL",
                 (
                     f"Файл не найден: {path}. "
-                    f"Создайте файл командой: copy \"{source}\" \"{target}\""
+                    f'Создайте файл командой: copy "{source}" "{target}"'
                 ),
             ),
             [],
@@ -484,7 +500,9 @@ def _yaml_template_hint(config_dir: Path | None) -> str:
     return f"Optional legacy config.yaml not found: {config_path}"
 
 
-def _load_doctor_bot_config(config_dir: Path | None) -> tuple[dict[str, object], BotConfig, list[str]]:
+def _load_doctor_bot_config(
+    config_dir: Path | None,
+) -> tuple[dict[str, object], BotConfig, list[str]]:
     resolved = resolve_config_paths(config_dir)
     if resolved.two_file_mode:
         return {}, _build_default_bot_config(), []
@@ -558,7 +576,11 @@ def _check_llm(base_dir: Path) -> list[DoctorEntry]:
     except Exception as exc:
         return [DoctorEntry("LLM", "WARN", f"ошибка конфигурации: {exc}")]
 
-    entries.append(_check_provider(router, "gigachat", config.gigachat_enabled, config.gigachat_api_key))
+    entries.append(
+        _check_provider(
+            router, "gigachat", config.gigachat_enabled, config.gigachat_api_key
+        )
+    )
     entries.append(
         _check_provider(
             router,
@@ -649,7 +671,9 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     try:
-        report = run_doctor(config_dir=Path(args.config_dir) if args.config_dir else None)
+        report = run_doctor(
+            config_dir=Path(args.config_dir) if args.config_dir else None
+        )
     except DependencyError as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(2)

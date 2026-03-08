@@ -33,6 +33,7 @@ FORBIDDEN_IMPORTS = [
     r"\bimport\s+transformers\b",
 ]
 
+
 def scan_code() -> list[str]:
     problems = []
     for file in PROJECT_ROOT.rglob("*.py"):
@@ -44,7 +45,9 @@ def scan_code() -> list[str]:
         # 1. Запрещённые exe-строки
         for bad in FORBIDDEN_STRINGS:
             if bad in text:
-                problems.append(f"ERROR: В файле {file} найдено запрещённое слово: {bad}")
+                problems.append(
+                    f"ERROR: В файле {file} найдено запрещённое слово: {bad}"
+                )
 
         # 2. Запрещённые импорты
         for pattern in FORBIDDEN_IMPORTS:

@@ -8,7 +8,9 @@ import pytest
 from mailbot_v26 import deps
 
 
-def test_require_runtime_for_reports_single_clean_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_require_runtime_for_reports_single_clean_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(deps, "has", lambda _module: False)
 
     with pytest.raises(deps.DependencyError) as exc_info:

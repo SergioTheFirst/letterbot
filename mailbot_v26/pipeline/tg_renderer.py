@@ -82,6 +82,7 @@ def _escape_dynamic(text: str | None) -> str:
     cleaned = strip_disallowed_emojis(normalized)
     return escape_tg_html(cleaned)
 
+
 def _strip_internal_noise(text: str | None) -> str:
     value = str(text or "")
     for marker in _INTERNAL_NOISE_MARKERS:
@@ -125,9 +126,7 @@ def is_semantic_duplicate(left: str, right: str) -> bool:
         return False
     if normalized_left == normalized_right:
         return True
-    shorter, longer = sorted(
-        (normalized_left, normalized_right), key=len
-    )
+    shorter, longer = sorted((normalized_left, normalized_right), key=len)
     if shorter in longer and len(shorter) / max(len(longer), 1) >= 0.8:
         return True
     left_tokens = _token_set(left)
@@ -274,8 +273,10 @@ def apply_semantic_gates(
     if _is_trivial_sentence(resolved_summary):
         resolved_summary = ""
 
-    if resolved_summary and resolved_action and is_semantic_duplicate(
-        resolved_action, resolved_summary
+    if (
+        resolved_summary
+        and resolved_action
+        and is_semantic_duplicate(resolved_action, resolved_summary)
     ):
         resolved_summary = ""
 
@@ -368,7 +369,12 @@ def _invoice_attachment_insight(
     attachments_count: int,
     message_facts: dict[str, Any] | None = None,
 ) -> str | None:
-    invoice_types = {"INVOICE", "PAYMENT_REMINDER", "INVOICE_OVERDUE", "OVERDUE_INVOICE"}
+    invoice_types = {
+        "INVOICE",
+        "PAYMENT_REMINDER",
+        "INVOICE_OVERDUE",
+        "OVERDUE_INVOICE",
+    }
     lowered = text.lower()
     invoice_text_signal = any(
         marker in lowered
@@ -376,11 +382,21 @@ def _invoice_attachment_insight(
     )
     incident_text_signal = any(
         marker in lowered
-        for marker in ("offline", "outage", "security alert", "подозрительный вход", "недоступ")
+        for marker in (
+            "offline",
+            "outage",
+            "security alert",
+            "подозрительный вход",
+            "недоступ",
+        )
     )
     facts = message_facts or {}
     decision_invoice = str(facts.get("doc_kind") or "") == "invoice"
-    if mail_type not in invoice_types and not decision_invoice and (not invoice_text_signal or incident_text_signal):
+    if (
+        mail_type not in invoice_types
+        and not decision_invoice
+        and (not invoice_text_signal or incident_text_signal)
+    ):
         return None
     if facts.get("doc_kind") and facts.get("doc_kind") != "invoice":
         return None
@@ -400,7 +416,9 @@ def _invoice_attachment_insight(
         chunk = match.group(0)
         start = max(0, match.start() - 28)
         context = lowered[start : match.end() + 6]
-        if any(token in context for token in ("итого", "сумм", "к оплат", "оплат", "всего")):
+        if any(
+            token in context for token in ("итого", "сумм", "к оплат", "оплат", "всего")
+        ):
             amount = _normalize_amount(chunk)
             break
     if not amount:
@@ -460,7 +478,9 @@ def _table_attachment_insight(attachments: list[dict[str, Any]]) -> str | None:
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext not in {"xls", "xlsx", "xlsm", "xlsb", "csv"}:
             continue
-        text = _normalize_attachment_text(attachment.get("text") or attachment.get("summary") or "")
+        text = _normalize_attachment_text(
+            attachment.get("text") or attachment.get("summary") or ""
+        )
         if not text:
             continue
         raw_tokens = _TOKEN_CLEAN_RE.sub(" ", text).split()
@@ -496,7 +516,9 @@ def build_attachment_insight(
     if not attachments:
         return None
     normalized_mail_type = (mail_type or "").strip().upper()
-    source_text = _collect_attachment_source_text(attachments, subject=subject, summary=summary)
+    source_text = _collect_attachment_source_text(
+        attachments, subject=subject, summary=summary
+    )
     invoice_line = _invoice_attachment_insight(
         normalized_mail_type,
         source_text,
@@ -521,7 +543,7 @@ def _is_binary_leak(text: str) -> bool:
     if not text:
         return False
     lowered = text.lower()
-    if "data=b'" in lowered or "data=b\"" in lowered:
+    if "data=b'" in lowered or 'data=b"' in lowered:
         return True
     stripped = text.lstrip()
     if stripped.startswith("b'") or stripped.startswith('b"'):
@@ -612,6 +634,7 @@ def format_priority_line(priority: str, from_email: str) -> str:
     safe_sender = _escape_dynamic(from_email or "неизвестно")
     return f"{normalized_priority} от {safe_sender}:"
 
+
 def format_subject(subject: str) -> str:
     safe_subject = _escape_dynamic(subject or "(без темы)")
     return f"<b>{safe_subject}</b>"
@@ -653,7 +676,9 @@ def format_attachments_block(attachments: list[dict[str, Any]]) -> str:
             )
             continue
         if skipped_reason == "total_limit":
-            lines.append(f"{filename} — <i>пропущен из-за ограничения размера письма</i>")
+            lines.append(
+                f"{filename} — <i>пропущен из-за ограничения размера письма</i>"
+            )
             continue
         extracted_text = _normalize_attachment_text(attachment.get("text"))
         if extracted_text and not _is_binary_leak(extracted_text):
@@ -680,7 +705,9 @@ def build_telegram_text(
     message_facts: dict[str, Any] | None = None,
     relationship_profile: dict[str, Any] | None = None,
 ) -> str:
-    body_lines = _maybe_drop_duplicate_subject_line(subject, [format_main_action(action_line)])
+    body_lines = _maybe_drop_duplicate_subject_line(
+        subject, [format_main_action(action_line)]
+    )
     lines = [
         format_priority_line(priority, from_email),
         format_subject(subject),

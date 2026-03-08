@@ -51,7 +51,9 @@ def _seed_emails(db_path: Path, now: datetime) -> None:
             ("primary@example.com", "carol@example.com", "🔵", 0),
             ("primary@example.com", "dana@example.com", "🟡", 1),
         ]
-        for idx, (account_email, from_email, priority, deferred) in enumerate(rows, start=1):
+        for idx, (account_email, from_email, priority, deferred) in enumerate(
+            rows, start=1
+        ):
             conn.execute(
                 """
                 INSERT INTO emails (

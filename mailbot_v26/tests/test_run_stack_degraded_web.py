@@ -11,7 +11,9 @@ def test_web_bind_error_is_non_fatal(monkeypatch, capsys) -> None:
         "build_commands",
         lambda **_kwargs: [
             run_stack.StackCommand("worker", ["python", "-m", "mailbot_v26"]),
-            run_stack.StackCommand("web", ["python", "-m", "mailbot_v26.web_observability.app"]),
+            run_stack.StackCommand(
+                "web", ["python", "-m", "mailbot_v26.web_observability.app"]
+            ),
         ],
     )
     monkeypatch.setattr(run_stack, "_is_port_busy", lambda _host, _port: True)
@@ -23,7 +25,11 @@ def test_web_bind_error_is_non_fatal(monkeypatch, capsys) -> None:
         return 0
 
     monkeypatch.setattr(run_stack, "_run_processes", _fake_run_processes)
-    monkeypatch.setattr(sys, "argv", ["run_stack", "all", "--bind", "127.0.0.1", "--port", "8787", "--no-browser"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_stack", "all", "--bind", "127.0.0.1", "--port", "8787", "--no-browser"],
+    )
 
     code = run_stack.main()
 

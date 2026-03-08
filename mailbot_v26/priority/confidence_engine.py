@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 PRIORITY_ORDER = {"🔵": 0, "🟡": 1, "🔴": 2}
 
 
@@ -40,7 +39,10 @@ class PriorityConfidenceEngine:
 
         underestimate_rate = float(sender_stats.get("llm_underestimate_rate") or 0.0)
         underestimate_count = int(sender_stats.get("llm_underestimation_count") or 0)
-        if bool(sender_stats.get("llm_underestimates_often")) or underestimate_rate >= 0.3:
+        if (
+            bool(sender_stats.get("llm_underestimates_often"))
+            or underestimate_rate >= 0.3
+        ):
             score += 0.3
         elif underestimate_count >= 3:
             score += 0.3

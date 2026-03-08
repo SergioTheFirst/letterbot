@@ -75,7 +75,9 @@ def main() -> int:
 
     with sync_playwright() as playwright:
         if not _playwright_ready(playwright):
-            print("Playwright browsers not installed; run `python -m playwright install`.")
+            print(
+                "Playwright browsers not installed; run `python -m playwright install`."
+            )
             return 0
 
         app = create_app(
@@ -97,7 +99,9 @@ def main() -> int:
 
         try:
             if not _wait_for_ready(login_url):
-                print("Login endpoint did not become ready; screenshot capture skipped.")
+                print(
+                    "Login endpoint did not become ready; screenshot capture skipped."
+                )
                 return 0
             browser = None
             try:
@@ -105,7 +109,9 @@ def main() -> int:
                 page = browser.new_page()
                 page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 try:
-                    page.get_by_role("textbox", name="Password").fill(password, timeout=5000)
+                    page.get_by_role("textbox", name="Password").fill(
+                        password, timeout=5000
+                    )
                 except Exception:
                     page.get_by_label("Password").fill(password, timeout=5000)
                 page.get_by_role("button", name="Sign in").click(timeout=5000)
@@ -115,7 +121,9 @@ def main() -> int:
                 print("Playwright crashed; screenshot skipped.")
                 return 0
             except PlaywrightError:
-                print("Playwright browser launch failed; run `python -m playwright install`.")
+                print(
+                    "Playwright browser launch failed; run `python -m playwright install`."
+                )
                 return 0
             finally:
                 if browser is not None:

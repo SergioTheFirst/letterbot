@@ -97,7 +97,9 @@ class MailTypeClassifier:
         *,
         enable_hierarchy: bool = False,
     ) -> tuple[str, list[str]]:
-        mail_type, reason_codes = cls._classify_base_detailed(subject, body, attachments)
+        mail_type, reason_codes = cls._classify_base_detailed(
+            subject, body, attachments
+        )
         if enable_hierarchy:
             refined_type, refine_reasons = cls.refine_subtype(
                 mail_type,
@@ -145,7 +147,9 @@ class MailTypeClassifier:
             return mail_type, reasons
 
         if mail_type == "PAYMENT_REMINDER":
-            escalation_matches = match_keywords(cls.REMINDER_ESCALATION_KEYWORDS, combined)
+            escalation_matches = match_keywords(
+                cls.REMINDER_ESCALATION_KEYWORDS, combined
+            )
             if escalation_matches:
                 add_match_reason("mt.reminder.escalation.keyword", escalation_matches)
                 return "REMINDER_ESCALATION", reasons
@@ -160,11 +164,15 @@ class MailTypeClassifier:
 
         if mail_type in {"CONTRACT_APPROVAL", "CONTRACT_UPDATE"}:
             contract_text = f"{combined} {attachment_names}".strip()
-            termination_matches = match_keywords(cls.CONTRACT_TERMINATION_KEYWORDS, contract_text)
+            termination_matches = match_keywords(
+                cls.CONTRACT_TERMINATION_KEYWORDS, contract_text
+            )
             if termination_matches:
                 add_match_reason("mt.contract.termination.keyword", termination_matches)
                 return "CONTRACT_TERMINATION", reasons
-            amendment_matches = match_keywords(cls.CONTRACT_AMENDMENT_KEYWORDS, contract_text)
+            amendment_matches = match_keywords(
+                cls.CONTRACT_AMENDMENT_KEYWORDS, contract_text
+            )
             if amendment_matches:
                 add_match_reason("mt.contract.amendment.keyword", amendment_matches)
                 return "CONTRACT_AMENDMENT", reasons
@@ -181,9 +189,13 @@ class MailTypeClassifier:
                     cls.CONTRACT_TERMINATION_KEYWORDS, combined
                 )
                 if termination_matches:
-                    add_match_reason("mt.contract.termination.keyword", termination_matches)
+                    add_match_reason(
+                        "mt.contract.termination.keyword", termination_matches
+                    )
                     return "CONTRACT_TERMINATION", reasons
-                amendment_matches = match_keywords(cls.CONTRACT_AMENDMENT_KEYWORDS, combined)
+                amendment_matches = match_keywords(
+                    cls.CONTRACT_AMENDMENT_KEYWORDS, combined
+                )
                 if amendment_matches:
                     add_match_reason("mt.contract.amendment.keyword", amendment_matches)
                     return "CONTRACT_AMENDMENT", reasons
@@ -221,7 +233,10 @@ class MailTypeClassifier:
         )
         has_date = bool(re.search(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b", combined))
 
-        kinds = {cls._detect_attachment_kind(att.filename, att.content_type) for att in attachments}
+        kinds = {
+            cls._detect_attachment_kind(att.filename, att.content_type)
+            for att in attachments
+        }
         has_contract_att = "CONTRACT" in kinds
         has_invoice_att = "INVOICE" in kinds
 
@@ -303,7 +318,9 @@ class MailTypeClassifier:
             reason_codes.append(f"mt.account.keyword={account_match}")
             return "ACCOUNT_CHANGE", reason_codes
 
-        info_match = cls._first_match(combined, {"информ", "ознак", "for your information", "fyi"})
+        info_match = cls._first_match(
+            combined, {"информ", "ознак", "for your information", "fyi"}
+        )
         if info_match:
             reason_codes.append("mt.base=INFORMATION_ONLY")
             reason_codes.append(f"mt.info.keyword={info_match}")

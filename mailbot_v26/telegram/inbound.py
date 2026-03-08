@@ -11,12 +11,16 @@ from typing import Callable, Iterable
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
 from mailbot_v26.config_loader import SupportSettings, load_support_settings
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
-from mailbot_v26.feedback import record_priority_confirmation, record_priority_correction
+from mailbot_v26.feedback import (
+    record_priority_confirmation,
+    record_priority_correction,
+)
 from mailbot_v26.insights.auto_priority_quality_gate import AutoPriorityQualityGate
-from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.llm.runtime_flags import RuntimeFlagStore
 from mailbot_v26.observability import get_logger
-from mailbot_v26.observability.calibration_report import compute_priority_calibration_report
+from mailbot_v26.observability.calibration_report import (
+    compute_priority_calibration_report,
+)
 from mailbot_v26.observability.decision_trace_store import load_latest_decision_traces
 from mailbot_v26.observability.decision_trace_view import build_decision_trace_summary
 from mailbot_v26.observability.event_emitter import EventEmitter
@@ -59,24 +63,22 @@ _HELP_PREFIXES = ("mb:help:", "help:")
 _UI_LOCALE = "ru"
 
 _PRIORITY_MAP = {
-    "R": "\U0001F534",
-    "Y": "\U0001F7E1",
-    "B": "\U0001F535",
-    "RED": "\U0001F534",
-    "YELLOW": "\U0001F7E1",
-    "BLUE": "\U0001F535",
-    "\U0001F534": "\U0001F534",
-    "\U0001F7E1": "\U0001F7E1",
-    "\U0001F535": "\U0001F535",
-    "\u0440\u045f\u201d\u0491": "\U0001F534",
-    "\u0440\u045f\u201f\u0160": "\U0001F7E1",
-    "\u0440\u045f\u201d\u00b5": "\U0001F535",
-    "\u0441\u0452\u0441\u045f\u0432\u0402\u045c\u0422\u2018": "\U0001F534",
-    "\u0441\u0452\u0441\u045f\u0421\u045f\u045f\u0420\u040b": "\U0001F7E1",
-    "\u0441\u0452\u0441\u045f\u0432\u0402\u045c\u0412\u00b5": "\U0001F535",
+    "R": "\U0001f534",
+    "Y": "\U0001f7e1",
+    "B": "\U0001f535",
+    "RED": "\U0001f534",
+    "YELLOW": "\U0001f7e1",
+    "BLUE": "\U0001f535",
+    "\U0001f534": "\U0001f534",
+    "\U0001f7e1": "\U0001f7e1",
+    "\U0001f535": "\U0001f535",
+    "\u0440\u045f\u201d\u0491": "\U0001f534",
+    "\u0440\u045f\u201f\u0160": "\U0001f7e1",
+    "\u0440\u045f\u201d\u00b5": "\U0001f535",
+    "\u0441\u0452\u0441\u045f\u0432\u0402\u045c\u0422\u2018": "\U0001f534",
+    "\u0441\u0452\u0441\u045f\u0421\u045f\u045f\u0420\u040b": "\U0001f7e1",
+    "\u0441\u0452\u0441\u045f\u0432\u0402\u045c\u0412\u00b5": "\U0001f535",
 }
-
-
 
 
 def _clean_text(text: str | None) -> str:
@@ -85,6 +87,7 @@ def _clean_text(text: str | None) -> str:
 
 def _t(key: str, **kwargs: object) -> str:
     return normalize_mojibake_text(t(key, locale=_UI_LOCALE, **kwargs))
+
 
 def _normalize_priority_token(value: object) -> str:
     token = normalize_mojibake_text(_clean_text(str(value or "")))
@@ -105,8 +108,12 @@ def _format_ts(value: datetime | None) -> str:
 def _format_percent(value: float) -> str:
     return f"{value * 100:.1f}%"
 
+
 def _status_llm_delivery_mode() -> str:
-    if system_health.mode in {OperationalMode.DEGRADED_NO_LLM, OperationalMode.EMERGENCY_READ_ONLY}:
+    if system_health.mode in {
+        OperationalMode.DEGRADED_NO_LLM,
+        OperationalMode.EMERGENCY_READ_ONLY,
+    }:
         return "heuristic"
     try:
         queue = load_llm_queue_config()
@@ -115,6 +122,7 @@ def _status_llm_delivery_mode() -> str:
     if queue.llm_request_queue_enabled and queue.max_concurrent_llm_calls == 1:
         return "queued"
     return "direct"
+
 
 def _safe_chat_id(chat_id: object) -> str:
     return str(chat_id or "").strip()
@@ -147,9 +155,9 @@ def _load_email_snapshot(db_path: Path, email_id: int) -> dict[str, object] | No
     return dict(row)
 
 
-
-
-def _top_priority_transitions(*, db_path: Path, days: int, limit: int = 3) -> list[tuple[str, int]]:
+def _top_priority_transitions(
+    *, db_path: Path, days: int, limit: int = 3
+) -> list[tuple[str, int]]:
     since_ts = datetime.now(timezone.utc).timestamp() - (max(1, int(days)) * 86400)
     totals: dict[str, int] = {}
     try:
@@ -186,7 +194,10 @@ def _top_priority_transitions(*, db_path: Path, days: int, limit: int = 3) -> li
     ordered = sorted(totals.items(), key=lambda item: (-item[1], item[0]))
     return ordered[: max(0, int(limit))]
 
-def _load_email_render_snapshot(db_path: Path, email_id: int) -> dict[str, object] | None:
+
+def _load_email_render_snapshot(
+    db_path: Path, email_id: int
+) -> dict[str, object] | None:
     try:
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -222,7 +233,9 @@ def _load_email_render_snapshot(db_path: Path, email_id: int) -> dict[str, objec
     return snapshot
 
 
-def _update_email_snapshot_priority(db_path: Path, email_id: int, new_priority: str) -> bool:
+def _update_email_snapshot_priority(
+    db_path: Path, email_id: int, new_priority: str
+) -> bool:
     try:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.execute(
@@ -243,8 +256,7 @@ def _update_email_snapshot_priority(db_path: Path, email_id: int, new_priority: 
 
 def _ensure_snooze_table(db_path: Path) -> None:
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS telegram_snooze (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email_id INTEGER NOT NULL,
@@ -258,8 +270,7 @@ def _ensure_snooze_table(db_path: Path) -> None:
                 delivered_at TEXT,
                 UNIQUE(email_id, deliver_at_utc)
             );
-            """
-        )
+            """)
 
 
 def _save_snooze(
@@ -299,9 +310,16 @@ def _save_snooze(
 
 
 def _render_tier1_message(snapshot: dict[str, object]) -> str:
-    priority = _normalize_priority_token(snapshot.get("priority")) or "\U0001F535"
-    from_email = normalize_mojibake_text(str(snapshot.get("from_email") or "\u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e"))
-    subject = normalize_mojibake_text(str(snapshot.get("subject") or "(\u0431\u0435\u0437 \u0442\u0435\u043c\u044b)"))
+    priority = _normalize_priority_token(snapshot.get("priority")) or "\U0001f535"
+    from_email = normalize_mojibake_text(
+        str(
+            snapshot.get("from_email")
+            or "\u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e"
+        )
+    )
+    subject = normalize_mojibake_text(
+        str(snapshot.get("subject") or "(\u0431\u0435\u0437 \u0442\u0435\u043c\u044b)")
+    )
     action_line = str(snapshot.get("action_line") or "")
     body_summary = str(snapshot.get("body_summary") or "")
     attachments = snapshot.get("attachments") or []
@@ -317,6 +335,8 @@ def _render_tier1_message(snapshot: dict[str, object]) -> str:
     if priority_source == "user_override":
         base_text = f"{base_text}\n\u041f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442: {priority} \u0432\u0440\u0443\u0447\u043d\u0443\u044e"
     return telegram_safe(normalize_mojibake_text(base_text))
+
+
 def _render_decision_trace_details(snapshot: list[dict[str, object]]) -> str:
     if not snapshot:
         return "Нет данных explainability для этого решения (trace not available)"
@@ -324,7 +344,9 @@ def _render_decision_trace_details(snapshot: list[dict[str, object]]) -> str:
     for entry in snapshot:
         decision_kind = str(entry.get("decision_kind") or "")
         decision_label = str(entry.get("decision_label") or "")
-        evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+        evidence = (
+            entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+        )
         matched = int(evidence.get("matched") or 0)
         total = int(evidence.get("total") or 0)
         codes = entry.get("explain_codes") or []
@@ -474,7 +496,9 @@ class TelegramInboundClient:
 
             object.__setattr__(self, "_requests", requests)
 
-    def get_updates(self, *, offset: int | None, limit: int = 20) -> list[dict[str, object]]:
+    def get_updates(
+        self, *, offset: int | None, limit: int = 20
+    ) -> list[dict[str, object]]:
         if self._requests is None:
             logger.error("telegram_inbound_requests_missing")
             return []
@@ -487,7 +511,9 @@ class TelegramInboundClient:
             params["offset"] = offset
         url = f"https://api.telegram.org/bot{self.bot_token}/getUpdates"
         try:
-            response = self._requests.get(url, params=params, timeout=self.timeout_s + 5)
+            response = self._requests.get(
+                url, params=params, timeout=self.timeout_s + 5
+            )
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:
@@ -523,15 +549,13 @@ class InboundStateStore:
     def _init_db(self) -> None:
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS telegram_inbound_state (
                         state_key TEXT PRIMARY KEY,
                         last_update_id INTEGER,
                         updated_at TEXT
                     );
-                    """
-                )
+                    """)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("telegram_inbound_state_init_failed", error=str(exc))
 
@@ -639,7 +663,10 @@ class TelegramInboundProcessor:
                     message_id=message_id,
                     from_user_id=from_user_id,
                 )
-                self._answer_callback(callback_id, "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e \u0434\u043b\u044f \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f")
+                self._answer_callback(
+                    callback_id,
+                    "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e \u0434\u043b\u044f \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f",
+                )
                 return
             self._reply(chat_id, _t("inbound.bad_button"))
             self._answer_callback(callback_id, _t("inbound.bad_button"))
@@ -663,7 +690,9 @@ class TelegramInboundProcessor:
             self._reply(chat_id, self._priority_help_text())
             self._answer_callback(callback_id, _t("inbound.ok"))
         elif action in {"details", "hide"}:
-            self._toggle_decision_trace(chat_id, message, payload, expanded=action == "details")
+            self._toggle_decision_trace(
+                chat_id, message, payload, expanded=action == "details"
+            )
             self._answer_callback(callback_id, _t("inbound.ok"))
         elif action == "prio_menu":
             self._open_priority_menu(chat_id, message, payload)
@@ -692,9 +721,15 @@ class TelegramInboundProcessor:
             self._answer_callback(callback_id, ack or _t("inbound.bad_button"))
         elif action == "priority_ok":
             if self._record_priority_confirmation(payload):
-                self._answer_callback(callback_id, "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e \u0434\u043b\u044f \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f")
+                self._answer_callback(
+                    callback_id,
+                    "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e \u0434\u043b\u044f \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f",
+                )
             else:
-                self._answer_callback(callback_id, "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e \u0434\u043b\u044f \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f")
+                self._answer_callback(
+                    callback_id,
+                    "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e \u0434\u043b\u044f \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f",
+                )
 
     def handle_message(self, message: dict[str, object]) -> None:
         chat_id = ""
@@ -800,7 +835,9 @@ class TelegramInboundProcessor:
             return False
         return True
 
-    def _apply_priority(self, chat_id: str, payload: dict[str, str], *, send_ack: bool = True) -> None:
+    def _apply_priority(
+        self, chat_id: str, payload: dict[str, str], *, send_ack: bool = True
+    ) -> None:
         email_id_raw = payload.get("email_id")
         if not email_id_raw or not email_id_raw.isdigit():
             self._reply(chat_id, _t("inbound.bad_email_id"))
@@ -826,7 +863,9 @@ class TelegramInboundProcessor:
             surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
         )
         if send_ack:
-            priority = _normalize_priority_token(payload.get("priority")) or "\U0001F535"
+            priority = (
+                _normalize_priority_token(payload.get("priority")) or "\U0001f535"
+            )
             self._reply(
                 chat_id,
                 _t("inbound.priority_ack", priority=priority),
@@ -840,7 +879,9 @@ class TelegramInboundProcessor:
     ) -> str:
         email_id_raw = payload.get("email_id")
         if not email_id_raw or not email_id_raw.isdigit():
-            logger.warning("tg_priority_callback_missing_email_id", callback_data=payload)
+            logger.warning(
+                "tg_priority_callback_missing_email_id", callback_data=payload
+            )
             return "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e"
         if not message or not isinstance(message, dict):
             return "\u041d\u0435 \u043c\u043e\u0433\u0443 \u043e\u0442\u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c"
@@ -856,7 +897,9 @@ class TelegramInboundProcessor:
         account_email = str(snapshot.get("account_email") or "")
         sender_email = str(snapshot.get("from_email") or "")
         old_priority = _normalize_priority_token(snapshot.get("priority"))
-        new_priority = _normalize_priority_token(payload.get("priority")) or "\U0001F535"
+        new_priority = (
+            _normalize_priority_token(payload.get("priority")) or "\U0001f535"
+        )
         record_priority_correction(
             knowledge_db=self.knowledge_db,
             email_id=email_id,
@@ -879,7 +922,9 @@ class TelegramInboundProcessor:
             message_id=message_id_int,
             priority=new_priority,
         )
-        if not _update_email_snapshot_priority(self.knowledge_db.path, email_id, new_priority):
+        if not _update_email_snapshot_priority(
+            self.knowledge_db.path, email_id, new_priority
+        ):
             logger.warning(
                 "tg_priority_snapshot_update_missing_email",
                 email_id=email_id,
@@ -958,6 +1003,7 @@ class TelegramInboundProcessor:
             logger.error("tg_priority_edit_failed", error=str(exc))
             return "\u041d\u0435 \u043c\u043e\u0433\u0443 \u043e\u0442\u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c"
         return "\u041f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442 \u043e\u0431\u043d\u043e\u0432\u043b\u0451\u043d"
+
     def _open_priority_menu(
         self,
         chat_id: str,
@@ -1126,7 +1172,9 @@ class TelegramInboundProcessor:
             ack = "⏰ Напомню в 6 часов"
         elif snooze_code == "tom":
             tomorrow = now_local.date() + timedelta(days=1)
-            deliver_local = datetime.combine(tomorrow, datetime.min.time(), tzinfo=now_local.tzinfo).replace(
+            deliver_local = datetime.combine(
+                tomorrow, datetime.min.time(), tzinfo=now_local.tzinfo
+            ).replace(
                 hour=9,
                 minute=0,
                 second=0,
@@ -1362,10 +1410,14 @@ class TelegramInboundProcessor:
                 "/help \u2014 \u044d\u0442\u0430 \u0441\u043f\u0440\u0430\u0432\u043a\u0430",
             ]
         )
+
     def _handle_commitments(self, chat_id: str) -> None:
         account_emails = list(self._account_emails())
         if not account_emails:
-            self._reply(chat_id, "\u2705 \u041d\u0435\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432")
+            self._reply(
+                chat_id,
+                "\u2705 \u041d\u0435\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432",
+            )
             return
         placeholders = ",".join("?" for _ in account_emails)
         try:
@@ -1389,7 +1441,10 @@ class TelegramInboundProcessor:
             logger.error("telegram_inbound_commitments_failed", error=str(exc))
             rows = []
         if not rows:
-            self._reply(chat_id, "\u2705 \u041d\u0435\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432")
+            self._reply(
+                chat_id,
+                "\u2705 \u041d\u0435\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432",
+            )
             return
 
         deduped: list[str] = []
@@ -1412,14 +1467,26 @@ class TelegramInboundProcessor:
                 break
 
         if not deduped:
-            self._reply(chat_id, "\u2705 \u041d\u0435\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432")
+            self._reply(
+                chat_id,
+                "\u2705 \u041d\u0435\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432",
+            )
             return
-        self._reply(chat_id, "\n".join(["\U0001F4CB <b>\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u0430:</b>", *deduped]))
+        self._reply(
+            chat_id,
+            "\n".join(
+                [
+                    "\U0001f4cb <b>\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u0430:</b>",
+                    *deduped,
+                ]
+            ),
+        )
+
     def _week_text(self) -> str:
         account_emails = list(self._account_emails())
         if not account_emails:
             base = (
-                "\U0001F4CA Letterbot \u2014 \u043d\u0435\u0434\u0435\u043b\u044f\n"
+                "\U0001f4ca Letterbot \u2014 \u043d\u0435\u0434\u0435\u043b\u044f\n"
                 "\u041f\u0438\u0441\u0435\u043c: 0 \u00b7 \u0412\u0430\u0436\u043d\u044b\u0445: 0 \u00b7 \u041d\u0438\u0437\u043a\u0438\u0445: 0\n"
                 "\u041a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u0439: 0 \u00b7 \u0422\u043e\u0447\u043d\u043e\u0441\u0442\u044c: \u043d/\u0434\n"
                 "\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u043e: 0"
@@ -1432,18 +1499,25 @@ class TelegramInboundProcessor:
             days=7,
         )
         accuracy_pct = summary.get("accuracy_pct")
-        accuracy_text = f"{int(accuracy_pct)}%" if accuracy_pct is not None else "\u043d/\u0434"
+        accuracy_text = (
+            f"{int(accuracy_pct)}%" if accuracy_pct is not None else "\u043d/\u0434"
+        )
         base = (
-            "\U0001F4CA Letterbot \u2014 \u043d\u0435\u0434\u0435\u043b\u044f\n"
+            "\U0001f4ca Letterbot \u2014 \u043d\u0435\u0434\u0435\u043b\u044f\n"
             f"\u041f\u0438\u0441\u0435\u043c: {int(summary.get('emails_total') or 0)} \u00b7 \u0412\u0430\u0436\u043d\u044b\u0445: {int(summary.get('important') or 0)} \u00b7 \u041d\u0438\u0437\u043a\u0438\u0445: {int(summary.get('low') or 0)}\n"
             f"\u041a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u0439: {int(summary.get('corrections') or 0)} \u00b7 \u0422\u043e\u0447\u043d\u043e\u0441\u0442\u044c: {accuracy_text}\n"
             f"\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u043e: {int(summary.get('open_commitments') or 0)}"
         )
         return "\n".join([base, self._stats_text(days=7, include_header=False)])
+
     def _stats_text(self, *, days: int = 7, include_header: bool = True) -> str:
         account_emails = list(self._account_emails())
         if not account_emails:
-            header = "\U0001F4C8 \u041a\u0430\u0447\u0435\u0441\u0442\u0432\u043e \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438" if include_header else ""
+            header = (
+                "\U0001f4c8 \u041a\u0430\u0447\u0435\u0441\u0442\u0432\u043e \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438"
+                if include_header
+                else ""
+            )
             trust = "\u041f\u043e\u043a\u0430 \u0434\u0430\u043d\u043d\u044b\u0445 \u043c\u0430\u043b\u043e \u2014 \u0434\u0435\u043b\u0430\u0435\u043c \u0432\u044b\u0432\u043e\u0434\u044b \u0432\u0440\u0443\u0447\u043d\u0443\u044e."
             lines = [
                 line
@@ -1490,9 +1564,13 @@ class TelegramInboundProcessor:
             surprise_text = f"{float(surprise_rate) * 100:.0f}%"
 
         transitions_text = "\u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445"
-        transitions = _top_priority_transitions(db_path=self.knowledge_db.path, days=days, limit=3)
+        transitions = _top_priority_transitions(
+            db_path=self.knowledge_db.path, days=days, limit=3
+        )
         if transitions:
-            transitions_text = ", ".join(f"{transition} \u00d7{count}" for transition, count in transitions)
+            transitions_text = ", ".join(
+                f"{transition} \u00d7{count}" for transition, count in transitions
+            )
 
         latency_text = "\u043d/\u0434"
         decisions_total = int(calibration_totals.get("decisions_total") or 0)
@@ -1508,7 +1586,9 @@ class TelegramInboundProcessor:
 
         lines: list[str] = []
         if include_header:
-            lines.append("\U0001F4C8 \u041a\u0430\u0447\u0435\u0441\u0442\u0432\u043e \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438")
+            lines.append(
+                "\U0001f4c8 \u041a\u0430\u0447\u0435\u0441\u0442\u0432\u043e \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438"
+            )
         lines.extend(
             [
                 f"\u041a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u0439: {corrections}",
@@ -1519,6 +1599,7 @@ class TelegramInboundProcessor:
             ]
         )
         return "\n".join(lines)
+
     def _priority_help_text(self) -> str:
         return _t("inbound.priority_help")
 
@@ -1528,11 +1609,15 @@ class TelegramInboundProcessor:
             return "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0430 \u043f\u0440\u043e\u0435\u043a\u0442\u0430 \u0441\u0435\u0439\u0447\u0430\u0441 \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u0430."
         if not support.url or support.url == "CHANGE_ME":
             return "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0430 \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u0430, \u043d\u043e \u0441\u0441\u044b\u043b\u043a\u0430 \u0435\u0449\u0451 \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u0430."
-        return "\n".join([
-            support.label or "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u0430\u0442\u044c Letterbot",
-            support.text,
-            support.url,
-        ])
+        return "\n".join(
+            [
+                support.label
+                or "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u0430\u0442\u044c Letterbot",
+                support.text,
+                support.url,
+            ]
+        )
+
     def _status_text(self, *, chat_id: str) -> str:
         mode_label = humanize_mode(system_health.mode.value, locale="ru")
         sla = compute_notification_sla(analytics=self.analytics)
@@ -1540,29 +1625,65 @@ class TelegramInboundProcessor:
 
         accounts = []
         for account_email in self._account_emails():
-            daily = self.knowledge_db.get_last_digest_sent_at(account_email=account_email)
-            weekly = self.knowledge_db.get_last_weekly_digest_sent_at(account_email=account_email)
+            daily = self.knowledge_db.get_last_digest_sent_at(
+                account_email=account_email
+            )
+            weekly = self.knowledge_db.get_last_weekly_digest_sent_at(
+                account_email=account_email
+            )
             accounts.append(
                 f"{account_email}: \u0434\u0435\u043d\u044c {_format_ts(daily)}, \u043d\u0435\u0434\u0435\u043b\u044f {_format_ts(weekly)}"
             )
-        accounts_block = "\n".join(accounts) if accounts else "\u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445"
+        accounts_block = (
+            "\n".join(accounts)
+            if accounts
+            else "\u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445"
+        )
 
         runtime_flags, _ = self.runtime_flag_store.get_flags(force=True)
-        auto_mode = "\u0430\u0432\u0442\u043e" if self.feature_flags.ENABLE_AUTO_PRIORITY and runtime_flags.enable_auto_priority else "\u0442\u0435\u043d\u0435\u0432\u043e\u0439"
+        auto_mode = (
+            "\u0430\u0432\u0442\u043e"
+            if self.feature_flags.ENABLE_AUTO_PRIORITY
+            and runtime_flags.enable_auto_priority
+            else "\u0442\u0435\u043d\u0435\u0432\u043e\u0439"
+        )
 
         if digest_override is True:
             digest_flag = "\u0432\u043a\u043b\u044e\u0447\u0435\u043d\u044b"
         elif digest_override is False:
             digest_flag = "\u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u044b"
         else:
-            digest_flag = "\u0432\u043a\u043b\u044e\u0447\u0435\u043d\u044b" if self.feature_flags.ENABLE_DAILY_DIGEST else "\u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u044b"
+            digest_flag = (
+                "\u0432\u043a\u043b\u044e\u0447\u0435\u043d\u044b"
+                if self.feature_flags.ENABLE_DAILY_DIGEST
+                else "\u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u044b"
+            )
 
-        preview = "\u0432\u043a\u043b" if self.feature_flags.ENABLE_PREVIEW_ACTIONS else "\u0432\u044b\u043a\u043b"
-        anomalies = "\u0432\u043a\u043b" if self.feature_flags.ENABLE_ANOMALY_ALERTS else "\u0432\u044b\u043a\u043b"
-        quality = "\u0432\u043a\u043b" if self.feature_flags.ENABLE_QUALITY_METRICS else "\u0432\u044b\u043a\u043b"
+        preview = (
+            "\u0432\u043a\u043b"
+            if self.feature_flags.ENABLE_PREVIEW_ACTIONS
+            else "\u0432\u044b\u043a\u043b"
+        )
+        anomalies = (
+            "\u0432\u043a\u043b"
+            if self.feature_flags.ENABLE_ANOMALY_ALERTS
+            else "\u0432\u044b\u043a\u043b"
+        )
+        quality = (
+            "\u0432\u043a\u043b"
+            if self.feature_flags.ENABLE_QUALITY_METRICS
+            else "\u0432\u044b\u043a\u043b"
+        )
 
-        llm_active = system_health.mode not in {OperationalMode.DEGRADED_NO_LLM, OperationalMode.EMERGENCY_READ_ONLY}
-        llm_state = "\u0430\u043a\u0442\u0438\u0432\u0435\u043d" if llm_active else "\u0434\u0435\u0433\u0440\u0430\u0434\u0438\u0440\u043e\u0432\u0430\u043d"
+        llm_active = system_health.mode not in {
+            OperationalMode.DEGRADED_NO_LLM,
+            OperationalMode.EMERGENCY_READ_ONLY,
+        }
+        llm_state = (
+            "\u0430\u043a\u0442\u0438\u0432\u0435\u043d"
+            if llm_active
+            else "\u0434\u0435\u0433\u0440\u0430\u0434\u0438\u0440\u043e\u0432\u0430\u043d"
+        )
         delivery_mode = _status_llm_delivery_mode()
 
         status_lines = [
@@ -1582,6 +1703,7 @@ class TelegramInboundProcessor:
             status_lines.append(f"\u2b50 Letterbot Insider since: {insider_since}")
         status_lines.append(f"Version: {get_version()}")
         return normalize_mojibake_text("\n".join(status_lines))
+
     def _doctor_text(self) -> str:
         try:
             from mailbot_v26 import doctor
@@ -1667,10 +1789,3 @@ __all__ = [
     "parse_command",
     "run_inbound_polling",
 ]
-
-
-
-
-
-
-

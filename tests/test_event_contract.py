@@ -55,7 +55,9 @@ def test_event_emitter_fail_does_not_break_pipeline(monkeypatch):
         calls["called"] = True
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(processor, "contract_event_emitter", type("E", (), {"emit": _raise})())
+    monkeypatch.setattr(
+        processor, "contract_event_emitter", type("E", (), {"emit": _raise})()
+    )
     processor._emit_contract_event(  # noqa: SLF001
         EventType.EMAIL_RECEIVED,
         ts_utc=time.time(),
@@ -111,7 +113,10 @@ def test_no_direct_gigachat_usage(tmp_path):
     restricted = []
     repo_root = Path(__file__).resolve().parents[1]
     for path in (repo_root / "mailbot_v26").rglob("*.py"):
-        if "llm/router.py" in str(path) or "llm/providers.py" in str(path):
+        normalized = path.as_posix()
+        if normalized.endswith("llm/router.py") or normalized.endswith(
+            "llm/providers.py"
+        ):
             continue
         if "tests" in path.parts:
             continue

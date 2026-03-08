@@ -28,11 +28,12 @@ def test_run_stack_default_config_dir_uses_single_source_of_truth() -> None:
     assert run_stack._resolve_config_dir(None) == CONFIG_DIR
 
 
-
 def test_processor_config_dir_configures_module_loaders(tmp_path: Path) -> None:
     config_dir = tmp_path / "cfg"
     config_dir.mkdir()
-    (config_dir / "config.ini").write_text("[budgets]\ndefault_llm_budget_tokens_per_day = 123\n", encoding="utf-8")
+    (config_dir / "config.ini").write_text(
+        "[budgets]\ndefault_llm_budget_tokens_per_day = 123\n", encoding="utf-8"
+    )
 
     processor.configure_processor_config_dir(config_dir)
 

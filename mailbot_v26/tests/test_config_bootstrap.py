@@ -27,7 +27,9 @@ def test_init_config_keeps_placeholder_examples(tmp_path) -> None:
 
 
 def test_config_ready_ignores_optional_change_me_sections(tmp_path) -> None:
-    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval = 120\n", encoding="utf-8")
+    (tmp_path / "settings.ini").write_text(
+        "[general]\ncheck_interval = 120\n", encoding="utf-8"
+    )
     (tmp_path / "accounts.ini").write_text(
         """
 [work]
@@ -57,7 +59,9 @@ account_id = CHANGE_ME
 
 
 def test_validate_config_treats_system_sections_by_own_rules(tmp_path) -> None:
-    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval = 120\n", encoding="utf-8")
+    (tmp_path / "settings.ini").write_text(
+        "[general]\ncheck_interval = 120\n", encoding="utf-8"
+    )
     (tmp_path / "accounts.ini").write_text(
         """
 [acc]
@@ -96,7 +100,9 @@ fallback = gigachat
 
 
 def test_two_file_mode_does_not_require_yaml_or_keys_for_readiness(tmp_path) -> None:
-    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval = 120\n", encoding="utf-8")
+    (tmp_path / "settings.ini").write_text(
+        "[general]\ncheck_interval = 120\n", encoding="utf-8"
+    )
     (tmp_path / "accounts.ini").write_text(
         """
 [acc]
@@ -145,13 +151,27 @@ def test_settings_example_contains_runtime_sections_and_no_inline_comments() -> 
     parser = configparser.ConfigParser()
     parser.read_string(SETTINGS_TEMPLATE)
 
-    required_sections = {"general", "features", "web", "telegram_ui", "web_ui", "delivery_policy", "silence_policy", "deadlock_policy", "support"}
+    required_sections = {
+        "general",
+        "features",
+        "web",
+        "telegram_ui",
+        "web_ui",
+        "delivery_policy",
+        "silence_policy",
+        "deadlock_policy",
+        "support",
+    }
     assert required_sections.issubset(set(parser.sections()))
 
     for section in parser.sections():
         for key, value in parser.items(section):
-            assert " ;" not in value, f"{section}.{key} contains inline ';' comment tail"
-            assert " #" not in value, f"{section}.{key} contains inline '#' comment tail"
+            assert (
+                " ;" not in value
+            ), f"{section}.{key} contains inline ';' comment tail"
+            assert (
+                " #" not in value
+            ), f"{section}.{key} contains inline '#' comment tail"
 
 
 def test_two_file_mode_defaults_work_without_settings_ini(tmp_path) -> None:
@@ -198,7 +218,9 @@ use_ssl = true
 
 
 def test_validate_config_does_not_require_llm_fallback(tmp_path) -> None:
-    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval = 120\n", encoding="utf-8")
+    (tmp_path / "settings.ini").write_text(
+        "[general]\ncheck_interval = 120\n", encoding="utf-8"
+    )
     (tmp_path / "accounts.ini").write_text(
         """
 [acc]
@@ -219,12 +241,14 @@ primary = cloudflare
     assert ok is False
     assert not any("[llm] fallback is not configured" in issue for issue in issues)
 
+
 def test_digest_defaults_enabled_in_bootstrap() -> None:
     parser = configparser.ConfigParser()
     parser.read_string(SETTINGS_TEMPLATE)
 
     assert parser.getboolean("features", "enable_daily_digest") is True
     assert parser.getboolean("features", "enable_weekly_digest") is True
+
 
 def test_autopriority_enabled_in_bootstrap_defaults() -> None:
     parser = configparser.ConfigParser()

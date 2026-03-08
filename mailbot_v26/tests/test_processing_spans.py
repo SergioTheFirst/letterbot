@@ -118,7 +118,9 @@ def test_stage_durations_pii_guard(tmp_path: Path) -> None:
     )
 
     with sqlite3.connect(db_path) as conn:
-        row = conn.execute("SELECT stage_durations_json FROM processing_spans LIMIT 1").fetchone()
+        row = conn.execute(
+            "SELECT stage_durations_json FROM processing_spans LIMIT 1"
+        ).fetchone()
     durations = json.loads(row[0])
     assert "body_text" not in durations
     assert "rendered_message" not in durations
@@ -130,7 +132,10 @@ def test_stage_durations_pii_guard(tmp_path: Path) -> None:
 def test_processing_span_basic_fields(tmp_path: Path) -> None:
     db_path = tmp_path / "db.sqlite"
     recorder = ProcessingSpanRecorder(db_path)
-    payload = {"metrics": {"days_7": {"shadow_accuracy": 0.9}}, "gates": {"passed": True, "failed": []}}
+    payload = {
+        "metrics": {"days_7": {"shadow_accuracy": 0.9}},
+        "gates": {"passed": True, "failed": []},
+    }
 
     span = recorder.start(account_id="acc", email_id=4)
     time.sleep(0.002)

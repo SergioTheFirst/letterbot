@@ -113,14 +113,20 @@ def test_launch_report_deterministic() -> None:
     builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
     results = [
         {"component": "Cloudflare", "status": HealthStatus.OK, "details": "active"},
-        {"component": "GigaChat", "status": HealthStatus.DEGRADED, "details": "disabled"},
+        {
+            "component": "GigaChat",
+            "status": HealthStatus.DEGRADED,
+            "details": "disabled",
+        },
         {"component": "DB", "status": HealthStatus.OK, "details": "/db"},
         {"component": "OS", "status": HealthStatus.OK, "details": "Linux"},
         {"component": "Python", "status": HealthStatus.OK, "details": "3.11"},
         {"component": "Telegram", "status": HealthStatus.OK, "details": "reachable"},
     ]
     report_a = builder.build(results, mode=SimpleNamespace(value="FULL"))
-    report_b = builder.build(list(reversed(results)), mode=SimpleNamespace(value="FULL"))
+    report_b = builder.build(
+        list(reversed(results)), mode=SimpleNamespace(value="FULL")
+    )
     assert report_a == report_b
 
 
@@ -171,9 +177,9 @@ def test_launch_report_includes_honest_llm_delivery_mode(tmp_path) -> None:
     assert "direct path check: configured + capability probe failed" in report
 
 
-
-
-def test_startup_health_checker_probe_failure_is_non_blocking(tmp_path, monkeypatch) -> None:
+def test_startup_health_checker_probe_failure_is_non_blocking(
+    tmp_path, monkeypatch
+) -> None:
     _write_config_files(tmp_path, gigachat_enabled=False, gigachat_key="")
     config_dir = tmp_path / "config"
     config = load_config(config_dir)
@@ -195,7 +201,6 @@ def test_startup_health_checker_probe_failure_is_non_blocking(tmp_path, monkeypa
 
     assert "LLM Direct" in results
     assert results["LLM Direct"]["status"] == HealthStatus.FAILED
-
 
 
 def test_launch_report_marks_direct_delivery_mode(tmp_path) -> None:
@@ -238,6 +243,7 @@ def test_launch_report_marks_direct_delivery_mode(tmp_path) -> None:
     assert "LLM delivery mode: DIRECT" in report
     assert "Immediate TG summaries: direct" in report
 
+
 def test_startup_report_default_branding_and_watermark() -> None:
     report = LaunchReportBuilder().build(results=[], mode=SimpleNamespace(value="FULL"))
     assert "Letterbot Premium" in report
@@ -277,7 +283,9 @@ def test_startup_report_includes_mail_account_status_failed() -> None:
 
 def test_startup_report_handles_no_accounts() -> None:
     builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
-    report = builder.build(results=[], mode=SimpleNamespace(value="FULL"), mail_accounts=[])
+    report = builder.build(
+        results=[], mode=SimpleNamespace(value="FULL"), mail_accounts=[]
+    )
 
     assert "Mail accounts:" in report
     assert "- none configured" in report
@@ -295,7 +303,9 @@ def test_startup_report_degrades_if_mail_check_unavailable() -> None:
     assert "check unavailable (RuntimeError: imap unavailable)" in report
 
 
-def test_dispatch_launch_report_does_not_raise(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_dispatch_launch_report_does_not_raise(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     def raising_send(*_args, **_kwargs) -> bool:
         raise RuntimeError("send failed")
 
@@ -313,6 +323,7 @@ def test_startup_health_import_has_no_pipeline_side_effects(monkeypatch) -> None
     importlib.reload(sys.modules["mailbot_v26.system.startup_health"])
     assert not any(name.startswith("mailbot_v26.pipeline") for name in sys.modules)
 
+
 def test_evaluate_mode_updates_global_system_health(tmp_path, monkeypatch) -> None:
     _write_config_files(tmp_path, gigachat_enabled=False, gigachat_key="")
     config_dir = tmp_path / "config"
@@ -329,7 +340,11 @@ def test_evaluate_mode_updates_global_system_health(tmp_path, monkeypatch) -> No
             {"component": "DB", "status": HealthStatus.OK, "details": "ok"},
             {"component": "Telegram", "status": HealthStatus.OK, "details": "ok"},
             {"component": "Cloudflare", "status": HealthStatus.OK, "details": "ok"},
-            {"component": "GigaChat", "status": HealthStatus.DEGRADED, "details": "disabled"},
+            {
+                "component": "GigaChat",
+                "status": HealthStatus.DEGRADED,
+                "details": "disabled",
+            },
         ]
     )
 
@@ -337,11 +352,12 @@ def test_evaluate_mode_updates_global_system_health(tmp_path, monkeypatch) -> No
     assert system_health.mode == OperationalMode.FULL
 
 
-
 def test_db_parent_dir_created_before_storage_init() -> None:
     source = Path("mailbot_v26/start.py").read_text(encoding="utf-8")
 
-    mkdir_index = source.index("config.storage.db_path.parent.mkdir(parents=True, exist_ok=True)")
+    mkdir_index = source.index(
+        "config.storage.db_path.parent.mkdir(parents=True, exist_ok=True)"
+    )
     storage_index = source.index("storage = Storage(config.storage.db_path)")
 
     assert mkdir_index < storage_index
@@ -350,4 +366,6 @@ def test_db_parent_dir_created_before_storage_init() -> None:
 def test_processor_and_start_use_same_db_path() -> None:
     source = Path("mailbot_v26/start.py").read_text(encoding="utf-8")
 
-    assert "processor_module.configure_processor_db_path(config.storage.db_path)" in source
+    assert (
+        "processor_module.configure_processor_db_path(config.storage.db_path)" in source
+    )

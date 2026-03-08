@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import configparser
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,16 +36,12 @@ def load_premium_clarity_config(
     if mode not in {"auto", "always", "never"}:
         mode = "auto"
     try:
-        threshold = section.getint(
-            "premium_clarity_confidence_threshold", fallback=75
-        )
+        threshold = section.getint("premium_clarity_confidence_threshold", fallback=75)
     except ValueError:
         threshold = 75
     threshold = max(0, min(100, threshold))
     try:
-        scale = section.getint(
-            "premium_clarity_confidence_dots_scale", fallback=10
-        )
+        scale = section.getint("premium_clarity_confidence_dots_scale", fallback=10)
     except ValueError:
         scale = 10
     if scale not in {5, 10}:

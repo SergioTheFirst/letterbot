@@ -134,7 +134,9 @@ def test_collect_weekly_data_accepts_account_emails() -> None:
             self.seen["overdue"] = account_emails
             return []
 
-        def weekly_trust_score_deltas(self, *, days: int = 7) -> dict[str, list[dict[str, object]]]:
+        def weekly_trust_score_deltas(
+            self, *, days: int = 7
+        ) -> dict[str, list[dict[str, object]]]:
             return {}
 
         def weekly_accuracy_report(
@@ -180,7 +182,9 @@ def test_collect_weekly_data_accepts_account_emails() -> None:
         def _window_start_ts(self, days: int) -> float:
             return 0.0
 
-        def _event_rows_scoped(self, *, account_ids: list[str], event_type: str, since_ts: float):
+        def _event_rows_scoped(
+            self, *, account_ids: list[str], event_type: str, since_ts: float
+        ):
             self.seen["event_rows"] = account_ids
             return []
 

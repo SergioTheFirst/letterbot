@@ -82,7 +82,9 @@ def _seed_deferred_email(db: KnowledgeDB, emitter: ContractEventEmitter) -> None
     )
 
 
-def _write_config(path: Path, *, daily_enabled: bool = True, weekly_enabled: bool = False) -> None:
+def _write_config(
+    path: Path, *, daily_enabled: bool = True, weekly_enabled: bool = False
+) -> None:
     path.write_text(
         """
 [features]
@@ -135,7 +137,9 @@ def _build_config(tmp_path: Path) -> BotConfig:
     )
 
 
-def _build_config_with_accounts(tmp_path: Path, accounts: list[AccountConfig]) -> BotConfig:
+def _build_config_with_accounts(
+    tmp_path: Path, accounts: list[AccountConfig]
+) -> BotConfig:
     return BotConfig(
         general=GeneralConfig(
             check_interval=120,
@@ -193,9 +197,12 @@ def test_scheduler_daily_due_no_mail(monkeypatch, tmp_path) -> None:
     )
 
     assert len(sent) == 1
-    assert storage.knowledge_db.get_last_digest_sent_at(
-        account_email="account@example.com"
-    ) == now
+    assert (
+        storage.knowledge_db.get_last_digest_sent_at(
+            account_email="account@example.com"
+        )
+        == now
+    )
 
 
 def test_scheduler_idempotency(monkeypatch, tmp_path) -> None:
@@ -260,9 +267,12 @@ def test_scheduler_weekly_iso_logic(monkeypatch, tmp_path) -> None:
     )
 
     assert len(sent) == 1
-    assert storage.knowledge_db.get_last_weekly_digest_key(
-        account_email="account@example.com"
-    ) == "2026-W01"
+    assert (
+        storage.knowledge_db.get_last_weekly_digest_key(
+            account_email="account@example.com"
+        )
+        == "2026-W01"
+    )
 
 
 def test_scheduler_dedup_chat_id_daily(monkeypatch, tmp_path) -> None:
@@ -314,12 +324,16 @@ def test_scheduler_dedup_chat_id_daily(monkeypatch, tmp_path) -> None:
     )
 
     assert len(sent) == 1
-    assert storage.knowledge_db.get_last_digest_sent_at(
-        account_email="account@example.com"
-    ) == now
-    assert storage.knowledge_db.get_last_digest_sent_at(
-        account_email="alt@example.com"
-    ) == now
+    assert (
+        storage.knowledge_db.get_last_digest_sent_at(
+            account_email="account@example.com"
+        )
+        == now
+    )
+    assert (
+        storage.knowledge_db.get_last_digest_sent_at(account_email="alt@example.com")
+        == now
+    )
 
     digest_scheduler.run_digest_tick(
         now=now,
@@ -392,18 +406,28 @@ def test_scheduler_dedup_chat_id_weekly_event_payload(monkeypatch, tmp_path) -> 
     )
 
     assert len(sent) == 1
-    assert storage.knowledge_db.get_last_weekly_digest_key(
-        account_email="account@example.com"
-    ) == "2026-W01"
-    assert storage.knowledge_db.get_last_weekly_digest_key(
-        account_email="alt@example.com"
-    ) == "2026-W01"
-    assert storage.knowledge_db.get_last_weekly_digest_sent_at(
-        account_email="account@example.com"
-    ) == now
-    assert storage.knowledge_db.get_last_weekly_digest_sent_at(
-        account_email="alt@example.com"
-    ) == now
+    assert (
+        storage.knowledge_db.get_last_weekly_digest_key(
+            account_email="account@example.com"
+        )
+        == "2026-W01"
+    )
+    assert (
+        storage.knowledge_db.get_last_weekly_digest_key(account_email="alt@example.com")
+        == "2026-W01"
+    )
+    assert (
+        storage.knowledge_db.get_last_weekly_digest_sent_at(
+            account_email="account@example.com"
+        )
+        == now
+    )
+    assert (
+        storage.knowledge_db.get_last_weekly_digest_sent_at(
+            account_email="alt@example.com"
+        )
+        == now
+    )
 
     with sqlite3.connect(storage.knowledge_db.path) as conn:
         rows = list(

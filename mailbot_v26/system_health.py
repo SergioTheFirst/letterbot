@@ -49,7 +49,9 @@ class SystemHealth:
         self._components[component] = ComponentHealth(component, available, reason)
         return self._evaluate_mode()
 
-    def update_components(self, updates: Iterable[ComponentHealth]) -> ModeChange | None:
+    def update_components(
+        self, updates: Iterable[ComponentHealth]
+    ) -> ModeChange | None:
         for update in updates:
             self._components[update.name] = update
         return self._evaluate_mode()
@@ -72,7 +74,11 @@ class SystemHealth:
         self._mode = new_mode
         self._logger.info(
             "system_mode_changed",
-            **{"from": change.previous.value, "to": change.current.value, "reason": reason},
+            **{
+                "from": change.previous.value,
+                "to": change.current.value,
+                "reason": reason,
+            },
         )
         return change
 
@@ -85,7 +91,10 @@ class SystemHealth:
         if crm is not None and crm.available is False:
             return OperationalMode.EMERGENCY_READ_ONLY, crm.reason or "CRM unavailable"
         if mail is not None and mail.available is False:
-            return OperationalMode.EMERGENCY_READ_ONLY, mail.reason or "Mail unavailable"
+            return (
+                OperationalMode.EMERGENCY_READ_ONLY,
+                mail.reason or "Mail unavailable",
+            )
         if llm is not None and llm.available is False:
             return OperationalMode.DEGRADED_NO_LLM, llm.reason or "LLM unavailable"
         if telegram is not None and telegram.available is False:

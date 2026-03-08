@@ -62,9 +62,7 @@ def compute_trust_bootstrap_snapshot(
         account_emails=account_emails,
     )
     surprise_rate = (
-        surprises_count / corrections_count
-        if corrections_count > 0
-        else None
+        surprises_count / corrections_count if corrections_count > 0 else None
     )
 
     active = False

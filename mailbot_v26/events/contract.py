@@ -62,7 +62,9 @@ class EventV1:
 
 
 def fingerprint(event: EventV1) -> str:
-    payload_value = event.payload_json if event.payload_json is not None else event.payload
+    payload_value = (
+        event.payload_json if event.payload_json is not None else event.payload
+    )
     stable = json.dumps(
         {
             "event_type": event.event_type.value,

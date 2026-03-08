@@ -31,7 +31,7 @@ from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics, WeeklyAccuracyProgress
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
-from mailbot_v26.ui.i18n import DEFAULT_LOCALE, humanize_severity, t
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE, humanize_severity
 
 logger = get_logger("mailbot")
 
@@ -93,7 +93,6 @@ class WeeklyDigestData:
     silence_risk: dict[str, object] | None = None
     relationship_top_senders: Sequence[dict[str, object]] = ()
     relationship_trend: str | None = None
-
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -190,14 +189,18 @@ def _trust_summary(trust_deltas: dict[str, list[dict[str, object]]]) -> str:
     if up:
         up_items = []
         for item in up:
-            name = _safe_text(str(item.get("entity_name") or item.get("entity_id") or ""), max_len=24)
+            name = _safe_text(
+                str(item.get("entity_name") or item.get("entity_id") or ""), max_len=24
+            )
             delta_pp = float(item.get("delta") or 0.0) * 100.0
             up_items.append(f"{name} +{delta_pp:.1f} п.п.")
         parts.append(f"рост: {', '.join(up_items)}")
     if down:
         down_items = []
         for item in down:
-            name = _safe_text(str(item.get("entity_name") or item.get("entity_id") or ""), max_len=24)
+            name = _safe_text(
+                str(item.get("entity_name") or item.get("entity_id") or ""), max_len=24
+            )
             delta_pp = float(item.get("delta") or 0.0) * 100.0
             down_items.append(f"{name} {delta_pp:.1f} п.п.")
         parts.append(f"падение: {', '.join(down_items)}")
@@ -214,7 +217,9 @@ def _format_weekly_accuracy_progress(
         return None
     if float(progress.current_surprise_rate_pp) > 20:
         return None
-    accuracy_pct = max(0, min(100, int(round(100 - float(progress.current_surprise_rate_pp)))))
+    accuracy_pct = max(
+        0, min(100, int(round(100 - float(progress.current_surprise_rate_pp))))
+    )
     delta = int(progress.delta_pp)
     if abs(delta) < 2:
         return None
@@ -265,11 +270,17 @@ def _collect_weekly_human_signals(
                     invoice_total_rub += int(round(float(amount_value)))
                     has_invoice_amount = True
                 except (TypeError, ValueError):
-                    logger.warning("weekly_interpretation_amount_invalid", amount=amount_value)
+                    logger.warning(
+                        "weekly_interpretation_amount_invalid", amount=amount_value
+                    )
         if doc_kind == "contract":
             contract_count += 1
 
-    return invoice_count, (invoice_total_rub if has_invoice_amount else None), contract_count
+    return (
+        invoice_count,
+        (invoice_total_rub if has_invoice_amount else None),
+        contract_count,
+    )
 
 
 def _collect_anomaly_alerts(
@@ -339,7 +350,10 @@ def _collect_anomaly_alerts(
 
 
 def _emit_attention_block_event(
-    *, event_emitter: EventEmitter | None, week_key: str, result: AttentionEconomicsResult
+    *,
+    event_emitter: EventEmitter | None,
+    week_key: str,
+    result: AttentionEconomicsResult,
 ) -> None:
     if event_emitter is None or result is None:
         return
@@ -380,7 +394,9 @@ def _emit_calibration_proposals_event(
         ],
     }
     if account_emails:
-        payload["account_emails"] = sorted({str(email).strip() for email in account_emails if str(email).strip()})
+        payload["account_emails"] = sorted(
+            {str(email).strip() for email in account_emails if str(email).strip()}
+        )
     try:
         contract_event_emitter.emit(
             EventV1(
@@ -491,9 +507,7 @@ def _collect_weekly_data(
     if include_notification_sla:
         try:
             now_dt = now or datetime.now(timezone.utc)
-            notification_sla = compute_notification_sla(
-                analytics=analytics, now=now_dt
-            )
+            notification_sla = compute_notification_sla(analytics=analytics, now=now_dt)
             previous_week_sla = compute_notification_sla(
                 analytics=analytics, now=now_dt - timedelta(days=7)
             )
@@ -525,7 +539,9 @@ def _collect_weekly_data(
                 account_emails=account_emails,
             )
             if weekly_calibration_report is not None:
-                weekly_calibration_report["window_days"] = weekly_calibration_window_days
+                weekly_calibration_report["window_days"] = (
+                    weekly_calibration_window_days
+                )
                 proposals = weekly_calibration_report.get("proposals") or []
                 _emit_calibration_proposals_event(
                     contract_event_emitter=contract_event_emitter,
@@ -589,9 +605,9 @@ def _collect_weekly_data(
             now=now,
         )
         if relationship_top_senders:
-            avg_trust = sum(float(item.get("trust_score") or 0) for item in relationship_top_senders) / len(
-                relationship_top_senders
-            )
+            avg_trust = sum(
+                float(item.get("trust_score") or 0) for item in relationship_top_senders
+            ) / len(relationship_top_senders)
             relationship_trend = "stable"
             if avg_trust >= 3.5:
                 relationship_trend = "improving"
@@ -642,7 +658,9 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
     if data.invoice_count > 0:
         if data.invoice_total_rub is not None and data.invoice_total_rub > 0:
             total = f"{data.invoice_total_rub:,}".replace(",", " ")
-            highlights.append(f"• {data.invoice_count} счёта на оплату (общая сумма {total} ₽)")
+            highlights.append(
+                f"• {data.invoice_count} счёта на оплату (общая сумма {total} ₽)"
+            )
         else:
             highlights.append(f"• {data.invoice_count} счёта на оплату")
     if data.contract_count > 0:
@@ -651,7 +669,9 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
     if overdue_count > 0:
         highlights.append(f"• {overdue_count} обязательства просрочены")
     if data.silence_risk:
-        contact = _safe_text(str(data.silence_risk.get("contact") or "контакт"), max_len=40)
+        contact = _safe_text(
+            str(data.silence_risk.get("contact") or "контакт"), max_len=40
+        )
         days = int(data.silence_risk.get("days_silent") or 0)
         if days > 0:
             highlights.append(f"• От {contact} — молчание {days} дней (риск)")
@@ -682,7 +702,9 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
 def _format_share_accuracy(progress: WeeklyAccuracyProgress | None) -> str:
     if progress is None:
         return "n/a"
-    accuracy_pct = max(0, min(100, int(round(100 - float(progress.current_surprise_rate_pp)))))
+    accuracy_pct = max(
+        0, min(100, int(round(100 - float(progress.current_surprise_rate_pp))))
+    )
     return f"{accuracy_pct}%"
 
 
@@ -798,7 +820,9 @@ def maybe_send_weekly_digest(
 
     if data.attention_economics is not None:
         _emit_attention_block_event(
-            event_emitter=event_emitter, week_key=week_key, result=data.attention_economics
+            event_emitter=event_emitter,
+            week_key=week_key,
+            result=data.attention_economics,
         )
 
     digest_text = _build_weekly_digest_text(data)

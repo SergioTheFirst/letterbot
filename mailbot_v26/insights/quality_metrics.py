@@ -45,11 +45,7 @@ def _sorted_breakdown(rows: dict[str, int]) -> list[CountBreakdown]:
 def _normalize_account_emails(account_emails: Iterable[str] | None) -> list[str]:
     if not account_emails:
         return []
-    normalized = {
-        str(email).strip()
-        for email in account_emails
-        if str(email).strip()
-    }
+    normalized = {str(email).strip() for email in account_emails if str(email).strip()}
     return sorted(normalized)
 
 
@@ -64,7 +60,11 @@ def compute_quality_metrics(
     since_ts = _window_start(now, window_days)
     scope_account_email = (account_email or "").strip() or None
     scoped_account_emails = _normalize_account_emails(account_emails)
-    if account_emails is not None and not scoped_account_emails and not scope_account_email:
+    if (
+        account_emails is not None
+        and not scoped_account_emails
+        and not scope_account_email
+    ):
         return None
 
     if scoped_account_emails:
@@ -96,7 +96,9 @@ def compute_quality_metrics(
 
     for row in correction_rows:
         payload = analytics.event_payload(row)
-        new_priority = str(payload.get("new_priority") or "unknown").strip() or "unknown"
+        new_priority = (
+            str(payload.get("new_priority") or "unknown").strip() or "unknown"
+        )
         engine = str(payload.get("engine") or "unknown").strip() or "unknown"
         corrections_total += 1
         by_new_priority[new_priority] = by_new_priority.get(new_priority, 0) + 1

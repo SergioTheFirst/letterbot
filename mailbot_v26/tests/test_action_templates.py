@@ -4,7 +4,6 @@ import re
 
 from mailbot_v26.ui import action_templates
 
-
 _LATIN_RE = re.compile(r"[A-Za-z]")
 
 

@@ -1,4 +1,5 @@
 """Runtime checks for frozen one-folder distribution."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,7 +24,9 @@ def find_missing_dist_files(dist_root: Path) -> list[str]:
     return missing
 
 
-def validate_dist_runtime(*, frozen: bool, executable_path: Path) -> tuple[bool, str | None]:
+def validate_dist_runtime(
+    *, frozen: bool, executable_path: Path
+) -> tuple[bool, str | None]:
     if not is_dist_mode(frozen=frozen):
         return True, None
 

@@ -104,8 +104,12 @@ donate_enabled = true
     assert flags.DONATE_ENABLED is True
 
 
-def test_digest_flags_loaded_from_settings_aliases_in_two_file_mode(tmp_path: Path) -> None:
-    (tmp_path / "accounts.ini").write_text("[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8")
+def test_digest_flags_loaded_from_settings_aliases_in_two_file_mode(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "accounts.ini").write_text(
+        "[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8"
+    )
     (tmp_path / "settings.ini").write_text(
         """[features]
 daily_digest_enabled = true
@@ -121,8 +125,12 @@ weekly_digest_enabled = true
 
 
 def test_premium_processor_defaults_to_true_in_two_file_mode(tmp_path: Path) -> None:
-    (tmp_path / "accounts.ini").write_text("[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8")
-    (tmp_path / "settings.ini").write_text("[features]\nenable_daily_digest = true\n", encoding="utf-8")
+    (tmp_path / "accounts.ini").write_text(
+        "[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8"
+    )
+    (tmp_path / "settings.ini").write_text(
+        "[features]\nenable_daily_digest = true\n", encoding="utf-8"
+    )
 
     flags = FeatureFlags(tmp_path)
 
@@ -147,6 +155,7 @@ def test_settings_example_has_daily_digest_enabled() -> None:
 
     assert parser.getboolean("daily_digest", "enabled") is True
 
+
 def test_digest_loader_defaults_enabled(tmp_path: Path) -> None:
     flags = FeatureFlags(tmp_path)
     assert flags.ENABLE_DAILY_DIGEST is True
@@ -167,13 +176,13 @@ def test_autopriority_enabled_by_default(tmp_path: Path) -> None:
     flags = FeatureFlags(tmp_path)
     assert flags.ENABLE_AUTO_PRIORITY is True
 
+
 def test_digest_enabled_by_default_in_example() -> None:
     test_digest_defaults_enabled_in_example_config()
 
 
 def test_digest_enabled_by_default_in_loader(tmp_path: Path) -> None:
     test_digest_loader_defaults_enabled(tmp_path)
-
 
 
 def test_auto_priority_gate_enabled_in_example_config() -> None:

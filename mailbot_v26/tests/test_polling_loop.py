@@ -99,30 +99,54 @@ def _config(accounts, tmp_path):
         max_extracted_total_chars=120_000,
         admin_chat_id="admin",
     )
-    keys = KeysConfig(telegram_bot_token="token", cf_account_id="cf", cf_api_token="cf_token")
+    keys = KeysConfig(
+        telegram_bot_token="token", cf_account_id="cf", cf_api_token="cf_token"
+    )
     storage = StorageConfig(db_path=tmp_path / "mailbot.sqlite")
     return BotConfig(general=general, accounts=accounts, keys=keys, storage=storage)
 
 
 def _install_common_patches(monkeypatch, accounts, tmp_path):
-    monkeypatch.setattr(start_module, "load_config", lambda *_args, **_kwargs: _config(accounts, tmp_path))
-    monkeypatch.setattr(start_module, "run_startup_mail_account_healthcheck", lambda *_args, **_kwargs: accounts)
+    monkeypatch.setattr(
+        start_module,
+        "load_config",
+        lambda *_args, **_kwargs: _config(accounts, tmp_path),
+    )
+    monkeypatch.setattr(
+        start_module,
+        "run_startup_mail_account_healthcheck",
+        lambda *_args, **_kwargs: accounts,
+    )
     monkeypatch.setattr(start_module, "Storage", DummyStorage)
-    monkeypatch.setattr(start_module, "StateManager", lambda *_args, **_kwargs: DummyState())
+    monkeypatch.setattr(
+        start_module, "StateManager", lambda *_args, **_kwargs: DummyState()
+    )
     monkeypatch.setattr(start_module, "MessageProcessor", DummyProcessor)
-    monkeypatch.setattr(start_module, "configure_pipeline", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        start_module, "configure_pipeline", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(start_module, "run_self_check", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(start_module, "StartupHealthChecker", DummyHealthChecker)
     monkeypatch.setattr(start_module, "LaunchReportBuilder", DummyLaunchReportBuilder)
-    monkeypatch.setattr(start_module, "dispatch_launch_report", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(start_module, "send_telegram", lambda *_args, **_kwargs: type("R", (), {"delivered": True})())
+    monkeypatch.setattr(
+        start_module, "dispatch_launch_report", lambda *_args, **_kwargs: True
+    )
+    monkeypatch.setattr(
+        start_module,
+        "send_telegram",
+        lambda *_args, **_kwargs: type("R", (), {"delivered": True})(),
+    )
     original_runtime_health = start_module.AccountRuntimeHealthManager
     monkeypatch.setattr(
         start_module,
         "AccountRuntimeHealthManager",
-        lambda *args, **kwargs: original_runtime_health(tmp_path / "runtime_health.json"),
+        lambda *args, **kwargs: original_runtime_health(
+            tmp_path / "runtime_health.json"
+        ),
     )
-    monkeypatch.setattr(start_module, "require_runtime_for", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        start_module, "require_runtime_for", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(start_module, "time", start_module.time)
     monkeypatch.setattr(start_module.time, "sleep", lambda *_args, **_kwargs: None)
 
@@ -249,7 +273,11 @@ def test_main_enables_premium_processor_when_llm_healthy(monkeypatch, tmp_path):
         def run(self):
             return [
                 {"component": "GigaChat", "status": "OK", "details": "active"},
-                {"component": "Cloudflare", "status": "DEGRADED", "details": "disabled"},
+                {
+                    "component": "Cloudflare",
+                    "status": "DEGRADED",
+                    "details": "disabled",
+                },
             ]
 
         def evaluate_mode(self, _results):

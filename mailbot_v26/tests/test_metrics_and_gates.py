@@ -8,8 +8,7 @@ from mailbot_v26.observability.metrics import MetricsAggregator, SystemGates
 
 def _seed_metrics_db(path: Path) -> None:
     with sqlite3.connect(path) as conn:
-        conn.executescript(
-            """
+        conn.executescript("""
             CREATE TABLE decision_traces (
                 id TEXT PRIMARY KEY,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -27,20 +26,16 @@ def _seed_metrics_db(path: Path) -> None:
                 status TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             INSERT INTO decision_traces (id, created_at, priority, shadow_priority, response_full)
             VALUES
                 ('d1', datetime('now', '-1 days'), '🔵', '🔵', 'ok'),
                 ('d2', datetime('now', '-2 days'), '🔴', '🟡', ''),
                 ('d3', datetime('now', '-10 days'), '🟡', '🟡', 'ok'),
                 ('d4', datetime('now', '-40 days'), '🔵', '🔵', 'ok')
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             INSERT INTO action_feedback (id, decision, created_at)
             VALUES
                 ('f1', 'accepted', datetime('now', '-1 days')),
@@ -48,10 +43,8 @@ def _seed_metrics_db(path: Path) -> None:
                 ('f3', 'accepted', datetime('now', '-5 days')),
                 ('f4', 'accepted', datetime('now', '-20 days')),
                 ('f5', 'accepted', datetime('now', '-40 days'))
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             INSERT INTO commitments (id, status, created_at)
             VALUES
                 (1, 'fulfilled', datetime('now', '-1 days')),
@@ -59,8 +52,7 @@ def _seed_metrics_db(path: Path) -> None:
                 (3, 'fulfilled', datetime('now', '-5 days')),
                 (4, 'fulfilled', datetime('now', '-20 days')),
                 (5, 'expired', datetime('now', '-40 days'))
-            """
-        )
+            """)
         conn.commit()
 
 

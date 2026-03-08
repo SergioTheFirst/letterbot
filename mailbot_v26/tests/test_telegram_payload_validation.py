@@ -21,7 +21,9 @@ def _setup_processor(monkeypatch) -> None:
         llm_provider="gigachat",
     )
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -43,9 +45,17 @@ def _setup_processor(monkeypatch) -> None:
         "compute",
         lambda account_email, from_email: [],
     )
-    monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **kwargs: None)
-    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
-    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor.context_store, "resolve_sender_entity", lambda **kwargs: None
+    )
+    monkeypatch.setattr(
+        processor.context_store,
+        "record_interaction_event",
+        lambda **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0)
+    )
     monkeypatch.setattr(
         processor,
         "evaluate_signal_quality",
@@ -114,7 +124,9 @@ def test_tg_payload_with_attachments(monkeypatch) -> None:
     assert isinstance(payload.metadata, dict)
     assert payload.priority == "🔴"
     telegram_text = payload.html_text
-    assert telegram_text.startswith("📩 Письмо получено") or "Вложения: 4" in telegram_text
+    assert (
+        telegram_text.startswith("📩 Письмо получено") or "Вложения: 4" in telegram_text
+    )
 
 
 def test_tg_payload_never_subject_only(monkeypatch) -> None:
@@ -143,7 +155,9 @@ def test_tg_payload_never_subject_only(monkeypatch) -> None:
     assert "Письмо получено" not in sent["payload"].html_text
 
 
-def test_tg_payload_validator_blocks_empty(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_tg_payload_validator_blocks_empty(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     _setup_processor(monkeypatch)
     monkeypatch.setattr(processor, "_build_telegram_text", lambda **kwargs: "short")
 
@@ -275,7 +289,9 @@ def test_attachment_visibility(monkeypatch) -> None:
     )
 
     telegram_text = sent["payload"].html_text
-    assert telegram_text.startswith("📩 Письмо получено") or ("📎" in telegram_text and "report.pdf" in telegram_text)
+    assert telegram_text.startswith("📩 Письмо получено") or (
+        "📎" in telegram_text and "report.pdf" in telegram_text
+    )
     assert "Manual Review" not in telegram_text
 
 
@@ -304,5 +320,7 @@ def test_default_delivery_sends_only_processed_message(monkeypatch) -> None:
     test_tg_payload_never_subject_only(monkeypatch)
 
 
-def test_no_default_pre_message_in_premium_mode(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_no_default_pre_message_in_premium_mode(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     test_tg_payload_validator_blocks_empty(monkeypatch, caplog)

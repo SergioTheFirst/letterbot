@@ -101,8 +101,6 @@ class BrandingConfig:
     show_watermark: bool = True
 
 
-
-
 @dataclass
 class SupportSettings:
     """Telegram support banner settings."""
@@ -112,6 +110,7 @@ class SupportSettings:
     url: str
     label: str
     frequency_days: int
+
 
 @dataclass
 class BotConfig:
@@ -127,7 +126,9 @@ class BotConfig:
     maintenance: MaintenanceConfig = field(
         default_factory=lambda: MaintenanceConfig(maintenance_mode=False)
     )
-    web: WebConfig = field(default_factory=lambda: WebConfig(host="127.0.0.1", port=8787))
+    web: WebConfig = field(
+        default_factory=lambda: WebConfig(host="127.0.0.1", port=8787)
+    )
     llm_call: Optional[Callable[[str], str]] = None
 
 
@@ -146,7 +147,9 @@ class InvalidAccountIdError(ConfigError):
     """Raised when account IDs do not match the allowed pattern."""
 
     def __init__(self, invalid_ids: list[str]) -> None:
-        super().__init__(f"Invalid account_id(s) in accounts.ini: {', '.join(invalid_ids)}")
+        super().__init__(
+            f"Invalid account_id(s) in accounts.ini: {', '.join(invalid_ids)}"
+        )
         self.invalid_ids = invalid_ids
 
 
@@ -185,7 +188,9 @@ def _read_settings_with_legacy_fallback(
     if resolved.legacy_ini_path.exists():
         legacy_parser = _read_config_file(resolved.legacy_ini_path)
         if section in legacy_parser:
-            _LOGGER.info("settings.ini missing [%s], using legacy config.ini fallback", section)
+            _LOGGER.info(
+                "settings.ini missing [%s], using legacy config.ini fallback", section
+            )
             return legacy_parser
     return parser
 
@@ -260,13 +265,19 @@ def load_accounts_config(base_dir: Path = CONFIG_DIR) -> List[AccountConfig]:
                 host=section.get("host", ""),
                 port=section.getint("port", fallback=993),
                 use_ssl=section.getboolean("use_ssl", fallback=True),
-                telegram_chat_id=(section.get("telegram_chat_id", fallback="") or global_chat_id).strip(),
+                telegram_chat_id=(
+                    section.get("telegram_chat_id", fallback="") or global_chat_id
+                ).strip(),
             )
         except KeyError as exc:
-            _LOGGER.warning("Skipping account [%s]: missing required field %s", section_name, exc)
+            _LOGGER.warning(
+                "Skipping account [%s]: missing required field %s", section_name, exc
+            )
             continue
         except ValueError as exc:
-            _LOGGER.warning("Skipping account [%s]: invalid field (%s)", section_name, exc)
+            _LOGGER.warning(
+                "Skipping account [%s]: invalid field (%s)", section_name, exc
+            )
             continue
         accounts.append(account)
 
@@ -313,9 +324,7 @@ def _normalize_account_emails(account_emails: Iterable[str] | None) -> list[str]
     if not account_emails:
         return []
     cleaned = {
-        str(email).strip()
-        for email in account_emails
-        if str(email or "").strip()
+        str(email).strip() for email in account_emails if str(email or "").strip()
     }
     return sorted(cleaned)
 
@@ -341,7 +350,9 @@ def load_keys_config(base_dir: Path = CONFIG_DIR) -> KeysConfig:
     resolved = resolve_config_paths(base_dir)
     accounts_parser = _read_config_file(resolved.accounts_path)
     parser = accounts_parser
-    if not resolved.two_file_mode and not any(section in accounts_parser for section in ("telegram", "cloudflare")):
+    if not resolved.two_file_mode and not any(
+        section in accounts_parser for section in ("telegram", "cloudflare")
+    ):
         keys_path = resolved.keys_path
         if keys_path.exists():
             _LOGGER.info("keys.ini legacy fallback is used")
@@ -380,7 +391,10 @@ def validate_telegram_contract(config: BotConfig, *, config_dir: Path) -> list[s
         account
         for account in config.accounts
         if account.enabled
-        and (str(account.telegram_chat_id or "").strip() or str(config.keys.telegram_chat_id or "").strip())
+        and (
+            str(account.telegram_chat_id or "").strip()
+            or str(config.keys.telegram_chat_id or "").strip()
+        )
     ]
     if telegram_targets and (not token or token.upper() == "CHANGE_ME"):
         errors.append(
@@ -459,8 +473,6 @@ def load_maintenance_config(base_dir: Path = CONFIG_DIR) -> MaintenanceConfig:
         return MaintenanceConfig(maintenance_mode=False)
 
 
-
-
 def _support_defaults() -> SupportSettings:
     return SupportSettings(
         enabled=False,
@@ -515,18 +527,33 @@ def _load_support_from_yaml(raw: Any) -> SupportSettings:
     telegram = support.get("telegram")
     telegram = telegram if isinstance(telegram, dict) else {}
     methods = support.get("methods")
-    method0 = methods[0] if isinstance(methods, list) and methods and isinstance(methods[0], dict) else {}
+    method0 = (
+        methods[0]
+        if isinstance(methods, list) and methods and isinstance(methods[0], dict)
+        else {}
+    )
 
-    text = str(telegram.get("text") or support.get("text") or defaults.text).strip() or defaults.text
-    url = str(support.get("url") or method0.get("url") or defaults.url).strip() or defaults.url
-    label = str(support.get("label") or method0.get("label") or defaults.label).strip() or defaults.label
+    text = (
+        str(telegram.get("text") or support.get("text") or defaults.text).strip()
+        or defaults.text
+    )
+    url = (
+        str(support.get("url") or method0.get("url") or defaults.url).strip()
+        or defaults.url
+    )
+    label = (
+        str(support.get("label") or method0.get("label") or defaults.label).strip()
+        or defaults.label
+    )
     return SupportSettings(
         enabled=bool(support.get("enabled", False)),
         text=text,
         url=url,
         label=label,
         frequency_days=_normalize_support_frequency(
-            telegram.get("frequency_days", support.get("frequency_days", defaults.frequency_days)),
+            telegram.get(
+                "frequency_days", support.get("frequency_days", defaults.frequency_days)
+            ),
             default=defaults.frequency_days,
         ),
     )
@@ -537,7 +564,11 @@ def load_support_settings(base_dir: Path = CONFIG_DIR) -> SupportSettings:
     if resolved.two_file_mode:
         return _load_support_from_ini(_read_config_file(resolved.settings_path))
 
-    settings_path = resolved.settings_path if resolved.settings_path.exists() else resolved.legacy_ini_path
+    settings_path = (
+        resolved.settings_path
+        if resolved.settings_path.exists()
+        else resolved.legacy_ini_path
+    )
     parser = _read_config_file(settings_path)
     ini_settings = _load_support_from_ini(parser)
     if "support" in parser:
@@ -558,6 +589,7 @@ def load_support_settings(base_dir: Path = CONFIG_DIR) -> SupportSettings:
         return ini_settings
     return _load_support_from_yaml(raw)
 
+
 def load_web_config(base_dir: Path = CONFIG_DIR) -> WebConfig:
     parser = _read_settings_with_legacy_fallback(base_dir, section="web")
 
@@ -572,7 +604,11 @@ def load_web_config(base_dir: Path = CONFIG_DIR) -> WebConfig:
             if 1 <= parsed_port <= 65535:
                 port = parsed_port
             else:
-                _LOGGER.warning("Invalid [web] port out of range (%s), using default %s", parsed_port, port)
+                _LOGGER.warning(
+                    "Invalid [web] port out of range (%s), using default %s",
+                    parsed_port,
+                    port,
+                )
         except ValueError as exc:
             _LOGGER.warning("Invalid [web] port value, using default %s: %s", port, exc)
     elif "web_ui" in parser:
@@ -584,9 +620,15 @@ def load_web_config(base_dir: Path = CONFIG_DIR) -> WebConfig:
             if 1 <= parsed_port <= 65535:
                 port = parsed_port
             else:
-                _LOGGER.warning("Invalid [web_ui] port out of range (%s), using default %s", parsed_port, port)
+                _LOGGER.warning(
+                    "Invalid [web_ui] port out of range (%s), using default %s",
+                    parsed_port,
+                    port,
+                )
         except ValueError as exc:
-            _LOGGER.warning("Invalid [web_ui] port value, using default %s: %s", port, exc)
+            _LOGGER.warning(
+                "Invalid [web_ui] port value, using default %s: %s", port, exc
+            )
 
     return WebConfig(host=host, port=port)
 
@@ -597,7 +639,9 @@ def load_telegram_ui_config(base_dir: Path = CONFIG_DIR) -> TelegramUIConfig:
     if "telegram_ui" in parser:
         section = parser["telegram_ui"]
         try:
-            show_decision_trace = section.getboolean("show_decision_trace", fallback=False)
+            show_decision_trace = section.getboolean(
+                "show_decision_trace", fallback=False
+            )
         except ValueError as exc:
             _LOGGER.warning(
                 "Invalid [telegram_ui] show_decision_trace value, using default false: %s",

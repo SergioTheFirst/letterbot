@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from mailbot_v26.observability.decision_trace_v1 import sanitize_codes
-from mailbot_v26.priority.priority_engine_v2 import PriorityV2Config, load_priority_v2_config
+from mailbot_v26.priority.priority_engine_v2 import (
+    PriorityV2Config,
+    load_priority_v2_config,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +53,9 @@ def evaluate_attention_gate(
 ) -> DecisionEvalResult:
     signals = _apply_overrides(context.signals, overrides)
     signals_evaluated = sanitize_codes(sorted(signals.keys()))
-    signals_fired = sanitize_codes(sorted([key for key, fired in signals.items() if fired]))
+    signals_fired = sanitize_codes(
+        sorted([key for key, fired in signals.items() if fired])
+    )
     use_candidate = signals.get("TOP_PERCENTILE_CANDIDATE", False)
     budget_ok = signals.get("BUDGET_GATE_ALLOW", False) if use_candidate else False
     decision = "ALLOW" if use_candidate and budget_ok else "DENY"
@@ -70,7 +75,9 @@ def evaluate_llm_gate(
 ) -> DecisionEvalResult:
     signals = _apply_overrides(context.signals, overrides)
     signals_evaluated = sanitize_codes(sorted(signals.keys()))
-    signals_fired = sanitize_codes(sorted([key for key, fired in signals.items() if fired]))
+    signals_fired = sanitize_codes(
+        sorted([key for key, fired in signals.items() if fired])
+    )
     llm_used = bool(signals.get("LLM_CALLED_DIRECT") or signals.get("LLM_QUEUED"))
     decision = "LLM_USED" if llm_used else "HEURISTIC"
     evidence = {"matched": len(signals_fired), "total": len(signals_evaluated)}
@@ -99,7 +106,9 @@ def evaluate_priority_heuristic(
     else:
         decision = "🔵"
     signals_evaluated = sanitize_codes(sorted(signals.keys()))
-    signals_fired = sanitize_codes(sorted([key for key, fired in signals.items() if fired]))
+    signals_fired = sanitize_codes(
+        sorted([key for key, fired in signals.items() if fired])
+    )
     explain_codes = sanitize_codes(sorted(set(reason_codes)))
     evidence = {"matched": len(signals_fired), "total": len(signals_evaluated)}
     return DecisionEvalResult(
@@ -124,7 +133,9 @@ def _priority_score_from_signals(
         score += config.urgency_weight_default
         reason_codes.append("PRIO_URGENT_KEYWORD")
         if signals.get("URGENCY_WEIGHTED_BY_TYPE"):
-            extra = max(0, config.urgency_weight_by_type - config.urgency_weight_default)
+            extra = max(
+                0, config.urgency_weight_by_type - config.urgency_weight_default
+            )
             score += extra
             reason_codes.append("PRIO_URGENT_WEIGHTED_BY_TYPE")
 
@@ -179,7 +190,9 @@ def _priority_score_from_signals(
         if signals.get("VIP_COMMITMENT_BOOST"):
             multiplier *= config.vip_multiplier_commitment
             reason_codes.append("PRIO_VIP_COMMITMENT_BOOST")
-        multiplier = max(config.vip_multiplier_min, min(config.vip_multiplier_max, multiplier))
+        multiplier = max(
+            config.vip_multiplier_min, min(config.vip_multiplier_max, multiplier)
+        )
         score += int(round(config.vip_base_score * multiplier))
         reason_codes.append("PRIO_VIP_BASE")
 

@@ -23,8 +23,7 @@ class EventEmitter:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS events_v1 (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         event_type TEXT NOT NULL,
@@ -38,59 +37,41 @@ class EventEmitter:
                         schema_version INTEGER NOT NULL,
                         fingerprint TEXT NOT NULL UNIQUE
                     );
-                    """
-                )
+                    """)
                 self._ensure_columns(conn)
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts
                     ON events_v1(event_type, ts_utc);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts
                     ON events_v1(account_id, ts_utc);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_events_v1_entity_ts
                     ON events_v1(entity_id, ts_utc);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_events_v1_email_id
                     ON events_v1(email_id);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts_iso
                     ON events_v1(event_type, ts);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts_iso
                     ON events_v1(account_id, ts);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_events_v1_entity_ts_iso
                     ON events_v1(entity_id, ts);
-                    """
-                )
+                    """)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("event_store_init_failed", error=str(exc))
 
     def _ensure_columns(self, conn: sqlite3.Connection) -> None:
-        columns = {
-            str(row[1])
-            for row in conn.execute("PRAGMA table_info(events_v1)")
-        }
+        columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(events_v1)")}
         if "ts" not in columns:
             conn.execute("ALTER TABLE events_v1 ADD COLUMN ts TEXT;")
         if "payload" not in columns:
@@ -100,9 +81,7 @@ class EventEmitter:
 
     def emit(self, event: EventV1) -> bool:
         fp = fingerprint(event)
-        ts_iso = datetime.fromtimestamp(
-            event.ts_utc, tz=timezone.utc
-        ).isoformat()
+        ts_iso = datetime.fromtimestamp(event.ts_utc, tz=timezone.utc).isoformat()
         payload = json.dumps(event.payload, ensure_ascii=False)
         payload_json = event.payload_json if event.payload_json is not None else payload
         try:

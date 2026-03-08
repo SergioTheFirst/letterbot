@@ -21,9 +21,7 @@ def _write_accounts(tmp_path, content: str) -> None:
     (tmp_path / "accounts.ini").write_text(content, encoding="utf-8")
 
 
-def test_delivery_policy_event_payload_and_render_record(
-    monkeypatch, tmp_path
-) -> None:
+def test_delivery_policy_event_payload_and_render_record(monkeypatch, tmp_path) -> None:
     _write_accounts(
         tmp_path,
         """[primary]
@@ -47,7 +45,9 @@ telegram_chat_id = chat
         llm_provider="cloudflare",
     )
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -75,7 +75,9 @@ telegram_chat_id = chat
             anchor_ts_utc=float(kwargs.get("anchor_ts_utc") or 0.0),
         ),
     )
-    monkeypatch.setattr(processor.budget_gate, "can_use_llm", lambda _account_email: True)
+    monkeypatch.setattr(
+        processor.budget_gate, "can_use_llm", lambda _account_email: True
+    )
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         return DeliveryResult(delivered=True, retryable=False)
@@ -98,7 +100,9 @@ telegram_chat_id = chat
     assert EventType.TG_RENDER_RECORDED in event_types
 
     decision_event = next(
-        event for event in collector.events if event.event_type == EventType.DELIVERY_POLICY_APPLIED
+        event
+        for event in collector.events
+        if event.event_type == EventType.DELIVERY_POLICY_APPLIED
     )
     payload = decision_event.payload
     assert "subject" not in payload
@@ -112,7 +116,9 @@ telegram_chat_id = chat
     assert payload["account_emails"] == ["account@example.com", "alt@example.com"]
 
     render_event = next(
-        event for event in collector.events if event.event_type == EventType.TG_RENDER_RECORDED
+        event
+        for event in collector.events
+        if event.event_type == EventType.TG_RENDER_RECORDED
     )
     render_payload = render_event.payload
     assert set(render_payload.keys()) == {
@@ -160,7 +166,9 @@ telegram_chat_id = chat
         llm_provider="cloudflare",
     )
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -188,7 +196,9 @@ telegram_chat_id = chat
             anchor_ts_utc=float(kwargs.get("anchor_ts_utc") or 0.0),
         ),
     )
-    monkeypatch.setattr(processor.budget_gate, "can_use_llm", lambda _account_email: True)
+    monkeypatch.setattr(
+        processor.budget_gate, "can_use_llm", lambda _account_email: True
+    )
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         return DeliveryResult(delivered=True, retryable=False)
@@ -207,7 +217,9 @@ telegram_chat_id = chat
     )
 
     decision_event = next(
-        event for event in collector.events if event.event_type == EventType.DELIVERY_POLICY_APPLIED
+        event
+        for event in collector.events
+        if event.event_type == EventType.DELIVERY_POLICY_APPLIED
     )
     payload = decision_event.payload
     assert "subject" not in payload
@@ -219,9 +231,7 @@ telegram_chat_id = chat
     assert payload["account_emails"] == ["account@example.com", "alt@example.com"]
 
 
-def test_delivery_policy_event_payload_without_scope(
-    monkeypatch, tmp_path
-) -> None:
+def test_delivery_policy_event_payload_without_scope(monkeypatch, tmp_path) -> None:
     _write_accounts(
         tmp_path,
         """[primary]
@@ -239,7 +249,9 @@ password = secret
         llm_provider="cloudflare",
     )
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -267,7 +279,9 @@ password = secret
             anchor_ts_utc=float(kwargs.get("anchor_ts_utc") or 0.0),
         ),
     )
-    monkeypatch.setattr(processor.budget_gate, "can_use_llm", lambda _account_email: True)
+    monkeypatch.setattr(
+        processor.budget_gate, "can_use_llm", lambda _account_email: True
+    )
 
     def _enqueue_tg(*, email_id: int, payload) -> None:
         return DeliveryResult(delivered=True, retryable=False)
@@ -286,7 +300,9 @@ password = secret
     )
 
     decision_event = next(
-        event for event in collector.events if event.event_type == EventType.DELIVERY_POLICY_APPLIED
+        event
+        for event in collector.events
+        if event.event_type == EventType.DELIVERY_POLICY_APPLIED
     )
     payload = decision_event.payload
     assert "subject" not in payload

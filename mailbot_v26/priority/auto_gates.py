@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from mailbot_v26.observability import get_logger
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
-
 PRIORITY_ORDER = {"🔵": 0, "🟡": 1, "🔴": 2}
 logger = get_logger("mailbot")
 
@@ -110,7 +109,10 @@ class AutoPriorityCircuitBreaker:
         try:
             reject_stats = self._analytics.auto_priority_reject_rate(hours=24)
             reject_rate = float(reject_stats.get("reject_rate", 0.0) or 0.0)
-            if int(reject_stats.get("total", 0) or 0) > 0 and reject_rate > self.MAX_REJECT_RATE_24H:
+            if (
+                int(reject_stats.get("total", 0) or 0) > 0
+                and reject_rate > self.MAX_REJECT_RATE_24H
+            ):
                 reasons.append("reject_rate_24h")
         except Exception:
             pass

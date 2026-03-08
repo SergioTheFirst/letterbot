@@ -8,7 +8,6 @@ from pathlib import Path
 from mailbot_v26.budgets.gate import BudgetGateConfig
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -78,7 +77,9 @@ def _get_int(section: configparser.SectionProxy | None, key: str, default: int) 
         return default
 
 
-def _get_bool(section: configparser.SectionProxy | None, key: str, default: bool) -> bool:
+def _get_bool(
+    section: configparser.SectionProxy | None, key: str, default: bool
+) -> bool:
     if section is None:
         return default
     try:
@@ -94,4 +95,9 @@ def _get_str(section: configparser.SectionProxy | None, key: str, default: str) 
     return str(raw or default)
 
 
-__all__ = ["BudgetGateConfig", "BudgetUsageConfig", "load_budget_gate_config", "load_budget_usage_config"]
+__all__ = [
+    "BudgetGateConfig",
+    "BudgetUsageConfig",
+    "load_budget_gate_config",
+    "load_budget_usage_config",
+]

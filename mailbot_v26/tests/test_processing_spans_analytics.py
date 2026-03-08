@@ -26,7 +26,7 @@ def _insert_processing_span(
     error_code: str = "",
     stage_durations: dict[str, int] | None = None,
     health_snapshot_id: str = "",
-    ) -> None:
+) -> None:
     ts_end_utc = ts_start_utc + (total_duration_ms / 1000)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -84,7 +84,7 @@ def _insert_health_snapshot(
 
 def test_processing_spans_metrics_scoped(tmp_path: Path) -> None:
     db_path = tmp_path / "db.sqlite"
-    recorder = ProcessingSpanRecorder(db_path)
+    ProcessingSpanRecorder(db_path)
     base_ts = datetime.now(timezone.utc) - timedelta(days=1)
     _insert_processing_span(
         db_path,
@@ -126,7 +126,9 @@ def test_processing_spans_metrics_scoped(tmp_path: Path) -> None:
 
     analytics = KnowledgeAnalytics(db_path)
     digest = analytics.processing_spans_metrics_digest(
-        account_email="a-primary", account_emails=["a-primary", "a-secondary"], window_days=7
+        account_email="a-primary",
+        account_emails=["a-primary", "a-secondary"],
+        window_days=7,
     )
 
     assert digest["span_count"] == 3
@@ -142,7 +144,7 @@ def test_processing_spans_metrics_scoped(tmp_path: Path) -> None:
 
 def test_processing_spans_scope_fallback_empty_list(tmp_path: Path) -> None:
     db_path = tmp_path / "db.sqlite"
-    recorder = ProcessingSpanRecorder(db_path)
+    ProcessingSpanRecorder(db_path)
     now_ts = datetime.now(timezone.utc).timestamp()
     _insert_processing_span(
         db_path,
@@ -168,7 +170,7 @@ def test_processing_spans_scope_fallback_empty_list(tmp_path: Path) -> None:
 
 def test_processing_spans_recent_errors(tmp_path: Path) -> None:
     db_path = tmp_path / "db.sqlite"
-    recorder = ProcessingSpanRecorder(db_path)
+    ProcessingSpanRecorder(db_path)
     now_ts = datetime.now(timezone.utc).timestamp()
     _insert_processing_span(
         db_path,
@@ -220,7 +222,7 @@ def test_processing_spans_recent_errors(tmp_path: Path) -> None:
 
 def test_health_current_scoped(tmp_path: Path) -> None:
     db_path = tmp_path / "db.sqlite"
-    recorder = ProcessingSpanRecorder(db_path)
+    ProcessingSpanRecorder(db_path)
     base_ts = datetime.now(timezone.utc).timestamp()
     _insert_health_snapshot(
         db_path,
@@ -290,7 +292,7 @@ def test_health_current_scoped(tmp_path: Path) -> None:
 
 def test_health_timeline_order_and_limit(tmp_path: Path) -> None:
     db_path = tmp_path / "db.sqlite"
-    recorder = ProcessingSpanRecorder(db_path)
+    ProcessingSpanRecorder(db_path)
     base_ts = datetime.now(timezone.utc).timestamp()
     _insert_health_snapshot(
         db_path,
@@ -367,7 +369,7 @@ def test_health_timeline_order_and_limit(tmp_path: Path) -> None:
 
 def test_health_json_parse_failure_safe(tmp_path: Path) -> None:
     db_path = tmp_path / "db.sqlite"
-    recorder = ProcessingSpanRecorder(db_path)
+    ProcessingSpanRecorder(db_path)
     now_ts = datetime.now(timezone.utc).timestamp()
     _insert_health_snapshot(
         db_path,
@@ -404,8 +406,7 @@ def test_export_includes_processing_and_health(tmp_path: Path) -> None:
     db_path = tmp_path / "db.sqlite"
     recorder = ProcessingSpanRecorder(db_path)
     with sqlite3.connect(db_path) as conn:
-        conn.executescript(
-            """
+        conn.executescript("""
             CREATE TABLE IF NOT EXISTS events_v1 (
                 id INTEGER PRIMARY KEY,
                 event_type TEXT,
@@ -437,22 +438,47 @@ def test_export_includes_processing_and_health(tmp_path: Path) -> None:
                 components_breakdown TEXT,
                 data_window_days INTEGER
             );
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO events_v1 (event_type, ts_utc, ts, account_id, entity_id, email_id, payload, schema_version, fingerprint)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("test_event", datetime.now(timezone.utc).timestamp(), "", "acc", "ent", 1, "{}", 1, "fp"),
+            (
+                "test_event",
+                datetime.now(timezone.utc).timestamp(),
+                "",
+                "acc",
+                "ent",
+                1,
+                "{}",
+                1,
+                "fp",
+            ),
         )
         conn.execute(
             "INSERT INTO commitments (email_row_id, source, commitment_text, deadline_iso, status, confidence, created_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (1, "src", "do thing", "", "open", 0.5, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")),
+            (
+                1,
+                "src",
+                "do thing",
+                "",
+                "open",
+                0.5,
+                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            ),
         )
         conn.execute(
             "INSERT INTO relationship_health_snapshots (snapshot_id, created_at, entity_id, health_score, reason, components_breakdown, data_window_days)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("snap-1", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), "ent", 0.8, "ok", "{}", 7),
+            (
+                "snap-1",
+                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "ent",
+                0.8,
+                "ok",
+                "{}",
+                7,
+            ),
         )
         conn.commit()
 

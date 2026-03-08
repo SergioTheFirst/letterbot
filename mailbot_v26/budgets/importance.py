@@ -40,13 +40,20 @@ def heuristic_importance(
     subject_lower = (subject or "").lower()
     body_lower = (body_text or "").lower()
 
-    if any(keyword in subject_lower for keyword in ("срочно", "urgent", "asap", "немедленно")):
+    if any(
+        keyword in subject_lower
+        for keyword in ("срочно", "urgent", "asap", "немедленно")
+    ):
         score += 40
         reasons.append("subject_urgent")
-    if any(keyword in subject_lower for keyword in ("срок", "deadline", "due", "оплата")):
+    if any(
+        keyword in subject_lower for keyword in ("срок", "deadline", "due", "оплата")
+    ):
         score += 25
         reasons.append("subject_deadline")
-    if any(keyword in body_lower for keyword in ("срочно", "urgent", "asap", "немедленно")):
+    if any(
+        keyword in body_lower for keyword in ("срочно", "urgent", "asap", "немедленно")
+    ):
         score += 20
         reasons.append("body_urgent")
     if any(keyword in body_lower for keyword in ("срок", "deadline", "due", "оплата")):

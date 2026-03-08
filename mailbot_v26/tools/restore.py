@@ -38,7 +38,9 @@ def _is_allowed_path(member: str) -> bool:
     return False
 
 
-def restore_from_backup(archive_path: Path, base_dir: Path | None = None) -> RestoreResult:
+def restore_from_backup(
+    archive_path: Path, base_dir: Path | None = None
+) -> RestoreResult:
     root = base_dir or _repo_root()
     restored: list[str] = []
     skipped: list[str] = []

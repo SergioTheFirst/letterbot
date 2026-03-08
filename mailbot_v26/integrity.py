@@ -1,4 +1,5 @@
 """Integrity checks for tamper-evident builds."""
+
 from __future__ import annotations
 
 import hashlib

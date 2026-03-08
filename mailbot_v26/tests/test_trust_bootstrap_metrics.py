@@ -215,7 +215,9 @@ def test_trust_bootstrap_aggregates_account_scope(tmp_path) -> None:
     analytics, conn = _setup_db(tmp_path)
     now = datetime.now(timezone.utc)
     start_ts = (now - timedelta(days=30)).timestamp()
-    _seed_email_received(conn, account_id="account@example.com", start_ts=start_ts, count=3)
+    _seed_email_received(
+        conn, account_id="account@example.com", start_ts=start_ts, count=3
+    )
     _seed_email_received(conn, account_id="alt@example.com", start_ts=start_ts, count=3)
     corrections_start = (now - timedelta(days=2)).timestamp()
     _seed_corrections(

@@ -16,7 +16,9 @@ def test_resolve_config_paths_uses_config_dir_yaml_only(tmp_path: Path) -> None:
     assert resolved.yaml_path == config_dir / "config.yaml"
 
 
-def test_resolve_config_paths_does_not_read_repo_root_yaml_implicitly(tmp_path: Path) -> None:
+def test_resolve_config_paths_does_not_read_repo_root_yaml_implicitly(
+    tmp_path: Path,
+) -> None:
     config_dir = tmp_path / "mailbot_v26" / "config"
     config_dir.mkdir(parents=True)
     (tmp_path / "config.yaml").write_text("root: true", encoding="utf-8")

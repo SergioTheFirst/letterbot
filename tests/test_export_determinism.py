@@ -10,8 +10,7 @@ from mailbot_v26.tools.export_data import export_data
 
 def _init_db(path: Path) -> None:
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE events_v1 (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_type TEXT NOT NULL,
@@ -25,10 +24,8 @@ def _init_db(path: Path) -> None:
                 schema_version INTEGER NOT NULL,
                 fingerprint TEXT NOT NULL
             );
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TABLE commitments (
                 id INTEGER PRIMARY KEY,
                 email_row_id INTEGER NOT NULL,
@@ -39,10 +36,8 @@ def _init_db(path: Path) -> None:
                 confidence REAL NOT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TABLE relationship_health_snapshots (
                 id TEXT PRIMARY KEY,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -52,8 +47,7 @@ def _init_db(path: Path) -> None:
                 components_breakdown JSON,
                 data_window_days INTEGER
             );
-            """
-        )
+            """)
         conn.execute(
             """
             INSERT INTO events_v1 (
@@ -79,7 +73,16 @@ def _init_db(path: Path) -> None:
                 id, email_row_id, source, commitment_text, deadline_iso, status, confidence, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (1, 10, "parser", "deliver", "2023-11-15", "open", 0.9, "2023-11-14 10:00:00"),
+            (
+                1,
+                10,
+                "parser",
+                "deliver",
+                "2023-11-15",
+                "open",
+                0.9,
+                "2023-11-14 10:00:00",
+            ),
         )
         conn.execute(
             """

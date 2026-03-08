@@ -35,8 +35,7 @@ class EventEmitter:
         try:
             with sqlite3.connect(self.path) as conn:
                 conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS events (
                         id TEXT PRIMARY KEY,
                         type TEXT NOT NULL,
@@ -45,8 +44,7 @@ class EventEmitter:
                         email_id TEXT,
                         payload JSON
                     );
-                    """
-                )
+                    """)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("event_store_init_failed", error=str(exc))
 

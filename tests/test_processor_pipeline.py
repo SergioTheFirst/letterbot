@@ -41,8 +41,15 @@ def test_html_body_is_sanitized_and_summarized():
 
 def test_image_attachments_are_ignored_completely():
     processor = _processor()
-    att = Attachment(filename="photo.png", content=b"binary", content_type="image/png", text="Image text")
-    msg = InboundMessage(subject="Pictures", body="Plain text message with info.", attachments=[att])
+    att = Attachment(
+        filename="photo.png",
+        content=b"binary",
+        content_type="image/png",
+        text="Image text",
+    )
+    msg = InboundMessage(
+        subject="Pictures", body="Plain text message with info.", attachments=[att]
+    )
 
     result = processor.process("user@example.com", msg)
 
@@ -192,12 +199,14 @@ def test_all_document_attachments_render_even_without_text():
     result = processor.process("user@example.com", msg)
 
     assert result is not None
-    lines = result.split("\n")
     names = {att.filename for att in attachments}
     attachment_lines = _attachment_lines(result, names)
 
     assert len(attachment_lines) == 4
-    assert all(name in result for name in ("draft.docx", "legacy.doc", "report.xlsx", "table.xls"))
+    assert all(
+        name in result
+        for name in ("draft.docx", "legacy.doc", "report.xlsx", "table.xls")
+    )
     assert "формат а2" not in " ".join(attachment_lines).lower()
     assert "по данным файла" not in result.lower()
     assert any(line.startswith("draft.docx") for line in attachment_lines)

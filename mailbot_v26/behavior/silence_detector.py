@@ -26,9 +26,7 @@ def run_silence_scan(
         placeholders = ",".join("?" for _ in scope_emails)
         cutoff_ts = now_ts - (policy.lookback_days * 86400)
         history_cutoff_ts = now_ts - (30 * 86400)
-        cutoff_iso = datetime.fromtimestamp(
-            cutoff_ts, tz=timezone.utc
-        ).isoformat()
+        cutoff_iso = datetime.fromtimestamp(cutoff_ts, tz=timezone.utc).isoformat()
         history_cutoff_iso = datetime.fromtimestamp(
             history_cutoff_ts, tz=timezone.utc
         ).isoformat()
@@ -94,11 +92,7 @@ def run_silence_scan(
 
         first_ts = first_dt.timestamp()
         last_ts = last_dt.timestamp()
-        baseline_gap_hours = (
-            (last_ts - first_ts)
-            / max(1, int(msg_count) - 1)
-            / 3600.0
-        )
+        baseline_gap_hours = (last_ts - first_ts) / max(1, int(msg_count) - 1) / 3600.0
         silence_threshold_hours = max(
             policy.min_silence_days * 24.0,
             baseline_gap_hours * policy.silence_factor,
@@ -170,9 +164,7 @@ def _normalize_account_scope(
 ) -> list[str]:
     if account_emails:
         cleaned = {
-            str(email).strip()
-            for email in account_emails
-            if str(email or "").strip()
+            str(email).strip() for email in account_emails if str(email or "").strip()
         }
     else:
         cleaned = set()

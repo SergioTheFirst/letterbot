@@ -5,8 +5,7 @@ from mailbot_v26.maintenance.indexes import ensure_indexes
 
 
 def _create_events_schema(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE events_v1 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             event_type TEXT NOT NULL,
@@ -20,8 +19,7 @@ def _create_events_schema(conn: sqlite3.Connection) -> None:
             schema_version INTEGER NOT NULL,
             fingerprint TEXT NOT NULL UNIQUE
         )
-        """
-    )
+        """)
     conn.execute(
         """
         INSERT INTO events_v1 (

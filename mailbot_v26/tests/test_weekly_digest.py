@@ -145,7 +145,9 @@ def test_weekly_digest_sent_once_per_week(monkeypatch, tmp_path) -> None:
     )
 
     assert len(sent) == 1
-    assert db.get_last_weekly_digest_key(account_email="account@example.com") == "2025-W02"
+    assert (
+        db.get_last_weekly_digest_key(account_email="account@example.com") == "2025-W02"
+    )
 
 
 def test_weekly_digest_empty_content_is_deterministic(monkeypatch, tmp_path) -> None:
@@ -201,7 +203,9 @@ def _event_types(path: Path) -> list[str]:
         return [str(row[0]) for row in cur.fetchall()]
 
 
-def test_weekly_digest_attention_block_added_when_flag_on(monkeypatch, tmp_path) -> None:
+def test_weekly_digest_attention_block_added_when_flag_on(
+    monkeypatch, tmp_path
+) -> None:
     now = _due_time()
     created_at = datetime.utcnow().isoformat()
     earlier = (datetime.utcnow() - timedelta(days=5)).isoformat()
@@ -340,7 +344,9 @@ def test_weekly_digest_attention_block_added_when_flag_on(monkeypatch, tmp_path)
     assert "weekly_digest_attention_block_added" in types
 
 
-def test_weekly_digest_attention_block_skipped_on_small_sample(monkeypatch, tmp_path) -> None:
+def test_weekly_digest_attention_block_skipped_on_small_sample(
+    monkeypatch, tmp_path
+) -> None:
     now = _due_time()
     created_at = datetime.utcnow().isoformat()
     db_path = tmp_path / "weekly.sqlite"
@@ -403,14 +409,16 @@ def test_weekly_digest_attention_block_skipped_on_small_sample(monkeypatch, tmp_
     assert "Спокойная неделя" in html_text
 
     with sqlite3.connect(events_path) as conn:
-        cur = conn.execute("SELECT type, payload FROM events WHERE type LIKE 'attention_economics_%'")
+        cur = conn.execute(
+            "SELECT type, payload FROM events WHERE type LIKE 'attention_economics_%'"
+        )
         rows = cur.fetchall()
     assert any(row[0] == "attention_economics_skipped" for row in rows)
 
 
-
 def test_weekly_uses_interpretation_events_only(tmp_path) -> None:
     test_weekly_uses_interpretation_events(tmp_path)
+
 
 def test_weekly_uses_interpretation_events(tmp_path) -> None:
     db_path = tmp_path / "weekly-interpretation.sqlite"
@@ -419,8 +427,18 @@ def test_weekly_uses_interpretation_events(tmp_path) -> None:
     now = datetime.now(timezone.utc)
     with sqlite3.connect(db_path) as conn:
         for payload in (
-            {"doc_kind": "invoice", "amount": 87500, "sender_email": "a@example.com", "due_date": "2026-04-15"},
-            {"doc_kind": "invoice", "amount": 12500, "sender_email": "b@example.com", "due_date": "2026-04-16"},
+            {
+                "doc_kind": "invoice",
+                "amount": 87500,
+                "sender_email": "a@example.com",
+                "due_date": "2026-04-15",
+            },
+            {
+                "doc_kind": "invoice",
+                "amount": 12500,
+                "sender_email": "b@example.com",
+                "due_date": "2026-04-16",
+            },
             {"doc_kind": "contract", "sender_email": "c@example.com", "due_date": None},
         ):
             conn.execute(
@@ -443,10 +461,12 @@ def test_weekly_uses_interpretation_events(tmp_path) -> None:
             )
         conn.commit()
 
-    invoice_count, invoice_total, contract_count = weekly_digest._collect_weekly_human_signals(  # noqa: SLF001
-        analytics=analytics,
-        account_email="account@example.com",
-        account_emails=["account@example.com"],
+    invoice_count, invoice_total, contract_count = (
+        weekly_digest._collect_weekly_human_signals(  # noqa: SLF001
+            analytics=analytics,
+            account_email="account@example.com",
+            account_emails=["account@example.com"],
+        )
     )
 
     assert invoice_count == 2
@@ -547,7 +567,9 @@ def test_weekly_digest_contains_shareable_card(monkeypatch, tmp_path) -> None:
             [
                 {
                     "text": "📤 Поделиться отчётом",
-                    "switch_inline_query_current_chat": payload.metadata["shareable_weekly_card"],
+                    "switch_inline_query_current_chat": payload.metadata[
+                        "shareable_weekly_card"
+                    ],
                 }
             ]
         ]

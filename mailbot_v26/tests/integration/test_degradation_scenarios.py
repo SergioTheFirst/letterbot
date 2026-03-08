@@ -8,7 +8,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from mailbot_v26.bot_core import pipeline as core_pipeline
-from mailbot_v26.bot_core.pipeline import PIPELINE_CACHE, PipelineContext, configure_pipeline, store_inbound
+from mailbot_v26.bot_core.pipeline import (
+    PIPELINE_CACHE,
+    PipelineContext,
+    configure_pipeline,
+    store_inbound,
+)
 from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.config_loader import AccountConfig
 from mailbot_v26.llm.providers import LLMProvider
@@ -16,7 +21,11 @@ from mailbot_v26.llm.router import LLMRouter, LLMRouterConfig
 from mailbot_v26.llm.runtime_flags import RuntimeFlags
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline import processor
-from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor, process_message
+from mailbot_v26.pipeline.processor import (
+    InboundMessage,
+    MessageProcessor,
+    process_message,
+)
 from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.start import _process_queue
 from mailbot_v26.features.flags import FeatureFlags
@@ -25,7 +34,6 @@ from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 from mailbot_v26.tests.integration.harness import (
     build_config,
-    build_raw_email,
     cleanup_pipeline_cache,
     run_single_cycle,
 )
@@ -76,10 +84,19 @@ def _patch_processor_basics(monkeypatch, *, llm_result: SimpleNamespace) -> None
     monkeypatch.setattr(
         processor,
         "runtime_flag_store",
-        SimpleNamespace(get_flags=lambda **_kwargs: (RuntimeFlags(enable_auto_priority=False), False)),
+        SimpleNamespace(
+            get_flags=lambda **_kwargs: (
+                RuntimeFlags(enable_auto_priority=False),
+                False,
+            )
+        ),
     )
-    monkeypatch.setattr(processor, "metrics_aggregator", SimpleNamespace(snapshot=lambda: {}))
-    monkeypatch.setattr(processor, "system_gates", SimpleNamespace(evaluate=lambda _metrics: None))
+    monkeypatch.setattr(
+        processor, "metrics_aggregator", SimpleNamespace(snapshot=lambda: {})
+    )
+    monkeypatch.setattr(
+        processor, "system_gates", SimpleNamespace(evaluate=lambda _metrics: None)
+    )
     monkeypatch.setattr(
         processor,
         "context_store",
@@ -92,23 +109,49 @@ def _patch_processor_basics(monkeypatch, *, llm_result: SimpleNamespace) -> None
     monkeypatch.setattr(
         processor,
         "analytics",
-        SimpleNamespace(sender_stats=lambda: [], priority_escalations=lambda **_kwargs: []),
+        SimpleNamespace(
+            sender_stats=lambda: [], priority_escalations=lambda **_kwargs: []
+        ),
     )
     monkeypatch.setattr(
         processor,
         "shadow_priority_engine",
         SimpleNamespace(compute=lambda **_kwargs: (llm_result.priority, None)),
     )
-    monkeypatch.setattr(processor, "shadow_action_engine", SimpleNamespace(compute=lambda **_kwargs: []))
-    monkeypatch.setattr(processor, "auto_action_engine", SimpleNamespace(propose=lambda **_kwargs: None))
-    monkeypatch.setattr(processor, "decision_trace_writer", SimpleNamespace(write=lambda **_kwargs: None))
-    monkeypatch.setattr(processor, "trust_snapshot_writer", SimpleNamespace(write=lambda *_args, **_kwargs: None))
     monkeypatch.setattr(
-        processor, "relationship_health_snapshot_writer", SimpleNamespace(write=lambda *_args, **_kwargs: None)
+        processor, "shadow_action_engine", SimpleNamespace(compute=lambda **_kwargs: [])
     )
-    monkeypatch.setattr(processor, "event_emitter", SimpleNamespace(emit=lambda **_kwargs: None))
-    monkeypatch.setattr(processor, "contract_event_emitter", SimpleNamespace(emit=lambda *_args, **_kwargs: None))
-    monkeypatch.setattr(processor, "system_snapshotter", SimpleNamespace(maybe_log=lambda **_kwargs: None))
+    monkeypatch.setattr(
+        processor, "auto_action_engine", SimpleNamespace(propose=lambda **_kwargs: None)
+    )
+    monkeypatch.setattr(
+        processor,
+        "decision_trace_writer",
+        SimpleNamespace(write=lambda **_kwargs: None),
+    )
+    monkeypatch.setattr(
+        processor,
+        "trust_snapshot_writer",
+        SimpleNamespace(write=lambda *_args, **_kwargs: None),
+    )
+    monkeypatch.setattr(
+        processor,
+        "relationship_health_snapshot_writer",
+        SimpleNamespace(write=lambda *_args, **_kwargs: None),
+    )
+    monkeypatch.setattr(
+        processor, "event_emitter", SimpleNamespace(emit=lambda **_kwargs: None)
+    )
+    monkeypatch.setattr(
+        processor,
+        "contract_event_emitter",
+        SimpleNamespace(emit=lambda *_args, **_kwargs: None),
+    )
+    monkeypatch.setattr(
+        processor,
+        "system_snapshotter",
+        SimpleNamespace(maybe_log=lambda **_kwargs: None),
+    )
     monkeypatch.setattr(processor, "send_system_notice", lambda **_kwargs: None)
 
 
@@ -164,7 +207,7 @@ def test_gigachat_unavailable_falls_back(caplog, tmp_path: Path) -> None:
     gigachat = StubProvider(response="giga", healthy=False)
     cloudflare = StubProvider(response="cf", healthy=True)
     runtime_flags = tmp_path / "runtime_flags.json"
-    runtime_flags.write_text("{\"enable_gigachat\": true}", encoding="utf-8")
+    runtime_flags.write_text('{"enable_gigachat": true}', encoding="utf-8")
     router = LLMRouter(
         LLMRouterConfig(
             primary="gigachat",
@@ -195,7 +238,9 @@ def test_telegram_parse_error_salvage_sends_plain(monkeypatch, caplog) -> None:
     def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
         calls.append(json)
         if len(calls) == 1:
-            return DummyResponse(status_code=400, text="Bad Request: can't parse entities")
+            return DummyResponse(
+                status_code=400, text="Bad Request: can't parse entities"
+            )
         return DummyResponse(status_code=200, text="ok")
 
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
@@ -222,7 +267,7 @@ def test_telegram_parse_error_salvage_sends_plain(monkeypatch, caplog) -> None:
     assert calls[0]["parse_mode"] == "HTML"
     assert "parse_mode" not in calls[1]
     assert any("[TG-SALVAGE]" in record.message for record in caplog.records)
-    assert any("\"event\":\"telegram_sent\"" in record.message for record in caplog.records)
+    assert any('"event":"telegram_sent"' in record.message for record in caplog.records)
 
 
 def test_telegram_retry_then_success(monkeypatch, tmp_path, caplog) -> None:
@@ -313,7 +358,9 @@ def test_telegram_retry_exhausted_marks_failed(monkeypatch, tmp_path, caplog) ->
     cleanup_pipeline_cache([email_id])
 
 
-def test_imap_error_backoff_and_other_accounts_continue(monkeypatch, tmp_path, caplog) -> None:
+def test_imap_error_backoff_and_other_accounts_continue(
+    monkeypatch, tmp_path, caplog
+) -> None:
     bad = AccountConfig(
         account_id="bad",
         login="bad@example.com",
@@ -387,7 +434,9 @@ def test_imap_error_backoff_and_other_accounts_continue(monkeypatch, tmp_path, c
     assert len(alerts) == 1
 
 
-def test_sqlite_busy_side_effect_does_not_block_telegram(monkeypatch, tmp_path, caplog) -> None:
+def test_sqlite_busy_side_effect_does_not_block_telegram(
+    monkeypatch, tmp_path, caplog
+) -> None:
     from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
     system_health.reset()
@@ -431,7 +480,9 @@ def test_sqlite_busy_side_effect_does_not_block_telegram(monkeypatch, tmp_path, 
 def test_llm_recovery_returns_full(monkeypatch, caplog) -> None:
     system_health.reset()
     _patch_processor_basics(monkeypatch, llm_result=_llm_result(provider="cloudflare"))
-    monkeypatch.setattr(processor, "enqueue_tg", lambda **_kwargs: DeliveryResult(True, False))
+    monkeypatch.setattr(
+        processor, "enqueue_tg", lambda **_kwargs: DeliveryResult(True, False)
+    )
 
     monkeypatch.setattr(processor, "run_llm_stage", lambda **_kwargs: None)
 
@@ -449,7 +500,9 @@ def test_llm_recovery_returns_full(monkeypatch, caplog) -> None:
 
     assert system_health.mode == OperationalMode.DEGRADED_NO_LLM
 
-    monkeypatch.setattr(processor, "run_llm_stage", lambda **_kwargs: _llm_result(provider="cloudflare"))
+    monkeypatch.setattr(
+        processor, "run_llm_stage", lambda **_kwargs: _llm_result(provider="cloudflare")
+    )
 
     with caplog.at_level(logging.INFO):
         process_message(
@@ -464,7 +517,9 @@ def test_llm_recovery_returns_full(monkeypatch, caplog) -> None:
         )
 
     assert system_health.mode == OperationalMode.FULL
-    assert any("\"event\":\"system_mode_changed\"" in record.message for record in caplog.records)
+    assert any(
+        '"event":"system_mode_changed"' in record.message for record in caplog.records
+    )
 
 
 def test_imap_account_recovery_after_backoff(tmp_path) -> None:
@@ -527,14 +582,15 @@ def test_imap_account_recovery_after_backoff(tmp_path) -> None:
     assert len(alerts) == 1
 
 
-
 def test_telegram_unavailable_enters_degraded_mode(monkeypatch, caplog) -> None:
     system_health.reset()
     _patch_processor_basics(monkeypatch, llm_result=_llm_result(provider="cloudflare"))
     monkeypatch.setattr(
         processor,
         "enqueue_tg",
-        lambda **_kwargs: DeliveryResult(delivered=False, retryable=True, error="network down"),
+        lambda **_kwargs: DeliveryResult(
+            delivered=False, retryable=True, error="network down"
+        ),
     )
 
     with caplog.at_level(logging.INFO):

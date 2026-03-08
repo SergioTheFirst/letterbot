@@ -43,10 +43,10 @@ logger = get_logger("mailbot")
 _TRUST_DELTA_THRESHOLD = 0.0
 _RELATIONSHIP_HEALTH_DELTA_THRESHOLD = 5.0
 _WARNING_EMOJI = "\u26a0\ufe0f"
-_TARGET_EMOJI = "\U0001F3AF"
-_CHART_EMOJI = "\U0001F4C8"
-_LEARNING_EMOJI = "\U0001F393"
-_OBSERVATION_EMOJI = "\U0001F50E"
+_TARGET_EMOJI = "\U0001f3af"
+_CHART_EMOJI = "\U0001f4c8"
+_LEARNING_EMOJI = "\U0001f393"
+_OBSERVATION_EMOJI = "\U0001f50e"
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,7 +339,9 @@ def _collect_digest_data(
             )
 
     if include_commitment_chain_digest:
-        resolved_config = commitment_chain_digest_config or CommitmentChainDigestConfig()
+        resolved_config = (
+            commitment_chain_digest_config or CommitmentChainDigestConfig()
+        )
         try:
             window_days = max(1, int(resolved_config.window_days))
         except (TypeError, ValueError):
@@ -477,9 +479,7 @@ def _build_digest_text(data: DigestData) -> str:
             "• Прогресс: "
             f"{data.trust_bootstrap_snapshot.samples_count}/{data.trust_bootstrap_min_samples}"
         )
-        lines.append(
-            "• Я пока показываю факты и наблюдения — без «готовых действий»."
-        )
+        lines.append("• Я пока показываю факты и наблюдения — без «готовых действий».")
     if data.deferred_total > 0:
         lines.append(
             "• Отложено писем: "
@@ -525,8 +525,7 @@ def _build_digest_text(data: DigestData) -> str:
             data.commitments_expired > 0
             and data.regret_minimization_stats is not None
             and not (
-                data.trust_bootstrap_snapshot
-                and data.trust_bootstrap_snapshot.active
+                data.trust_bootstrap_snapshot and data.trust_bootstrap_snapshot.active
             )
         ):
             stats = data.regret_minimization_stats
@@ -557,7 +556,10 @@ def _build_digest_text(data: DigestData) -> str:
         delta_pp = data.trust_delta * 100.0
         sign = "+" if delta_pp >= 0 else ""
         lines.append(f"• Уровень доверия: {sign}{delta_pp:.1f} п.п.")
-    if data.health_delta is not None and abs(data.health_delta) >= _RELATIONSHIP_HEALTH_DELTA_THRESHOLD:
+    if (
+        data.health_delta is not None
+        and abs(data.health_delta) >= _RELATIONSHIP_HEALTH_DELTA_THRESHOLD
+    ):
         sign = "+" if data.health_delta >= 0 else ""
         lines.append(f"• Здоровье отношений: {sign}{data.health_delta:.0f} пунктов")
     if data.anomaly_alerts:
@@ -569,12 +571,10 @@ def _build_digest_text(data: DigestData) -> str:
         if qm.correction_rate is not None:
             rate_display = f" ({qm.correction_rate * 100:.1f}% писем)"
         lines.append(
-            "• Качество: "
-            f"исправлений {qm.corrections_total} за 24ч{rate_display}"
+            "• Качество: " f"исправлений {qm.corrections_total} за 24ч{rate_display}"
         )
         priority_breakdown = ", ".join(
-            f"{escape_tg_html(item.key)}: {item.count}"
-            for item in qm.by_new_priority
+            f"{escape_tg_html(item.key)}: {item.count}" for item in qm.by_new_priority
         )
         if priority_breakdown:
             lines.append(f"  - по приоритету: {priority_breakdown}")
@@ -599,8 +599,7 @@ def _build_digest_text(data: DigestData) -> str:
         insights_lines: list[str] = []
         insight_count = 0
         action_mode = not (
-            data.trust_bootstrap_snapshot
-            and data.trust_bootstrap_snapshot.active
+            data.trust_bootstrap_snapshot and data.trust_bootstrap_snapshot.active
         )
         insights_header = (
             f"{_WARNING_EMOJI} <b>ТРЕБУЕТ ВНИМАНИЯ</b>"
@@ -629,10 +628,7 @@ def _build_digest_text(data: DigestData) -> str:
                             f"  <i>Текст: {escape_tg_html(template)}</i>"
                         )
             else:
-                insights_lines.append(
-                    "• Наблюдение: "
-                    f"застой в переписке — {label}"
-                )
+                insights_lines.append("• Наблюдение: " f"застой в переписке — {label}")
             insight_count += 1
         for item in data.silence_insights:
             if insight_count >= data.digest_insights_max_items:
@@ -655,8 +651,7 @@ def _build_digest_text(data: DigestData) -> str:
                         )
             else:
                 insights_lines.append(
-                    "• Наблюдение: "
-                    f"нет ответа — {contact}, {days}"
+                    "• Наблюдение: " f"нет ответа — {contact}, {days}"
                 )
             insight_count += 1
         if insights_lines:
@@ -689,9 +684,7 @@ def _build_digest_text(data: DigestData) -> str:
             low = int(distribution.get("low") or 0)
             medium = int(distribution.get("medium") or 0)
             high = int(distribution.get("high") or 0)
-            lines.append(
-                f"• Долг внимания: низк {low}, средн {medium}, высок {high}"
-            )
+            lines.append(f"• Долг внимания: низк {low}, средн {medium}, высок {high}")
         signal_counts = metrics.get("signal_counts")
         if isinstance(signal_counts, dict):
             deadlock = int(signal_counts.get("deadlock_count") or 0)
@@ -744,7 +737,10 @@ def _has_digest_content(data: DigestData) -> bool:
         return True
     if data.trust_delta is not None and abs(data.trust_delta) > _TRUST_DELTA_THRESHOLD:
         return True
-    if data.health_delta is not None and abs(data.health_delta) >= _RELATIONSHIP_HEALTH_DELTA_THRESHOLD:
+    if (
+        data.health_delta is not None
+        and abs(data.health_delta) >= _RELATIONSHIP_HEALTH_DELTA_THRESHOLD
+    ):
         return True
     if data.anomaly_alerts:
         return True

@@ -39,9 +39,29 @@ def test_support_page_renders_methods(tmp_path: Path) -> None:
             enabled=True,
             show_in_nav=True,
             methods=[
-                SupportMethod("card", "Карта", "Для переводов", "", "2202 20XX XXXX XXXX", "", "", ""),
-                SupportMethod("sbp", "СБП", "По номеру телефона", "+70000000000", "", "", "", ""),
-                SupportMethod("yoomoney", "ЮMoney", "", "", "", "https://yoomoney.ru/to/abc", "", ""),
+                SupportMethod(
+                    "card",
+                    "Карта",
+                    "Для переводов",
+                    "",
+                    "2202 20XX XXXX XXXX",
+                    "",
+                    "",
+                    "",
+                ),
+                SupportMethod(
+                    "sbp", "СБП", "По номеру телефона", "+70000000000", "", "", "", ""
+                ),
+                SupportMethod(
+                    "yoomoney",
+                    "ЮMoney",
+                    "",
+                    "",
+                    "",
+                    "https://yoomoney.ru/to/abc",
+                    "",
+                    "",
+                ),
             ],
             text="Поддержать можно любым удобным способом.",
         ),

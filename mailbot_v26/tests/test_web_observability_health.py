@@ -65,7 +65,9 @@ def _build_app_with_health_data(tmp_path: Path) -> tuple[Path, object]:
         snapshot_id="h1",
         ts_utc=now.timestamp(),
         gates_state=json.dumps({"passed": True, "failed": []}, ensure_ascii=False),
-        metrics_brief=json.dumps({"telegram_delivery_success_rate": 0.99}, ensure_ascii=False),
+        metrics_brief=json.dumps(
+            {"telegram_delivery_success_rate": 0.99}, ensure_ascii=False
+        ),
         system_mode="FULL",
         account_id="primary@example.com",
     )
@@ -153,7 +155,7 @@ def test_health_page_component_matrix(tmp_path: Path) -> None:
         assert page.status_code == 200
         body = page.get_data(as_text=True)
         assert "System health" in body
-        assert "data-testid=\"health-component-matrix\"" in body
+        assert 'data-testid="health-component-matrix"' in body
 
 
 def test_health_mode_blocks_toggle(tmp_path: Path) -> None:
@@ -163,11 +165,11 @@ def test_health_mode_blocks_toggle(tmp_path: Path) -> None:
 
         basic = client.get("/health?mode=basic")
         assert basic.status_code == 200
-        assert "data-testid=\"health-engineer-block\"" not in basic.get_data(as_text=True)
+        assert 'data-testid="health-engineer-block"' not in basic.get_data(as_text=True)
 
         engineer = client.get("/health?mode=engineer")
         assert engineer.status_code == 200
-        assert "data-testid=\"health-engineer-block\"" in engineer.get_data(as_text=True)
+        assert 'data-testid="health-engineer-block"' in engineer.get_data(as_text=True)
 
 
 def test_health_trend_order_deterministic(tmp_path: Path) -> None:
@@ -179,7 +181,9 @@ def test_health_trend_order_deterministic(tmp_path: Path) -> None:
         snapshot_id="snap-a",
         ts_utc=base_ts,
         gates_state=json.dumps({"passed": True, "failed": []}, ensure_ascii=False),
-        metrics_brief=json.dumps({"telegram_delivery_success_rate": 0.99}, ensure_ascii=False),
+        metrics_brief=json.dumps(
+            {"telegram_delivery_success_rate": 0.99}, ensure_ascii=False
+        ),
         system_mode="FULL",
         account_id="primary@example.com",
     )
@@ -188,7 +192,9 @@ def test_health_trend_order_deterministic(tmp_path: Path) -> None:
         snapshot_id="snap-b",
         ts_utc=base_ts,
         gates_state=json.dumps({"passed": True, "failed": []}, ensure_ascii=False),
-        metrics_brief=json.dumps({"telegram_delivery_success_rate": 0.99}, ensure_ascii=False),
+        metrics_brief=json.dumps(
+            {"telegram_delivery_success_rate": 0.99}, ensure_ascii=False
+        ),
         system_mode="FULL",
         account_id="primary@example.com",
     )
@@ -197,7 +203,9 @@ def test_health_trend_order_deterministic(tmp_path: Path) -> None:
         snapshot_id="snap-c",
         ts_utc=base_ts - 10,
         gates_state=json.dumps({"passed": True, "failed": []}, ensure_ascii=False),
-        metrics_brief=json.dumps({"telegram_delivery_success_rate": 0.99}, ensure_ascii=False),
+        metrics_brief=json.dumps(
+            {"telegram_delivery_success_rate": 0.99}, ensure_ascii=False
+        ),
         system_mode="FULL",
         account_id="primary@example.com",
     )
@@ -221,4 +229,4 @@ def test_health_basic_mode_hides_engineer_dump(tmp_path: Path) -> None:
         body = page.get_data(as_text=True)
         assert page.status_code == 200
         assert "Health timeline" not in body
-        assert "data-testid=\"health-engineer-block\"" not in body
+        assert 'data-testid="health-engineer-block"' not in body

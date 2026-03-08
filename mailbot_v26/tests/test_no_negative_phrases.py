@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
 
-
 FORBIDDEN_SUBSTRINGS = [
     "тело письма отсутств",
     "полезная информация",
@@ -30,8 +29,18 @@ def test_message_has_no_negative_phrases():
         sender="robot@example.com",
         body="",
         attachments=[
-            Attachment(filename="draft.docx", content=b"", content_type="application/msword", text=""),
-            Attachment(filename="table.xlsx", content=b"", content_type="application/vnd.ms-excel", text=""),
+            Attachment(
+                filename="draft.docx",
+                content=b"",
+                content_type="application/msword",
+                text="",
+            ),
+            Attachment(
+                filename="table.xlsx",
+                content=b"",
+                content_type="application/vnd.ms-excel",
+                text="",
+            ),
         ],
     )
 

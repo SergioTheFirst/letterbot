@@ -48,7 +48,9 @@ class ShadowPriorityEngine:
                 reason = "Повышен до 🟡: 2+ писем с 🟡/🔴 от отправителя (analytics)"
 
         except Exception as exc:  # pragma: no cover - defensive
-            logger.error("ShadowPriorityEngine failed to read analytics: %s", exc, exc_info=True)
+            logger.error(
+                "ShadowPriorityEngine failed to read analytics: %s", exc, exc_info=True
+            )
 
         return shadow_priority, reason
 

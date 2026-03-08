@@ -6,7 +6,6 @@ import unicodedata
 from email.header import decode_header
 from typing import Iterable
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -22,7 +21,9 @@ def _decode_bytes(data: bytes, encodings: Iterable[str | None]) -> str:
             continue
 
     decoded = data.decode("utf-8", errors="ignore")
-    logger.warning("Decoding used utf-8 with errors='ignore' after attempts: %s", ", ".join(tried))
+    logger.warning(
+        "Decoding used utf-8 with errors='ignore' after attempts: %s", ", ".join(tried)
+    )
     return decoded
 
 
@@ -63,9 +64,7 @@ def decode_mime_header(value: str) -> str:
     parts: list[str] = []
     for chunk, encoding in decode_header(value):
         if isinstance(chunk, bytes):
-            decoded = _decode_bytes(
-                chunk, (encoding, "utf-8", "koi8-r", "cp1251")
-            )
+            decoded = _decode_bytes(chunk, (encoding, "utf-8", "koi8-r", "cp1251"))
         else:
             decoded = chunk if chunk is not None else ""
         parts.append(decoded)

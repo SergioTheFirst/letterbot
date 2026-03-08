@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Protocol
 
 from mailbot_v26.config.temporal_rules import DEFAULT_TEMPORAL_RULES, TemporalRuleConfig
@@ -25,12 +25,13 @@ class TemporalRule(Protocol):
         entity_id: str,
         from_email: str | None,
         now: datetime,
-    ) -> list[TemporalState]:
-        ...
+    ) -> list[TemporalState]: ...
 
 
 class CommitmentDeadlineRule:
-    def __init__(self, analytics: KnowledgeAnalytics, config: TemporalRuleConfig) -> None:
+    def __init__(
+        self, analytics: KnowledgeAnalytics, config: TemporalRuleConfig
+    ) -> None:
         self.analytics = analytics
         self.config = config
 
@@ -91,7 +92,9 @@ class CommitmentDeadlineRule:
 
 
 class ResponseOverdueRule:
-    def __init__(self, analytics: KnowledgeAnalytics, config: TemporalRuleConfig) -> None:
+    def __init__(
+        self, analytics: KnowledgeAnalytics, config: TemporalRuleConfig
+    ) -> None:
         self.analytics = analytics
         self.config = config
 
@@ -116,7 +119,10 @@ class ResponseOverdueRule:
         if not response_times:
             return []
         avg_response = sum(response_times) / len(response_times)
-        expected_hours = max(self.config.response_min_hours, avg_response * self.config.response_multiplier)
+        expected_hours = max(
+            self.config.response_min_hours,
+            avg_response * self.config.response_multiplier,
+        )
         elapsed_hours = (now - last_received).total_seconds() / 3600.0
         if elapsed_hours <= expected_hours:
             return []
@@ -145,7 +151,9 @@ class ResponseOverdueRule:
 
 
 class SilenceBreakRule:
-    def __init__(self, analytics: KnowledgeAnalytics, config: TemporalRuleConfig) -> None:
+    def __init__(
+        self, analytics: KnowledgeAnalytics, config: TemporalRuleConfig
+    ) -> None:
         self.analytics = analytics
         self.config = config
 
@@ -156,7 +164,9 @@ class SilenceBreakRule:
         from_email: str | None,
         now: datetime,
     ) -> list[TemporalState]:
-        baseline = self.analytics.entity_baseline(entity_id=entity_id, metric="email_frequency")
+        baseline = self.analytics.entity_baseline(
+            entity_id=entity_id, metric="email_frequency"
+        )
         baseline_value = baseline.get("baseline_value")
         if baseline_value is None:
             return []

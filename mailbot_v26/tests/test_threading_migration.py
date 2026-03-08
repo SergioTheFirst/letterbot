@@ -23,8 +23,7 @@ def test_thread_columns_added_on_new_db(tmp_path: Path) -> None:
 def test_thread_columns_added_on_existing_db(tmp_path: Path) -> None:
     db_path = tmp_path / "database.sqlite"
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE emails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_email TEXT,
@@ -36,8 +35,7 @@ def test_thread_columns_added_on_existing_db(tmp_path: Path) -> None:
                 body_summary TEXT,
                 raw_body_hash TEXT
             );
-            """
-        )
+            """)
         conn.commit()
 
     KnowledgeDB(db_path)

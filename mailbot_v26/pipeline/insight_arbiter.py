@@ -91,22 +91,20 @@ def _build_fallback_summary(
 ) -> str:
     attachments_count = len(attachment_details)
     if extracted_text_len <= 0 and attachments_count == 0:
-        return "Не удалось извлечь текст письма или вложений; требуется ручной просмотр."
+        return (
+            "Не удалось извлечь текст письма или вложений; требуется ручной просмотр."
+        )
     prefix = "Автоматическая сводка слишком общая."
     if attachments_count > 0 and extracted_text_len <= 0:
         description = _attachment_description(attachment_details)
-        return (
-            f"{prefix} Письмо содержит {description}, текст письма не извлечён."
-        )
+        return f"{prefix} Письмо содержит {description}, текст письма не извлечён."
     if attachments_count == 0:
         return (
             f"{prefix} В письме {extracted_text_len} символов текста; "
             "требуется ручной просмотр."
         )
     description = _attachment_description(attachment_details)
-    return (
-        f"{prefix} В письме {extracted_text_len} символов текста и {description}."
-    )
+    return f"{prefix} В письме {extracted_text_len} символов текста и {description}."
 
 
 def apply_insight_arbiter(payload: InsightArbiterInput) -> InsightArbiterResult:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import configparser
 import logging
 import math
 from dataclasses import dataclass
@@ -85,15 +84,21 @@ class TrustScoreCalculator:
         section = parser["trust"] if "trust" in parser else None
         if section is not None:
             try:
-                half_life = max(1.0, float(section.get("half_life_days", fallback=half_life)))
+                half_life = max(
+                    1.0, float(section.get("half_life_days", fallback=half_life))
+                )
             except ValueError:
                 half_life = self.DEFAULT_HALF_LIFE_DAYS
             try:
-                weight_commitment = float(section.get("weight_commitment", fallback=weight_commitment))
+                weight_commitment = float(
+                    section.get("weight_commitment", fallback=weight_commitment)
+                )
             except ValueError:
                 weight_commitment = self.DEFAULT_WEIGHT_COMMITMENT
             try:
-                weight_response = float(section.get("weight_response", fallback=weight_response))
+                weight_response = float(
+                    section.get("weight_response", fallback=weight_response)
+                )
             except ValueError:
                 weight_response = self.DEFAULT_WEIGHT_RESPONSE
             try:
@@ -103,14 +108,22 @@ class TrustScoreCalculator:
             try:
                 max_response_stddev = max(
                     1.0,
-                    float(section.get("max_response_stddev_hours", fallback=max_response_stddev)),
+                    float(
+                        section.get(
+                            "max_response_stddev_hours", fallback=max_response_stddev
+                        )
+                    ),
                 )
             except ValueError:
                 max_response_stddev = self.DEFAULT_MAX_RESPONSE_STDDEV_HOURS
             try:
                 min_response_samples = max(
                     1,
-                    int(section.get("min_response_samples", fallback=min_response_samples)),
+                    int(
+                        section.get(
+                            "min_response_samples", fallback=min_response_samples
+                        )
+                    ),
                 )
             except ValueError:
                 min_response_samples = self.DEFAULT_MIN_RESPONSE_SAMPLES
@@ -173,11 +186,7 @@ class TrustScoreCalculator:
         )
         sample_size = commitment_samples + response_samples + trend_samples
 
-        if (
-            commitment_score is None
-            or response_score is None
-            or trend_score is None
-        ):
+        if commitment_score is None or response_score is None or trend_score is None:
             snapshot = TrustSnapshot(
                 entity_id=entity_id,
                 score=None,
@@ -194,9 +203,7 @@ class TrustScoreCalculator:
             )
 
         weight_sum = (
-            config.weight_commitment
-            + config.weight_response
-            + config.weight_trend
+            config.weight_commitment + config.weight_response + config.weight_trend
         )
         if weight_sum <= 0:
             weight_sum = (
@@ -255,7 +262,9 @@ class TrustScoreCalculator:
         sample_size = 0
         for row in rows:
             payload = self.analytics.event_payload(row)
-            status = str(payload.get("new_status") or payload.get("status") or "").lower()
+            status = str(
+                payload.get("new_status") or payload.get("status") or ""
+            ).lower()
             if status not in {"fulfilled", "expired"}:
                 continue
             weight = self._decay_weight(
@@ -384,9 +393,10 @@ class TrustScoreCalculator:
         if weight_sum <= 0:
             return None, len(values)
         weighted_mean = sum(value * weight for value, weight in values) / weight_sum
-        variance = sum(
-            weight * (value - weighted_mean) ** 2 for value, weight in values
-        ) / weight_sum
+        variance = (
+            sum(weight * (value - weighted_mean) ** 2 for value, weight in values)
+            / weight_sum
+        )
         stddev = math.sqrt(variance)
         normalized = 1.0 - min(
             max(stddev / self._get_config().max_response_stddev_hours, 0.0),

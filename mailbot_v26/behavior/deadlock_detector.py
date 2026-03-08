@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from mailbot_v26.config.deadlock_policy import DeadlockPolicyConfig
 from mailbot_v26.events.contract import EventType, EventV1
@@ -25,9 +25,7 @@ def maybe_emit_deadlock(
 
     try:
         cutoff_ts = now_ts - (policy.window_days * 86400)
-        cutoff_iso = datetime.fromtimestamp(
-            cutoff_ts, tz=timezone.utc
-        ).isoformat()
+        cutoff_iso = datetime.fromtimestamp(cutoff_ts, tz=timezone.utc).isoformat()
         with sqlite3.connect(knowledge_db.path) as conn:
             email_count = conn.execute(
                 """

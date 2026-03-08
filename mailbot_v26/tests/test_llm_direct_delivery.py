@@ -42,7 +42,9 @@ def _setup_runtime(monkeypatch) -> None:
     monkeypatch.setattr(
         processor,
         "runtime_flag_store",
-        SimpleNamespace(get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=False), False)),
+        SimpleNamespace(
+            get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=False), False)
+        ),
     )
     monkeypatch.setattr(
         processor,
@@ -79,8 +81,11 @@ def test_direct_llm_preferred_over_queue_heuristic(monkeypatch) -> None:
     monkeypatch.setattr(
         processor,
         "get_llm_queue_config",
-        lambda: LLMQueueConfig(llm_request_queue_enabled=True, max_concurrent_llm_calls=1),
+        lambda: LLMQueueConfig(
+            llm_request_queue_enabled=True, max_concurrent_llm_calls=1
+        ),
     )
+
     def _enqueue(*, email_id: int, payload):
         captured["payload"] = payload
         return DeliveryResult(delivered=True, retryable=False)
@@ -119,7 +124,9 @@ def test_heuristic_fallback_used_when_direct_llm_fails(monkeypatch) -> None:
     monkeypatch.setattr(
         processor,
         "get_llm_queue_config",
-        lambda: LLMQueueConfig(llm_request_queue_enabled=False, max_concurrent_llm_calls=1),
+        lambda: LLMQueueConfig(
+            llm_request_queue_enabled=False, max_concurrent_llm_calls=1
+        ),
     )
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue)
 

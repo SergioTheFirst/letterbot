@@ -24,8 +24,7 @@ password: my-password
 api_token: very-secret-token
 telegram_token: tg-secret
 regular_field: keep-me
-""".strip()
-        + "\n",
+""".strip() + "\n",
         encoding="utf-8",
     )
     log_path = tmp_path / "mailbot.log"

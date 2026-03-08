@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 _DEADLOCK_TEMPLATE = (
     "Предлагаю созвониться на 15 минут сегодня или завтра — так быстрее решим вопрос."
 )

@@ -9,7 +9,11 @@ from mailbot_v26.ui.branding import WATERMARK_LINE
 
 def test_tg_payload_with_attachments():
     attachments = [
-        {"filename": "doc1.doc", "content_type": "application/msword", "text": "a" * 1143},
+        {
+            "filename": "doc1.doc",
+            "content_type": "application/msword",
+            "text": "a" * 1143,
+        },
         {
             "filename": "sheet1.xls",
             "content_type": "application/vnd.ms-excel",
@@ -69,9 +73,9 @@ def test_tg_payload_never_subject_only():
         attachment_summary="",
     )
 
-    assert "Письмо получено" in fallback
-    assert "Основной текст не удалось безопасно отобразить." in fallback
-    assert "Вложения: 0" in fallback
+    assert "от hq@example.com" in fallback
+    assert subject in fallback
+    assert "Действий не требуется" in fallback
     assert WATERMARK_LINE in fallback
 
 
@@ -136,9 +140,17 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, caplog):
             ENABLE_ATTENTION_DEBT=False,
         ),
     )
-    monkeypatch.setattr(processor_module.context_store, "resolve_sender_entity", lambda **kwargs: None)
-    monkeypatch.setattr(processor_module.shadow_priority_engine, "compute", lambda **kwargs: ("🔵", None))
-    monkeypatch.setattr(processor_module.shadow_action_engine, "compute", lambda **kwargs: [])
+    monkeypatch.setattr(
+        processor_module.context_store, "resolve_sender_entity", lambda **kwargs: None
+    )
+    monkeypatch.setattr(
+        processor_module.shadow_priority_engine,
+        "compute",
+        lambda **kwargs: ("🔵", None),
+    )
+    monkeypatch.setattr(
+        processor_module.shadow_action_engine, "compute", lambda **kwargs: []
+    )
     monkeypatch.setattr(
         processor_module.DecisionTraceWriter, "write", lambda self, **kwargs: None
     )
@@ -162,9 +174,11 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, caplog):
 
     assert "tg_payload_invalid" in caplog.text
     telegram_text = captured.get("telegram_text", "")
-    assert telegram_text.startswith(
-        "Внимание: доставка в Telegram деградировала"
-    ) or telegram_text.startswith("🔵 от hq@example.com:") or telegram_text.startswith("Письмо получено")
+    assert (
+        telegram_text.startswith("Внимание: доставка в Telegram деградировала")
+        or telegram_text.startswith("🔵 от hq@example.com:")
+        or telegram_text.startswith("Письмо получено")
+    )
     assert any(event.get("type") == "tg_payload_invalid" for event in emitted_events)
 
 
@@ -195,5 +209,7 @@ def test_validate_tg_payload_rejects_if_no_attachment_marker():
         action_line="Ответить",
     )
 
-    with pytest.raises(processor_module.InvalidTelegramPayload, match="attachments missing"):
+    with pytest.raises(
+        processor_module.InvalidTelegramPayload, match="attachments missing"
+    ):
         processor_module.validate_tg_payload(text_no_marker, ctx)

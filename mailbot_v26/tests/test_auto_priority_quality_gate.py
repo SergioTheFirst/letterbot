@@ -62,7 +62,9 @@ def _emit_event(
     )
 
 
-def _emit_processed(emitter: ContractEventEmitter, *, count: int, ts: datetime, engine: str) -> None:
+def _emit_processed(
+    emitter: ContractEventEmitter, *, count: int, ts: datetime, engine: str
+) -> None:
     for idx in range(count):
         _emit_event(
             emitter,

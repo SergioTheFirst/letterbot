@@ -39,6 +39,7 @@ def _strip_html_tags(text: str) -> str:
 def _sanitize_user_facing_text(text: str) -> str:
     return normalize_mojibake_text(text)
 
+
 def _looks_like_parse_error(error_text: str) -> bool:
     lowered = (error_text or "").lower()
     return "unsupported start tag" in lowered or "can't parse" in lowered

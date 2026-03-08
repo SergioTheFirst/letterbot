@@ -4,7 +4,6 @@ from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
 from mailbot_v26.tests._web_helpers import login_with_csrf
 
-
 FORBIDDEN = [
     "no " + "data",
     "nothing " + "to show",

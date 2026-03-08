@@ -3,7 +3,6 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
 
 from mailbot_v26.events.contract import EventType, EventV1, fingerprint
 from mailbot_v26.observability.processing_span import ProcessingSpanRecorder
@@ -245,7 +244,16 @@ def test_latency_summary_endpoint(tmp_path: Path) -> None:
         assert response.status_code == 200
         payload = response.get_json()
         assert payload is not None
-        assert set(["window_days", "summary", "recent_errors", "slowest", "account_email", "account_emails"]) <= set(payload.keys())
+        assert set(
+            [
+                "window_days",
+                "summary",
+                "recent_errors",
+                "slowest",
+                "account_email",
+                "account_emails",
+            ]
+        ) <= set(payload.keys())
 
 
 def test_latency_summary_forbidden_strings(tmp_path: Path) -> None:
@@ -282,8 +290,12 @@ def test_latency_summary_deterministic(tmp_path: Path) -> None:
             "account_emails": "primary@example.com,secondary@example.com",
             "window_days": "7",
         }
-        first = client.get("/api/v1/observability/latency_summary", query_string=query).get_json()
-        second = client.get("/api/v1/observability/latency_summary", query_string=query).get_json()
+        first = client.get(
+            "/api/v1/observability/latency_summary", query_string=query
+        ).get_json()
+        second = client.get(
+            "/api/v1/observability/latency_summary", query_string=query
+        ).get_json()
         assert first == second
 
 
@@ -291,7 +303,9 @@ def test_latency_page_masks_forbidden_phrases(tmp_path: Path) -> None:
     app = _build_app_with_activity(tmp_path)
     with app.test_client() as client:
         login_with_csrf(client, "pw")
-        page = client.get("/latency", query_string={"account_email": "primary@example.com"})
+        page = client.get(
+            "/latency", query_string={"account_email": "primary@example.com"}
+        )
         assert page.status_code == 200
         text = page.get_data(as_text=True).lower()
         for token in [
@@ -333,7 +347,9 @@ def test_latency_activity_masks_pii_by_default(tmp_path: Path) -> None:
     app = _build_app_with_activity(tmp_path)
     with app.test_client() as client:
         login_with_csrf(client, "pw")
-        page = client.get("/latency", query_string={"account_email": "primary@example.com"})
+        page = client.get(
+            "/latency", query_string={"account_email": "primary@example.com"}
+        )
         assert page.status_code == 200
         analytics = KnowledgeAnalytics(app.config["DB_PATH"], read_only=True)
         rows = analytics.recent_mail_activity(

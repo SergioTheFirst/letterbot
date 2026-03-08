@@ -16,7 +16,9 @@ def test_import_and_version_source_of_truth() -> None:
 
 
 def test_web_cockpit_and_template_show_version(tmp_path: Path) -> None:
-    rendered = render_template("mailbot_v26/web_observability/templates/base.html", app_version=get_version())
+    rendered = render_template(
+        "mailbot_v26/web_observability/templates/base.html", app_version=get_version()
+    )
     assert f"Letterbot v{__version__}" in rendered
 
     db_path = tmp_path / "observability.sqlite"
@@ -56,8 +58,12 @@ def test_tg_payload_generation_smoke() -> None:
 
 
 def test_examples_are_readable() -> None:
-    settings_text = Path("mailbot_v26/config/settings.ini.example").read_text(encoding="utf-8")
-    accounts_text = Path("mailbot_v26/config/accounts.ini.example").read_text(encoding="utf-8")
+    settings_text = Path("mailbot_v26/config/settings.ini.example").read_text(
+        encoding="utf-8"
+    )
+    accounts_text = Path("mailbot_v26/config/accounts.ini.example").read_text(
+        encoding="utf-8"
+    )
 
     assert "[general]" in settings_text
     assert "[example_account]" in accounts_text

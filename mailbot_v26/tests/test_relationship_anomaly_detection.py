@@ -53,7 +53,9 @@ def _seed_entity(db_path, from_email: str) -> str:
     return resolution.entity_id
 
 
-def _insert_email(conn: sqlite3.Connection, *, from_email: str, received_at: str) -> int:
+def _insert_email(
+    conn: sqlite3.Connection, *, from_email: str, received_at: str
+) -> int:
     cur = conn.execute(
         """
         INSERT INTO emails (
@@ -70,7 +72,9 @@ def _insert_email(conn: sqlite3.Connection, *, from_email: str, received_at: str
     return int(cur.lastrowid)
 
 
-def _insert_commitment(conn: sqlite3.Connection, *, email_row_id: int, status: str) -> None:
+def _insert_commitment(
+    conn: sqlite3.Connection, *, email_row_id: int, status: str
+) -> None:
     conn.execute(
         """
         INSERT INTO commitments (
@@ -94,7 +98,9 @@ def _insert_commitment(conn: sqlite3.Connection, *, email_row_id: int, status: s
     conn.commit()
 
 
-def _seed_response_times(db_path, entity_id: str, now: datetime, entries: list[tuple[int, float]]) -> None:
+def _seed_response_times(
+    db_path, entity_id: str, now: datetime, entries: list[tuple[int, float]]
+) -> None:
     store = ContextStore(db_path)
     for offset, hours in entries:
         store.record_interaction_event(
@@ -163,7 +169,9 @@ def test_commitment_break_pattern_detected(tmp_path) -> None:
 
     anomalies = detector.detect(entity_id=entity_id, from_email="sender@example.com")
 
-    assert any(anomaly.anomaly_type == "COMMITMENT_BREAK_PATTERN" for anomaly in anomalies)
+    assert any(
+        anomaly.anomaly_type == "COMMITMENT_BREAK_PATTERN" for anomaly in anomalies
+    )
 
 
 def test_relationship_health_drop_detected(tmp_path) -> None:
@@ -192,7 +200,9 @@ def test_relationship_health_drop_detected(tmp_path) -> None:
 
     anomalies = detector.detect(entity_id=entity_id, from_email="sender@example.com")
 
-    assert any(anomaly.anomaly_type == "RELATIONSHIP_HEALTH_DROP" for anomaly in anomalies)
+    assert any(
+        anomaly.anomaly_type == "RELATIONSHIP_HEALTH_DROP" for anomaly in anomalies
+    )
 
 
 def test_insufficient_data_yields_no_anomaly(tmp_path) -> None:

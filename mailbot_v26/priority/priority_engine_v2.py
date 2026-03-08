@@ -107,7 +107,9 @@ def _load_ini_with_fallback(config_dir: Path) -> configparser.ConfigParser:
 def load_priority_v2_config(base_dir: Path | None = None) -> PriorityV2Config:
     config_dir = base_dir or _DEFAULT_CONFIG_DIR
     parser = _load_ini_with_fallback(config_dir)
-    section = parser[_PRIORITY_CONFIG_SECTION] if _PRIORITY_CONFIG_SECTION in parser else {}
+    section = (
+        parser[_PRIORITY_CONFIG_SECTION] if _PRIORITY_CONFIG_SECTION in parser else {}
+    )
 
     def _get_int(key: str, default: int) -> int:
         try:
@@ -133,7 +135,9 @@ def load_priority_v2_config(base_dir: Path | None = None) -> PriorityV2Config:
         deadline_7d_points=_get_int("deadline_7d_points", 10),
         type_invoice_final_points=_get_int("type_invoice_final_points", 25),
         type_reminder_escalation_points=_get_int("type_reminder_escalation_points", 22),
-        type_contract_termination_points=_get_int("type_contract_termination_points", 20),
+        type_contract_termination_points=_get_int(
+            "type_contract_termination_points", 20
+        ),
         type_claim_points=_get_int("type_claim_points", 20),
         vip_base_score=_get_int("vip_base_score", 20),
         vip_multiplier_fyi=_get_float("vip_multiplier_fyi", 0.3),
@@ -237,7 +241,9 @@ class PriorityEngineV2:
         normalized_subject = subject or ""
         reference_time = received_at or datetime.now(timezone.utc)
 
-        def add_points(points: int, reason_code: str, signal: str, detail: str | None = None) -> None:
+        def add_points(
+            points: int, reason_code: str, signal: str, detail: str | None = None
+        ) -> None:
             nonlocal score
             if points <= 0:
                 return
@@ -288,7 +294,11 @@ class PriorityEngineV2:
                 "invoice_subject",
                 detail=normalized_subject[:60],
             )
-        if invoice_subject_boost_allowed and has_invoice_subject and has_excel_attachment:
+        if (
+            invoice_subject_boost_allowed
+            and has_invoice_subject
+            and has_excel_attachment
+        ):
             add_points(
                 20,
                 "PRIO_INVOICE_EXCEL_ATTACHMENT",
@@ -296,8 +306,12 @@ class PriorityEngineV2:
                 detail="excel",
             )
 
-        alert_hits = self._count_keyword_hits(combined_text, self._TECH_SECURITY_ALERT_MARKERS)
-        subject_alert = self._find_keyword(subject or "", self._TECH_SECURITY_ALERT_MARKERS)
+        alert_hits = self._count_keyword_hits(
+            combined_text, self._TECH_SECURITY_ALERT_MARKERS
+        )
+        subject_alert = self._find_keyword(
+            subject or "", self._TECH_SECURITY_ALERT_MARKERS
+        )
         if subject_alert or alert_hits >= 2:
             add_points(
                 36,
@@ -374,7 +388,9 @@ class PriorityEngineV2:
 
         type_points, type_reason = self._mail_type_boost(normalized_mail_type)
         if type_points > 0 and type_reason:
-            add_points(type_points, type_reason, "mail_type", detail=normalized_mail_type)
+            add_points(
+                type_points, type_reason, "mail_type", detail=normalized_mail_type
+            )
 
         events_window = self._recent_email_events(reference_time)
         frequency_ratio = self._frequency_ratio(
@@ -382,7 +398,10 @@ class PriorityEngineV2:
             reference_time=reference_time,
             from_email=from_email,
         )
-        if frequency_ratio is not None and frequency_ratio > self._config.freq_spike_threshold:
+        if (
+            frequency_ratio is not None
+            and frequency_ratio > self._config.freq_spike_threshold
+        ):
             add_points(
                 self._config.freq_spike_points,
                 "PRIO_FREQ_SPIKE_3X",
@@ -417,7 +436,10 @@ class PriorityEngineV2:
             if self._contains_any(normalized_subject, self._FYI_MARKERS):
                 multiplier *= self._config.vip_multiplier_fyi
                 vip_reasons.append("PRIO_VIP_FYI_DAMPEN")
-            if frequency_ratio is not None and frequency_ratio > self._config.freq_spike_threshold:
+            if (
+                frequency_ratio is not None
+                and frequency_ratio > self._config.freq_spike_threshold
+            ):
                 multiplier *= self._config.vip_multiplier_freq
                 vip_reasons.append("PRIO_VIP_FREQ_DAMPEN")
             if normalized_mail_type in self._COMMITMENT_TYPES:
@@ -501,12 +523,21 @@ class PriorityEngineV2:
             "AMOUNT_10K": bool(amount_value is not None and amount_value > 10_000),
             "AMOUNT_50K": bool(amount_value is not None and amount_value > 50_000),
             "AMOUNT_100K": bool(amount_value is not None and amount_value > 100_000),
-            "DEADLINE_WITHIN_1D": bool(deadline_days is not None and deadline_days <= 1),
-            "DEADLINE_WITHIN_3D": bool(deadline_days is not None and deadline_days <= 3),
-            "DEADLINE_WITHIN_7D": bool(deadline_days is not None and deadline_days <= 7),
+            "DEADLINE_WITHIN_1D": bool(
+                deadline_days is not None and deadline_days <= 1
+            ),
+            "DEADLINE_WITHIN_3D": bool(
+                deadline_days is not None and deadline_days <= 3
+            ),
+            "DEADLINE_WITHIN_7D": bool(
+                deadline_days is not None and deadline_days <= 7
+            ),
             "MAIL_TYPE_BOOST": type_points > 0,
             "TECH_SECURITY_ALERT": bool(
-                self._count_keyword_hits(combined_text, self._TECH_SECURITY_ALERT_MARKERS) > 0
+                self._count_keyword_hits(
+                    combined_text, self._TECH_SECURITY_ALERT_MARKERS
+                )
+                > 0
             ),
             "FREQUENCY_SPIKE": bool(
                 frequency_ratio is not None
@@ -723,7 +754,7 @@ class PriorityEngineV2:
     @staticmethod
     def _parse_amount(raw: str) -> float | None:
         cleaned = re.sub(r"[^0-9,\.\s]", "", str(raw))
-        cleaned = cleaned.replace("\u00A0", " ")
+        cleaned = cleaned.replace("\u00a0", " ")
         cleaned = cleaned.strip()
         if not cleaned:
             return None
@@ -764,7 +795,9 @@ class PriorityEngineV2:
 
     @staticmethod
     def _normalize_subject(subject: str) -> str:
-        cleaned = re.sub(r"^(re:|fw:|fwd:)\s*", "", subject.strip(), flags=re.IGNORECASE)
+        cleaned = re.sub(
+            r"^(re:|fw:|fwd:)\s*", "", subject.strip(), flags=re.IGNORECASE
+        )
         cleaned = re.sub(r"\s+", " ", cleaned)
         return cleaned.lower()
 

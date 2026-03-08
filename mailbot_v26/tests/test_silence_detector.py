@@ -108,9 +108,7 @@ def test_silence_does_not_emit_when_recent(tmp_path) -> None:
 
     assert emitted == 0
     with sqlite3.connect(db_path) as conn:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM events_v1"
-        ).fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM events_v1").fetchone()[0]
     assert count == 0
 
 

@@ -27,15 +27,11 @@ def render_windows_version_info(version: str | None = None) -> str:
         "      StringTable('040904B0', [\n"
         "        StringStruct('CompanyName', 'Letterbot'),\n"
         "        StringStruct('FileDescription', 'Letterbot'),\n"
-        "        StringStruct('FileVersion', '"
-        + escaped
-        + "'),\n"
+        "        StringStruct('FileVersion', '" + escaped + "'),\n"
         "        StringStruct('InternalName', 'Letterbot'),\n"
         "        StringStruct('OriginalFilename', 'Letterbot.exe'),\n"
         "        StringStruct('ProductName', 'Letterbot'),\n"
-        "        StringStruct('ProductVersion', '"
-        + escaped
-        + "')\n"
+        "        StringStruct('ProductVersion', '" + escaped + "')\n"
         "      ])\n"
         "    ]),\n"
         "    VarFileInfo([VarStruct('Translation', [1033, 1200])])\n"

@@ -26,7 +26,9 @@ EMAILS_REQUIRED_COLUMNS: set[str] = {
 }
 
 
-def run_self_check(db_path: Path | str | None = None, project_root: Path | None = None) -> None:
+def run_self_check(
+    db_path: Path | str | None = None, project_root: Path | None = None
+) -> None:
     """
     Выполняет диагностический self-check CRM.
     Никогда не бросает исключения наружу и не меняет поведение бота.
@@ -44,7 +46,12 @@ def _safe_call(fn: Callable[..., object], *args: object) -> None:
     try:
         fn(*args)
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("[SELF-CHECK] Unexpected failure in %s: %s", getattr(fn, "__name__", fn), exc, exc_info=True)
+        logger.error(
+            "[SELF-CHECK] Unexpected failure in %s: %s",
+            getattr(fn, "__name__", fn),
+            exc,
+            exc_info=True,
+        )
 
 
 def _check_schema(db_path: Path) -> None:
@@ -61,14 +68,18 @@ def _check_schema(db_path: Path) -> None:
 
     missing = EMAILS_REQUIRED_COLUMNS - columns
     if missing:
-        logger.error("[SELF-CHECK] Missing email columns: %s", ", ".join(sorted(missing)))
+        logger.error(
+            "[SELF-CHECK] Missing email columns: %s", ", ".join(sorted(missing))
+        )
     else:
         logger.info("[SELF-CHECK] emails schema OK (%d columns)", len(columns))
 
 
 def _check_priority_reason_persistence(db_path: Path) -> None:
     if not db_path.exists():
-        logger.error("[SELF-CHECK] priority_reason check skipped: DB not found at %s", db_path)
+        logger.error(
+            "[SELF-CHECK] priority_reason check skipped: DB not found at %s", db_path
+        )
         return
 
     savepoint = "sc_priority_reason"
@@ -159,9 +170,15 @@ def _log_crm_metrics(db_path: Path) -> None:
         with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
             total = _fetch_single_int(conn, "SELECT COUNT(*) FROM emails;")
             priority_counts = {
-                "🔴": _fetch_single_int(conn, "SELECT COUNT(*) FROM emails WHERE priority = '🔴';"),
-                "🟡": _fetch_single_int(conn, "SELECT COUNT(*) FROM emails WHERE priority = '🟡';"),
-                "🔵": _fetch_single_int(conn, "SELECT COUNT(*) FROM emails WHERE priority = '🔵';"),
+                "🔴": _fetch_single_int(
+                    conn, "SELECT COUNT(*) FROM emails WHERE priority = '🔴';"
+                ),
+                "🟡": _fetch_single_int(
+                    conn, "SELECT COUNT(*) FROM emails WHERE priority = '🟡';"
+                ),
+                "🔵": _fetch_single_int(
+                    conn, "SELECT COUNT(*) FROM emails WHERE priority = '🔵';"
+                ),
             }
             escalations = _fetch_single_int(
                 conn,

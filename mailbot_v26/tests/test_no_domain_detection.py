@@ -1,7 +1,6 @@
 import importlib
 import logging
 
-import pytest
 
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
 
@@ -12,7 +11,9 @@ class DummyState:
 
 
 def _processor() -> MessageProcessor:
-    return MessageProcessor(config=type("Cfg", (), {"llm_call": None})(), state=DummyState())
+    return MessageProcessor(
+        config=type("Cfg", (), {"llm_call": None})(), state=DummyState()
+    )
 
 
 def test_no_domain_logs_are_emitted(caplog):
@@ -21,7 +22,14 @@ def test_no_domain_logs_are_emitted(caplog):
         subject="Invoice attached",
         sender="billing@example.com",
         body="Счет на оплату во вложении",
-        attachments=[Attachment(filename="invoice.pdf", content=b"", content_type="application/pdf", text="")],
+        attachments=[
+            Attachment(
+                filename="invoice.pdf",
+                content=b"",
+                content_type="application/pdf",
+                text="",
+            )
+        ],
     )
 
     with caplog.at_level(logging.INFO, logger="mailbot_v26.pipeline.processor"):
@@ -29,7 +37,8 @@ def test_no_domain_logs_are_emitted(caplog):
 
     assert result
     assert not any(
-        "Domain detected" in record.message or "Domain priority suggestion" in record.message
+        "Domain detected" in record.message
+        or "Domain priority suggestion" in record.message
         for record in caplog.records
     )
 

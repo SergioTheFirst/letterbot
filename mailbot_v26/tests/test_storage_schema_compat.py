@@ -6,11 +6,16 @@ from pathlib import Path
 from mailbot_v26.bot_core.storage import Storage
 
 
-def _create_legacy_emails_table(db_path: Path, *, include_telegram_delivered_at: bool) -> None:
-    telegram_col = ",\n                telegram_delivered_at TEXT" if include_telegram_delivered_at else ""
+def _create_legacy_emails_table(
+    db_path: Path, *, include_telegram_delivered_at: bool
+) -> None:
+    telegram_col = (
+        ",\n                telegram_delivered_at TEXT"
+        if include_telegram_delivered_at
+        else ""
+    )
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            f"""
+        conn.execute(f"""
             CREATE TABLE emails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_email TEXT NOT NULL,
@@ -27,8 +32,7 @@ def _create_legacy_emails_table(db_path: Path, *, include_telegram_delivered_at:
                 {telegram_col},
                 UNIQUE(account_email, uid)
             );
-            """
-        )
+            """)
         conn.commit()
 
 
@@ -50,7 +54,9 @@ def test_storage_migrates_missing_status_column(tmp_path: Path) -> None:
     assert "telegram_delivered_at" in columns
 
     with sqlite3.connect(db_path) as conn:
-        indexes = {str(row[1]) for row in conn.execute("PRAGMA index_list(emails);").fetchall()}
+        indexes = {
+            str(row[1]) for row in conn.execute("PRAGMA index_list(emails);").fetchall()
+        }
     assert "idx_emails_status" in indexes
 
 
@@ -75,7 +81,9 @@ def test_storage_init_works_with_old_schema(tmp_path: Path) -> None:
         )
         assert email_id > 0
 
-        row = storage.conn.execute("SELECT status FROM emails WHERE id = ?;", (email_id,)).fetchone()
+        row = storage.conn.execute(
+            "SELECT status FROM emails WHERE id = ?;", (email_id,)
+        ).fetchone()
         assert row is not None
         assert row[0] == "NEW"
     finally:

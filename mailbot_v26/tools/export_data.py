@@ -51,7 +51,9 @@ def _scrub_payload(value: Any) -> Any:
         cleaned: dict[str, Any] = {}
         for key, item in value.items():
             lowered = key.lower()
-            if any(token in lowered for token in ("token", "password", "secret", "key")):
+            if any(
+                token in lowered for token in ("token", "password", "secret", "key")
+            ):
                 cleaned[key] = "***"
             else:
                 cleaned[key] = _scrub_payload(item)
@@ -73,7 +75,9 @@ def _load_payload(raw: str | None) -> dict[str, Any]:
     return {"_value": parsed}
 
 
-def _fetch_events(conn: sqlite3.Connection, since_ts: float) -> Iterable[dict[str, Any]]:
+def _fetch_events(
+    conn: sqlite3.Connection, since_ts: float
+) -> Iterable[dict[str, Any]]:
     cursor = conn.execute(
         """
         SELECT id, event_type, ts_utc, ts, account_id, entity_id, email_id, payload, schema_version, fingerprint
@@ -100,14 +104,14 @@ def _fetch_events(conn: sqlite3.Connection, since_ts: float) -> Iterable[dict[st
         }
 
 
-def _fetch_commitments(conn: sqlite3.Connection, since_dt: datetime) -> Iterable[dict[str, Any]]:
-    cursor = conn.execute(
-        """
+def _fetch_commitments(
+    conn: sqlite3.Connection, since_dt: datetime
+) -> Iterable[dict[str, Any]]:
+    cursor = conn.execute("""
         SELECT id, email_row_id, source, commitment_text, deadline_iso, status, confidence, created_at
         FROM commitments
         ORDER BY created_at ASC, id ASC
-        """
-    )
+        """)
     for row in cursor.fetchall():
         created_at = _parse_sqlite_timestamp(row[7])
         if created_at and created_at < since_dt:
@@ -129,13 +133,11 @@ def _fetch_relationship_snapshots(
     conn: sqlite3.Connection, since_dt: datetime
 ) -> Iterable[dict[str, Any]]:
     try:
-        cursor = conn.execute(
-            """
+        cursor = conn.execute("""
             SELECT id, created_at, entity_id, health_score, reason, components_breakdown, data_window_days
             FROM relationship_health_snapshots
             ORDER BY created_at ASC, id ASC
-            """
-        )
+            """)
     except sqlite3.Error:
         return []
     rows = cursor.fetchall()
@@ -235,7 +237,9 @@ def _fetch_system_health_snapshots(
         }
 
 
-def _quality_metrics_record(db_path: Path, since_dt: datetime, *, now: datetime) -> dict[str, Any]:
+def _quality_metrics_record(
+    db_path: Path, since_dt: datetime, *, now: datetime
+) -> dict[str, Any]:
     analytics = KnowledgeAnalytics(db_path)
     window_days = max(1, int((now - since_dt).total_seconds() // 86400))
     metrics = compute_quality_metrics(
@@ -261,12 +265,10 @@ def _quality_metrics_record(db_path: Path, since_dt: datetime, *, now: datetime)
         "correction_rate": metrics.correction_rate,
         "emails_received": metrics.emails_received,
         "by_new_priority": [
-            {"key": row.key, "count": row.count}
-            for row in metrics.by_new_priority
+            {"key": row.key, "count": row.count} for row in metrics.by_new_priority
         ],
         "by_engine": [
-            {"key": row.key, "count": row.count}
-            for row in metrics.by_engine
+            {"key": row.key, "count": row.count} for row in metrics.by_engine
         ],
     }
 
@@ -296,7 +298,9 @@ def _parse_sqlite_timestamp(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(
+            tzinfo=timezone.utc
+        )
     except ValueError:
         return None
 
@@ -312,7 +316,9 @@ def export_data(
     since_ts = since_dt.timestamp()
     export_now = datetime.now(timezone.utc)
 
-    with sqlite3.connect(db_path) as conn, output_path.open("w", encoding="utf-8") as handle:
+    with sqlite3.connect(db_path) as conn, output_path.open(
+        "w", encoding="utf-8"
+    ) as handle:
         for record in _fetch_events(conn, since_ts):
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
             handle.write("\n")

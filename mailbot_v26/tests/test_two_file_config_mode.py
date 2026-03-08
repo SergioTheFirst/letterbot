@@ -7,8 +7,12 @@ from mailbot_v26.config_loader import load_general_config, load_keys_config
 from mailbot_v26.doctor import DoctorEntry, DoctorReport, report_exit_code
 
 
-def test_malformed_settings_ini_falls_back_to_defaults_with_warning(tmp_path: Path, caplog) -> None:
-    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval = broken\n", encoding="utf-8")
+def test_malformed_settings_ini_falls_back_to_defaults_with_warning(
+    tmp_path: Path, caplog
+) -> None:
+    (tmp_path / "settings.ini").write_text(
+        "[general]\ncheck_interval = broken\n", encoding="utf-8"
+    )
 
     caplog.set_level(logging.WARNING)
     general = load_general_config(tmp_path)
@@ -18,7 +22,9 @@ def test_malformed_settings_ini_falls_back_to_defaults_with_warning(tmp_path: Pa
 
 
 def test_legacy_keys_ini_is_ignored_in_two_file_mode(tmp_path: Path) -> None:
-    (tmp_path / "accounts.ini").write_text("[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8")
+    (tmp_path / "accounts.ini").write_text(
+        "[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8"
+    )
     (tmp_path / "keys.ini").write_text(
         "[telegram]\nbot_token=tg\n[cloudflare]\naccount_id=acc\napi_token=tok\n",
         encoding="utf-8",

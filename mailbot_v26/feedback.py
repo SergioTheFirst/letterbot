@@ -49,7 +49,9 @@ def _priority_feedback_anchor_ts(
     return datetime.now(timezone.utc).timestamp()
 
 
-def _feedback_created_at(knowledge_db: KnowledgeDB, feedback_id: str) -> datetime | None:
+def _feedback_created_at(
+    knowledge_db: KnowledgeDB, feedback_id: str
+) -> datetime | None:
     try:
         with sqlite3.connect(knowledge_db.path) as conn:
             row = conn.execute(
@@ -170,7 +172,9 @@ def record_priority_correction(
                         ts_utc=event_ts,
                         account_id=account_email or "",
                         entity_id=entity_id,
-                        email_id=int(str(email_id)) if str(email_id).isdigit() else None,
+                        email_id=(
+                            int(str(email_id)) if str(email_id).isdigit() else None
+                        ),
                         payload={
                             "old_priority": old_priority or "",
                             "new_priority": correction,

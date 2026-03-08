@@ -72,19 +72,32 @@ def account() -> AccountConfig:
     )
 
 
-def test_fetch_skips_messages_before_start(monkeypatch, tmp_path: Path, account: AccountConfig) -> None:
+def test_fetch_skips_messages_before_start(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
     fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
     start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 
     fake_client.set_messages(
         {
-            1: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
-            2: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0, tzinfo=timezone.utc)},
-            3: {b"RFC822": b"newer", b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0, tzinfo=timezone.utc)},
+            1: {
+                b"RFC822": b"old",
+                b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc),
+            },
+            2: {
+                b"RFC822": b"new",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0, tzinfo=timezone.utc),
+            },
+            3: {
+                b"RFC822": b"newer",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(account, state, start_time=start_time)
@@ -98,18 +111,28 @@ def test_fetch_skips_messages_before_start(monkeypatch, tmp_path: Path, account:
     assert "SINCE" in fake_client.search_calls[1]
 
 
-def test_baseline_updates_when_only_old(monkeypatch, tmp_path: Path, account: AccountConfig) -> None:
+def test_baseline_updates_when_only_old(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
     fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
     start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 
     fake_client.set_messages(
         {
-            10: {b"RFC822": b"first", b"INTERNALDATE": datetime(2023, 12, 31, 23, 59, 0, tzinfo=timezone.utc)},
-            11: {b"RFC822": b"second", b"INTERNALDATE": datetime(2024, 1, 1, 8, 0, 0, tzinfo=timezone.utc)},
+            10: {
+                b"RFC822": b"first",
+                b"INTERNALDATE": datetime(2023, 12, 31, 23, 59, 0, tzinfo=timezone.utc),
+            },
+            11: {
+                b"RFC822": b"second",
+                b"INTERNALDATE": datetime(2024, 1, 1, 8, 0, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(account, state, start_time=start_time)
@@ -129,13 +152,24 @@ def test_steady_state_filters_prestart_emails(
 
     fake_client.set_messages(
         {
-            1: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
-            2: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0, tzinfo=timezone.utc)},
-            3: {b"RFC822": b"newer", b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0, tzinfo=timezone.utc)},
+            1: {
+                b"RFC822": b"old",
+                b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc),
+            },
+            2: {
+                b"RFC822": b"new",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0, tzinfo=timezone.utc),
+            },
+            3: {
+                b"RFC822": b"newer",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(account, state, start_time=start_time)
@@ -144,10 +178,22 @@ def test_steady_state_filters_prestart_emails(
     fake_client.search_calls.clear()
     fake_client.set_messages(
         {
-            1: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
-            2: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0, tzinfo=timezone.utc)},
-            3: {b"RFC822": b"newer", b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0, tzinfo=timezone.utc)},
-            4: {b"RFC822": b"late", b"INTERNALDATE": datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc)},
+            1: {
+                b"RFC822": b"old",
+                b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc),
+            },
+            2: {
+                b"RFC822": b"new",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0, tzinfo=timezone.utc),
+            },
+            3: {
+                b"RFC822": b"newer",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, 0, tzinfo=timezone.utc),
+            },
+            4: {
+                b"RFC822": b"late",
+                b"INTERNALDATE": datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
@@ -159,7 +205,9 @@ def test_steady_state_filters_prestart_emails(
     assert "SINCE" in fake_client.search_calls[1]
 
 
-def test_cursor_advances_when_all_skipped(monkeypatch, tmp_path: Path, account: AccountConfig) -> None:
+def test_cursor_advances_when_all_skipped(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
     fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
     start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
     state = StateManager(tmp_path / "state.json")
@@ -167,12 +215,20 @@ def test_cursor_advances_when_all_skipped(monkeypatch, tmp_path: Path, account: 
 
     fake_client.set_messages(
         {
-            2: {b"RFC822": b"old", b"INTERNALDATE": datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)},
-            3: {b"RFC822": b"older", b"INTERNALDATE": datetime(2024, 1, 2, 11, 59, 0, tzinfo=timezone.utc)},
+            2: {
+                b"RFC822": b"old",
+                b"INTERNALDATE": datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            },
+            3: {
+                b"RFC822": b"older",
+                b"INTERNALDATE": datetime(2024, 1, 2, 11, 59, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     client = ResilientIMAP(account, state, start_time=start_time)
     messages = client.fetch_new_messages()
 
@@ -180,7 +236,9 @@ def test_cursor_advances_when_all_skipped(monkeypatch, tmp_path: Path, account: 
     assert state.get_last_uid(account.login) == 3
 
 
-def test_internaldate_timezone_normalization(monkeypatch, tmp_path: Path, account: AccountConfig) -> None:
+def test_internaldate_timezone_normalization(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
     fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
     start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
     local_tz = timezone(timedelta(hours=2))
@@ -198,7 +256,9 @@ def test_internaldate_timezone_normalization(monkeypatch, tmp_path: Path, accoun
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(account, state, start_time=start_time)
@@ -207,15 +267,22 @@ def test_internaldate_timezone_normalization(monkeypatch, tmp_path: Path, accoun
     assert [uid for uid, _ in messages] == [1]
 
 
-def test_fetch_uses_normalized_state_login_key(monkeypatch, tmp_path: Path, account: AccountConfig) -> None:
+def test_fetch_uses_normalized_state_login_key(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
     fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
     fake_client.set_messages(
         {
-            6: {b"RFC822": b"new", b"INTERNALDATE": datetime(2024, 1, 3, 12, 0, 0, tzinfo=timezone.utc)},
+            6: {
+                b"RFC822": b"new",
+                b"INTERNALDATE": datetime(2024, 1, 3, 12, 0, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     state = StateManager(tmp_path / "state.json")
     state.update_last_uid("user@example.com", 5)
 
@@ -248,12 +315,20 @@ def test_first_run_bootstrap_allows_recent_prestart_messages(
 
     fake_client.set_messages(
         {
-            1: {b"RFC822": b"recent-1", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
-            2: {b"RFC822": b"recent-2", b"INTERNALDATE": datetime(2024, 1, 2, 11, 30, 0, tzinfo=timezone.utc)},
+            1: {
+                b"RFC822": b"recent-1",
+                b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc),
+            },
+            2: {
+                b"RFC822": b"recent-2",
+                b"INTERNALDATE": datetime(2024, 1, 2, 11, 30, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(
@@ -281,11 +356,16 @@ def test_non_first_run_still_blocks_prestart_messages_when_disabled(
 
     fake_client.set_messages(
         {
-            6: {b"RFC822": b"prestart", b"INTERNALDATE": datetime(2024, 1, 2, 11, 0, 0, tzinfo=timezone.utc)},
+            6: {
+                b"RFC822": b"prestart",
+                b"INTERNALDATE": datetime(2024, 1, 2, 11, 0, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     state = StateManager(tmp_path / "state.json")
     state.update_last_uid(account.login, 5)
 
@@ -310,12 +390,20 @@ def test_first_run_bootstrap_is_limited_by_hours_window(
 
     fake_client.set_messages(
         {
-            1: {b"RFC822": b"too-old", b"INTERNALDATE": datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc)},
-            2: {b"RFC822": b"recent", b"INTERNALDATE": datetime(2024, 1, 1, 14, 0, 0, tzinfo=timezone.utc)},
+            1: {
+                b"RFC822": b"too-old",
+                b"INTERNALDATE": datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc),
+            },
+            2: {
+                b"RFC822": b"recent",
+                b"INTERNALDATE": datetime(2024, 1, 1, 14, 0, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(
@@ -340,15 +428,32 @@ def test_first_run_bootstrap_is_limited_by_message_count(
 
     fake_client.set_messages(
         {
-            1: {b"RFC822": b"m1", b"INTERNALDATE": datetime(2024, 1, 2, 8, 0, 0, tzinfo=timezone.utc)},
-            2: {b"RFC822": b"m2", b"INTERNALDATE": datetime(2024, 1, 2, 8, 30, 0, tzinfo=timezone.utc)},
-            3: {b"RFC822": b"m3", b"INTERNALDATE": datetime(2024, 1, 2, 9, 0, 0, tzinfo=timezone.utc)},
-            4: {b"RFC822": b"m4", b"INTERNALDATE": datetime(2024, 1, 2, 9, 30, 0, tzinfo=timezone.utc)},
-            5: {b"RFC822": b"m5", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
+            1: {
+                b"RFC822": b"m1",
+                b"INTERNALDATE": datetime(2024, 1, 2, 8, 0, 0, tzinfo=timezone.utc),
+            },
+            2: {
+                b"RFC822": b"m2",
+                b"INTERNALDATE": datetime(2024, 1, 2, 8, 30, 0, tzinfo=timezone.utc),
+            },
+            3: {
+                b"RFC822": b"m3",
+                b"INTERNALDATE": datetime(2024, 1, 2, 9, 0, 0, tzinfo=timezone.utc),
+            },
+            4: {
+                b"RFC822": b"m4",
+                b"INTERNALDATE": datetime(2024, 1, 2, 9, 30, 0, tzinfo=timezone.utc),
+            },
+            5: {
+                b"RFC822": b"m5",
+                b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(
@@ -374,12 +479,20 @@ def test_bootstrap_does_not_duplicate_already_seen_messages(
 
     fake_client.set_messages(
         {
-            1: {b"RFC822": b"first", b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc)},
-            2: {b"RFC822": b"second", b"INTERNALDATE": datetime(2024, 1, 2, 11, 0, 0, tzinfo=timezone.utc)},
+            1: {
+                b"RFC822": b"first",
+                b"INTERNALDATE": datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc),
+            },
+            2: {
+                b"RFC822": b"second",
+                b"INTERNALDATE": datetime(2024, 1, 2, 11, 0, 0, tzinfo=timezone.utc),
+            },
         }
     )
 
-    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client))
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(

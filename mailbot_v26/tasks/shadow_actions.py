@@ -74,8 +74,12 @@ class ShadowActionEngine:
                     )
 
             if latest_escalation:
-                subject = (latest_escalation.get("subject") or "").strip() or "(без темы)"
-                sender = (latest_escalation.get("from_email") or from_email or "").strip()
+                subject = (
+                    latest_escalation.get("subject") or ""
+                ).strip() or "(без темы)"
+                sender = (
+                    latest_escalation.get("from_email") or from_email or ""
+                ).strip()
                 tasks.append(
                     (
                         f"Держать эскалацию в фокусе: {subject}",
@@ -84,7 +88,9 @@ class ShadowActionEngine:
                 )
 
         except Exception as exc:  # pragma: no cover - defensive
-            logger.error("ShadowActionEngine failed to read analytics: %s", exc, exc_info=True)
+            logger.error(
+                "ShadowActionEngine failed to read analytics: %s", exc, exc_info=True
+            )
 
         return tasks
 
@@ -119,8 +125,16 @@ class ShadowActionEngine:
         normalized_sender = (from_email or "").strip().lower()
 
         for row in self.analytics.priority_escalations():
-            account_match = normalized_account and str(row.get("account_email") or "").strip().lower() == normalized_account
-            sender_match = normalized_sender and str(row.get("from_email") or "").strip().lower() == normalized_sender
+            account_match = (
+                normalized_account
+                and str(row.get("account_email") or "").strip().lower()
+                == normalized_account
+            )
+            sender_match = (
+                normalized_sender
+                and str(row.get("from_email") or "").strip().lower()
+                == normalized_sender
+            )
             if account_match or sender_match:
                 return row
         return None

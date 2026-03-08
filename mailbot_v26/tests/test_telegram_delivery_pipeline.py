@@ -92,7 +92,9 @@ def _seed_pipeline_context(email_id: int, account_email: str) -> PipelineContext
     return ctx
 
 
-def _configure_pipeline(config: BotConfig, *, enable_premium_processor: bool = False) -> MessageProcessor:
+def _configure_pipeline(
+    config: BotConfig, *, enable_premium_processor: bool = False
+) -> MessageProcessor:
     processor = MessageProcessor(SimpleNamespace(), SimpleNamespace())
     configure_pipeline(
         config,
@@ -107,7 +109,9 @@ def _cleanup_pipeline(email_id: int) -> None:
     PIPELINE_INBOUND_CACHE.pop(email_id, None)
 
 
-def test_telegram_retry_on_http_failure(monkeypatch, tmp_path, caplog: pytest.LogCaptureFixture) -> None:
+def test_telegram_retry_on_http_failure(
+    monkeypatch, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
     config = _make_config(tmp_path)
     storage = Storage(config.storage.db_path)
     email_id = _seed_queue(storage, config.accounts[0].login)
@@ -168,13 +172,14 @@ def test_telegram_delivery_failed_after_max_attempts(monkeypatch, tmp_path) -> N
     assert status == "DELIVERY_FAILED"
     assert remaining == 0
     assert any(
-        "TELEGRAM DELIVERY FAILED" in entry["payload"].html_text
-        for entry in calls[1:]
+        "TELEGRAM DELIVERY FAILED" in entry["payload"].html_text for entry in calls[1:]
     )
     _cleanup_pipeline(email_id)
 
 
-def test_duplicate_uid_ingest_enqueues_once_and_sends_once(monkeypatch, tmp_path) -> None:
+def test_duplicate_uid_ingest_enqueues_once_and_sends_once(
+    monkeypatch, tmp_path
+) -> None:
     config = _make_config(tmp_path)
     storage = Storage(config.storage.db_path)
     processor = _configure_pipeline(config)
@@ -199,7 +204,9 @@ def test_duplicate_uid_ingest_enqueues_once_and_sends_once(monkeypatch, tmp_path
         received_at=datetime.utcnow().isoformat(),
         attachments_count=0,
         raw_email=b"raw",
-        inbound=InboundMessage(subject="Subject", body="Body", sender="sender@example.com"),
+        inbound=InboundMessage(
+            subject="Subject", body="Body", sender="sender@example.com"
+        ),
     )
     assert enqueued is True
     ctx = PIPELINE_CACHE[email_id]
@@ -220,7 +227,9 @@ def test_duplicate_uid_ingest_enqueues_once_and_sends_once(monkeypatch, tmp_path
         received_at=datetime.utcnow().isoformat(),
         attachments_count=0,
         raw_email=b"raw",
-        inbound=InboundMessage(subject="Subject", body="Body", sender="sender@example.com"),
+        inbound=InboundMessage(
+            subject="Subject", body="Body", sender="sender@example.com"
+        ),
     )
 
     assert second_enqueued is False
@@ -233,7 +242,9 @@ def test_duplicate_uid_ingest_enqueues_once_and_sends_once(monkeypatch, tmp_path
     assert len(calls) == 1
 
 
-def test_tg_stage_idempotency_skips_duplicate_delivery(monkeypatch, tmp_path, caplog: pytest.LogCaptureFixture) -> None:
+def test_tg_stage_idempotency_skips_duplicate_delivery(
+    monkeypatch, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
     config = _make_config(tmp_path)
     storage = Storage(config.storage.db_path)
     email_id = _seed_queue(storage, config.accounts[0].login)
@@ -264,8 +275,6 @@ def test_tg_stage_idempotency_skips_duplicate_delivery(monkeypatch, tmp_path, ca
     assert "telegram_delivery_skipped_duplicate" in caplog.text
 
 
-
-
 def test_stage_tg_payload_carries_bot_token_and_chat_id(monkeypatch, tmp_path) -> None:
     config = _make_config(tmp_path)
     storage = Storage(config.storage.db_path)
@@ -289,7 +298,11 @@ def test_stage_tg_payload_carries_bot_token_and_chat_id(monkeypatch, tmp_path) -
     assert payload.metadata["bot_token"] == config.keys.telegram_bot_token
     assert payload.metadata["chat_id"] == config.accounts[0].telegram_chat_id
     _cleanup_pipeline(email_id)
-def test_stage_tg_adds_inline_keyboard_when_premium_enabled(monkeypatch, tmp_path) -> None:
+
+
+def test_stage_tg_adds_inline_keyboard_when_premium_enabled(
+    monkeypatch, tmp_path
+) -> None:
     config = _make_config(tmp_path)
     storage = Storage(config.storage.db_path)
     email_id = _seed_queue(storage, config.accounts[0].login)
@@ -314,8 +327,9 @@ def test_stage_tg_adds_inline_keyboard_when_premium_enabled(monkeypatch, tmp_pat
     _cleanup_pipeline(email_id)
 
 
-
-def test_stage_tg_adds_inline_keyboard_when_premium_disabled(monkeypatch, tmp_path) -> None:
+def test_stage_tg_adds_inline_keyboard_when_premium_disabled(
+    monkeypatch, tmp_path
+) -> None:
     config = _make_config(tmp_path)
     storage = Storage(config.storage.db_path)
     email_id = _seed_queue(storage, config.accounts[0].login)
@@ -338,6 +352,7 @@ def test_stage_tg_adds_inline_keyboard_when_premium_disabled(monkeypatch, tmp_pa
     assert isinstance(reply_markup, dict)
     assert "inline_keyboard" in reply_markup
     _cleanup_pipeline(email_id)
+
 
 def test_tg_stage_rerun_after_success_still_sends_once(monkeypatch, tmp_path) -> None:
     config = _make_config(tmp_path)
@@ -404,7 +419,9 @@ def test_duplicate_uid_ingest_is_case_insensitive(monkeypatch, tmp_path) -> None
         received_at=datetime.utcnow().isoformat(),
         attachments_count=0,
         raw_email=b"raw",
-        inbound=InboundMessage(subject="Subject", body="Body", sender="sender@example.com"),
+        inbound=InboundMessage(
+            subject="Subject", body="Body", sender="sender@example.com"
+        ),
     )
     assert enqueued is True
     ctx = PIPELINE_CACHE[email_id]
@@ -425,7 +442,9 @@ def test_duplicate_uid_ingest_is_case_insensitive(monkeypatch, tmp_path) -> None
         received_at=datetime.utcnow().isoformat(),
         attachments_count=0,
         raw_email=b"raw",
-        inbound=InboundMessage(subject="Subject", body="Body", sender="sender@example.com"),
+        inbound=InboundMessage(
+            subject="Subject", body="Body", sender="sender@example.com"
+        ),
     )
 
     assert second_enqueued is False
@@ -434,7 +453,9 @@ def test_duplicate_uid_ingest_is_case_insensitive(monkeypatch, tmp_path) -> None
 
 def test_delivery_key_snooze_kind_separation() -> None:
     email_key = _build_telegram_delivery_key(email_id=101, kind="email")
-    snooze_key = _build_telegram_delivery_key(email_id=101, kind="snooze", snooze_ts="2026-03-01T10:00:00Z")
+    snooze_key = _build_telegram_delivery_key(
+        email_id=101, kind="snooze", snooze_ts="2026-03-01T10:00:00Z"
+    )
 
     assert email_key == "email:101"
     assert snooze_key == "snooze:email:101:2026-03-01T10:00:00Z"
@@ -521,7 +542,9 @@ def test_snooze_retry_on_failure_not_stuck(monkeypatch, tmp_path) -> None:
     assert "tg down" in str(row[2])
 
 
-def test_stage_tg_uses_real_priority_and_attachment_insight(monkeypatch, tmp_path) -> None:
+def test_stage_tg_uses_real_priority_and_attachment_insight(
+    monkeypatch, tmp_path
+) -> None:
     config = _make_config(tmp_path)
     storage = Storage(config.storage.db_path)
     email_id = _seed_queue(storage, config.accounts[0].login)
@@ -569,8 +592,9 @@ def test_stage_tg_uses_real_priority_and_attachment_insight(monkeypatch, tmp_pat
     _cleanup_pipeline(email_id)
 
 
-
-def test_priority_keyboard_uses_initial_prio_true_in_user_path(monkeypatch, tmp_path) -> None:
+def test_priority_keyboard_uses_initial_prio_true_in_user_path(
+    monkeypatch, tmp_path
+) -> None:
     config = _make_config(tmp_path)
     storage = Storage(config.storage.db_path)
     email_id = _seed_queue(storage, config.accounts[0].login)

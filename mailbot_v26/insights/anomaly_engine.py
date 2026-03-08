@@ -81,8 +81,7 @@ def _response_time_anomaly(
         severity = "ALERT"
 
     details = (
-        f"Текущее: {current:.1f} ч, базовое: {baseline_avg:.1f} ч, "
-        f"Δ {delta:.1f} ч"
+        f"Текущее: {current:.1f} ч, базовое: {baseline_avg:.1f} ч, " f"Δ {delta:.1f} ч"
     )
     return Anomaly(
         type="RESPONSE_TIME_DELAY",
@@ -117,10 +116,7 @@ def _frequency_drop_anomaly(
         return None
 
     severity = "WARN" if ratio <= 0.2 else "INFO"
-    details = (
-        f"За 7 дней: {count_short}, "
-        f"норма в неделю: {weekly_avg:.1f}"
-    )
+    details = f"За 7 дней: {count_short}, " f"норма в неделю: {weekly_avg:.1f}"
     return Anomaly(
         type="FREQUENCY_DROP",
         severity=severity,

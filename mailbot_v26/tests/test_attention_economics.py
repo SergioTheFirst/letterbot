@@ -138,7 +138,9 @@ def test_at_risk_only_uses_health_or_anomalies(tmp_path: Path) -> None:
                         "from_email": row["from_email"],
                         "subject": row["subject"],
                         "body_summary": row["body_summary"],
-                        "attachments_count": 1 if row["from_email"] == "risk@example.com" else 0,
+                        "attachments_count": (
+                            1 if row["from_email"] == "risk@example.com" else 0
+                        ),
                     },
                 )
             )
@@ -146,7 +148,9 @@ def test_at_risk_only_uses_health_or_anomalies(tmp_path: Path) -> None:
     emitter.emit(
         EventV1(
             event_type=EventType.RELATIONSHIP_HEALTH_UPDATED,
-            ts_utc=datetime.fromisoformat(earlier).replace(tzinfo=timezone.utc).timestamp(),
+            ts_utc=datetime.fromisoformat(earlier)
+            .replace(tzinfo=timezone.utc)
+            .timestamp(),
             account_id="acc@example.com",
             entity_id="risk@example.com",
             email_id=None,
@@ -156,7 +160,9 @@ def test_at_risk_only_uses_health_or_anomalies(tmp_path: Path) -> None:
     emitter.emit(
         EventV1(
             event_type=EventType.RELATIONSHIP_HEALTH_UPDATED,
-            ts_utc=datetime.fromisoformat(now_iso).replace(tzinfo=timezone.utc).timestamp(),
+            ts_utc=datetime.fromisoformat(now_iso)
+            .replace(tzinfo=timezone.utc)
+            .timestamp(),
             account_id="acc@example.com",
             entity_id="risk@example.com",
             email_id=None,
@@ -166,7 +172,9 @@ def test_at_risk_only_uses_health_or_anomalies(tmp_path: Path) -> None:
     emitter.emit(
         EventV1(
             event_type=EventType.TRUST_SCORE_UPDATED,
-            ts_utc=datetime.fromisoformat(earlier).replace(tzinfo=timezone.utc).timestamp(),
+            ts_utc=datetime.fromisoformat(earlier)
+            .replace(tzinfo=timezone.utc)
+            .timestamp(),
             account_id="acc@example.com",
             entity_id="trust-only@example.com",
             email_id=None,
@@ -176,7 +184,9 @@ def test_at_risk_only_uses_health_or_anomalies(tmp_path: Path) -> None:
     emitter.emit(
         EventV1(
             event_type=EventType.TRUST_SCORE_UPDATED,
-            ts_utc=datetime.fromisoformat(now_iso).replace(tzinfo=timezone.utc).timestamp(),
+            ts_utc=datetime.fromisoformat(now_iso)
+            .replace(tzinfo=timezone.utc)
+            .timestamp(),
             account_id="acc@example.com",
             entity_id="trust-only@example.com",
             email_id=None,

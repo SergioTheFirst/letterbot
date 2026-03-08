@@ -19,7 +19,9 @@ from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 logger = logging.getLogger(__name__)
 
 _REL_INVOICE_RE = re.compile(r"(сч[её]т|invoice|оплат)", re.IGNORECASE)
-_REL_CONTRACT_RE = re.compile(r"(договор|contract|подпис|signature|sign)", re.IGNORECASE)
+_REL_CONTRACT_RE = re.compile(
+    r"(договор|contract|подпис|signature|sign)", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +120,9 @@ class KnowledgeAnalytics:
                 raise
         return conn
 
-    def _execute_select(self, query: str, params: Iterable[object] | None = None) -> list[dict[str, object]]:
+    def _execute_select(
+        self, query: str, params: Iterable[object] | None = None
+    ) -> list[dict[str, object]]:
         with self._connect_readonly() as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.execute(query, tuple(params or ()))
@@ -153,7 +157,9 @@ class KnowledgeAnalytics:
         types = self._LANE_EVENT_TYPES.get(normalized, set())
         return sorted(types)
 
-    def _lane_email_clause(self, lane: str | None, *, since_ts: float) -> tuple[str, list[object]]:
+    def _lane_email_clause(
+        self, lane: str | None, *, since_ts: float
+    ) -> tuple[str, list[object]]:
         normalized = self._normalize_lane(lane)
         if normalized == "all":
             return "", []
@@ -172,7 +178,9 @@ class KnowledgeAnalytics:
                 "WHERE ev.email_id = e.id AND ev.event_type = ? AND ev.ts_utc >= ? "
                 "AND ev.payload_json IS NOT NULL AND UPPER(ev.payload_json) LIKE ?)"
             )
-            params.extend([EventType.DELIVERY_POLICY_APPLIED.value, since_ts, "%IMMEDIATE%"])
+            params.extend(
+                [EventType.DELIVERY_POLICY_APPLIED.value, since_ts, "%IMMEDIATE%"]
+            )
         elif normalized == "commitments":
             conditions.append(
                 "EXISTS (SELECT 1 FROM commitments c "
@@ -378,7 +386,9 @@ class KnowledgeAnalytics:
         return cleaned
 
     @staticmethod
-    def _contact_label(entity_id: str, payload: Mapping[str, object] | None = None) -> tuple[str, str]:
+    def _contact_label(
+        entity_id: str, payload: Mapping[str, object] | None = None
+    ) -> tuple[str, str]:
         domain_hint = ""
         if payload:
             raw_domain = payload.get("sender_domain") or payload.get("domain")
@@ -669,7 +679,9 @@ class KnowledgeAnalytics:
             return value[:max_length]
         return str(value)[:max_length]
 
-    def _sanitize_learning_payload(self, event_type: str, payload: Mapping[str, object]) -> dict[str, object]:
+    def _sanitize_learning_payload(
+        self, event_type: str, payload: Mapping[str, object]
+    ) -> dict[str, object]:
         allowed_by_type: dict[str, set[str]] = {
             EventType.PRIORITY_CORRECTION_RECORDED.value: {
                 "old_priority",
@@ -743,7 +755,9 @@ class KnowledgeAnalytics:
         return {key: sanitized[key] for key in sorted(sanitized.keys())}
 
     def _event_summary(self, event_type: str, details: dict[str, object]) -> str:
-        priority_marker = self._priority_emoji(details.get("priority")) if details else None
+        priority_marker = (
+            self._priority_emoji(details.get("priority")) if details else None
+        )
         prefix = f"{event_type}{f' {priority_marker}' if priority_marker else ''}"
         if not details:
             return prefix
@@ -790,7 +804,9 @@ class KnowledgeAnalytics:
                 break
         return "; ".join(pairs)
 
-    def budgets_llm_status(self, account_emails: list[str], window_days: int) -> dict[str, object]:
+    def budgets_llm_status(
+        self, account_emails: list[str], window_days: int
+    ) -> dict[str, object]:
         account_ids = self._normalize_account_scope("", account_emails)
         now = datetime.now(timezone.utc)
         if not account_ids:
@@ -894,7 +910,9 @@ class KnowledgeAnalytics:
             remaining_total += remaining
 
         reset_at_total = min(reset_dates).isoformat() if reset_dates else ""
-        percent_total = (consumed_total / limit_total * 100.0) if limit_total > 0 else 0.0
+        percent_total = (
+            (consumed_total / limit_total * 100.0) if limit_total > 0 else 0.0
+        )
 
         return {
             "budget_type": BudgetType.LLM_TOKENS.value,
@@ -909,7 +927,9 @@ class KnowledgeAnalytics:
             "accounts": accounts,
         }
 
-    def budgets_llm_trend(self, account_emails: list[str], days: int) -> dict[str, object]:
+    def budgets_llm_trend(
+        self, account_emails: list[str], days: int
+    ) -> dict[str, object]:
         account_ids = self._normalize_account_scope("", account_emails)
         if not account_ids:
             return {
@@ -922,9 +942,7 @@ class KnowledgeAnalytics:
         query = (
             "SELECT substr(timestamp, 1, 10) AS date_iso, SUM(consumed) AS tokens "
             "FROM budget_consumption "
-            "WHERE budget_type = ?"
-            + clause
-            + " AND timestamp >= ? "
+            "WHERE budget_type = ?" + clause + " AND timestamp >= ? "
             "GROUP BY date_iso "
             "ORDER BY date_iso ASC"
         )
@@ -934,7 +952,10 @@ class KnowledgeAnalytics:
         except sqlite3.OperationalError:
             rows = []
         trend = [
-            {"date": str(row.get("date_iso") or ""), "tokens": int(row.get("tokens") or 0)}
+            {
+                "date": str(row.get("date_iso") or ""),
+                "tokens": int(row.get("tokens") or 0),
+            }
             for row in rows
         ]
         return {
@@ -943,9 +964,15 @@ class KnowledgeAnalytics:
             "trend": trend,
         }
 
-    def triage_lane_distribution(self, account_emails: list[str], window_days: int) -> dict[str, object]:
+    def triage_lane_distribution(
+        self, account_emails: list[str], window_days: int
+    ) -> dict[str, object]:
         account_ids = self._normalize_account_scope("", account_emails)
-        mapping = {"urgent": "🔴", "normal": "🟡", "delegated": "🔵 or deferred_for_digest"}
+        mapping = {
+            "urgent": "🔴",
+            "normal": "🟡",
+            "delegated": "🔵 or deferred_for_digest",
+        }
         if not account_ids:
             return {
                 "window_days": int(window_days),
@@ -955,7 +982,9 @@ class KnowledgeAnalytics:
                 "total": 0,
                 "mapping": mapping,
             }
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(window_days))).isoformat()
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=int(window_days))
+        ).isoformat()
         clause, clause_params = self._account_email_clause(account_ids)
         query = (
             "SELECT "
@@ -964,8 +993,7 @@ class KnowledgeAnalytics:
             "SUM(CASE WHEN priority = ? OR deferred_for_digest = 1 THEN 1 ELSE 0 END) AS delegated, "
             "COUNT(*) AS total "
             "FROM emails "
-            "WHERE received_at >= ?"
-            + clause
+            "WHERE received_at >= ?" + clause
         )
         params: list[object] = ["🔴", "🟡", "🔵", cutoff, *clause_params]
         try:
@@ -1094,7 +1122,11 @@ class KnowledgeAnalytics:
                     "page_size": resolved_page_size,
                 }
 
-        total_groups = int(total_row["total"]) if total_row and total_row["total"] is not None else 0
+        total_groups = (
+            int(total_row["total"])
+            if total_row and total_row["total"] is not None
+            else 0
+        )
         group_records = [dict(row) for row in group_rows]
 
         email_ids: list[int] = []
@@ -1146,7 +1178,9 @@ class KnowledgeAnalytics:
             with self._connect_readonly() as conn:
                 conn.row_factory = sqlite3.Row
                 try:
-                    rows = conn.execute(delivery_query, tuple(delivery_params)).fetchall()
+                    rows = conn.execute(
+                        delivery_query, tuple(delivery_params)
+                    ).fetchall()
                 except sqlite3.OperationalError:
                     rows = []
             for row in rows:
@@ -1201,12 +1235,25 @@ class KnowledgeAnalytics:
                         "event_id": row_dict.get("id"),
                         "ts_utc": row_dict.get("ts_utc"),
                         "event_type": row_dict.get("event_type"),
-                        "stage": details.get("stage") if isinstance(details, Mapping) else None,
-                        "outcome": details.get("outcome") if isinstance(details, Mapping) else None,
+                        "stage": (
+                            details.get("stage")
+                            if isinstance(details, Mapping)
+                            else None
+                        ),
+                        "outcome": (
+                            details.get("outcome")
+                            if isinstance(details, Mapping)
+                            else None
+                        ),
                         "details": details,
                     }
                 )
-            items.sort(key=lambda item: (float(item.get("ts_utc") or 0.0), int(item.get("event_id") or 0)))
+            items.sort(
+                key=lambda item: (
+                    float(item.get("ts_utc") or 0.0),
+                    int(item.get("event_id") or 0),
+                )
+            )
             return items
 
         groups: list[dict[str, object]] = []
@@ -1230,10 +1277,14 @@ class KnowledgeAnalytics:
                     limit=160,
                 )
                 from_label = (
-                    self._mask_email_address(from_value) if not reveal_pii else str(from_value)
+                    self._mask_email_address(from_value)
+                    if not reveal_pii
+                    else str(from_value)
                 )
                 to_label = (
-                    self._mask_email_address(to_value) if not reveal_pii else str(to_value)
+                    self._mask_email_address(to_value)
+                    if not reveal_pii
+                    else str(to_value)
                 )
                 delivery = delivery_map.get(email_id or -1, {})
                 delivered_ts = delivery.get("delivered_ts")
@@ -1262,9 +1313,18 @@ class KnowledgeAnalytics:
                 label = label.replace("_", " ")
                 status_label = ""
                 if timeline:
-                    details = timeline[-1].get("details") if isinstance(timeline[-1], dict) else {}
+                    details = (
+                        timeline[-1].get("details")
+                        if isinstance(timeline[-1], dict)
+                        else {}
+                    )
                     if isinstance(details, Mapping):
-                        for key in ("outcome", "decision", "system_mode", "delivery_mode"):
+                        for key in (
+                            "outcome",
+                            "decision",
+                            "system_mode",
+                            "delivery_mode",
+                        ):
                             if details.get(key):
                                 status_label = str(details.get(key))
                                 break
@@ -1460,9 +1520,9 @@ class KnowledgeAnalytics:
         if resolved_limit <= 0:
             return []
         since_ts = self._window_start_ts(window_days)
-        since_iso = datetime.fromtimestamp(
-            since_ts, tz=timezone.utc
-        ).strftime("%Y-%m-%d %H:%M:%S")
+        since_iso = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         clause, clause_params = self._account_email_clause(account_ids)
         query = """
         SELECT id, account_email, from_email, action_line, body_summary, received_at
@@ -1680,9 +1740,9 @@ class KnowledgeAnalytics:
         if resolved_limit <= 0:
             return []
         since_ts = self._window_start_ts(window_days)
-        since_iso = datetime.fromtimestamp(
-            since_ts, tz=timezone.utc
-        ).strftime("%Y-%m-%d %H:%M:%S")
+        since_iso = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         clause, clause_params = self._account_email_clause(account_ids)
         lane_clause, lane_params = self._lane_email_clause(lane, since_ts=since_ts)
         query = """
@@ -1992,7 +2052,9 @@ class KnowledgeAnalytics:
         count_query = f"{base_query}SELECT COUNT(1) AS total_count FROM scoped WHERE {status_clause}"
         try:
             count_rows = self._execute_select(count_query, params)
-            total_count = int(count_rows[0].get("total_count") or 0) if count_rows else 0
+            total_count = (
+                int(count_rows[0].get("total_count") or 0) if count_rows else 0
+            )
         except sqlite3.OperationalError:
             total_count = 0
 
@@ -2042,7 +2104,9 @@ class KnowledgeAnalytics:
             delivered_payload = self._parse_json_dict(row.get("delivered_payload"))
             delivery_mode = ""
             if policy_payload:
-                raw_mode = policy_payload.get("mode") or policy_payload.get("delivery_mode")
+                raw_mode = policy_payload.get("mode") or policy_payload.get(
+                    "delivery_mode"
+                )
                 if raw_mode:
                     delivery_mode = str(raw_mode)
             if not delivery_mode and delivered_payload:
@@ -2166,7 +2230,9 @@ class KnowledgeAnalytics:
         count_query = f"{base_query}SELECT COUNT(1) AS total_count FROM scoped WHERE {status_clause}"
         try:
             count_rows = self._execute_select(count_query, params)
-            total_count = int(count_rows[0].get("total_count") or 0) if count_rows else 0
+            total_count = (
+                int(count_rows[0].get("total_count") or 0) if count_rows else 0
+            )
         except sqlite3.OperationalError:
             total_count = 0
 
@@ -2216,7 +2282,9 @@ class KnowledgeAnalytics:
             delivered_payload = self._parse_json_dict(row.get("delivered_payload"))
             delivery_mode = ""
             if policy_payload:
-                raw_mode = policy_payload.get("mode") or policy_payload.get("delivery_mode")
+                raw_mode = policy_payload.get("mode") or policy_payload.get(
+                    "delivery_mode"
+                )
                 if raw_mode:
                     delivery_mode = str(raw_mode)
             if not delivery_mode and delivered_payload:
@@ -2317,9 +2385,7 @@ class KnowledgeAnalytics:
         from_email = row.get("from_email") or ""
         account_email = row.get("account_email") or ""
         from_label = (
-            self._mask_email_address(from_email)
-            if not reveal_pii
-            else str(from_email)
+            self._mask_email_address(from_email) if not reveal_pii else str(from_email)
         )
         account_label = (
             self._mask_email_address(account_email)
@@ -2476,7 +2542,9 @@ class KnowledgeAnalytics:
         results: list[dict[str, object]] = []
         for row in rows:
             label = str(row.get("priority") or "Unclassified").strip() or "Unclassified"
-            results.append({"label": label.title(), "count": int(row.get("count") or 0)})
+            results.append(
+                {"label": label.title(), "count": int(row.get("count") or 0)}
+            )
         return results
 
     def _latency_distribution(
@@ -2488,7 +2556,9 @@ class KnowledgeAnalytics:
         if not account_ids:
             return []
         since_ts = self._window_start_ts(window_days)
-        rows = self._processing_span_rows_scoped(account_ids=account_ids, since_ts=since_ts)
+        rows = self._processing_span_rows_scoped(
+            account_ids=account_ids, since_ts=since_ts
+        )
         bins = [
             (0.0, 1.0, "0-1s"),
             (1.0, 2.0, "1-2s"),
@@ -2503,7 +2573,9 @@ class KnowledgeAnalytics:
             total_ms = row.get("total_duration_ms")
             if total_ms is None:
                 try:
-                    total_ms = (float(row.get("ts_end_utc")) - float(row.get("ts_start_utc"))) * 1000.0
+                    total_ms = (
+                        float(row.get("ts_end_utc")) - float(row.get("ts_start_utc"))
+                    ) * 1000.0
                 except (TypeError, ValueError):
                     total_ms = None
             if total_ms is None:
@@ -2617,7 +2689,11 @@ class KnowledgeAnalytics:
             "span_count": summary.get("span_count"),
             "db_size_bytes": db_size_bytes,
         }
-        metrics_brief = status_strip.get("metrics_brief") if isinstance(status_strip, Mapping) else {}
+        metrics_brief = (
+            status_strip.get("metrics_brief")
+            if isinstance(status_strip, Mapping)
+            else {}
+        )
         metrics_window: Mapping[str, object] | None = None
         if isinstance(metrics_brief, Mapping) and metrics_brief:
             for key in sorted(metrics_brief.keys(), key=lambda item: str(item)):
@@ -2808,8 +2884,12 @@ class KnowledgeAnalytics:
             delta = correction_ts - received_ts
             if delta >= 0:
                 tta_values.append(delta)
-        summary["tta_seconds_p50"] = self._percentile(tta_values, 50) if tta_values else None
-        summary["tta_seconds_p90"] = self._percentile(tta_values, 90) if tta_values else None
+        summary["tta_seconds_p50"] = (
+            self._percentile(tta_values, 50) if tta_values else None
+        )
+        summary["tta_seconds_p90"] = (
+            self._percentile(tta_values, 90) if tta_values else None
+        )
 
         delivery_rows = self._event_rows_scoped(
             account_ids=account_ids,
@@ -2870,9 +2950,13 @@ class KnowledgeAnalytics:
             ),
         }
 
-        generated_at = datetime.fromtimestamp(float(now_ts), tz=timezone.utc).isoformat()
+        generated_at = datetime.fromtimestamp(
+            float(now_ts), tz=timezone.utc
+        ).isoformat()
         summary["generated_at_utc"] = (
-            generated_at if not generated_at.endswith("+00:00") else generated_at.replace("+00:00", "Z")
+            generated_at
+            if not generated_at.endswith("+00:00")
+            else generated_at.replace("+00:00", "Z")
         )
         return summary
 
@@ -2917,7 +3001,11 @@ class KnowledgeAnalytics:
                 ts_float = float(ts_val)
             except (TypeError, ValueError):
                 ts_float = 0.0
-            iso_ts = datetime.fromtimestamp(ts_float, tz=timezone.utc).isoformat() if ts_float else None
+            iso_ts = (
+                datetime.fromtimestamp(ts_float, tz=timezone.utc).isoformat()
+                if ts_float
+                else None
+            )
             if iso_ts and iso_ts.endswith("+00:00"):
                 iso_ts = iso_ts.replace("+00:00", "Z")
             items.append(
@@ -2926,7 +3014,9 @@ class KnowledgeAnalytics:
                     "event_type": event_type,
                     "ts_utc": ts_val,
                     "ts_iso": iso_ts,
-                    "email_id": row.get("email_id") if row.get("email_id") is not None else None,
+                    "email_id": (
+                        row.get("email_id") if row.get("email_id") is not None else None
+                    ),
                     "entity": {
                         "label": entity_label,
                         "domain": entity_domain,
@@ -2934,7 +3024,9 @@ class KnowledgeAnalytics:
                     "payload": sanitized_payload,
                 }
             )
-        generated_at = datetime.fromtimestamp(float(now_ts), tz=timezone.utc).isoformat()
+        generated_at = datetime.fromtimestamp(
+            float(now_ts), tz=timezone.utc
+        ).isoformat()
         if generated_at.endswith("+00:00"):
             generated_at = generated_at.replace("+00:00", "Z")
         return {
@@ -2982,7 +3074,9 @@ class KnowledgeAnalytics:
         """
         clause, clause_params = self._account_scope_clause(account_ids)
         query += clause
-        query += "\n        ORDER BY ts_utc ASC, event_type ASC, email_id ASC, entity_id ASC"
+        query += (
+            "\n        ORDER BY ts_utc ASC, event_type ASC, email_id ASC, entity_id ASC"
+        )
         params: list[object] = [since_ts, *clause_params]
         try:
             rows = self._execute_select(query, params)
@@ -3045,13 +3139,21 @@ class KnowledgeAnalytics:
                     "domain": domain,
                     "emails_total": int(entry["emails_total"]),
                     "threads_total": len(entry["threads"]),
-                    **({"trust_score": entry["trust_score"]} if entry["trust_score"] is not None else {}),
+                    **(
+                        {"trust_score": entry["trust_score"]}
+                        if entry["trust_score"] is not None
+                        else {}
+                    ),
                     **({"trust_delta": trust_delta} if trust_delta is not None else {}),
                     "avg_tta_seconds": None,
                     "risk_flags": sorted(entry["risk_flags"]),
-                    "last_seen_utc": datetime.fromtimestamp(entry["last_seen"], tz=timezone.utc).isoformat()
-                    if entry["last_seen"]
-                    else None,
+                    "last_seen_utc": (
+                        datetime.fromtimestamp(
+                            entry["last_seen"], tz=timezone.utc
+                        ).isoformat()
+                        if entry["last_seen"]
+                        else None
+                    ),
                 }
             )
 
@@ -3075,7 +3177,12 @@ class KnowledgeAnalytics:
             }
             for node in result_nodes
         ]
-        edges.sort(key=lambda edge: (-int(edge.get("weight") or 0), str(edge.get("target") or "")))
+        edges.sort(
+            key=lambda edge: (
+                -int(edge.get("weight") or 0),
+                str(edge.get("target") or ""),
+            )
+        )
         generated = datetime.fromtimestamp(max_ts, tz=timezone.utc).isoformat()
         return {
             "scope": {"account_emails": account_ids, "window_days": window_days},
@@ -3125,11 +3232,19 @@ class KnowledgeAnalytics:
             ts_utc = float(row.get("ts_utc") or 0.0)
             event_type = str(row.get("event_type") or "")
             payload = self._event_payload(row)
-            date_key = datetime.fromtimestamp(ts_utc, tz=timezone.utc).date().isoformat()
-            volume_entry = volume_by_date.setdefault(date_key, {"inbound": 0, "outbound": 0})
+            date_key = (
+                datetime.fromtimestamp(ts_utc, tz=timezone.utc).date().isoformat()
+            )
+            volume_entry = volume_by_date.setdefault(
+                date_key, {"inbound": 0, "outbound": 0}
+            )
             if event_type == "email_received":
                 volume_entry["inbound"] += 1
-            elif event_type in {"telegram_delivered", "priority_decision_recorded", "priority_correction_recorded"}:
+            elif event_type in {
+                "telegram_delivered",
+                "priority_decision_recorded",
+                "priority_correction_recorded",
+            }:
                 volume_entry["outbound"] += 1
             if row.get("email_id") is not None:
                 emails_total += 1
@@ -3167,14 +3282,22 @@ class KnowledgeAnalytics:
             **({"trust_delta": trust_delta} if trust_delta is not None else {}),
             "avg_tta_seconds": None,
             "risk_flags": sorted(risk_flags),
-            "last_seen_utc": datetime.fromtimestamp(last_seen, tz=timezone.utc).isoformat() if last_seen else None,
+            "last_seen_utc": (
+                datetime.fromtimestamp(last_seen, tz=timezone.utc).isoformat()
+                if last_seen
+                else None
+            ),
         }
         highlights: list[dict[str, str]] = []
         for flag in sorted(risk_flags):
             if flag == "silence_signal_detected":
-                highlights.append({"kind": "pattern", "text": "Обнаружен сигнал тишины за период"})
+                highlights.append(
+                    {"kind": "pattern", "text": "Обнаружен сигнал тишины за период"}
+                )
             elif flag == "deadlock_detected":
-                highlights.append({"kind": "pattern", "text": "Возможный дедлок общения"})
+                highlights.append(
+                    {"kind": "pattern", "text": "Возможный дедлок общения"}
+                )
         return {
             "contact": contact,
             "series": {"trust": trust_series, "volume": volume_series},
@@ -3245,7 +3368,11 @@ class KnowledgeAnalytics:
                     FROM priority_feedback
                     WHERE kind IN (?, ?, ?)
                     """
-                    params = ["correction", "priority_correction", "priority_correction_recorded"]
+                    params = [
+                        "correction",
+                        "priority_correction",
+                        "priority_correction_recorded",
+                    ]
                     email_clause, email_params = self._account_email_clause(account_ids)
                     query += email_clause
                     params.extend(email_params)
@@ -3306,7 +3433,13 @@ class KnowledgeAnalytics:
         limit: int = 3,
     ) -> list[dict[str, object]]:
         account_ids = self._normalize_account_scope("", account_emails)
-        if not account_ids or silent_days <= 0 or days <= 0 or min_msgs <= 0 or limit <= 0:
+        if (
+            not account_ids
+            or silent_days <= 0
+            or days <= 0
+            or min_msgs <= 0
+            or limit <= 0
+        ):
             return []
         since_ts = self._window_start_ts(days)
         cutoff_ts = self._window_start_ts(silent_days)
@@ -3339,7 +3472,9 @@ class KnowledgeAnalytics:
                 last_ts = float(row.get("last_ts") or 0.0)
             except (TypeError, ValueError):
                 last_ts = 0.0
-            days_silent = max(0, int((now_ts - last_ts) // 86400)) if last_ts > 0 else silent_days
+            days_silent = (
+                max(0, int((now_ts - last_ts) // 86400)) if last_ts > 0 else silent_days
+            )
             masked = self._mask_email_address(email) or email
             items.append(
                 {
@@ -3379,7 +3514,9 @@ class KnowledgeAnalytics:
                 parsed = parse_sqlite_datetime(received_at)
                 if parsed is not None:
                     detected_ts = parsed.timestamp()
-            days_ago = max(0, int((now_ts - detected_ts) // 86400)) if detected_ts > 0 else 0
+            days_ago = (
+                max(0, int((now_ts - detected_ts) // 86400)) if detected_ts > 0 else 0
+            )
             from_email = str(row.get("from_email") or "").strip()
             items.append(
                 {
@@ -3485,9 +3622,7 @@ class KnowledgeAnalytics:
         )
         entity_id = entity_id.strip()
         return [
-            row
-            for row in rows
-            if str(row.get("entity_id") or "").strip() == entity_id
+            row for row in rows if str(row.get("entity_id") or "").strip() == entity_id
         ]
 
     def sender_stats(self, limit: int | None = None) -> list[dict[str, object]]:
@@ -4326,7 +4461,9 @@ class KnowledgeAnalytics:
         contract_count = 0
         last_contact_ts = 0.0
         for row in email_rows:
-            text = " ".join(str(row.get(key) or "") for key in ("subject", "body_summary")).lower()
+            text = " ".join(
+                str(row.get(key) or "") for key in ("subject", "body_summary")
+            ).lower()
             if _REL_INVOICE_RE.search(text):
                 invoice_count += 1
             if _REL_CONTRACT_RE.search(text):
@@ -4353,8 +4490,12 @@ class KnowledgeAnalytics:
         trust_score = 0
         for row in event_rows:
             event_type = str(row.get("event_type") or "").strip().lower()
-            payload_text = str(row.get("payload_json") or row.get("payload") or "").lower()
-            if "invoice_paid" in event_type or ("invoice" in payload_text and "paid" in payload_text):
+            payload_text = str(
+                row.get("payload_json") or row.get("payload") or ""
+            ).lower()
+            if "invoice_paid" in event_type or (
+                "invoice" in payload_text and "paid" in payload_text
+            ):
                 trust_score += 1
             if "overdue" in event_type or "expired" in event_type:
                 overdue_count += 1
@@ -4522,7 +4663,9 @@ class KnowledgeAnalytics:
         fulfilled_count = 0
         for row in status_rows:
             payload = self._event_payload(row)
-            status = str(payload.get("new_status") or payload.get("status") or "").lower()
+            status = str(
+                payload.get("new_status") or payload.get("status") or ""
+            ).lower()
             if status == "expired":
                 expired_count += 1
             elif status == "fulfilled":
@@ -4581,16 +4724,12 @@ class KnowledgeAnalytics:
             placeholders = ", ".join(["?"] * len(status_values))
             status_clause = f" AND lower(c.status) IN ({placeholders})"
             status_params.extend(status_values)
-        count_query = (
-            """
+        count_query = """
             SELECT COUNT(*) AS total_count
             FROM commitments c
             JOIN emails e ON e.id = c.email_row_id
             WHERE datetime(c.created_at) >= datetime(?)
-            """
-            + clause
-            + status_clause
-        )
+            """ + clause + status_clause
         params: list[object] = [since_iso, *clause_params, *status_params]
         try:
             count_rows = self._execute_select(count_query, params)
@@ -4670,7 +4809,9 @@ class KnowledgeAnalytics:
         if not commitments:
             return {"rows": [], "total_count": total_count}
 
-        email_ids = sorted({entry["email_id"] for entry in commitments if entry.get("email_id")})
+        email_ids = sorted(
+            {entry["email_id"] for entry in commitments if entry.get("email_id")}
+        )
         if email_ids and resolved_limit > 0:
             placeholders = ", ".join(["?"] * len(email_ids))
             event_placeholders = ", ".join(["?"] * len(self._COMMITMENT_EVENT_TYPES))
@@ -4735,13 +4876,17 @@ class KnowledgeAnalytics:
                 )
             )
             evidence_count = len(evidence_items)
-            evidence_trimmed = evidence_items[:resolved_limit] if resolved_limit > 0 else []
+            evidence_trimmed = (
+                evidence_items[:resolved_limit] if resolved_limit > 0 else []
+            )
             last_evidence_ts = None
             if evidence_items:
                 last_evidence_ts = float(evidence_items[0].get("ts_utc") or 0.0)
             last_activity_ts = entry.get("created_ts")
             if last_evidence_ts is not None:
-                if last_activity_ts is None or last_evidence_ts > float(last_activity_ts):
+                if last_activity_ts is None or last_evidence_ts > float(
+                    last_activity_ts
+                ):
                     last_activity_ts = last_evidence_ts
             rows_out.append(
                 {
@@ -4933,7 +5078,6 @@ class KnowledgeAnalytics:
                 return True
         return False
 
-
     def weekly_compact_summary(
         self,
         *,
@@ -4963,7 +5107,9 @@ class KnowledgeAnalytics:
             account_emails=account_ids,
         )
 
-        since_iso = datetime.fromtimestamp(self._window_start_ts(days), tz=timezone.utc).isoformat()
+        since_iso = datetime.fromtimestamp(
+            self._window_start_ts(days), tz=timezone.utc
+        ).isoformat()
         clause, clause_params = self._account_email_clause(account_ids)
         priority_rows: list[dict[str, object]] = []
         try:
@@ -4972,9 +5118,7 @@ class KnowledgeAnalytics:
                 SELECT priority, COUNT(*) AS count
                 FROM emails
                 WHERE received_at >= ?
-                """
-                + clause
-                + " GROUP BY priority",
+                """ + clause + " GROUP BY priority",
                 [since_iso, *clause_params],
             )
         except sqlite3.OperationalError:
@@ -5017,6 +5161,7 @@ class KnowledgeAnalytics:
             "accuracy_pct": int(accuracy_pct) if accuracy_pct is not None else None,
             "open_commitments": int(open_commitments),
         }
+
     def weekly_email_volume(
         self,
         *,
@@ -5397,10 +5542,11 @@ class KnowledgeAnalytics:
             words = re.findall(r"\b\w+\b", text)
             totals[sender] = totals.get(sender, 0) + len(words)
         results = [
-            {"entity": sender, "words": words}
-            for sender, words in totals.items()
+            {"entity": sender, "words": words} for sender, words in totals.items()
         ]
-        results.sort(key=lambda item: (-int(item["words"]), str(item["entity"]).lower()))
+        results.sort(
+            key=lambda item: (-int(item["words"]), str(item["entity"]).lower())
+        )
         return results
 
     def attention_entity_metrics(
@@ -5448,7 +5594,10 @@ class KnowledgeAnalytics:
             )
             entry["message_count"] += 1.0
             entry["estimated_read_minutes"] += float(read_minutes)
-            if row.get("email_id") is not None and str(row.get("email_id")) in deferred_ids:
+            if (
+                row.get("email_id") is not None
+                and str(row.get("email_id")) in deferred_ids
+            ):
                 entry["deferred_count"] += 1.0
 
         results: list[dict[str, object]] = []
@@ -5462,11 +5611,16 @@ class KnowledgeAnalytics:
                     "message_count": int(totals.get("message_count") or 0),
                     "deferred_count": int(totals.get("deferred_count") or 0),
                     "attachment_count": int(totals.get("attachment_count") or 0),
-                    "estimated_read_minutes": float(totals.get("estimated_read_minutes") or 0.0),
+                    "estimated_read_minutes": float(
+                        totals.get("estimated_read_minutes") or 0.0
+                    ),
                 }
             )
         results.sort(
-            key=lambda item: (-float(item["estimated_read_minutes"]), str(item["entity_id"]).lower())
+            key=lambda item: (
+                -float(item["estimated_read_minutes"]),
+                str(item["entity_id"]).lower(),
+            )
         )
         return results
 
@@ -5482,9 +5636,9 @@ class KnowledgeAnalytics:
         if not account_ids:
             return []
         since_ts = self._window_start_ts(window_days)
-        since_iso = datetime.fromtimestamp(
-            since_ts, tz=timezone.utc
-        ).strftime("%Y-%m-%d %H:%M:%S")
+        since_iso = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         clause, clause_params = self._account_email_clause(account_ids)
         base_query = """
         SELECT e.id
@@ -5528,9 +5682,7 @@ class KnowledgeAnalytics:
             except sqlite3.OperationalError:
                 rows = []
             email_ids = [
-                int(row.get("id") or 0)
-                for row in rows
-                if int(row.get("id") or 0) > 0
+                int(row.get("id") or 0) for row in rows if int(row.get("id") or 0) > 0
             ]
             count = len(email_ids)
             minutes = 0.0
@@ -5555,7 +5707,14 @@ class KnowledgeAnalytics:
             if total_minutes > 0:
                 share = max(
                     0.0,
-                    min(100.0, (float(row.get("estimated_read_minutes") or 0.0) / total_minutes) * 100),
+                    min(
+                        100.0,
+                        (
+                            float(row.get("estimated_read_minutes") or 0.0)
+                            / total_minutes
+                        )
+                        * 100,
+                    ),
                 )
             row["share_percent"] = round(share, 1)
         return results
@@ -5583,13 +5742,20 @@ class KnowledgeAnalytics:
         )
         totals = {
             "estimated_read_minutes": float(
-                sum(float(item.get("estimated_read_minutes") or 0.0) for item in raw_entities)
+                sum(
+                    float(item.get("estimated_read_minutes") or 0.0)
+                    for item in raw_entities
+                )
             ),
-            "message_count": int(sum(int(item.get("message_count") or 0) for item in raw_entities)),
+            "message_count": int(
+                sum(int(item.get("message_count") or 0) for item in raw_entities)
+            ),
             "attachment_count": int(
                 sum(int(item.get("attachment_count") or 0) for item in raw_entities)
             ),
-            "deferred_count": int(sum(int(item.get("deferred_count") or 0) for item in raw_entities)),
+            "deferred_count": int(
+                sum(int(item.get("deferred_count") or 0) for item in raw_entities)
+            ),
         }
         if attention_cost_per_hour > 0:
             totals["estimated_cost"] = round(
@@ -5636,7 +5802,9 @@ class KnowledgeAnalytics:
                     label=label,
                     message_count=int(item.get("message_count") or 0),
                     attachment_count=int(item.get("attachment_count") or 0),
-                    estimated_read_minutes=float(item.get("estimated_read_minutes") or 0.0),
+                    estimated_read_minutes=float(
+                        item.get("estimated_read_minutes") or 0.0
+                    ),
                     deferred_count=int(item.get("deferred_count") or 0),
                 )
             )
@@ -5671,7 +5839,9 @@ class KnowledgeAnalytics:
             )[0]
             entity_id = str(top_entry.get("entity_id") or "")
             label = self.entity_label(entity_id=entity_id) or entity_id
-            top_contact_label = self._mask_contact_label(entity_id=entity_id, label=label)
+            top_contact_label = self._mask_contact_label(
+                entity_id=entity_id, label=label
+            )
 
         generated_ts = None
         if scope:
@@ -5806,7 +5976,9 @@ class KnowledgeAnalytics:
         expired_count = 0
         for row in status_rows:
             payload = self._event_payload(row)
-            status = str(payload.get("new_status") or payload.get("status") or "").lower()
+            status = str(
+                payload.get("new_status") or payload.get("status") or ""
+            ).lower()
             if status == "fulfilled":
                 fulfilled_count += 1
             elif status == "expired":
@@ -5842,7 +6014,9 @@ class KnowledgeAnalytics:
         overdue: list[dict[str, object]] = []
         for row in rows:
             payload = self._event_payload(row)
-            status = str(payload.get("new_status") or payload.get("status") or "").lower()
+            status = str(
+                payload.get("new_status") or payload.get("status") or ""
+            ).lower()
             if status != "expired":
                 continue
             overdue.append(
@@ -6301,7 +6475,9 @@ class KnowledgeAnalytics:
     ) -> dict[str, object]:
         account_ids = self._normalize_account_scope(account_email, account_emails)
         since_ts = self._window_start_ts(window_days)
-        rows = self._processing_span_rows_scoped(account_ids=account_ids, since_ts=since_ts)
+        rows = self._processing_span_rows_scoped(
+            account_ids=account_ids, since_ts=since_ts
+        )
 
         span_count = len(rows)
         total_durations: list[float] = []
@@ -6452,7 +6628,11 @@ class KnowledgeAnalytics:
             end_value = row_dict.get("ts_end_utc")
             try:
                 total_raw = row_dict.get("total_duration_ms")
-                if total_raw is None and start_value is not None and end_value is not None:
+                if (
+                    total_raw is None
+                    and start_value is not None
+                    and end_value is not None
+                ):
                     total_ms = (float(end_value) - float(start_value)) * 1000.0
                 else:
                     total_ms = float(total_raw) if total_raw is not None else None
@@ -6490,7 +6670,9 @@ class KnowledgeAnalytics:
     ) -> list[dict[str, object]]:
         account_ids = self._normalize_account_scope(account_email, account_emails)
         since_ts = self._window_start_ts(window_days)
-        rows = self._processing_span_rows_scoped(account_ids=account_ids, since_ts=since_ts)
+        rows = self._processing_span_rows_scoped(
+            account_ids=account_ids, since_ts=since_ts
+        )
 
         errors: list[dict[str, object]] = []
         for row in rows:

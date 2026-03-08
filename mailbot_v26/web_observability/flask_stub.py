@@ -20,7 +20,9 @@ _app_ctx = contextvars.ContextVar("app_ctx")
 
 
 class Request:
-    def __init__(self, method: str, path: str, args: dict[str, str], form: dict[str, str]):
+    def __init__(
+        self, method: str, path: str, args: dict[str, str], form: dict[str, str]
+    ):
         self.method = method
         self.path = path
         self.args = args
@@ -128,24 +130,43 @@ class TestClient:
                 self.cookies[key] = morsel.value
         return response
 
-    def get(self, path: str, query_string: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> Response:
+    def get(
+        self,
+        path: str,
+        query_string: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
         query = f"?{urlencode(query_string)}" if query_string else ""
         combined_headers = self._prepare_headers()
         if headers:
             combined_headers.update(headers)
-        response = self.app._handle_request("GET", f"{path}{query}", data=None, headers=combined_headers)
+        response = self.app._handle_request(
+            "GET", f"{path}{query}", data=None, headers=combined_headers
+        )
         return self._handle_response(response)
 
-    def post(self, path: str, data: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> Response:
+    def post(
+        self,
+        path: str,
+        data: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
         combined_headers = self._prepare_headers()
         if headers:
             combined_headers.update(headers)
-        response = self.app._handle_request("POST", path, data=data, headers=combined_headers)
+        response = self.app._handle_request(
+            "POST", path, data=data, headers=combined_headers
+        )
         return self._handle_response(response)
 
 
 class Flask:
-    def __init__(self, name: str, template_folder: str | None = None, static_folder: str | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        template_folder: str | None = None,
+        static_folder: str | None = None,
+    ) -> None:
         self.name = name
         self.template_folder = template_folder
         self.static_folder = static_folder
@@ -155,7 +176,9 @@ class Flask:
         self._endpoint_map: dict[str, str] = {}
         self.config: dict[str, object] = {}
 
-    def route(self, path: str, methods: Iterable[str] | None = None) -> Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
+    def route(
+        self, path: str, methods: Iterable[str] | None = None
+    ) -> Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
         allowed_methods = set(methods or ["GET"])
 
         def decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
@@ -166,7 +189,9 @@ class Flask:
 
         return decorator
 
-    def before_request(self, func: Callable[[], Response | None]) -> Callable[[], Response | None]:
+    def before_request(
+        self, func: Callable[[], Response | None]
+    ) -> Callable[[], Response | None]:
         self.before_request_funcs.append(func)
         return func
 
@@ -185,7 +210,9 @@ class Flask:
             data_part, sig = value.rsplit(".", 1)
         except ValueError:
             return Session()
-        expected = hmac.new((self.secret_key or "").encode(), data_part.encode(), sha256).hexdigest()
+        expected = hmac.new(
+            (self.secret_key or "").encode(), data_part.encode(), sha256
+        ).hexdigest()
         if not hmac.compare_digest(expected, sig):
             return Session()
         try:
@@ -200,7 +227,9 @@ class Flask:
     def _dump_session(self, session_obj: Session) -> str:
         payload = json.dumps(dict(session_obj), separators=(",", ":"))
         data_part = base64.urlsafe_b64encode(payload.encode()).decode()
-        signature = hmac.new((self.secret_key or "").encode(), data_part.encode(), sha256).hexdigest()
+        signature = hmac.new(
+            (self.secret_key or "").encode(), data_part.encode(), sha256
+        ).hexdigest()
         return f"{data_part}.{signature}"
 
     @staticmethod
@@ -258,7 +287,13 @@ class Flask:
             return self._static_handler, "static", {}
         return None, None, {}
 
-    def _parse_request(self, method: str, path: str, data: dict[str, str] | None, headers: dict[str, str]) -> Request:
+    def _parse_request(
+        self,
+        method: str,
+        path: str,
+        data: dict[str, str] | None,
+        headers: dict[str, str],
+    ) -> Request:
         parsed = urlparse(path)
         args = {k: v[0] for k, v in parse_qs(parsed.query).items()}
         form = {}
@@ -267,7 +302,13 @@ class Flask:
         req = Request(method, parsed.path or path, args, form)
         return req
 
-    def _handle_request(self, method: str, path: str, data: dict[str, str] | None, headers: dict[str, str] | None = None) -> Response:
+    def _handle_request(
+        self,
+        method: str,
+        path: str,
+        data: dict[str, str] | None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
         headers = headers or {}
         func, endpoint, kwargs = self._match_route(method, path)
         req = self._parse_request(method, path, data, headers)
@@ -309,7 +350,9 @@ class Flask:
             return Response(b"Not Found", status_code=404, headers={})
         with open(file_path, "rb") as fp:
             data = fp.read()
-        return Response(data, status_code=200, headers={"Content-Type": _guess_mime(file_path)})
+        return Response(
+            data, status_code=200, headers={"Content-Type": _guess_mime(file_path)}
+        )
 
     def run(self, host: str = "127.0.0.1", port: int = 5000, **_: Any) -> None:
         def app(environ, start_response):  # type: ignore[override]
@@ -340,7 +383,11 @@ class Flask:
 
 def jsonify(payload: Any) -> Response:
     data = json.dumps(payload, separators=(",", ":"))
-    return Response(data.encode("utf-8"), status_code=200, headers={"Content-Type": "application/json"})
+    return Response(
+        data.encode("utf-8"),
+        status_code=200,
+        headers={"Content-Type": "application/json"},
+    )
 
 
 def redirect(location: str, code: int = 302) -> Response:

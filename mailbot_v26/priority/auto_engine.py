@@ -59,7 +59,9 @@ class AutoPriorityEngine:
         skipped_reason: str | None = None
 
         runtime_flags, _ = self._runtime_flag_store.get_flags()
-        auto_priority_enabled = bool(self._enabled_flag()) and runtime_flags.enable_auto_priority
+        auto_priority_enabled = (
+            bool(self._enabled_flag()) and runtime_flags.enable_auto_priority
+        )
 
         if not auto_priority_enabled:
             skipped_reason = "auto_priority_disabled"
@@ -110,7 +112,9 @@ class AutoPriorityEngine:
                 skipped_reason=skipped_reason,
             )
 
-        delta = PRIORITY_ORDER.get(shadow_priority, 0) - PRIORITY_ORDER.get(llm_priority, 0)
+        delta = PRIORITY_ORDER.get(shadow_priority, 0) - PRIORITY_ORDER.get(
+            llm_priority, 0
+        )
         if delta <= 0:
             skipped_reason = "shadow_not_higher"
             logger.info("auto_priority_skipped", reason=skipped_reason)
@@ -149,7 +153,10 @@ class AutoPriorityEngine:
                 skipped_reason=skipped_reason,
             )
 
-        if confidence_score is None or confidence_score < AutoPriorityGates.MIN_CONFIDENCE:
+        if (
+            confidence_score is None
+            or confidence_score < AutoPriorityGates.MIN_CONFIDENCE
+        ):
             skipped_reason = "min_confidence"
             confidence_decision = "SKIPPED"
             logger.info(

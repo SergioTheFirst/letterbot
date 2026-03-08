@@ -8,7 +8,9 @@ from mailbot_v26.pipeline.stage_telegram import enqueue_tg
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 
 
-def test_enqueue_tg_missing_credentials_keeps_existing_behavior(caplog: pytest.LogCaptureFixture) -> None:
+def test_enqueue_tg_missing_credentials_keeps_existing_behavior(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     payload = TelegramPayload(
         html_text="text",
         priority="🔵",

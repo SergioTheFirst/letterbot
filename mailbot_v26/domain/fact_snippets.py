@@ -12,7 +12,12 @@ def normalize_text(text: str) -> str:
         return ""
 
     cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
-    cleaned = re.sub(r"<(head|script|style)[^>]*>.*?</\1>", " ", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(
+        r"<(head|script|style)[^>]*>.*?</\1>",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
     cleaned = re.sub(r"<!--.*?-->", " ", cleaned, flags=re.DOTALL)
     cleaned = re.sub(r"<[^>]+>", " ", cleaned)
     cleaned = html.unescape(cleaned)
@@ -38,7 +43,20 @@ def pick_email_body_fact(body_text: str) -> Optional[str]:
         lowered = line.lower()
         if not line:
             continue
-        if lowered.startswith(("from:", "sent:", "to:", "subject:", "cc:", "bcc:", "от:", "кому:", "тема:", "дата:")):
+        if lowered.startswith(
+            (
+                "from:",
+                "sent:",
+                "to:",
+                "subject:",
+                "cc:",
+                "bcc:",
+                "от:",
+                "кому:",
+                "тема:",
+                "дата:",
+            )
+        ):
             continue
         if lowered.startswith((">", "fw:", "fwd:", "forwarded message")):
             continue
@@ -54,7 +72,16 @@ def pick_email_body_fact(body_text: str) -> Optional[str]:
 
     greetings = ("добрый день", "добрый вечер", "здравствуйте", "привет", "hello", "hi")
     signatures = ("с уважением", "best regards", "kind regards")
-    keywords = ("счёт", "оплата", "долг", "задолженность", "договор", "прайс", "срок", "до")
+    keywords = (
+        "счёт",
+        "оплата",
+        "долг",
+        "задолженность",
+        "договор",
+        "прайс",
+        "срок",
+        "до",
+    )
     date_pattern = re.compile(
         r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b|"
         r"\b(январ[ья]|феврал[ья]|март[а]?|апрел[ья]|ма[йя]|июн[ья]|июл[ья]|август[а]?|сентябр[ья]|октябр[ья]|ноябр[ья]|декабр[ья])\s+\d{4}\b",
@@ -89,7 +116,9 @@ def pick_attachment_fact(text: str, filename: str, doc_type: str) -> Optional[st
 
     segments = _collect_segments(normalized)
 
-    money_pattern = re.compile(r"₽|\bруб\.?\b|\bр\.\b|USD|\$|EUR|€|сумма|итого|к оплате", re.IGNORECASE)
+    money_pattern = re.compile(
+        r"₽|\bруб\.?\b|\bр\.\b|USD|\$|EUR|€|сумма|итого|к оплате", re.IGNORECASE
+    )
     for segment in segments:
         if money_pattern.search(segment):
             return _safe_clause(segment)
@@ -102,8 +131,19 @@ def pick_attachment_fact(text: str, filename: str, doc_type: str) -> Optional[st
         if date_pattern.search(segment):
             return _safe_clause(segment)
 
-    contract_headers = ("соглашение", "договор", "стороны", "поставщик", "покупатель", "предмет договора")
-    contract_candidates = [seg for seg in segments if any(header.lower() in seg.lower() for header in contract_headers)]
+    contract_headers = (
+        "соглашение",
+        "договор",
+        "стороны",
+        "поставщик",
+        "покупатель",
+        "предмет договора",
+    )
+    contract_candidates = [
+        seg
+        for seg in segments
+        if any(header.lower() in seg.lower() for header in contract_headers)
+    ]
     if contract_candidates:
         rich_candidates = [seg for seg in contract_candidates if len(seg.split()) > 1]
         chosen = min(rich_candidates or contract_candidates, key=len)
@@ -188,7 +228,11 @@ def _dense_line(segments: Iterable[str]) -> Optional[str]:
         if digits > length * 0.6:
             continue
         score = len(tokens)
-        if best is None or score > best[0] or (score == best[0] and length < len(best[1])):
+        if (
+            best is None
+            or score > best[0]
+            or (score == best[0] and length < len(best[1]))
+        ):
             best = (score, segment)
     return best[1] if best else None
 

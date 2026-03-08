@@ -106,22 +106,27 @@ def _manifest_status(dist_root: Path) -> dict[str, Any]:
 
 def _runtime_versions_text() -> str:
     deps: list[str] = []
-    for dist in sorted(metadata.distributions(), key=lambda d: (d.metadata.get("Name") or "").lower()):
+    for dist in sorted(
+        metadata.distributions(), key=lambda d: (d.metadata.get("Name") or "").lower()
+    ):
         name = dist.metadata.get("Name")
         if not name:
             continue
         deps.append(f"{name}=={dist.version}")
         if len(deps) >= 30:
             break
-    return "\n".join(
-        [
-            f"app_version={__version__}",
-            f"python={sys.version}",
-            f"platform={platform.platform()}",
-            "dependencies:",
-            *deps,
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                f"app_version={__version__}",
+                f"python={sys.version}",
+                f"platform={platform.platform()}",
+                "dependencies:",
+                *deps,
+            ]
+        )
+        + "\n"
+    )
 
 
 def build_diagnostics_zip(
@@ -147,7 +152,9 @@ def build_diagnostics_zip(
         "port": int(web_ui_port),
         "uptime_seconds": max(0, int(uptime_seconds)),
     }
-    health_payload.setdefault("generated_at_utc", datetime.now(timezone.utc).isoformat())
+    health_payload.setdefault(
+        "generated_at_utc", datetime.now(timezone.utc).isoformat()
+    )
     health_payload.setdefault("app_version", __version__)
 
     metadata_lines: list[str] = [f"app_version={__version__}"]
@@ -155,7 +162,9 @@ def build_diagnostics_zip(
     with zipfile.ZipFile(out, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         if log_path.exists():
             if log_path.stat().st_size > MAX_LOG_BYTES:
-                archive.writestr(f"logs/{log_path.name}", _tail_text(log_path, TAIL_LINE_LIMIT))
+                archive.writestr(
+                    f"logs/{log_path.name}", _tail_text(log_path, TAIL_LINE_LIMIT)
+                )
                 metadata_lines.append(
                     f"logs/{log_path.name}: truncated_to_tail_lines={TAIL_LINE_LIMIT}"
                 )
@@ -167,7 +176,9 @@ def build_diagnostics_zip(
         rotated = log_path.with_name(f"{log_path.name}.1")
         if rotated.exists():
             if rotated.stat().st_size > MAX_LOG_BYTES:
-                archive.writestr(f"logs/{rotated.name}", _tail_text(rotated, TAIL_LINE_LIMIT))
+                archive.writestr(
+                    f"logs/{rotated.name}", _tail_text(rotated, TAIL_LINE_LIMIT)
+                )
                 metadata_lines.append(
                     f"logs/{rotated.name}: truncated_to_tail_lines={TAIL_LINE_LIMIT}"
                 )

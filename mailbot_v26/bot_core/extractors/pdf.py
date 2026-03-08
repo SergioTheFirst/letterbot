@@ -228,7 +228,11 @@ def extract_pdf(file_bytes: bytes, filename: str) -> tuple[str, str]:
     try:
         text = _extract_with_pypdf(file_bytes)
     except Exception as exc:
-        reason = PDF_ZERO_REASON_ENCRYPTED if _looks_encrypted_error(exc) else PDF_ZERO_REASON_BROKEN
+        reason = (
+            PDF_ZERO_REASON_ENCRYPTED
+            if _looks_encrypted_error(exc)
+            else PDF_ZERO_REASON_BROKEN
+        )
         logger.warning("pypdf extraction exception for %s: %s", filename, exc)
         return "", reason
     if text.strip():
@@ -237,7 +241,11 @@ def extract_pdf(file_bytes: bytes, filename: str) -> tuple[str, str]:
     try:
         text = _extract_with_pikepdf(file_bytes)
     except Exception as exc:
-        reason = PDF_ZERO_REASON_ENCRYPTED if _looks_encrypted_error(exc) else PDF_ZERO_REASON_BROKEN
+        reason = (
+            PDF_ZERO_REASON_ENCRYPTED
+            if _looks_encrypted_error(exc)
+            else PDF_ZERO_REASON_BROKEN
+        )
         logger.warning("pikepdf extraction exception for %s: %s", filename, exc)
         return "", reason
     if text.strip():

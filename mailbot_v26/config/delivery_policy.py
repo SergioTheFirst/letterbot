@@ -7,7 +7,6 @@ from pathlib import Path
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 
-
 _LOGGER = logging.getLogger(__name__)
 
 

@@ -3,8 +3,6 @@ from __future__ import annotations
 from mailbot_v26.pipeline import tg_renderer
 
 
-
-
 def test_decision_explanation_invoice() -> None:
     explanation = tg_renderer._build_decision_explanation(
         {
@@ -43,6 +41,8 @@ def test_decision_explanation_max_three_points() -> None:
         "• сумма 10 000 ₽",
         "• срок 20.05",
     ]
+
+
 def test_tg_render_standard() -> None:
     attachments = [
         {"filename": "report.pdf", "text": "summary"},
@@ -256,8 +256,6 @@ def test_attachment_insight_invoice_amount_due_date() -> None:
     assert "invoice.pdf" not in rendered
 
 
-
-
 def test_attachment_insight_invoice_excel_number_amount_due_date() -> None:
     attachments = [
         {
@@ -296,6 +294,7 @@ def test_attachment_insight_invoice_from_attachment_text_without_mail_type() -> 
     )
 
     assert "📎 Счет №123 · 87 500 ₽ · до 15.04" in rendered
+
 
 def test_attachment_insight_act_reconciliation_period() -> None:
     attachments = [
@@ -446,6 +445,7 @@ def test_attachment_insight_uses_decision_facts() -> None:
     )
 
     assert "📎 87 500 ₽ · до 15.04" in rendered
+
 
 def test_all_email_notifications_render_priority_circle() -> None:
     for priority in ("🔴", "🟡", "🔵"):

@@ -25,7 +25,9 @@ def get_primary_ipv4() -> str | None:
 
     hostname = socket.gethostname()
     try:
-        addresses = socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_DGRAM)
+        addresses = socket.getaddrinfo(
+            hostname, None, socket.AF_INET, socket.SOCK_DGRAM
+        )
     except OSError:
         return None
     for item in addresses:

@@ -1,5 +1,3 @@
-import pytest
-
 from mailbot_v26.facts.fact_extractor import FactBundle, FactExtractor
 
 

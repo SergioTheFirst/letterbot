@@ -22,7 +22,9 @@ class DummyResponse:
         raise ValueError("no payload")
 
 
-def _payload(text: str, *, token: str = "token", chat_id: str = "123") -> TelegramPayload:
+def _payload(
+    text: str, *, token: str = "token", chat_id: str = "123"
+) -> TelegramPayload:
     return TelegramPayload(
         html_text=text,
         priority="🔵",
@@ -32,7 +34,9 @@ def _payload(text: str, *, token: str = "token", chat_id: str = "123") -> Telegr
 
 def test_send_telegram_empty_text_logs(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.ERROR):
-        result = telegram_sender.send_telegram(_payload("", token="token", chat_id="chat"))
+        result = telegram_sender.send_telegram(
+            _payload("", token="token", chat_id="chat")
+        )
         assert result.delivered is False
     assert "empty" in caplog.text.lower()
 
@@ -55,11 +59,15 @@ def test_send_telegram_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert called["json"]["disable_web_page_preview"] is True
 
 
-def test_send_telegram_non_200_logs(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_send_telegram_non_200_logs(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     monkeypatch.setattr(
         telegram_sender,
         "requests",
-        SimpleNamespace(post=lambda url, json, timeout: DummyResponse(status_code=401, text="bad")),
+        SimpleNamespace(
+            post=lambda url, json, timeout: DummyResponse(status_code=401, text="bad")
+        ),
     )
     with caplog.at_level(logging.ERROR):
         result = telegram_sender.send_telegram(_payload("hello"))
@@ -68,7 +76,9 @@ def test_send_telegram_non_200_logs(monkeypatch: pytest.MonkeyPatch, caplog: pyt
     assert "bad" in caplog.text
 
 
-def test_send_telegram_exception(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_send_telegram_exception(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     def raising_post(url: str, json: dict, timeout: int) -> DummyResponse:
         raise RuntimeError("network error")
 
@@ -79,7 +89,9 @@ def test_send_telegram_exception(monkeypatch: pytest.MonkeyPatch, caplog: pytest
     assert "network error" in caplog.text
 
 
-def test_send_telegram_requests_missing(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_send_telegram_requests_missing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     monkeypatch.setattr(telegram_sender, "requests", None)
     with caplog.at_level(logging.ERROR):
         result = telegram_sender.send_telegram(_payload("hello"))
@@ -121,7 +133,9 @@ def test_salvage_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
         calls.append(json)
         if len(calls) == 1:
-            return DummyResponse(status_code=400, text="Bad Request: unsupported start tag")
+            return DummyResponse(
+                status_code=400, text="Bad Request: unsupported start tag"
+            )
         return DummyResponse(status_code=200, text="ok")
 
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
@@ -171,7 +185,10 @@ def test_edit_telegram_message_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert ok is False
 
-def test_outbound_sanitizer_fixes_common_mojibake_sequences(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_outbound_sanitizer_fixes_common_mojibake_sequences(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
 
     def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
@@ -179,7 +196,7 @@ def test_outbound_sanitizer_fixes_common_mojibake_sequences(monkeypatch: pytest.
         return DummyResponse(status_code=200, text="ok")
 
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
-    clean_text = "\U0001F535 from sender@example.com:\nCheck payment by 15.04 — urgent…\n• Action"
+    clean_text = "\U0001f535 from sender@example.com:\nCheck payment by 15.04 — urgent…\n• Action"
     mojibake_text = clean_text.encode("utf-8").decode("cp1251")
 
     result = telegram_sender.send_telegram(_payload(mojibake_text))
@@ -191,7 +208,9 @@ def test_outbound_sanitizer_fixes_common_mojibake_sequences(monkeypatch: pytest.
         assert token not in sent_text
 
 
-def test_no_mojibake_in_regular_telegram_message(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_mojibake_in_regular_telegram_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
 
     def fake_post(url: str, json: dict, timeout: int) -> DummyResponse:
@@ -199,7 +218,7 @@ def test_no_mojibake_in_regular_telegram_message(monkeypatch: pytest.MonkeyPatch
         return DummyResponse(status_code=200, text="ok")
 
     monkeypatch.setattr(telegram_sender, "requests", SimpleNamespace(post=fake_post))
-    clean_text = "\U0001F7E1 from alerts@example.com:\nTotal payable 1200 USD"
+    clean_text = "\U0001f7e1 from alerts@example.com:\nTotal payable 1200 USD"
     mojibake_text = clean_text.encode("utf-8").decode("cp1251")
 
     result = telegram_sender.send_telegram(_payload(mojibake_text))

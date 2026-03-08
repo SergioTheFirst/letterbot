@@ -1,4 +1,5 @@
 """Utilities for safe Telegram HTML payloads."""
+
 from __future__ import annotations
 
 import re

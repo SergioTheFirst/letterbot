@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 KEY_BATS = [
     "letterbot.bat",
     "update_and_run.bat",
@@ -22,9 +21,9 @@ def test_no_bare_bracketed_text_in_bat_files() -> None:
                 continue
             lowered = line.lower()
             if line.startswith("["):
-                assert lowered.startswith("echo [") or lowered.startswith("rem ["), (
-                    f"{bat}: bare bracket text -> {line}"
-                )
+                assert lowered.startswith("echo [") or lowered.startswith(
+                    "rem ["
+                ), f"{bat}: bare bracket text -> {line}"
 
 
 def test_key_bats_have_quoted_cd_and_config_dir() -> None:

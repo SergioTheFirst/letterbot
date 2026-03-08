@@ -129,7 +129,9 @@ class ResilientIMAP:
         backoff_base: float = 0.7,
     ) -> None:
         if not _imapclient_available():
-            raise IMAPError("Пакет imapclient не установлен. Установите: pip install imapclient")
+            raise IMAPError(
+                "Пакет imapclient не установлен. Установите: pip install imapclient"
+            )
 
         normalized_account = IMAPAccount(
             host=getattr(account, "host", ""),
@@ -138,7 +140,9 @@ class ResilientIMAP:
             user=getattr(account, "user", getattr(account, "login", "")),
             password=getattr(account, "password", ""),
             mailbox=getattr(account, "mailbox", "INBOX"),
-            max_email_mb=int(max_email_mb or getattr(account, "max_email_mb", 15) or 15),
+            max_email_mb=int(
+                max_email_mb or getattr(account, "max_email_mb", 15) or 15
+            ),
         )
         self.account = normalized_account
         self._state = state
@@ -212,10 +216,16 @@ class ResilientIMAP:
     def last_fetch_included_prestart(self) -> bool:
         return self._last_fetch_included_prestart
 
-    def _resolve_search_scope(self, start_time_utc: datetime) -> tuple[list[str], Optional[datetime], bool]:
+    def _resolve_search_scope(
+        self, start_time_utc: datetime
+    ) -> tuple[list[str], Optional[datetime], bool]:
         if self._allow_prestart_emails:
             return [], None, False
-        if self._first_run_bootstrap and self._bootstrap_hours > 0 and self._bootstrap_max_messages > 0:
+        if (
+            self._first_run_bootstrap
+            and self._bootstrap_hours > 0
+            and self._bootstrap_max_messages > 0
+        ):
             cutoff = start_time_utc - timedelta(hours=self._bootstrap_hours)
             return ["SINCE", cutoff.strftime("%d-%b-%Y")], cutoff, True
         return ["SINCE", start_time_utc.strftime("%d-%b-%Y")], start_time_utc, False
@@ -228,18 +238,30 @@ class ResilientIMAP:
                 return fn(client, *args, **kwargs)
             except (socket.timeout, ssl.SSLError, OSError) as e:
                 last_exc = e
-                log.warning("IMAP сеть/SSL ошибка, переподключение (%s/%s): %s", attempt + 1, self.retries + 1, e)
+                log.warning(
+                    "IMAP сеть/SSL ошибка, переподключение (%s/%s): %s",
+                    attempt + 1,
+                    self.retries + 1,
+                    e,
+                )
                 self.close()
             except Exception as e:
                 # любые прочие ошибки тоже попробуем один раз переподключением (часто IMAP рвёт сессию)
                 last_exc = e
-                log.warning("IMAP ошибка, переподключение (%s/%s): %s", attempt + 1, self.retries + 1, e)
+                log.warning(
+                    "IMAP ошибка, переподключение (%s/%s): %s",
+                    attempt + 1,
+                    self.retries + 1,
+                    e,
+                )
                 self.close()
 
             if attempt < self.retries:
                 time.sleep(self.backoff_base * (2**attempt))
 
-        raise IMAPError(f"IMAP операция не удалась после ретраев: {last_exc}") from last_exc
+        raise IMAPError(
+            f"IMAP операция не удалась после ретраев: {last_exc}"
+        ) from last_exc
 
     # ---------- API ----------
 
@@ -259,7 +281,9 @@ class ResilientIMAP:
         # imapclient может вернуть list[int] или tuple
         return [int(x) for x in (uids or [])]
 
-    def fetch_headers_and_size(self, uids: Sequence[int]) -> Dict[int, Dict[bytes, Any]]:
+    def fetch_headers_and_size(
+        self, uids: Sequence[int]
+    ) -> Dict[int, Dict[bytes, Any]]:
         """
         Забираем заголовки (RFC822.HEADER) + размер (RFC822.SIZE) без тела.
         """
@@ -267,7 +291,9 @@ class ResilientIMAP:
             return {}
 
         def _fetch(client):
-            return client.fetch(list(uids), ["RFC822.HEADER", "RFC822.SIZE", "INTERNALDATE"])
+            return client.fetch(
+                list(uids), ["RFC822.HEADER", "RFC822.SIZE", "INTERNALDATE"]
+            )
 
         data = self._with_retries(_fetch) or {}
         # imapclient ключи uids -> dict
@@ -286,7 +312,9 @@ class ResilientIMAP:
         meta = self.fetch_headers_and_size([uid]).get(int(uid), {})
         size = _parse_rfc822_size(meta)
         if size is not None and size > max_bytes:
-            raise IMAPError(f"Письмо UID={uid} слишком большое: {size} bytes > limit {max_bytes} bytes")
+            raise IMAPError(
+                f"Письмо UID={uid} слишком большое: {size} bytes > limit {max_bytes} bytes"
+            )
 
         def _fetch(client):
             data = client.fetch([int(uid)], [b"RFC822"])
@@ -379,11 +407,17 @@ class ResilientIMAP:
             return client.search(criteria)
 
         base_criteria = ["UID", f"{range_start}:*"]
-        all_uids = sorted(int(uid) for uid in (self._with_retries(_search, base_criteria) or []))
+        all_uids = sorted(
+            int(uid) for uid in (self._with_retries(_search, base_criteria) or [])
+        )
 
-        search_scope, internaldate_cutoff, bootstrap_active = self._resolve_search_scope(start_time_utc)
+        search_scope, internaldate_cutoff, bootstrap_active = (
+            self._resolve_search_scope(start_time_utc)
+        )
         scoped_criteria = [*base_criteria, *search_scope]
-        scoped_uids = sorted(int(uid) for uid in (self._with_retries(_search, scoped_criteria) or []))
+        scoped_uids = sorted(
+            int(uid) for uid in (self._with_retries(_search, scoped_criteria) or [])
+        )
         highest_seen = max(all_uids) if all_uids else None
 
         eligible: list[tuple[int, dict[bytes, Any], Optional[datetime]]] = []
@@ -392,8 +426,14 @@ class ResilientIMAP:
                 meta = self.fetch_headers_and_size([uid]).get(uid, {})
             except Exception:
                 continue
-            internal_date = _safe_dt(meta.get(b"INTERNALDATE") or meta.get("INTERNALDATE"))
-            if internaldate_cutoff and internal_date and internal_date < internaldate_cutoff:
+            internal_date = _safe_dt(
+                meta.get(b"INTERNALDATE") or meta.get("INTERNALDATE")
+            )
+            if (
+                internaldate_cutoff
+                and internal_date
+                and internal_date < internaldate_cutoff
+            ):
                 continue
             eligible.append((uid, meta, internal_date))
 
@@ -412,15 +452,20 @@ class ResilientIMAP:
                 self._last_fetch_included_prestart = True
             size = _parse_rfc822_size(meta)
             if size is not None and size > max_bytes:
-                header_map = self._with_retries(
-                    lambda client: client.fetch([uid], ["BODY.PEEK[HEADER]"])
-                ) or {}
+                header_map = (
+                    self._with_retries(
+                        lambda client: client.fetch([uid], ["BODY.PEEK[HEADER]"])
+                    )
+                    or {}
+                )
                 header_bytes = (header_map.get(uid) or {}).get(b"BODY[HEADER]", b"")
                 header_msg = email.message_from_bytes(header_bytes or b"")
                 synthetic = EmailMessage()
                 synthetic["From"] = header_msg.get("From", "")
                 synthetic["Subject"] = header_msg.get("Subject", "")
-                synthetic.set_content("Письмо слишком большое и не было загружено полностью.")
+                synthetic.set_content(
+                    "Письмо слишком большое и не было загружено полностью."
+                )
                 messages.append((uid, synthetic.as_bytes()))
                 continue
             try:
@@ -437,6 +482,7 @@ class ResilientIMAP:
 
 
 # ---- удобные helper-ы, если где-то в проекте нужно ----
+
 
 def extract_basic_headers(msg: Message) -> Tuple[str, str, str]:
     subject = _decode_header_value(msg.get("Subject", "") or "")

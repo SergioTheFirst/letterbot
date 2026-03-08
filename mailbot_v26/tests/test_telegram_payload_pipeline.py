@@ -17,7 +17,9 @@ def _setup_processor(monkeypatch, *, enable_anomaly_alerts: bool = False) -> Non
         llm_provider="gigachat",
     )
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -40,9 +42,17 @@ def _setup_processor(monkeypatch, *, enable_anomaly_alerts: bool = False) -> Non
         "compute",
         lambda account_email, from_email: [],
     )
-    monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **kwargs: None)
-    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
-    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor.context_store, "resolve_sender_entity", lambda **kwargs: None
+    )
+    monkeypatch.setattr(
+        processor.context_store,
+        "record_interaction_event",
+        lambda **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0)
+    )
     monkeypatch.setattr(
         processor,
         "evaluate_signal_quality",
@@ -95,7 +105,10 @@ def test_telegram_contains_attachment_summary(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert html_text.startswith("📩 Письмо получено") or "📎 1 вложение: doc1.doc" in html_text
+    assert (
+        html_text.startswith("📩 Письмо получено")
+        or "📎 1 вложение: doc1.doc" in html_text
+    )
 
 
 def test_action_rendered_in_tg(monkeypatch) -> None:
@@ -172,7 +185,9 @@ def test_no_minimal_template_when_attachments_exist(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert "ℹ️ Детали будут доступны позже." not in html_text
-    assert html_text.startswith("📩 Письмо получено") or ("📎" in html_text and "report.pdf" in html_text)
+    assert html_text.startswith("📩 Письмо получено") or (
+        "📎" in html_text and "report.pdf" in html_text
+    )
 
 
 def test_empty_body_with_attachments_keeps_attachment_visibility(monkeypatch) -> None:
@@ -208,7 +223,11 @@ def test_empty_body_with_attachments_keeps_attachment_visibility(monkeypatch) ->
     )
 
     html_text = captured["payload"].html_text
-    assert html_text.startswith("📩 Письмо получено") or (html_text.startswith("🔵 от sender@example.com:") and "📎" in html_text and "3 влож" in html_text)
+    assert html_text.startswith("📩 Письмо получено") or (
+        html_text.startswith("🔵 от sender@example.com:")
+        and "📎" in html_text
+        and "3 влож" in html_text
+    )
 
 
 def test_binary_attachment_text_is_omitted(monkeypatch) -> None:

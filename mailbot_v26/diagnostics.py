@@ -5,7 +5,6 @@ from pathlib import Path
 from mailbot_v26.features import FeatureFlags
 from mailbot_v26.storage.knowledge_query import KnowledgeQuery
 
-
 DEFAULT_DB_PATH = Path("database.sqlite")
 
 
@@ -54,7 +53,9 @@ def _print_recent_actions(query: KnowledgeQuery) -> None:
 def main() -> None:
     flags = FeatureFlags()
     if not getattr(flags, "ENABLE_CRM_DIAGNOSTICS", False):
-        print("CRM diagnostics disabled. Enable ENABLE_CRM_DIAGNOSTICS to run the report.")
+        print(
+            "CRM diagnostics disabled. Enable ENABLE_CRM_DIAGNOSTICS to run the report."
+        )
         return
 
     query = KnowledgeQuery(DEFAULT_DB_PATH)

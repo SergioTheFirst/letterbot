@@ -10,7 +10,6 @@ from mailbot_v26.events.contract import EventType
 from mailbot_v26.observability import get_logger
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
-
 logger = get_logger("mailbot")
 
 _DELIVERY_CUTOFF = timedelta(hours=2)
@@ -69,7 +68,9 @@ def _window_start(now: datetime, days: int) -> float:
     return (now - timedelta(days=days)).timestamp()
 
 
-def _safe_payload(analytics: KnowledgeAnalytics, row: dict[str, object]) -> dict[str, object]:
+def _safe_payload(
+    analytics: KnowledgeAnalytics, row: dict[str, object]
+) -> dict[str, object]:
     try:
         return analytics.event_payload(row)
     except Exception:  # pragma: no cover - defensive
@@ -86,7 +87,9 @@ def _error_breakdown(values: dict[str, int], total: int) -> list[ErrorBreakdown]
     ]
 
 
-def _latencies(deliveries: Iterable[tuple[float, float]]) -> tuple[float | None, float | None, float | None]:
+def _latencies(
+    deliveries: Iterable[tuple[float, float]],
+) -> tuple[float | None, float | None, float | None]:
     latencies = [max(0.0, delivered - detected) for detected, delivered in deliveries]
     return (
         _percentile(latencies, 0.5),
@@ -139,12 +142,22 @@ def compute_notification_sla(
         if email_id is None or ts_utc is None:
             continue
         payload = _safe_payload(analytics, row)
-        delivered = bool(payload.get("delivered", row.get("event_type") == EventType.TELEGRAM_DELIVERED.value))
+        delivered = bool(
+            payload.get(
+                "delivered", row.get("event_type") == EventType.TELEGRAM_DELIVERED.value
+            )
+        )
         occurred = float(payload.get("occurred_at_utc", ts_utc))
         mode = str(payload.get("mode") or "html").strip() or "html"
         retry_count = int(payload.get("retry_count") or 0)
         error = payload.get("error")
-        delivery_events[int(email_id)] = (delivered, occurred, mode, retry_count, str(error) if error else None)
+        delivery_events[int(email_id)] = (
+            delivered,
+            occurred,
+            mode,
+            retry_count,
+            str(error) if error else None,
+        )
 
     cutoff_ts = anchor.timestamp() - delivery_cutoff.total_seconds()
 
@@ -175,7 +188,9 @@ def compute_notification_sla(
         else:
             if detected_ts >= start_24h and detected_ts <= cutoff_ts:
                 undelivered_24h += 1
-                error_reasons["missing_delivery"] = error_reasons.get("missing_delivery", 0) + 1
+                error_reasons["missing_delivery"] = (
+                    error_reasons.get("missing_delivery", 0) + 1
+                )
 
     total_24h = sum(1 for ts in detection_ts.values() if ts >= start_24h)
     delivered_7d = len(delivered_latencies_7d)
@@ -188,7 +203,11 @@ def compute_notification_sla(
     p50_24h, p90_24h, p99_24h = _latencies(delivered_latencies_24h)
     p50_7d, p90_7d, p99_7d = _latencies(delivered_latencies_7d)
 
-    error_rate_24h = (undelivered_24h + sum(error_reasons.values())) / total_24h if total_24h else 0.0
+    error_rate_24h = (
+        (undelivered_24h + sum(error_reasons.values())) / total_24h
+        if total_24h
+        else 0.0
+    )
 
     result = NotificationSLAResult(
         delivery_rate_24h=delivery_rate_24h,
@@ -234,16 +253,14 @@ class NotificationAlertStore:
 
     def _init_db(self) -> None:
         with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS notification_sla_alerts (
                     key TEXT PRIMARY KEY,
                     last_alert_fingerprint TEXT,
                     last_alert_at_utc REAL,
                     consecutive_failures INTEGER DEFAULT 0
                 );
-                """
-            )
+                """)
             conn.commit()
 
     def record_failure(self, now: datetime | None = None) -> int:
@@ -267,7 +284,9 @@ class NotificationAlertStore:
                     (next_value, last_ts, last_fp),
                 )
                 conn.commit()
-            logger.info("notification_sla_failure_recorded", consecutive_failures=next_value)
+            logger.info(
+                "notification_sla_failure_recorded", consecutive_failures=next_value
+            )
             return next_value
         except Exception:  # pragma: no cover - defensive fallback
             logger.error("notification_alert_store_failure")
@@ -306,7 +325,10 @@ class NotificationAlertStore:
         if row:
             last_fp, last_ts = row
             if last_fp == fingerprint:
-                if last_ts and (anchor.timestamp() - float(last_ts)) < cooldown_hours * 3600:
+                if (
+                    last_ts
+                    and (anchor.timestamp() - float(last_ts)) < cooldown_hours * 3600
+                ):
                     return False
         return True
 

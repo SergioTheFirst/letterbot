@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
 
 from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.insights.auto_priority_quality_gate import GateResult
@@ -111,9 +110,7 @@ class SystemOrchestrator:
                 )
 
             anomaly_flag = _flag(feature_flags, "ENABLE_ANOMALY_ALERTS")
-            allow_anomaly_alerts = (
-                system_mode == SystemMode.FULL and anomaly_flag
-            )
+            allow_anomaly_alerts = system_mode == SystemMode.FULL and anomaly_flag
             if not anomaly_flag:
                 _append_reason(reasons, "anomaly_flag_disabled")
 
@@ -133,9 +130,7 @@ class SystemOrchestrator:
 
             daily_digest_flag = _flag(feature_flags, "ENABLE_DAILY_DIGEST")
             allow_daily_digest = (
-                daily_digest_flag
-                and telegram_ok
-                and has_daily_digest_content
+                daily_digest_flag and telegram_ok and has_daily_digest_content
             )
             if not daily_digest_flag:
                 _append_reason(reasons, "daily_digest_flag_disabled")
@@ -144,9 +139,7 @@ class SystemOrchestrator:
 
             weekly_digest_flag = _flag(feature_flags, "ENABLE_WEEKLY_DIGEST")
             allow_weekly_digest = (
-                weekly_digest_flag
-                and telegram_ok
-                and has_weekly_digest_content
+                weekly_digest_flag and telegram_ok and has_weekly_digest_content
             )
             if not weekly_digest_flag:
                 _append_reason(reasons, "weekly_digest_flag_disabled")
@@ -223,10 +216,7 @@ class SystemOrchestrator:
             and system_mode == SystemMode.FULL
         )
         preview_flag = _flag(feature_flags, "ENABLE_PREVIEW_ACTIONS")
-        allow_preview = (
-            preview_flag
-            and system_mode != SystemMode.DEGRADED_NO_LLM
-        )
+        allow_preview = preview_flag and system_mode != SystemMode.DEGRADED_NO_LLM
         allow_anomaly_alerts = _flag(feature_flags, "ENABLE_ANOMALY_ALERTS")
         allow_daily_digest = (
             _flag(feature_flags, "ENABLE_DAILY_DIGEST") and has_daily_digest_content
@@ -290,4 +280,9 @@ def _flag(flags: FeatureFlags | None, name: str, default: bool = False) -> bool:
     return bool(getattr(flags, name, default))
 
 
-__all__ = ["SystemMode", "SystemOrchestrator", "SystemPolicyDecision", "SystemPolicyInputs"]
+__all__ = [
+    "SystemMode",
+    "SystemOrchestrator",
+    "SystemPolicyDecision",
+    "SystemPolicyInputs",
+]

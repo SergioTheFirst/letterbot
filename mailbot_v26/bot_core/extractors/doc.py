@@ -23,6 +23,7 @@ def _normalize_text(value: str) -> str:
 def _load_docx_parser():
     try:
         from docx import Document
+
         return Document
     except Exception:
         return None
@@ -31,6 +32,7 @@ def _load_docx_parser():
 def _load_docx2txt():
     try:
         import docx2txt
+
         return docx2txt
     except Exception:
         return None
@@ -57,22 +59,22 @@ def _extract_via_zip(file_bytes: bytes) -> str:
         text = _safe_text(node.text)
         if text:
             runs.append(text)
-    
+
     # Извлекаем текст из таблиц
     for table in root.findall(".//w:tbl", WORD_NS):
         for row in table.findall(".//w:tr", WORD_NS):
             row_texts = []
             for cell in row.findall(".//w:tc", WORD_NS):
                 cell_text = " ".join(
-                    _safe_text(t.text) 
-                    for t in cell.findall(".//w:t", WORD_NS) 
+                    _safe_text(t.text)
+                    for t in cell.findall(".//w:t", WORD_NS)
                     if t.text
                 )
                 if cell_text:
                     row_texts.append(cell_text)
             if row_texts:
                 runs.append(" | ".join(row_texts))
-    
+
     return " ".join(runs)
 
 
@@ -98,24 +100,28 @@ def extract_doc(file_bytes: bytes, filename: str) -> str:
             try:
                 doc = document_cls(io.BytesIO(file_bytes))
                 parts: list[str] = []
-                
+
                 # Параграфы
                 for p in doc.paragraphs:
                     if p.text and p.text.strip():
                         parts.append(_safe_text(p.text))
-                
+
                 # Таблицы
                 for table in getattr(doc, "tables", []):
                     for row in table.rows:
-                        cells = [_safe_text(cell.text) for cell in row.cells if cell.text]
+                        cells = [
+                            _safe_text(cell.text) for cell in row.cells if cell.text
+                        ]
                         if any(cells):
                             parts.append(" | ".join([c for c in cells if c]))
-                
+
                 if parts:
                     text = _normalize_text("\n".join(parts))
-                    logger.debug("Extracted %d chars from %s (python-docx)", len(text), filename)
+                    logger.debug(
+                        "Extracted %d chars from %s (python-docx)", len(text), filename
+                    )
                     return text
-                    
+
             except Exception as e:
                 logger.debug("python-docx failed: %s", e)
 
@@ -127,7 +133,9 @@ def extract_doc(file_bytes: bytes, filename: str) -> str:
                 raw = docx2txt.process(io.BytesIO(file_bytes)) or ""
                 text = _normalize_text(str(raw))
                 if text:
-                    logger.debug("Extracted %d chars from %s (docx2txt)", len(text), filename)
+                    logger.debug(
+                        "Extracted %d chars from %s (docx2txt)", len(text), filename
+                    )
                     return text
             except Exception as e:
                 logger.debug("docx2txt failed: %s", e)

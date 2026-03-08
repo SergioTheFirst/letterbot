@@ -101,7 +101,10 @@ class KnowledgeDB:
                         return None
                     attempts += 1
                     elapsed = time.monotonic() - start
-                    if attempts > self._WRITE_RETRIES or elapsed + delay > self._WRITE_MAX_TOTAL_WAIT:
+                    if (
+                        attempts > self._WRITE_RETRIES
+                        or elapsed + delay > self._WRITE_MAX_TOTAL_WAIT
+                    ):
                         logger.error(
                             "crm_write_failed: database is locked (attempts=%s)",
                             attempts,
@@ -127,33 +130,55 @@ class KnowledgeDB:
             if "priority" not in columns:
                 migrations.append("ALTER TABLE emails ADD COLUMN priority TEXT;")
             if "action_line" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN action_line TEXT NOT NULL DEFAULT '';")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN action_line TEXT NOT NULL DEFAULT '';"
+                )
             if "body_summary" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN body_summary TEXT NOT NULL DEFAULT '';")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN body_summary TEXT NOT NULL DEFAULT '';"
+                )
             if "raw_body_hash" not in columns:
                 migrations.append("ALTER TABLE emails ADD COLUMN raw_body_hash TEXT;")
             if "priority_source" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN priority_source TEXT DEFAULT 'auto';")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN priority_source TEXT DEFAULT 'auto';"
+                )
             if "priority_reason" not in columns:
                 migrations.append("ALTER TABLE emails ADD COLUMN priority_reason TEXT;")
             if "original_priority" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN original_priority TEXT;")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN original_priority TEXT;"
+                )
             if "shadow_priority" not in columns:
                 migrations.append("ALTER TABLE emails ADD COLUMN shadow_priority TEXT;")
             if "shadow_priority_reason" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN shadow_priority_reason TEXT;")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN shadow_priority_reason TEXT;"
+                )
             if "shadow_action_line" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN shadow_action_line TEXT;")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN shadow_action_line TEXT;"
+                )
             if "shadow_action_reason" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN shadow_action_reason TEXT;")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN shadow_action_reason TEXT;"
+                )
             if "confidence_score" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN confidence_score REAL;")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN confidence_score REAL;"
+                )
             if "confidence_decision" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN confidence_decision TEXT;")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN confidence_decision TEXT;"
+                )
             if "proposed_action_type" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN proposed_action_type TEXT;")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN proposed_action_type TEXT;"
+                )
             if "proposed_action_text" not in columns:
-                migrations.append("ALTER TABLE emails ADD COLUMN proposed_action_text TEXT;")
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN proposed_action_text TEXT;"
+                )
             if "proposed_action_confidence" not in columns:
                 migrations.append(
                     "ALTER TABLE emails ADD COLUMN proposed_action_confidence REAL;"
@@ -180,43 +205,34 @@ class KnowledgeDB:
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("KnowledgeDB migration failed: %s", exc)
 
-    def _ensure_auto_priority_gate_state_table(
-        self, conn: sqlite3.Connection
-    ) -> None:
+    def _ensure_auto_priority_gate_state_table(self, conn: sqlite3.Connection) -> None:
         try:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS auto_priority_gate_state (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     last_disabled_at_utc REAL,
                     last_disabled_reason TEXT,
                     last_eval_at_utc REAL
                 );
-                """
-            )
+                """)
             conn.commit()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("KnowledgeDB auto_priority_gate_state_failed: %s", exc)
 
-
     def _ensure_priority_feedback_index(self, conn: sqlite3.Connection) -> None:
         try:
-            conn.execute(
-                """
+            conn.execute("""
                 DELETE FROM priority_feedback
                 WHERE rowid NOT IN (
                     SELECT MIN(rowid)
                     FROM priority_feedback
                     GROUP BY email_id, kind, value
                 );
-                """
-            )
-            conn.execute(
-                """
+                """)
+            conn.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_priority_feedback_email_kind_value
                     ON priority_feedback(email_id, kind, value);
-                """
-            )
+                """)
             conn.commit()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("KnowledgeDB priority_feedback_index_failed: %s", exc)
@@ -224,13 +240,11 @@ class KnowledgeDB:
     def read_auto_priority_gate_state(self) -> AutoPriorityGateState:
         try:
             with self._connect() as conn:
-                cur = conn.execute(
-                    """
+                cur = conn.execute("""
                     SELECT last_disabled_at_utc, last_disabled_reason, last_eval_at_utc
                     FROM auto_priority_gate_state
                     WHERE id = 1
-                    """
-                )
+                    """)
                 row = cur.fetchone()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("auto_priority_gate_state_read_failed: %s", exc)
@@ -266,8 +280,8 @@ class KnowledgeDB:
                 """,
                 (last_disabled_at_utc, last_disabled_reason, last_eval_at_utc),
             )
-        self.write_transaction(_action)
 
+        self.write_transaction(_action)
 
     def save_email(
         self,
@@ -302,6 +316,7 @@ class KnowledgeDB:
         attachment_summaries: Iterable[tuple[str, str]],
     ) -> int | None:
         try:
+
             def _action(conn: sqlite3.Connection) -> int | None:
                 cur = conn.cursor()
 
@@ -462,6 +477,7 @@ class KnowledgeDB:
         commitments: Iterable[Commitment],
     ) -> bool:
         try:
+
             def _action(conn: sqlite3.Connection) -> bool:
                 conn.executemany(
                     """
@@ -563,6 +579,7 @@ class KnowledgeDB:
         if not account_email:
             return False
         try:
+
             def _action(conn: sqlite3.Connection) -> bool:
                 conn.execute(
                     """
@@ -589,6 +606,7 @@ class KnowledgeDB:
         if not account_email:
             return False
         try:
+
             def _action(conn: sqlite3.Connection) -> bool:
                 conn.execute(
                     """
@@ -663,6 +681,7 @@ class KnowledgeDB:
         if not update_list:
             return True
         try:
+
             def _action(conn: sqlite3.Connection) -> bool:
                 conn.executemany(
                     """
@@ -757,6 +776,7 @@ class KnowledgeDB:
             payload = str(proposed_action)
 
         try:
+
             def _action(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     """
@@ -791,6 +811,7 @@ class KnowledgeDB:
                 payload = str(proposed_action)
 
         try:
+
             def _action(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     """
@@ -825,6 +846,7 @@ class KnowledgeDB:
         email_value = str(email_id)
 
         try:
+
             def _action(conn: sqlite3.Connection) -> tuple[str, bool]:
                 conn.execute(
                     """
@@ -872,5 +894,3 @@ class KnowledgeDB:
         except Exception as exc:
             logger.error("KnowledgeDB priority feedback save failed: %s", exc)
             return feedback_id, False
-
-

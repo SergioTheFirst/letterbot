@@ -41,7 +41,9 @@ def test_delayed_followup_edits_same_message_and_preserves_reply_markup() -> Non
     sent: list[TelegramPayload] = []
     edited: list[tuple[int, TelegramPayload]] = []
 
-    final_markup = {"inline_keyboard": [[{"text": "Действия", "callback_data": "mb:ok:1"}]]}
+    final_markup = {
+        "inline_keyboard": [[{"text": "Действия", "callback_data": "mb:ok:1"}]]
+    }
 
     def _send(payload: TelegramPayload) -> DeliveryResult:
         sent.append(payload)

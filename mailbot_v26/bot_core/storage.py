@@ -26,8 +26,7 @@ class Storage:
 
     def _create_schema(self) -> None:
         with self.conn:
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS emails (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     account_email TEXT NOT NULL,
@@ -45,8 +44,7 @@ class Storage:
                     telegram_delivered_at TEXT,
                     UNIQUE(account_email, uid)
                 );
-                """
-            )
+                """)
             email_columns = {
                 str(row[1])
                 for row in self.conn.execute("PRAGMA table_info(emails);").fetchall()
@@ -59,8 +57,7 @@ class Storage:
                 self.conn.execute("DROP TABLE IF EXISTS telegram_delivery_log;")
                 self.conn.execute("DROP TABLE IF EXISTS telegram_snooze;")
                 self.conn.execute("DROP TABLE IF EXISTS emails;")
-                self.conn.execute(
-                    """
+                self.conn.execute("""
                     CREATE TABLE emails (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         account_email TEXT NOT NULL,
@@ -78,11 +75,12 @@ class Storage:
                         telegram_delivered_at TEXT,
                         UNIQUE(account_email, uid)
                     );
-                    """
-                )
+                    """)
                 email_columns = {
                     str(row[1])
-                    for row in self.conn.execute("PRAGMA table_info(emails);").fetchall()
+                    for row in self.conn.execute(
+                        "PRAGMA table_info(emails);"
+                    ).fetchall()
                 }
             if "status" not in email_columns:
                 self.conn.execute(
@@ -93,20 +91,15 @@ class Storage:
                 self.conn.execute(
                     "ALTER TABLE emails ADD COLUMN telegram_delivered_at TEXT;"
                 )
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_emails_status
                 ON emails(status);
-                """
-            )
-            self.conn.execute(
-                """
+                """)
+            self.conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_emails_received
                 ON emails(received_at);
-                """
-            )
-            self.conn.execute(
-                """
+                """)
+            self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS queue (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     email_id INTEGER NOT NULL,
@@ -119,10 +112,8 @@ class Storage:
                     UNIQUE(email_id, stage),
                     FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
                 );
-                """
-            )
-            self.conn.execute(
-                """
+                """)
+            self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS telegram_delivery_log (
                     delivery_key TEXT PRIMARY KEY,
                     email_id INTEGER,
@@ -133,22 +124,16 @@ class Storage:
                     telegram_message_id TEXT,
                     FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
                 );
-                """
-            )
-            self.conn.execute(
-                """
+                """)
+            self.conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_tg_delivery_log_email_kind
                 ON telegram_delivery_log(email_id, kind);
-                """
-            )
-            self.conn.execute(
-                """
+                """)
+            self.conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_queue_stage_time
                 ON queue(stage, not_before);
-                """
-            )
-            self.conn.execute(
-                """
+                """)
+            self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS telegram_snooze (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     email_id INTEGER NOT NULL,
@@ -163,14 +148,11 @@ class Storage:
                     FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE,
                     UNIQUE(email_id, deliver_at_utc)
                 );
-                """
-            )
-            self.conn.execute(
-                """
+                """)
+            self.conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_telegram_snooze_due
                 ON telegram_snooze(status, deliver_at_utc);
-                """
-            )
+                """)
 
     def close(self) -> None:
         try:
@@ -228,7 +210,9 @@ class Storage:
             row = cursor.fetchone()
             return int(row[0]) if row else -1
 
-    def enqueue_stage(self, email_id: int, stage: str, not_before: str | None = None) -> None:
+    def enqueue_stage(
+        self, email_id: int, stage: str, not_before: str | None = None
+    ) -> None:
         now = self._now()
         with self.conn:
             self.conn.execute(
@@ -268,7 +252,9 @@ class Storage:
         ).fetchone()
         return bool(row and row[0])
 
-    def mark_telegram_delivered(self, email_id: int, delivered_at: str | None = None) -> None:
+    def mark_telegram_delivered(
+        self, email_id: int, delivered_at: str | None = None
+    ) -> None:
         ts = delivered_at or self._now()
         with self.conn:
             self.conn.execute(
@@ -335,7 +321,9 @@ class Storage:
                 (delivery_key,),
             )
 
-    def list_due_snoozes(self, *, now_iso: str, limit: int = 20) -> List[Dict[str, Any]]:
+    def list_due_snoozes(
+        self, *, now_iso: str, limit: int = 20
+    ) -> List[Dict[str, Any]]:
         rows = self.conn.execute(
             """
             SELECT id, email_id, deliver_at_utc, reminder_text, attempts
@@ -360,7 +348,9 @@ class Storage:
             )
         return result
 
-    def mark_snooze_delivered(self, *, snooze_id: int, delivered_at: str | None = None) -> None:
+    def mark_snooze_delivered(
+        self, *, snooze_id: int, delivered_at: str | None = None
+    ) -> None:
         ts = delivered_at or self._now()
         with self.conn:
             self.conn.execute(

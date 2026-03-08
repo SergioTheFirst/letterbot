@@ -54,11 +54,13 @@ def test_force_llm_always_bypasses_budget_gate(monkeypatch) -> None:
         SimpleNamespace(can_use_llm=lambda _account_email: False),
     )
 
-    can_use_llm, budget_gate_allow, override_applied = pipeline_processor._resolve_llm_budget_access(
-        account_email="acc@example.com",
-        use_llm_candidate=True,
-        force_llm_always=True,
-        email_id=42,
+    can_use_llm, budget_gate_allow, override_applied = (
+        pipeline_processor._resolve_llm_budget_access(
+            account_email="acc@example.com",
+            use_llm_candidate=True,
+            force_llm_always=True,
+            email_id=42,
+        )
     )
 
     assert can_use_llm is True
@@ -104,12 +106,42 @@ def test_queue_timeout_uses_config_not_half_second(monkeypatch) -> None:
 
 
 def test_detect_attachment_doc_type_matches_russian_filename() -> None:
-    assert _detect_attachment_doc_type(filename="договор_поставки.docx", content_type="application/msword") == "CONTRACT"
-    assert _detect_attachment_doc_type(filename="счёт_77.pdf", content_type="application/pdf") == "TABLE"
-    assert _detect_attachment_doc_type(filename="счет_77.pdf", content_type="application/pdf") == "TABLE"
-    assert _detect_attachment_doc_type(filename="акт_сверки.pdf", content_type="application/pdf") == "TABLE"
-    assert _detect_attachment_doc_type(filename="накладная_1.pdf", content_type="application/pdf") == "TABLE"
-    assert _detect_attachment_doc_type(filename="расчетный_листок.pdf", content_type="application/pdf") == "TABLE"
+    assert (
+        _detect_attachment_doc_type(
+            filename="договор_поставки.docx", content_type="application/msword"
+        )
+        == "CONTRACT"
+    )
+    assert (
+        _detect_attachment_doc_type(
+            filename="счёт_77.pdf", content_type="application/pdf"
+        )
+        == "TABLE"
+    )
+    assert (
+        _detect_attachment_doc_type(
+            filename="счет_77.pdf", content_type="application/pdf"
+        )
+        == "TABLE"
+    )
+    assert (
+        _detect_attachment_doc_type(
+            filename="акт_сверки.pdf", content_type="application/pdf"
+        )
+        == "TABLE"
+    )
+    assert (
+        _detect_attachment_doc_type(
+            filename="накладная_1.pdf", content_type="application/pdf"
+        )
+        == "TABLE"
+    )
+    assert (
+        _detect_attachment_doc_type(
+            filename="расчетный_листок.pdf", content_type="application/pdf"
+        )
+        == "TABLE"
+    )
 
 
 def test_invoice_subject_detected_before_body() -> None:

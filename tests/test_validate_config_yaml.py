@@ -2,7 +2,12 @@ import pytest
 
 pytest.importorskip("yaml")
 
-from mailbot_v26.config_yaml import ConfigError, load_config, resolve_support_enabled, validate_config
+from mailbot_v26.config_yaml import (
+    ConfigError,
+    load_config,
+    resolve_support_enabled,
+    validate_config,
+)
 
 
 def _base_config() -> dict:
@@ -63,7 +68,10 @@ def test_validate_config_invalid_provider() -> None:
     ok, error = validate_config(config)
 
     assert not ok
-    assert error == 'Ошибка в config.yaml: llm.provider должен быть "cloudflare" или "gigachat"'
+    assert (
+        error
+        == 'Ошибка в config.yaml: llm.provider должен быть "cloudflare" или "gigachat"'
+    )
 
 
 def test_validate_config_model_null_allowed() -> None:
@@ -95,7 +103,10 @@ def test_validate_config_lan_requires_allowlist() -> None:
     ok, error = validate_config(config)
 
     assert not ok
-    assert error == "Ошибка в config.yaml: web_ui.allow_lan должен быть true для bind вне loopback"
+    assert (
+        error
+        == "Ошибка в config.yaml: web_ui.allow_lan должен быть true для bind вне loopback"
+    )
 
     config["web_ui"]["allow_lan"] = True
     config["web_ui"]["allow_cidrs"] = []
@@ -103,7 +114,10 @@ def test_validate_config_lan_requires_allowlist() -> None:
     ok, error = validate_config(config)
 
     assert not ok
-    assert error == "Ошибка в config.yaml: web_ui.allow_cidrs должен быть непустым при allow_lan=true"
+    assert (
+        error
+        == "Ошибка в config.yaml: web_ui.allow_cidrs должен быть непустым при allow_lan=true"
+    )
 
 
 def test_validate_config_lan_password_policy() -> None:
@@ -116,13 +130,19 @@ def test_validate_config_lan_password_policy() -> None:
     ok, error = validate_config(config)
 
     assert not ok
-    assert error == "Ошибка в config.yaml: web_ui.password не должен быть значением по умолчанию для LAN"
+    assert (
+        error
+        == "Ошибка в config.yaml: web_ui.password не должен быть значением по умолчанию для LAN"
+    )
 
     config["web_ui"]["password"] = "short"
     ok, error = validate_config(config)
 
     assert not ok
-    assert error == "Ошибка в config.yaml: web_ui.password должен быть не короче 10 символов для LAN"
+    assert (
+        error
+        == "Ошибка в config.yaml: web_ui.password должен быть не короче 10 символов для LAN"
+    )
 
 
 def test_validate_config_support_card_requires_number() -> None:
@@ -164,7 +184,10 @@ def test_validate_config_support_frequency_range() -> None:
     ok, error = validate_config(config)
 
     assert not ok
-    assert error == "Ошибка в config.yaml: support.telegram.frequency_days должен быть числом 7..365"
+    assert (
+        error
+        == "Ошибка в config.yaml: support.telegram.frequency_days должен быть числом 7..365"
+    )
 
 
 def test_validate_config_support_yoomoney_url_scheme() -> None:
@@ -178,7 +201,10 @@ def test_validate_config_support_yoomoney_url_scheme() -> None:
     ok, error = validate_config(config)
 
     assert not ok
-    assert error == "Ошибка в config.yaml: support.methods[0].url должен начинаться с http(s)"
+    assert (
+        error
+        == "Ошибка в config.yaml: support.methods[0].url должен начинаться с http(s)"
+    )
 
 
 def test_validate_config_support_success() -> None:
@@ -226,7 +252,9 @@ def test_validate_config_features_donate_enabled_type() -> None:
     ok, error = validate_config(config)
 
     assert not ok
-    assert error == "Ошибка в config.yaml: features.donate_enabled должен быть true/false"
+    assert (
+        error == "Ошибка в config.yaml: features.donate_enabled должен быть true/false"
+    )
 
 
 def test_resolve_support_enabled_prefers_support_enabled() -> None:
@@ -252,9 +280,11 @@ def test_resolve_support_enabled_support_disables_legacy_flag() -> None:
     assert resolve_support_enabled(config) is False
 
 
-def test_load_config_windows_double_quoted_username_shows_actionable_hint(tmp_path) -> None:
+def test_load_config_windows_double_quoted_username_shows_actionable_hint(
+    tmp_path,
+) -> None:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("username: \"HQ\\MedvedevSS\"\n", encoding="utf-8")
+    config_path.write_text('username: "HQ\\MedvedevSS"\n', encoding="utf-8")
 
     with pytest.raises(ConfigError) as exc_info:
         load_config(config_path)
@@ -289,15 +319,17 @@ def test_web_ui_disabled_requires_no_bind_or_port(tmp_path) -> None:
             "cloudflare": {"api_token": "tok", "account_id": "acc"},
             "gigachat": {"api_token": ""},
         },
-        "accounts": [{
-            "name": "Test",
-            "email": "x@y.com",
-            "imap_host": "imap.y.com",
-            "imap_port": 993,
-            "username": "x@y.com",
-            "password": "pass",
-            "enabled": True,
-        }],
+        "accounts": [
+            {
+                "name": "Test",
+                "email": "x@y.com",
+                "imap_host": "imap.y.com",
+                "imap_port": 993,
+                "username": "x@y.com",
+                "password": "pass",
+                "enabled": True,
+            }
+        ],
         "polling": {"interval_seconds": 60, "reload_config_seconds": 300},
         "web_ui": {"enabled": False},  # No bind, no port — must be valid
     }
@@ -323,11 +355,17 @@ def test_web_ui_enabled_still_requires_bind_and_port(tmp_path) -> None:
             "cloudflare": {"api_token": "tok", "account_id": "acc"},
             "gigachat": {"api_token": ""},
         },
-        "accounts": [{
-            "name": "Test", "email": "x@y.com",
-            "imap_host": "imap.y.com", "imap_port": 993,
-            "username": "x@y.com", "password": "pass", "enabled": True,
-        }],
+        "accounts": [
+            {
+                "name": "Test",
+                "email": "x@y.com",
+                "imap_host": "imap.y.com",
+                "imap_port": 993,
+                "username": "x@y.com",
+                "password": "pass",
+                "enabled": True,
+            }
+        ],
         "polling": {"interval_seconds": 60, "reload_config_seconds": 300},
         "web_ui": {"enabled": True},  # Missing bind/port/password — must fail
     }

@@ -30,7 +30,9 @@ def test_telegram_render_emoji_whitelist_premium_clarity() -> None:
             {"filename": "notes.txt", "text": ""},
         ],
         attachment_summaries=[],
-        insights=[Insight(type="Risk", severity="HIGH", explanation="", recommendation="")],
+        insights=[
+            Insight(type="Risk", severity="HIGH", explanation="", recommendation="")
+        ],
         insight_digest=None,
         commitments=[],
         attachments_count=2,

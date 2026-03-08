@@ -51,7 +51,9 @@ def check_mail_accounts(
         client: Optional[object] = None
         try:
             if timeout_sec is None:
-                client = imap_client_cls(account.host, port=account.port, ssl=account.use_ssl)
+                client = imap_client_cls(
+                    account.host, port=account.port, ssl=account.use_ssl
+                )
             else:
                 client = imap_client_cls(
                     account.host,
@@ -183,7 +185,7 @@ def format_account_failure_message(result: MailAccountHealth) -> str:
     reason = result.error or "unknown error"
     return "\n".join(
         [
-            "\U0001F6A8 ACCOUNT LOGIN FAILED",
+            "\U0001f6a8 ACCOUNT LOGIN FAILED",
             f"Account: {result.account_id}",
             f"Host: {result.host}",
             f"Reason: {reason}",

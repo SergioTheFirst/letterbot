@@ -7,7 +7,9 @@ from mailbot_v26.pipeline import processor
 from mailbot_v26.storage.context_layer import EntityResolution
 
 
-def test_commitment_signal_crm_failure_does_not_break_pipeline(monkeypatch, caplog) -> None:
+def test_commitment_signal_crm_failure_does_not_break_pipeline(
+    monkeypatch, caplog
+) -> None:
     flags = SimpleNamespace(
         ENABLE_AUTO_PRIORITY=False,
         AUTO_PRIORITY_CONFIDENCE_THRESHOLD=0.6,
@@ -19,12 +21,16 @@ def test_commitment_signal_crm_failure_does_not_break_pipeline(monkeypatch, capl
     )
     monkeypatch.setattr(processor, "feature_flags", flags)
 
-    monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: SimpleNamespace(
-        priority="🔴",
-        action_line="Оплатить счет",
-        body_summary="Body summary",
-        attachment_summaries=[],
-    ))
+    monkeypatch.setattr(
+        processor,
+        "run_llm_stage",
+        lambda **kwargs: SimpleNamespace(
+            priority="🔴",
+            action_line="Оплатить счет",
+            body_summary="Body summary",
+            attachment_summaries=[],
+        ),
+    )
     monkeypatch.setattr(
         processor.shadow_priority_engine,
         "compute",
@@ -49,7 +55,9 @@ def test_commitment_signal_crm_failure_does_not_break_pipeline(monkeypatch, capl
     monkeypatch.setattr(processor, "send_preview_to_telegram", lambda **kwargs: None)
 
     class _Analytics:
-        def commitment_stats_by_sender(self, *, from_email: str, days: int = 30) -> dict[str, int]:
+        def commitment_stats_by_sender(
+            self, *, from_email: str, days: int = 30
+        ) -> dict[str, int]:
             return {
                 "total_commitments": 2,
                 "fulfilled_count": 1,

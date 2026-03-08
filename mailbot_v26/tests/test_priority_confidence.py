@@ -14,7 +14,6 @@ from mailbot_v26.observability.notification_sla import NotificationSLAResult
 from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
-
 # Stub missing pipeline dependencies before importing the processor
 if "mailbot_v26.pipeline.stage_llm" not in sys.modules:
     stage_llm = types.ModuleType("mailbot_v26.pipeline.stage_llm")
@@ -36,7 +35,10 @@ class StubRuntimeFlagStore:
         self.enabled = enabled
 
     def get_flags(self, *, force: bool = False):
-        return RuntimeFlags(enable_gigachat=False, enable_auto_priority=self.enabled), False
+        return (
+            RuntimeFlags(enable_gigachat=False, enable_auto_priority=self.enabled),
+            False,
+        )
 
     def set_enable_auto_priority(self, enabled: bool) -> None:
         self.enabled = enabled
@@ -249,7 +251,9 @@ def test_telegram_payload_unchanged(monkeypatch):
         return DeliveryResult(delivered=True, retryable=False)
 
     monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",

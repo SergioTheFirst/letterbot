@@ -23,8 +23,7 @@ class TrustSnapshotWriter:
         try:
             with sqlite3.connect(self.path) as conn:
                 conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS trust_snapshots (
                         id TEXT PRIMARY KEY,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -35,21 +34,21 @@ class TrustSnapshotWriter:
                         data_quality TEXT,
                         model_version TEXT DEFAULT 'v1'
                     );
-                    """
-                )
+                    """)
                 self._ensure_columns(conn)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("trust_snapshot_init_failed", error=str(exc))
 
     def _ensure_columns(self, conn: sqlite3.Connection) -> None:
         columns = {
-            str(row[1])
-            for row in conn.execute("PRAGMA table_info(trust_snapshots)")
+            str(row[1]) for row in conn.execute("PRAGMA table_info(trust_snapshots)")
         }
         if "data_quality" not in columns:
             conn.execute("ALTER TABLE trust_snapshots ADD COLUMN data_quality TEXT;")
         if "model_version" not in columns:
-            conn.execute("ALTER TABLE trust_snapshots ADD COLUMN model_version TEXT DEFAULT 'v1';")
+            conn.execute(
+                "ALTER TABLE trust_snapshots ADD COLUMN model_version TEXT DEFAULT 'v1';"
+            )
 
     def write(self, snapshot: TrustSnapshot) -> None:
         try:

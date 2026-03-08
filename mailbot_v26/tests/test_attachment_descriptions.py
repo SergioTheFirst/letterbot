@@ -133,4 +133,4 @@ def test_excel_and_docx_summaries_are_compact() -> None:
 
     docx_summary = mapping["длинный_отчёт.docx"].split(" — ", 1)[1]
     assert len(docx_summary.split()) <= 12
-    assert "\"" not in docx_summary
+    assert '"' not in docx_summary

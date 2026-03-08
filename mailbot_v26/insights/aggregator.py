@@ -42,7 +42,9 @@ def aggregate_insights(
             explanation = "Контрагент начал хуже выполнять обещания, доверие снижается."
         elif trust_score is None:
             severity = "LOW"
-            explanation = "Фиксируются просрочки, но данных о доверии пока недостаточно."
+            explanation = (
+                "Фиксируются просрочки, но данных о доверии пока недостаточно."
+            )
         insights.append(
             Insight(
                 type="Reliability Degradation",
@@ -52,7 +54,9 @@ def aggregate_insights(
             )
         )
 
-    if _has_state(temporal_insights, {"silence_break", "silence_anomaly"}) and _has_state(
+    if _has_state(
+        temporal_insights, {"silence_break", "silence_anomaly"}
+    ) and _has_state(
         temporal_insights,
         {"escalation_window_open", "escalation_window"},
     ):
@@ -71,10 +75,14 @@ def aggregate_insights(
     ):
         if health_score is None:
             severity = "MEDIUM"
-            explanation = "Есть просрочки и задержки, но данных о здоровье отношений мало."
+            explanation = (
+                "Есть просрочки и задержки, но данных о здоровье отношений мало."
+            )
         elif health_score < HIGH_RISK_HEALTH_THRESHOLD:
             severity = "HIGH"
-            explanation = "Просрочки и задержки ответов усиливают риск срыва договорённости."
+            explanation = (
+                "Просрочки и задержки ответов усиливают риск срыва договорённости."
+            )
         else:
             severity = None
             explanation = ""

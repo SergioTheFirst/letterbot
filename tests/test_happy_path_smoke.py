@@ -9,11 +9,18 @@ from mailbot_v26.config_loader import AccountConfig
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline import processor
 from mailbot_v26.pipeline.processor import MessageProcessor
-from mailbot_v26.tests.integration.harness import DummyState, build_config, build_raw_email, run_single_cycle
+from mailbot_v26.tests.integration.harness import (
+    DummyState,
+    build_config,
+    build_raw_email,
+    run_single_cycle,
+)
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
-def _run_cycle_with_email(tmp_path, monkeypatch, *, subject: str, body: str, llm_priority: str):
+def _run_cycle_with_email(
+    tmp_path, monkeypatch, *, subject: str, body: str, llm_priority: str
+):
     account = AccountConfig(
         account_id="test_account",
         login="user@example.com",
@@ -40,7 +47,9 @@ def _run_cycle_with_email(tmp_path, monkeypatch, *, subject: str, body: str, llm
         delivered_payloads.append(payload)
         return DeliveryResult(delivered=True, retryable=False)
 
-    monkeypatch.setattr("mailbot_v26.bot_core.pipeline.send_telegram", fake_send)
+    monkeypatch.setattr(
+        processor, "enqueue_tg", lambda *, email_id, payload: fake_send(payload)
+    )
 
     raw_email = build_raw_email(subject=subject, body=body, sender="boss@company.ru")
 
@@ -80,8 +89,8 @@ def test_happy_path_simple_email(tmp_path, monkeypatch) -> None:
     )
 
     assert len(payloads) >= 1
-    assert payloads[-1].metadata.get("bot_token") == "token"
     assert payloads[-1].metadata.get("chat_id") == "123456"
+    assert payloads[-1].metadata.get("account_email") == "user@example.com"
     assert len(rows) >= 1
 
 
@@ -95,7 +104,9 @@ def test_happy_path_high_priority_email(tmp_path, monkeypatch) -> None:
     )
 
     assert len(payloads) >= 1
-    assert "🔴" in payloads[-1].html_text or payloads[-1].metadata.get("priority") == "🔴"
+    assert (
+        "🔴" in payloads[-1].html_text or payloads[-1].metadata.get("priority") == "🔴"
+    )
     assert len(rows) >= 1
 
 

@@ -16,7 +16,9 @@ def _llm_result() -> SimpleNamespace:
     )
 
 
-def _setup(monkeypatch, *, enabled: bool, corrections: int) -> tuple[dict[str, object], dict[str, int]]:
+def _setup(
+    monkeypatch, *, enabled: bool, corrections: int
+) -> tuple[dict[str, object], dict[str, int]]:
     processor.system_health.reset()
     monkeypatch.setattr(
         processor,
@@ -76,10 +78,16 @@ def _setup(monkeypatch, *, enabled: bool, corrections: int) -> tuple[dict[str, o
     monkeypatch.setattr(
         processor,
         "knowledge_db",
-        SimpleNamespace(save_email=lambda **kwargs: None, save_preview_action=lambda **kwargs: None),
+        SimpleNamespace(
+            save_email=lambda **kwargs: None, save_preview_action=lambda **kwargs: None
+        ),
     )
     payload_store: dict[str, object] = {}
-    monkeypatch.setattr(processor, "enqueue_tg", lambda *, email_id, payload: payload_store.setdefault("payload", payload))
+    monkeypatch.setattr(
+        processor,
+        "enqueue_tg",
+        lambda *, email_id, payload: payload_store.setdefault("payload", payload),
+    )
 
     calls = {"count": 0}
 

@@ -14,7 +14,6 @@ from mailbot_v26.config_yaml import (
     get_schema_version,
 )
 
-
 SYSTEM_SECTIONS = {"telegram", "cloudflare", "gigachat", "llm"}
 
 
@@ -296,7 +295,6 @@ def run_init_config(base_dir: Path = CONFIG_DIR) -> None:
         print(f"EXAMPLE: {path}")
 
 
-
 def migrate_two_file_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]]:
     base_dir.mkdir(parents=True, exist_ok=True)
     backups: list[Path] = []
@@ -310,7 +308,9 @@ def migrate_two_file_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]
 
     if not settings_path.exists():
         if legacy_settings.exists():
-            settings_path.write_text(legacy_settings.read_text(encoding="utf-8"), encoding="utf-8")
+            settings_path.write_text(
+                legacy_settings.read_text(encoding="utf-8"), encoding="utf-8"
+            )
         else:
             settings_path.write_text(SETTINGS_TEMPLATE, encoding="utf-8")
         created.append(settings_path)
@@ -322,9 +322,10 @@ def migrate_two_file_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]
     if legacy_settings.exists():
         backup = legacy_settings.with_suffix(".ini.bak")
         if not backup.exists():
-            backup.write_text(legacy_settings.read_text(encoding="utf-8"), encoding="utf-8")
+            backup.write_text(
+                legacy_settings.read_text(encoding="utf-8"), encoding="utf-8"
+            )
             backups.append(backup)
-
 
     if legacy_yaml.exists():
         backup = legacy_yaml.with_suffix(".yaml.bak")
@@ -368,7 +369,9 @@ def _is_imap_section(section_name: str) -> bool:
     return section_name.lower() not in SYSTEM_SECTIONS
 
 
-def check_config_ready(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str], list[str]]:
+def check_config_ready(
+    base_dir: Path = CONFIG_DIR,
+) -> tuple[bool, list[str], list[str]]:
     critical: list[str] = []
     warnings: list[str] = []
 
@@ -403,7 +406,9 @@ def check_config_ready(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str], li
             if _is_placeholder(section.get(key, ""))
         ]
         if missing:
-            critical.append(f"[{section_name}] missing required fields: {', '.join(missing)}")
+            critical.append(
+                f"[{section_name}] missing required fields: {', '.join(missing)}"
+            )
             continue
 
         try:
@@ -427,8 +432,12 @@ def check_config_ready(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str], li
         critical.append("No ready IMAP account found in accounts.ini")
 
     telegram_section = parser["telegram"] if parser.has_section("telegram") else None
-    if telegram_section is None or _is_placeholder(telegram_section.get("bot_token", "")):
-        warnings.append("[telegram] bot_token is not configured (Telegram delivery may be disabled)")
+    if telegram_section is None or _is_placeholder(
+        telegram_section.get("bot_token", "")
+    ):
+        warnings.append(
+            "[telegram] bot_token is not configured (Telegram delivery may be disabled)"
+        )
 
     return not critical, critical, warnings
 
@@ -443,6 +452,7 @@ def run_config_ready(base_dir: Path = CONFIG_DIR, *, verbose: bool = False) -> i
         for item in warnings:
             print(f"WARN: {item}")
     return 0 if ready else 2
+
 
 def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
     issues: list[str] = []
@@ -539,7 +549,9 @@ def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
 
         telegram_chat_id = section.get("telegram_chat_id", "").strip()
         if not telegram_chat_id:
-            issues.append(f"[{section_name}] telegram_chat_id is recommended for Telegram delivery")
+            issues.append(
+                f"[{section_name}] telegram_chat_id is recommended for Telegram delivery"
+            )
 
     if not has_imap_section:
         issues.append("accounts.ini has no IMAP account sections")
@@ -551,7 +563,9 @@ def _resolve_yaml_config_path(base_dir: Path = CONFIG_DIR) -> Path | None:
     return resolve_config_paths(base_dir).yaml_path
 
 
-def run_validate_config(base_dir: Path = CONFIG_DIR, *, compat: bool = False, strict: bool = False) -> int:
+def run_validate_config(
+    base_dir: Path = CONFIG_DIR, *, compat: bool = False, strict: bool = False
+) -> int:
     if not compat:
         ok, errors = validate_config(base_dir)
         print("validate-config: configuration report")

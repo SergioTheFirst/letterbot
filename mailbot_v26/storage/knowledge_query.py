@@ -59,14 +59,12 @@ class KnowledgeQuery:
 
     def priority_distribution(self) -> dict:
         result = {"🔴": 0, "🟡": 0, "🔵": 0}
-        rows = self._execute_select(
-            """
+        rows = self._execute_select("""
             SELECT priority, COUNT(*) AS total
             FROM emails
             WHERE priority IN ('🔴', '🟡', '🔵')
             GROUP BY priority
-            """
-        )
+            """)
         for row in rows:
             priority = row.get("priority")
             if priority in result:
@@ -74,8 +72,7 @@ class KnowledgeQuery:
         return result
 
     def shadow_vs_llm_stats(self) -> dict:
-        rows = self._execute_select(
-            """
+        rows = self._execute_select("""
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN shadow_priority != priority THEN 1 ELSE 0 END) AS diff_count,
@@ -101,8 +98,7 @@ class KnowledgeQuery:
             FROM emails
             WHERE TRIM(COALESCE(shadow_priority, '')) != ''
               AND TRIM(COALESCE(priority, '')) != ''
-            """
-        )
+            """)
         totals = rows[0] if rows else {"total": 0, "diff_count": 0, "higher_count": 0}
 
         total = int(totals.get("total", 0) or 0)
@@ -120,7 +116,9 @@ class KnowledgeQuery:
             "shadow_higher_pct": _pct(higher_count, total),
         }
 
-    def attention_entity_metrics(self, *, account_email: str, days: int = 7) -> list[dict]:
+    def attention_entity_metrics(
+        self, *, account_email: str, days: int = 7
+    ) -> list[dict]:
         if not account_email:
             return []
         rows = self._execute_select(
@@ -181,7 +179,9 @@ class KnowledgeQuery:
                 "message_count": int(row.get("message_count", 0) or 0),
                 "deferred_count": int(row.get("deferred_count", 0) or 0),
                 "attachment_count": int(row.get("attachment_count", 0) or 0),
-                "estimated_read_minutes": float(row.get("estimated_read_minutes", 0.0) or 0.0),
+                "estimated_read_minutes": float(
+                    row.get("estimated_read_minutes", 0.0) or 0.0
+                ),
             }
             for row in rows
             if str(row.get("entity_id") or "").strip()

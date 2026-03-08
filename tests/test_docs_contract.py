@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 README_PATH = Path("README_QUICKSTART_WINDOWS.md")
 
 

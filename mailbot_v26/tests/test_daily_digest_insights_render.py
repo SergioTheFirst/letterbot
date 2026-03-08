@@ -9,8 +9,7 @@ from mailbot_v26.pipeline import daily_digest
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
-
-_TARGET_EMOJI = "\U0001F3AF"
+_TARGET_EMOJI = "\U0001f3af"
 
 
 def _seed_email(
@@ -144,9 +143,21 @@ def test_daily_digest_insights_action_templates_present_when_enabled() -> None:
     )
     text = daily_digest._build_digest_text(data)
     lines = [line for line in text.splitlines() if line.strip()]
-    assert any(line.startswith("  <i>Текст:") and line.endswith("</i>") for line in lines)
-    assert lines.count("  <i>Текст: Предлагаю созвониться на 15 минут сегодня или завтра — так быстрее решим вопрос.</i>") == 1
-    assert lines.count("  <i>Текст: Напомню про наш вопрос. Удобно вернуться к нему сегодня?</i>") == 1
+    assert any(
+        line.startswith("  <i>Текст:") and line.endswith("</i>") for line in lines
+    )
+    assert (
+        lines.count(
+            "  <i>Текст: Предлагаю созвониться на 15 минут сегодня или завтра — так быстрее решим вопрос.</i>"
+        )
+        == 1
+    )
+    assert (
+        lines.count(
+            "  <i>Текст: Напомню про наш вопрос. Удобно вернуться к нему сегодня?</i>"
+        )
+        == 1
+    )
     assert "пинговать" not in text
     assert "Deadlock" not in text
     assert "Silence" not in text
@@ -196,13 +207,11 @@ def test_daily_digest_bootstrap_block_and_templates_hidden() -> None:
             "deadlock_insights": [
                 {"from_email": "boss@example.com", "subject": "Счёт"}
             ],
-            "silence_insights": [
-                {"contact": "client@example.com", "days_silent": 5}
-            ],
+            "silence_insights": [{"contact": "client@example.com", "days_silent": 5}],
         }
     )
     text = daily_digest._build_digest_text(data)
-    assert "\U0001F393 <b>Режим обучения</b>" in text
+    assert "\U0001f393 <b>Режим обучения</b>" in text
     assert "Прогресс: 12/50" in text
     assert "Текст:" not in text
     assert "→" not in text
@@ -227,13 +236,11 @@ def test_daily_digest_bootstrap_inactive_keeps_templates() -> None:
             "deadlock_insights": [
                 {"from_email": "boss@example.com", "subject": "Счёт"}
             ],
-            "silence_insights": [
-                {"contact": "client@example.com", "days_silent": 5}
-            ],
+            "silence_insights": [{"contact": "client@example.com", "days_silent": 5}],
         }
     )
     text = daily_digest._build_digest_text(data)
-    assert "\U0001F393 <b>Режим обучения</b>" not in text
+    assert "\U0001f393 <b>Режим обучения</b>" not in text
     assert "Текст:" in text
 
 
@@ -326,21 +333,17 @@ def test_daily_digest_insights_scope_aggregation(monkeypatch, tmp_path) -> None:
     text = daily_digest._build_digest_text(data)
     assert (
         f"• Застой в переписке: primary@example.com — Первичный → {_TARGET_EMOJI} "
-        "Предложить созвон (15 мин)"
-        in text
+        "Предложить созвон (15 мин)" in text
     )
     assert (
         f"• Застой в переписке: secondary@example.com — Вторичный → {_TARGET_EMOJI} "
-        "Предложить созвон (15 мин)"
-        in text
+        "Предложить созвон (15 мин)" in text
     )
     assert (
         f"• Нет ответа: client@example.com — 3 дня → {_TARGET_EMOJI} "
-        "Вежливо напомнить сегодня"
-        in text
+        "Вежливо напомнить сегодня" in text
     )
     assert (
         f"• Нет ответа: vendor@example.com — 4 дня → {_TARGET_EMOJI} "
-        "Вежливо напомнить сегодня"
-        in text
+        "Вежливо напомнить сегодня" in text
     )

@@ -4,7 +4,10 @@ from pathlib import Path
 
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
-from mailbot_v26.observability.decision_trace_v1 import DecisionTraceV1, to_canonical_json
+from mailbot_v26.observability.decision_trace_v1 import (
+    DecisionTraceV1,
+    to_canonical_json,
+)
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
 from mailbot_v26.tests._web_helpers import login_with_csrf

@@ -46,8 +46,12 @@ def test_run_stack_dry_run_web_only() -> None:
 
 
 def test_run_stack_dry_run_uses_web_values_from_settings_ini(tmp_path: Path) -> None:
-    (tmp_path / "settings.ini").write_text("[web]\nhost=0.0.0.0\nport=9321\n", encoding="utf-8")
-    (tmp_path / "accounts.ini").write_text("[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8")
+    (tmp_path / "settings.ini").write_text(
+        "[web]\nhost=0.0.0.0\nport=9321\n", encoding="utf-8"
+    )
+    (tmp_path / "accounts.ini").write_text(
+        "[acc]\nlogin=u\npassword=p\nhost=h\n", encoding="utf-8"
+    )
 
     result = _run_stack("web", "--dry-run", "--config-dir", str(tmp_path))
 
@@ -55,7 +59,6 @@ def test_run_stack_dry_run_uses_web_values_from_settings_ini(tmp_path: Path) -> 
     combined = result.stdout + result.stderr
     assert "--bind 0.0.0.0" in combined
     assert "--port 9321" in combined
-
 
 
 def test_build_web_command_uses_config_directory_argument(tmp_path: Path) -> None:
@@ -73,10 +76,18 @@ def test_build_web_command_uses_config_directory_argument(tmp_path: Path) -> Non
     assert str(tmp_path.resolve()) in cmd.args
 
 
-def test_web_module_does_not_exit_with_code_1_on_minimal_config_dir(tmp_path: Path) -> None:
-    (tmp_path / "settings.ini").write_text("[web]\nhost=127.0.0.1\nport=0\n", encoding="utf-8")
-    (tmp_path / "accounts.ini").write_text("[telegram]\nbot_token=t\n", encoding="utf-8")
-    (tmp_path / "config.ini").write_text("[general]\nweb_secret_key=test-secret\n", encoding="utf-8")
+def test_web_module_does_not_exit_with_code_1_on_minimal_config_dir(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "settings.ini").write_text(
+        "[web]\nhost=127.0.0.1\nport=0\n", encoding="utf-8"
+    )
+    (tmp_path / "accounts.ini").write_text(
+        "[telegram]\nbot_token=t\n", encoding="utf-8"
+    )
+    (tmp_path / "config.ini").write_text(
+        "[general]\nweb_secret_key=test-secret\n", encoding="utf-8"
+    )
     db_path = tmp_path / "mailbot.sqlite"
     db_path.touch()
 
@@ -104,11 +115,15 @@ def test_web_module_does_not_exit_with_code_1_on_minimal_config_dir(tmp_path: Pa
         process.terminate()
         process.wait(timeout=5)
     else:
-        combined = (process.stdout.read() if process.stdout else "") + (process.stderr.read() if process.stderr else "")
+        combined = (process.stdout.read() if process.stdout else "") + (
+            process.stderr.read() if process.stderr else ""
+        )
         assert process.returncode != 1, combined
 
 
-def test_run_processes_reports_log_tail_on_child_failure(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_run_processes_reports_log_tail_on_child_failure(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
     from mailbot_v26.tools import run_stack
 
     class DummyProcess:

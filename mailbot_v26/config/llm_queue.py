@@ -7,7 +7,6 @@ from pathlib import Path
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -29,12 +28,20 @@ def load_llm_queue_config(base_dir: Path | None = None) -> LLMQueueConfig:
         logger=_LOGGER,
         scope_label="llm queue settings",
     )
-    section = parser["llm_queue"] if "llm_queue" in parser else parser["threading"] if "threading" in parser else None
+    section = (
+        parser["llm_queue"]
+        if "llm_queue" in parser
+        else parser["threading"] if "threading" in parser else None
+    )
     return LLMQueueConfig(
         max_concurrent_llm_calls=_get_int(section, "max_concurrent_llm_calls", 1),
-        llm_request_queue_enabled=_get_bool(section, "llm_request_queue_enabled", False),
+        llm_request_queue_enabled=_get_bool(
+            section, "llm_request_queue_enabled", False
+        ),
         llm_request_queue_size=_get_int(section, "llm_request_queue_size", 50),
-        llm_request_queue_timeout_sec=_get_float(section, "llm_request_queue_timeout_sec", 300.0),
+        llm_request_queue_timeout_sec=_get_float(
+            section, "llm_request_queue_timeout_sec", 300.0
+        ),
     )
 
 
@@ -47,7 +54,9 @@ def _get_int(section: configparser.SectionProxy | None, key: str, default: int) 
         return default
 
 
-def _get_float(section: configparser.SectionProxy | None, key: str, default: float) -> float:
+def _get_float(
+    section: configparser.SectionProxy | None, key: str, default: float
+) -> float:
     if section is None:
         return default
     try:
@@ -56,7 +65,9 @@ def _get_float(section: configparser.SectionProxy | None, key: str, default: flo
         return default
 
 
-def _get_bool(section: configparser.SectionProxy | None, key: str, default: bool) -> bool:
+def _get_bool(
+    section: configparser.SectionProxy | None, key: str, default: bool
+) -> bool:
     if section is None:
         return default
     try:

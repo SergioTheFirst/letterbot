@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-
 CYRILLIC_DIR_NAME = "папка с пробелами"
 
 
