@@ -8,6 +8,7 @@ from mailbot_v26.config_loader import (
     load_branding_config,
     load_config,
     load_general_config,
+    load_ingest_config,
     load_keys_config,
     parse_telegram_chat_id,
     load_storage_config,
@@ -446,3 +447,33 @@ host=h
     password = load_web_ui_password_from_ini(tmp_path)
 
     assert password == "ini-pass"
+
+
+def test_load_ingest_config_defaults(tmp_path: Path) -> None:
+    write_file(tmp_path, "settings.ini", "[general]\ncheck_interval=120\n")
+    write_file(tmp_path, "accounts.ini", "[acc]\nlogin=u\npassword=p\nhost=h\n")
+
+    ingest = load_ingest_config(tmp_path)
+
+    assert ingest.allow_prestart_emails is False
+    assert ingest.first_run_bootstrap_hours == 24
+    assert ingest.first_run_bootstrap_max_messages == 20
+
+
+def test_load_ingest_config_reads_bootstrap_values(tmp_path: Path) -> None:
+    write_file(
+        tmp_path,
+        "settings.ini",
+        """[ingest]
+allow_prestart_emails = true
+first_run_bootstrap_hours = 12
+first_run_bootstrap_max_messages = 7
+""",
+    )
+    write_file(tmp_path, "accounts.ini", "[acc]\nlogin=u\npassword=p\nhost=h\n")
+
+    ingest = load_ingest_config(tmp_path)
+
+    assert ingest.allow_prestart_emails is True
+    assert ingest.first_run_bootstrap_hours == 12
+    assert ingest.first_run_bootstrap_max_messages == 7
