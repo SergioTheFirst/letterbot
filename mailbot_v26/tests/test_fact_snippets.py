@@ -66,7 +66,14 @@ def test_attachments_without_snippet_use_fallback():
         subject="Пустое вложение",
         sender="user@example.com",
         body="Сообщение без фактов",
-        attachments=[Attachment(filename="blank.pdf", content=b"data", content_type="application/pdf", text="")],
+        attachments=[
+            Attachment(
+                filename="blank.pdf",
+                content=b"data",
+                content_type="application/pdf",
+                text="",
+            )
+        ],
         received_at=datetime(2024, 1, 1, 9, 0),
     )
 

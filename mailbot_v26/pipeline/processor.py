@@ -27,6 +27,7 @@ from mailbot_v26.budgets.importance import (
 )
 from mailbot_v26.behavior.attention_engine import (
     DeliveryContext,
+    DeliveryDecision,
     DeliveryMode,
     decide_delivery,
     score_email,
@@ -34,7 +35,10 @@ from mailbot_v26.behavior.attention_engine import (
 from mailbot_v26.behavior.deadlock_detector import maybe_emit_deadlock
 from mailbot_v26.behavior.threading import compute_thread_key
 from mailbot_v26.config.deadlock_policy import load_deadlock_policy_config
-from mailbot_v26.config.delivery_policy import load_delivery_policy_config
+from mailbot_v26.config.delivery_policy import (
+    DeliveryPolicyConfig,
+    load_delivery_policy_config,
+)
 from mailbot_v26.config.budget_policy import (
     load_budget_gate_config,
     load_budget_usage_config,
@@ -48,7 +52,6 @@ from mailbot_v26.config.premium_clarity import load_premium_clarity_config
 from mailbot_v26.config.premium_clarity import PremiumClarityConfig
 from mailbot_v26.config_loader import (
     get_account_scope,
-    load_telegram_ui_config,
     resolve_account_scope,
 )
 from mailbot_v26.facts.fact_extractor import FactExtractor
@@ -126,8 +129,14 @@ from mailbot_v26.observability.relationship_health_snapshot import (
 )
 from mailbot_v26.observability.trust_snapshot import TrustSnapshotWriter
 from mailbot_v26.priority.auto_engine import AutoPriorityEngine, AutoPriorityOutcome
-from mailbot_v26.priority.confidence_engine import PriorityConfidenceEngine, PRIORITY_ORDER
-from mailbot_v26.priority.auto_gates import AutoPriorityCircuitBreaker, AutoPriorityGates
+from mailbot_v26.priority.confidence_engine import (
+    PriorityConfidenceEngine,
+    PRIORITY_ORDER,
+)
+from mailbot_v26.priority.auto_gates import (
+    AutoPriorityCircuitBreaker,
+    AutoPriorityGates,
+)
 from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.priority.shadow_engine import ShadowPriorityEngine
 from mailbot_v26.priority.priority_engine_v2 import (
@@ -139,7 +148,9 @@ from mailbot_v26.priority.priority_engine_v2 import (
 )
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.clean_email import clean_email_body, segment_email_body
-from mailbot_v26.text.mojibake import normalize_mojibake_text as _normalize_mojibake_text_impl
+from mailbot_v26.text.mojibake import (
+    normalize_mojibake_text as _normalize_mojibake_text_impl,
+)
 from .attention_gate import (
     AttentionGateInput,
     apply_attention_gate,
@@ -162,20 +173,27 @@ from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
 from mailbot_v26.worker.telegram_sender import DeliveryResult, edit_telegram_message
-from mailbot_v26.llm.request_queue import BackgroundLLMWorker, LLMRequest, LLMRequestQueue
+from mailbot_v26.llm.request_queue import (
+    BackgroundLLMWorker,
+    LLMRequest,
+    LLMRequestQueue,
+)
 from .signal_quality import evaluate_signal_quality
 from mailbot_v26.ui.i18n import (
     DEFAULT_LOCALE,
     humanize_mail_type,
-    humanize_mode,
     humanize_reason_codes,
     humanize_severity,
     t,
 )
 
 logger = get_logger("mailbot")
+# Backward-compatible symbol expected by monkeypatch-based tests.
+_SEND_PREVIEW_ALIAS = send_preview_to_telegram
 
-_SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd|отв|пер|ответ|перес)\s*:\s*)+", re.IGNORECASE)
+_SUBJECT_PREFIX_RE = re.compile(
+    r"^(?:(?:re|fw|fwd|отв|пер|ответ|перес)\s*:\s*)+", re.IGNORECASE
+)
 
 
 @lru_cache(maxsize=2048)
@@ -206,7 +224,9 @@ def _contains_any(text: str, tokens: tuple[str, ...] | list[str]) -> bool:
         normalized_token = _normalize_token(str(token or ""))
         if raw_token and (raw_token in raw or raw_token in normalized):
             return True
-        if normalized_token and (normalized_token in raw or normalized_token in normalized):
+        if normalized_token and (
+            normalized_token in raw or normalized_token in normalized
+        ):
             return True
     return False
 
@@ -268,6 +288,7 @@ def _maybe_drop_duplicate_subject_line(
     if normalized_subject and normalized_subject == normalized_first:
         return body_lines[1:]
     return body_lines
+
 
 class _LazyFeatureFlags:
     def __init__(self) -> None:
@@ -338,9 +359,7 @@ auto_priority_engine = AutoPriorityEngine(
     system_health,
     enabled_flag=lambda: feature_flags.ENABLE_AUTO_PRIORITY,
 )
-auto_action_engine = AutoActionEngine(
-    confidence_threshold=0.75
-)
+auto_action_engine = AutoActionEngine(confidence_threshold=0.75)
 system_orchestrator = SystemOrchestrator()
 notification_alert_store = NotificationAlertStore(DB_PATH)
 MAX_TELEGRAM_WAIT_SECONDS = 180
@@ -440,7 +459,9 @@ def configure_processor_db_path(db_path: Path) -> None:
         enabled_flag=lambda: feature_flags.ENABLE_AUTO_PRIORITY,
     )
     notification_alert_store = NotificationAlertStore(DB_PATH)
-    budget_gate = BudgetGate(DB_PATH, BudgetGateConfig(), emitter=contract_event_emitter)
+    budget_gate = BudgetGate(
+        DB_PATH, BudgetGateConfig(), emitter=contract_event_emitter
+    )
     budget_consumer = BudgetConsumer(budget_gate)
 
 
@@ -525,12 +546,12 @@ class PolicyInputs:
     gates: GateEvaluation | None
     runtime_flags: RuntimeFlags
     notification_sla: NotificationSLAResult | None
-    notification_sla: NotificationSLAResult | None
 
 
 @dataclass
 class Attachment:
     """Attachment contract: extracted text is a string (possibly empty)."""
+
     filename: str
     content: bytes = b""
     content_type: str = ""
@@ -582,7 +603,9 @@ def _emit_contract_event(
         )
         contract_event_emitter.emit(event)
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("contract_event_emit_failed", event_type=event_type.value, error=str(exc))
+        logger.error(
+            "contract_event_emit_failed", event_type=event_type.value, error=str(exc)
+        )
 
 
 def _emit_decision_trace(
@@ -624,9 +647,7 @@ def _build_delivery_context(
     )
 
 
-def _count_recent_immediate_deliveries(
-    *, account_email: str, since_ts: float
-) -> int:
+def _count_recent_immediate_deliveries(*, account_email: str, since_ts: float) -> int:
     if not account_email:
         return 0
     try:
@@ -885,21 +906,21 @@ def _maybe_alert_notification_sla(
         return
     fingerprint = _notification_alert_fingerprint(reasons)
     now_dt = datetime.now(timezone.utc)
-    if not notification_alert_store.should_alert(
-        fingerprint=fingerprint, now=now_dt
-    ):
+    if not notification_alert_store.should_alert(fingerprint=fingerprint, now=now_dt):
         return
-    delivery_pct = (
-        f"{sla_result.delivery_rate_24h * 100:.1f}%" if sla_result else "н/д"
-    )
+    delivery_pct = f"{sla_result.delivery_rate_24h * 100:.1f}%" if sla_result else "н/д"
     p90_latency = (
-        f"{int(sla_result.p90_latency_24h)}с" if sla_result and sla_result.p90_latency_24h is not None else "н/д"
+        f"{int(sla_result.p90_latency_24h)}с"
+        if sla_result and sla_result.p90_latency_24h is not None
+        else "н/д"
     )
     top_error = "н/д"
     if sla_result and sla_result.top_error_reasons_24h:
         top = sla_result.top_error_reasons_24h[0]
         top_error = f"{top.reason} ({top.share * 100:.1f}%)"
-    action_hint = "текст без форматирования" if consecutive_failures >= 3 else "повторяем"
+    action_hint = (
+        "текст без форматирования" if consecutive_failures >= 3 else "повторяем"
+    )
     alert_prefix = t("sla.alert.title", locale=_UI_LOCALE)
     alert_text = (
         f"{alert_prefix}\n"
@@ -911,7 +932,7 @@ def _maybe_alert_notification_sla(
     alert_text = append_watermark(alert_text, html=True)
     payload = TelegramPayload(
         html_text=escape_tg_html(alert_text),
-        priority="\U0001F534",
+        priority="\U0001f534",
         metadata={
             "chat_id": telegram_chat_id,
             "account_email": account_email,
@@ -1073,7 +1094,10 @@ class InvalidTelegramPayload(ValueError):
 class MessageProcessor:
     _ATTACHMENT_SNIPPET_LIMIT = 120
     _MAX_ATTACHMENTS = 12
-    _VERB_ORDER = tuple(_normalize_mojibake_text_impl(v) for v in ("Проверить", "Ответить", "Сделать", "Согласовать"))
+    _VERB_ORDER = tuple(
+        _normalize_mojibake_text_impl(v)
+        for v in ("Проверить", "Ответить", "Сделать", "Согласовать")
+    )
 
     def __init__(self, config: Any, state: Any) -> None:
         self.config = config
@@ -1114,7 +1138,9 @@ class MessageProcessor:
             body_text,
         )
         summary = self._summarize_body(body_text, subject)
-        attachments = self._build_attachment_summaries(message.attachments or [], subject)
+        attachments = self._build_attachment_summaries(
+            message.attachments or [], subject
+        )
 
         safe_sender = escape_tg_html(display_sender)
         safe_subject = escape_tg_html(subject)
@@ -1208,19 +1234,25 @@ class MessageProcessor:
         doc_type = "OTHER"
         if kind in {"XLS", "XLSX", "XLSM", "XLSB", "TABLE"}:
             doc_type = "TABLE"
-        elif kind in {"DOC", "DOCX"} and any(token in lowered_subject for token in ("договор", "contract")):
+        elif kind in {"DOC", "DOCX"} and any(
+            token in lowered_subject for token in ("договор", "contract")
+        ):
             doc_type = "CONTRACT"
         snippet = pick_attachment_fact(text, attachment.filename, doc_type) or ""
         snippet = snippet.replace('"', "").replace("В«", "").replace("В»", "")
         snippet = snippet.replace(";", " ").replace("|", " ")
         snippet = re.sub(r"\s+", " ", snippet).strip()
         if not snippet:
-            snippet = re.sub(r"\s+", " ", text.replace(";", " ").replace("|", " ")).strip()
+            snippet = re.sub(
+                r"\s+", " ", text.replace(";", " ").replace("|", " ")
+            ).strip()
         if not snippet:
             return "", len(text)
         words = snippet.split()
         if len(words) < 2:
-            fallback = re.sub(r"\s+", " ", text.replace(";", " ").replace("|", " ")).strip()
+            fallback = re.sub(
+                r"\s+", " ", text.replace(";", " ").replace("|", " ")
+            ).strip()
             fallback_words = fallback.split()
             if len(fallback_words) >= 2:
                 snippet = " ".join(fallback_words[:6])
@@ -1263,21 +1295,40 @@ class MessageProcessor:
 
     @staticmethod
     def _is_greeting_only(text: str) -> bool:
-        greetings = ("добрый день", "добрый вечер", "здравствуйте", "привет", "hello", "hi")
+        greetings = (
+            "добрый день",
+            "добрый вечер",
+            "здравствуйте",
+            "привет",
+            "hello",
+            "hi",
+        )
         lowered = text.lower().strip()
-        if any(lowered.startswith(greet) for greet in greetings) and len(lowered.split()) <= 4:
+        if (
+            any(lowered.startswith(greet) for greet in greetings)
+            and len(lowered.split()) <= 4
+        ):
             return True
         return False
 
     @staticmethod
     def _choose_priority(subject: str, body: str, attachments: list[Attachment]) -> str:
         combined = _normalized_lower(" ".join([subject or "", body or ""]))
-        attachment_names = _normalized_lower(" ".join(att.filename for att in attachments if att.filename))
-        attachment_text = _normalized_lower(" ".join((att.text or "") for att in attachments if att.text))
+        attachment_names = _normalized_lower(
+            " ".join(att.filename for att in attachments if att.filename)
+        )
+        attachment_text = _normalized_lower(
+            " ".join((att.text or "") for att in attachments if att.text)
+        )
         evidence = " ".join((combined, attachment_names, attachment_text)).strip()
-        if _contains_any(evidence, ("срочно", "urgent", "оплат", "security alert", "offline", "авар")):
+        if _contains_any(
+            evidence, ("срочно", "urgent", "оплат", "security alert", "offline", "авар")
+        ):
             return _normalize_mojibake_text("🔴")
-        if _contains_any(evidence, ("договор", "contract", "согласован", "approval", "счет", "invoice")):
+        if _contains_any(
+            evidence,
+            ("договор", "contract", "согласован", "approval", "счет", "invoice"),
+        ):
             return _normalize_mojibake_text("🟡")
         if _contains_any(attachment_names, ("invoice", "счет", "счёт")):
             return _normalize_mojibake_text("🟡")
@@ -1285,14 +1336,15 @@ class MessageProcessor:
             return _normalize_mojibake_text("🟡")
         return _normalize_mojibake_text("🔵")
 
-
     @staticmethod
     def _is_image_attachment(attachment: Attachment) -> bool:
         content_type = (attachment.content_type or "").lower()
         filename = (attachment.filename or "").lower()
         if content_type.startswith("image/"):
             return True
-        return filename.endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"))
+        return filename.endswith(
+            (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
+        )
 
     @staticmethod
     def _attachment_kind(attachment: Attachment) -> str:
@@ -1321,13 +1373,21 @@ class MessageProcessor:
 
         normalized_mail_type = _normalized_lower(mail_type).replace("_", "")
         if normalized_mail_type:
-            if normalized_mail_type.startswith("act") or "reconciliation" in normalized_mail_type:
+            if (
+                normalized_mail_type.startswith("act")
+                or "reconciliation" in normalized_mail_type
+            ):
                 return _out("Проверить акт")
-            if normalized_mail_type.startswith("invoice") or normalized_mail_type.startswith("paymentreminder"):
+            if normalized_mail_type.startswith(
+                "invoice"
+            ) or normalized_mail_type.startswith("paymentreminder"):
                 return _out("Оплатить счёт")
             if normalized_mail_type.startswith("overdueinvoice"):
                 return _out("Оплатить счёт")
-            if normalized_mail_type.startswith("contract") or "amendment" in normalized_mail_type:
+            if (
+                normalized_mail_type.startswith("contract")
+                or "amendment" in normalized_mail_type
+            ):
                 return _out("Проверить договор")
 
         lowered = _normalized_lower(
@@ -1364,7 +1424,11 @@ class MessageProcessor:
             return _out("Проверить договор")
         if _contains_any(lowered, ("прайс", "цена", "цен")):
             return _out("Проверить цены")
-        if any(str(att.filename or "").lower().endswith((".xls", ".xlsx")) for att in attachments if att.filename):
+        if any(
+            str(att.filename or "").lower().endswith((".xls", ".xlsx"))
+            for att in attachments
+            if att.filename
+        ):
             return _out("Проверить таблицу")
         return _out("Проверить письмо")
 
@@ -1374,7 +1438,9 @@ __all__ = ["Attachment", "AttachmentSummary", "InboundMessage", "MessageProcesso
 
 def _is_shadow_higher(shadow_priority: str, llm_priority: str) -> bool:
     priority_order = {"🔵": 0, "🟡": 1, "🔴": 2}
-    return priority_order.get(_normalize_priority_value(shadow_priority), 0) > priority_order.get(_normalize_priority_value(llm_priority), 0)
+    return priority_order.get(
+        _normalize_priority_value(shadow_priority), 0
+    ) > priority_order.get(_normalize_priority_value(llm_priority), 0)
 
 
 def _lookup_sender_stats(from_email: str) -> dict[str, object]:
@@ -1499,14 +1565,20 @@ def _has_high_risk(insights: list[Insight]) -> bool:
 
 
 def _attachment_kind(attachment: dict[str, Any]) -> str:
-    content_type = str(attachment.get("content_type") or attachment.get("type") or "").lower()
+    content_type = str(
+        attachment.get("content_type") or attachment.get("type") or ""
+    ).lower()
     filename = str(attachment.get("filename") or "").lower()
     extension = filename.rsplit(".", 1)[-1] if "." in filename else ""
     if "pdf" in content_type or extension == "pdf":
         return "PDF"
     if "word" in content_type or extension in {"doc", "docx"}:
         return "DOC"
-    if "excel" in content_type or "spreadsheet" in content_type or extension in {"xls", "xlsx"}:
+    if (
+        "excel" in content_type
+        or "spreadsheet" in content_type
+        or extension in {"xls", "xlsx"}
+    ):
         return "XLS"
     if extension:
         return extension.upper()
@@ -1627,9 +1699,7 @@ def _fact_items_from_text(text: str, *, tag: str) -> list[_FactItem]:
     if not text:
         return []
     facts = _FACT_EXTRACTOR.extract_facts(text)
-    date_matches = {
-        match.group(0) for match in _DATE_VALUE_PATTERN.finditer(text)
-    }
+    date_matches = {match.group(0) for match in _DATE_VALUE_PATTERN.finditer(text)}
     items: list[_FactItem] = []
     for amount in facts.amounts:
         value = _normalize_fact_value(amount)
@@ -1649,7 +1719,9 @@ def _fact_items_from_text(text: str, *, tag: str) -> list[_FactItem]:
 
 
 def _summary_numbers_supported(summary: str, *, subject: str, body_text: str) -> bool:
-    summary_numbers = {match.group(0) for match in _SUMMARY_NUMBER_PATTERN.finditer(summary or "")}
+    summary_numbers = {
+        match.group(0) for match in _SUMMARY_NUMBER_PATTERN.finditer(summary or "")
+    }
     if not summary_numbers:
         return True
     source_text = f"{subject}\n{body_text}".strip()
@@ -1766,8 +1838,7 @@ def _build_premium_clarity_facts(
         suppress_numeric_facts=suppress_numeric_facts,
     )
     rendered = [
-        f"{item.label}: {item.value}{_render_fact_tag(item.tag)}"
-        for item in selected
+        f"{item.label}: {item.value}{_render_fact_tag(item.tag)}" for item in selected
     ]
     return "; ".join(rendered)
 
@@ -1928,12 +1999,16 @@ def _enforce_premium_clarity_line_budget(
 
     if current_spoiler:
         trimmed_spoiler = list(current_spoiler)
-        while trimmed_spoiler and len(
-            _build_lines(
-                spoiler_details=trimmed_spoiler,
-                optional_details=current_optional,
+        while (
+            trimmed_spoiler
+            and len(
+                _build_lines(
+                    spoiler_details=trimmed_spoiler,
+                    optional_details=current_optional,
+                )
             )
-        ) > max_lines:
+            > max_lines
+        ):
             trimmed_spoiler.pop()
         current_spoiler = trimmed_spoiler
         lines = _build_lines(
@@ -1945,13 +2020,17 @@ def _enforce_premium_clarity_line_budget(
 
     if current_optional:
         trimmed_optional = list(current_optional)
-        while trimmed_optional and len(
-            _build_lines(
-                spoiler_details=current_spoiler,
-                optional_details=trimmed_optional,
-            ),
-            html=True,
-        ) > max_lines:
+        while (
+            trimmed_optional
+            and len(
+                _build_lines(
+                    spoiler_details=current_spoiler,
+                    optional_details=trimmed_optional,
+                ),
+                html=True,
+            )
+            > max_lines
+        ):
             trimmed_optional.pop()
         current_optional = trimmed_optional
         lines = _build_lines(
@@ -2074,7 +2153,10 @@ def _select_premium_short_action(
 
     if any(marker in normalized_evidence for marker in tech_security_markers):
         return "Проверить"
-    if normalized_mail_type.startswith("ACT") or "RECONCILIATION" in normalized_mail_type:
+    if (
+        normalized_mail_type.startswith("ACT")
+        or "RECONCILIATION" in normalized_mail_type
+    ):
         return "Сверить"
     if any(marker in normalized_evidence for marker in reconciliation_markers):
         return "Сверить"
@@ -2097,10 +2179,16 @@ def _select_premium_short_action(
         for phrase in strong_invoice_phrases
     )
     invoice_signal = strong_invoice_signal or (
-        subject_invoice_hits >= 1 and (body_invoice_hits >= 1 or evidence_invoice_hits >= 2)
+        subject_invoice_hits >= 1
+        and (body_invoice_hits >= 1 or evidence_invoice_hits >= 2)
     )
-    if normalized_mail_type.startswith("INVOICE") or "PAYMENT_REMINDER" in normalized_mail_type:
-        invoice_signal = invoice_signal or (subject_invoice_hits + body_invoice_hits >= 1)
+    if (
+        normalized_mail_type.startswith("INVOICE")
+        or "PAYMENT_REMINDER" in normalized_mail_type
+    ):
+        invoice_signal = invoice_signal or (
+            subject_invoice_hits + body_invoice_hits >= 1
+        )
     if not invoice_signal:
         action_invoice_hits = _count_marker_hits(normalized_action, invoice_markers)
         invoice_signal = action_invoice_hits >= 2 or any(
@@ -2146,9 +2234,13 @@ def _build_premium_clarity_text(
     action_text = strip_disallowed_emojis(_resolve_action_line(action_line))
     normalized_mail_type = (mail_type or "").strip().upper()
     normalized_action = _normalized_lower(re.sub(r"[\W_]+", " ", action_text).strip())
-    normalized_subject = _normalized_lower(re.sub(r"[\W_]+", " ", subject or "").strip())
+    normalized_subject = _normalized_lower(
+        re.sub(r"[\W_]+", " ", subject or "").strip()
+    )
     normalized_body = _normalized_lower(
-        re.sub(r"[\W_]+", " ", " ".join(part for part in (body_summary, body_text) if part)).strip()
+        re.sub(
+            r"[\W_]+", " ", " ".join(part for part in (body_summary, body_text) if part)
+        ).strip()
     )
     evidence_text = " ".join(
         part
@@ -2157,8 +2249,12 @@ def _build_premium_clarity_text(
             subject,
             body_summary,
             body_text,
-            " ".join(str(attachment.get("filename") or "") for attachment in attachments),
-            " ".join(str(attachment.get("text") or "")[:180] for attachment in attachments),
+            " ".join(
+                str(attachment.get("filename") or "") for attachment in attachments
+            ),
+            " ".join(
+                str(attachment.get("text") or "")[:180] for attachment in attachments
+            ),
             " ".join(str(item.get("summary") or "") for item in attachment_summaries),
         )
         if part
@@ -2184,7 +2280,9 @@ def _build_premium_clarity_text(
     message_facts = _score_message_facts(
         message_facts,
         evidence_text=fact_text,
-        attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+        attachment_text=" ".join(
+            str(attachment.get("text") or "") for attachment in attachments
+        ),
     )
     message_facts = _consistency_check_message_facts(
         message_facts,
@@ -2207,7 +2305,9 @@ def _build_premium_clarity_text(
     )
     if fact_evidence:
         evidence_text = " ".join((evidence_text, fact_evidence)).strip()
-    normalized_evidence = _normalized_lower(re.sub(r"[\W_]+", " ", evidence_text).strip())
+    normalized_evidence = _normalized_lower(
+        re.sub(r"[\W_]+", " ", evidence_text).strip()
+    )
     short_action = _select_premium_short_action(
         normalized_mail_type=normalized_mail_type,
         normalized_subject=normalized_subject,
@@ -2315,7 +2415,6 @@ def _build_minimal_telegram_payload(
     )
 
 
-
 def _interpretation_amount_text(amount: float | None) -> str:
     if amount is None:
         return ""
@@ -2369,7 +2468,9 @@ def _build_telegram_text(
                 subject,
                 body_summary,
                 fact_body_text,
-                " ".join(str(attachment.get("text") or "") for attachment in attachments),
+                " ".join(
+                    str(attachment.get("text") or "") for attachment in attachments
+                ),
             )
             if part
         )
@@ -2383,7 +2484,9 @@ def _build_telegram_text(
         message_facts = _score_message_facts(
             message_facts,
             evidence_text=fact_text,
-            attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+            attachment_text=" ".join(
+                str(attachment.get("text") or "") for attachment in attachments
+            ),
         )
         message_facts = _consistency_check_message_facts(
             message_facts,
@@ -2407,8 +2510,12 @@ def _build_telegram_text(
         action_line=resolved_action,
         summary=body_summary,
     )
-    safe_sender = escape_tg_html(from_email or "\u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e")
-    safe_subject = escape_tg_html(subject or "(\u0431\u0435\u0437 \u0442\u0435\u043c\u044b)")
+    safe_sender = escape_tg_html(
+        from_email or "\u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e"
+    )
+    safe_subject = escape_tg_html(
+        subject or "(\u0431\u0435\u0437 \u0442\u0435\u043c\u044b)"
+    )
     safe_summary = escape_tg_html(fields.summary or "")
     body_lines = tg_renderer._maybe_drop_duplicate_subject_line(
         subject,
@@ -2425,7 +2532,11 @@ def _build_telegram_text(
         )
     if attachment_summary:
         lines.append(attachment_summary)
-    return append_watermark(_normalize_mojibake_text(tg_renderer.dedup_rendered_text("\n".join(lines))), html=True)
+    return append_watermark(
+        _normalize_mojibake_text(tg_renderer.dedup_rendered_text("\n".join(lines))),
+        html=True,
+    )
+
 
 def _build_progressive_telegram_payload(
     *,
@@ -2465,7 +2576,9 @@ def _resolve_action_line(action_line: str) -> str:
     return cleaned
 
 
-def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]]) -> str:
+def _build_priority_signal_text(
+    body_text: str, attachments: list[dict[str, Any]]
+) -> str:
     base = (body_text or "").strip()
     signals: list[str] = []
     for attachment in attachments[:4]:
@@ -2488,7 +2601,9 @@ def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]
             )
             if part
         )
-        has_table_context = _has_keyword_context(context_source, _ATTACHMENT_CONTEXT_KEYWORDS)
+        has_table_context = _has_keyword_context(
+            context_source, _ATTACHMENT_CONTEXT_KEYWORDS
+        )
         if doc_type == "TABLE" and not has_table_context:
             continue
         if filename_lower.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")):
@@ -2520,7 +2635,9 @@ def _build_priority_signal_text(body_text: str, attachments: list[dict[str, Any]
     facts = _score_message_facts(
         facts,
         evidence_text=fact_text,
-        attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+        attachment_text=" ".join(
+            str(attachment.get("text") or "") for attachment in attachments
+        ),
     )
     facts = _consistency_check_message_facts(
         facts,
@@ -2623,7 +2740,13 @@ _CONTEXT_CONFIRMATION_MARKERS = (
     "получено",
     "спасибо",
 )
-_CONTEXT_DISCUSSION_MARKERS = ("исправили", "обновили", "комментарий", "правка", "правки")
+_CONTEXT_DISCUSSION_MARKERS = (
+    "исправили",
+    "обновили",
+    "комментарий",
+    "правка",
+    "правки",
+)
 _PAYMENT_ACTION_MARKERS = ("оплат", "payment", "pay")
 _CONTRACT_FINAL_ACTION_MARKERS = ("подпис", "соглас", "утверд", "заключ")
 _FACT_CURRENCY_RE = re.compile(r"(руб\.?|₽|usd|\$|eur|€)", re.IGNORECASE)
@@ -2684,7 +2807,9 @@ def _has_keyword_context(text: str, keywords: tuple[str, ...]) -> bool:
     normalized = _normalized_lower(text)
     if not normalized:
         return False
-    return any(keyword and _contains_any(normalized, (str(keyword),)) for keyword in keywords)
+    return any(
+        keyword and _contains_any(normalized, (str(keyword),)) for keyword in keywords
+    )
 
 
 def _extract_numbers_in_evidence_window(
@@ -2700,9 +2825,7 @@ def _extract_numbers_in_evidence_window(
     candidates: list[dict[str, Any]] = []
     seen: set[tuple[int, int, str]] = set()
     normalized_keywords = [
-        _normalize_token(str(keyword))
-        for keyword in keywords
-        if str(keyword).strip()
+        _normalize_token(str(keyword)) for keyword in keywords if str(keyword).strip()
     ]
 
     for keyword in normalized_keywords:
@@ -2723,7 +2846,9 @@ def _extract_numbers_in_evidence_window(
                 if dedupe_key in seen:
                     continue
                 seen.add(dedupe_key)
-                context = lowered[max(0, global_start - 36) : min(len(lowered), global_end + 36)]
+                context = lowered[
+                    max(0, global_start - 36) : min(len(lowered), global_end + 36)
+                ]
                 candidates.append(
                     {
                         "amount": amount_value,
@@ -2743,7 +2868,9 @@ def _extract_numbers_in_evidence_window(
         amount_value = " ".join(match.group(0).replace(" ", " ").split())
         global_start = match.start()
         global_end = match.end()
-        context = lowered[max(0, global_start - 36) : min(len(lowered), global_end + 36)]
+        context = lowered[
+            max(0, global_start - 36) : min(len(lowered), global_end + 36)
+        ]
         candidates.append(
             {
                 "amount": amount_value,
@@ -2767,18 +2894,30 @@ def _compute_decision_confidence(
     due_date = str(message_facts.get("due_date") or "").strip()
     doc_number = str(message_facts.get("doc_number") or "").strip()
     attachment_facts = [
-        str(item).strip() for item in (message_facts.get("attachment_facts") or []) if str(item).strip()
+        str(item).strip()
+        for item in (message_facts.get("attachment_facts") or [])
+        if str(item).strip()
     ]
-    evidence_facts = sum(bool(value) for value in (amount, due_date, doc_number)) + min(len(attachment_facts), 2)
+    evidence_facts = sum(bool(value) for value in (amount, due_date, doc_number)) + min(
+        len(attachment_facts), 2
+    )
 
     doc_kind = str(message_facts.get("doc_kind") or "").strip().lower()
     lowered_body = " ".join(part for part in (subject, body_text) if part).lower()
-    attachment_text = " ".join(str(item.get("text") or "") for item in attachments).lower()
-    filename_text = " ".join(str(item.get("filename") or "") for item in attachments).lower()
+    attachment_text = " ".join(
+        str(item.get("text") or "") for item in attachments
+    ).lower()
+    filename_text = " ".join(
+        str(item.get("filename") or "") for item in attachments
+    ).lower()
     markers = _FACT_DECISION_SIGNAL_MARKERS.get(doc_kind, ())
     body_signal = bool(markers) and any(marker in lowered_body for marker in markers)
-    attachment_signal = bool(markers) and any(marker in attachment_text for marker in markers)
-    filename_signal = bool(markers) and any(marker in filename_text for marker in markers)
+    attachment_signal = bool(markers) and any(
+        marker in attachment_text for marker in markers
+    )
+    filename_signal = bool(markers) and any(
+        marker in filename_text for marker in markers
+    )
     signal_count = sum(
         bool(message_facts.get(key))
         for key in ("invoice_signal", "contract_signal", "incident_signal")
@@ -2826,11 +2965,17 @@ def _validate_message_facts(
             amount_value = 0
         plain_amount = re.fullmatch(r"\d+", amount_raw.replace(" ", "")) is not None
         looks_like_table_row = plain_amount and len(amount_digits) <= 3
-        if amount_value <= 10 or amount_value >= _FACT_MAX_AMOUNT or looks_like_table_row:
+        if (
+            amount_value <= 10
+            or amount_value >= _FACT_MAX_AMOUNT
+            or looks_like_table_row
+        ):
             validated["amount"] = ""
         else:
             lowered_evidence = (evidence_text or "").lower()
-            amount_context_missing = not bool(_FACT_CURRENCY_RE.search(lowered_evidence))
+            amount_context_missing = not bool(
+                _FACT_CURRENCY_RE.search(lowered_evidence)
+            )
     else:
         validated["amount"] = ""
     validated["amount_context_missing"] = amount_context_missing
@@ -2860,7 +3005,9 @@ def _validate_message_facts(
         if len(normalized_doc) < 3 or len(normalized_doc) > 24:
             validated["doc_number"] = ""
         else:
-            amount_for_compare = re.sub(r"[^0-9]", "", str(validated.get("amount") or ""))
+            amount_for_compare = re.sub(
+                r"[^0-9]", "", str(validated.get("amount") or "")
+            )
             if amount_for_compare and normalized_doc == amount_for_compare:
                 validated["doc_number"] = ""
 
@@ -2878,13 +3025,21 @@ def _score_amount_candidate(
     normalized_context = _normalized_lower(context_text)
     if _contains_any(normalized_context, ("итого", "total")):
         score += 5
-    if doc_kind == "invoice" and _contains_any(normalized_context, _AMOUNT_POSITIVE_CONTEXT_MARKERS):
+    if doc_kind == "invoice" and _contains_any(
+        normalized_context, _AMOUNT_POSITIVE_CONTEXT_MARKERS
+    ):
         score += 7
-    if doc_kind == "invoice" and _contains_any(normalized_context, _AMOUNT_NEGATIVE_CONTEXT_MARKERS):
+    if doc_kind == "invoice" and _contains_any(
+        normalized_context, _AMOUNT_NEGATIVE_CONTEXT_MARKERS
+    ):
         score -= 8
-    if doc_kind == "payroll" and _contains_any(normalized_context, _PAYROLL_AMOUNT_POSITIVE_MARKERS):
+    if doc_kind == "payroll" and _contains_any(
+        normalized_context, _PAYROLL_AMOUNT_POSITIVE_MARKERS
+    ):
         score += 6
-    if doc_kind == "payroll" and _contains_any(normalized_context, _AMOUNT_POSITIVE_CONTEXT_MARKERS):
+    if doc_kind == "payroll" and _contains_any(
+        normalized_context, _AMOUNT_POSITIVE_CONTEXT_MARKERS
+    ):
         score -= 6
     if _FACT_CURRENCY_RE.search(normalized_context):
         score += 3
@@ -2937,7 +3092,9 @@ def _extract_table_total_amount(text: str) -> str:
 
 def _normalize_amount_candidate(amount_value: str) -> str:
     candidate = " ".join(str(amount_value or "").replace(" ", " ").split())
-    candidate = re.sub(r"\s*(?:usd|\$|eur|€)\s*$", "", candidate, flags=re.IGNORECASE).strip()
+    candidate = re.sub(
+        r"\s*(?:usd|\$|eur|€)\s*$", "", candidate, flags=re.IGNORECASE
+    ).strip()
     return candidate
 
 
@@ -2959,7 +3116,9 @@ def _score_message_facts(
     lower_source = _normalized_lower(source)
     doc_kind = _normalized_lower(str(scored.get("doc_kind") or "")).strip()
     attachment_lower = _normalized_lower(attachment_source)
-    table_total_amount = _normalize_amount_candidate(_extract_table_total_amount(attachment_source))
+    table_total_amount = _normalize_amount_candidate(
+        _extract_table_total_amount(attachment_source)
+    )
     attachment_has_currency = bool(_FACT_CURRENCY_RE.search(attachment_lower))
     candidates = _extract_numbers_in_evidence_window(
         source,
@@ -2981,7 +3140,11 @@ def _score_message_facts(
             continue
         plain_amount = re.fullmatch(r"\d+", candidate.replace(" ", "")) is not None
         looks_like_table_row = plain_amount and len(candidate_digits) <= 3
-        if candidate_int <= 10 or candidate_int >= _FACT_MAX_AMOUNT or looks_like_table_row:
+        if (
+            candidate_int <= 10
+            or candidate_int >= _FACT_MAX_AMOUNT
+            or looks_like_table_row
+        ):
             continue
 
         candidate_start = int(candidate_item.get("start") or 0)
@@ -2989,7 +3152,11 @@ def _score_message_facts(
         context = _normalized_lower(
             str(
                 candidate_item.get("context")
-                or lower_source[max(0, candidate_start - 36) : min(len(lower_source), candidate_end + 36)]
+                or lower_source[
+                    max(0, candidate_start - 36) : min(
+                        len(lower_source), candidate_end + 36
+                    )
+                ]
             )
         )
         has_invoice_context = _contains_any(context, _AMOUNT_POSITIVE_CONTEXT_MARKERS)
@@ -3002,9 +3169,16 @@ def _score_message_facts(
         window_hit = bool(candidate_item.get("window_hit"))
         if not window_hit and not (has_invoice_context or has_currency_context):
             continue
-        if doc_kind == "payroll" and (not has_payroll_context or not has_currency_context):
+        if doc_kind == "payroll" and (
+            not has_payroll_context or not has_currency_context
+        ):
             continue
-        if in_attachment and doc_kind == "invoice" and not has_currency_context and not attachment_has_currency:
+        if (
+            in_attachment
+            and doc_kind == "invoice"
+            and not has_currency_context
+            and not attachment_has_currency
+        ):
             continue
 
         candidate_score = _score_amount_candidate(
@@ -3013,7 +3187,9 @@ def _score_message_facts(
             is_attachment_context=in_attachment,
             doc_kind=doc_kind,
         )
-        prefix_context = _normalized_lower(lower_source[max(0, candidate_start - 20) : candidate_start])
+        prefix_context = _normalized_lower(
+            lower_source[max(0, candidate_start - 20) : candidate_start]
+        )
         if _contains_any(prefix_context, _AMOUNT_POSITIVE_CONTEXT_MARKERS):
             candidate_score += 6
         if table_total_amount and in_attachment:
@@ -3021,10 +3197,17 @@ def _score_message_facts(
                 candidate_score += 12
             else:
                 candidate_score -= 6
-        if in_attachment and doc_kind == "invoice" and not has_table_total_context and candidate != table_total_amount:
+        if (
+            in_attachment
+            and doc_kind == "invoice"
+            and not has_table_total_context
+            and candidate != table_total_amount
+        ):
             candidate_score -= 2
 
-        candidate_currency_hit = bool(_FACT_CURRENCY_RE.search(candidate_raw)) or has_currency_context
+        candidate_currency_hit = (
+            bool(_FACT_CURRENCY_RE.search(candidate_raw)) or has_currency_context
+        )
         if candidate_currency_hit:
             candidate_score += 4
         elif doc_kind == "invoice" and bool(_FACT_CURRENCY_RE.search(lower_source)):
@@ -3038,7 +3221,9 @@ def _score_message_facts(
             if candidate_currency_hit and not best_currency_hit:
                 best_amount = candidate
                 best_currency_hit = True
-            elif candidate_currency_hit == best_currency_hit and len(candidate) > len(best_amount):
+            elif candidate_currency_hit == best_currency_hit and len(candidate) > len(
+                best_amount
+            ):
                 best_amount = candidate
 
     if best_score is None:
@@ -3075,13 +3260,17 @@ def _to_float_amount(value: str) -> float | None:
 def _extract_amount_for_keywords(text: str, keywords: tuple[str, ...]) -> float | None:
     source = _normalize_mojibake_text(str(text or ""))
     lowered = _normalized_lower(source)
-    normalized_keywords = [_normalize_token(k) for k in keywords if str(k or "").strip()]
+    normalized_keywords = [
+        _normalize_token(k) for k in keywords if str(k or "").strip()
+    ]
     keyword_amount_re = re.compile(r"\d+(?:[  ]\d{3})*(?:[\.,]\d+)?", re.IGNORECASE)
 
     for keyword in normalized_keywords:
         if not keyword:
             continue
-        keyword_pattern = re.compile(rf"(?<![a-zа-я0-9]){re.escape(keyword)}(?![a-zа-я0-9])", re.IGNORECASE)
+        keyword_pattern = re.compile(
+            rf"(?<![a-zа-я0-9]){re.escape(keyword)}(?![a-zа-я0-9])", re.IGNORECASE
+        )
         for keyword_match in keyword_pattern.finditer(lowered):
             index = keyword_match.start()
             segment = source[index : min(len(source), index + 48)]
@@ -3128,7 +3317,11 @@ def _consistency_check_message_facts(
     checked = dict(facts)
     source_text = str(evidence_text or "")
 
-    issues = [str(item) for item in (checked.get("consistency_issues") or []) if str(item).strip()]
+    issues = [
+        str(item)
+        for item in (checked.get("consistency_issues") or [])
+        if str(item).strip()
+    ]
     penalty = float(checked.get("consistency_penalty") or 0.0)
 
     if bool(checked.get("payroll_signal")) and (
@@ -3191,7 +3384,9 @@ def _consistency_check_message_facts(
                 issues.append("line_total_mismatch")
                 penalty += 0.15
 
-    if str(checked.get("amount") or "").strip() and bool(checked.get("amount_context_missing")):
+    if str(checked.get("amount") or "").strip() and bool(
+        checked.get("amount_context_missing")
+    ):
         issues.append("amount_without_currency")
         penalty += 0.15
 
@@ -3201,9 +3396,13 @@ def _consistency_check_message_facts(
         source_text,
         flags=re.IGNORECASE,
     )
-    invoice_date = _parse_ddmmyyyy(invoice_date_match.group(1)) if invoice_date_match else None
+    invoice_date = (
+        _parse_ddmmyyyy(invoice_date_match.group(1)) if invoice_date_match else None
+    )
     if due_date is not None and invoice_date is None:
-        date_candidates = [_parse_ddmmyyyy(token) for token in _FACT_DATE_RE.findall(source_text)]
+        date_candidates = [
+            _parse_ddmmyyyy(token) for token in _FACT_DATE_RE.findall(source_text)
+        ]
         date_candidates = [item for item in date_candidates if item is not None]
         if date_candidates:
             invoice_date = date_candidates[0]
@@ -3259,7 +3458,9 @@ def _collect_message_facts(
             )
             if part
         )
-        if doc_type == "TABLE" and not _has_keyword_context(context_source, _ATTACHMENT_CONTEXT_KEYWORDS):
+        if doc_type == "TABLE" and not _has_keyword_context(
+            context_source, _ATTACHMENT_CONTEXT_KEYWORDS
+        ):
             continue
 
         compact_text = text_value[:300]
@@ -3300,7 +3501,13 @@ def _collect_message_facts(
         _AMOUNT_EVIDENCE_KEYWORDS,
         window=120,
     )
-    attachment_source = " ".join((" ".join(pdf_attachment_texts), " ".join(table_attachment_texts), " ".join(other_attachment_texts))).strip()
+    attachment_source = " ".join(
+        (
+            " ".join(pdf_attachment_texts),
+            " ".join(table_attachment_texts),
+            " ".join(other_attachment_texts),
+        )
+    ).strip()
     attachment_source_norm = _normalized_lower(attachment_source)
     for candidate_item in amount_candidates:
         candidate_value_raw = str(candidate_item.get("amount") or "").strip()
@@ -3309,15 +3516,21 @@ def _collect_message_facts(
             continue
         context = _normalized_lower(str(candidate_item.get("context") or ""))
         has_positive = _contains_any(context, _AMOUNT_POSITIVE_CONTEXT_MARKERS)
-        has_currency = bool(_FACT_CURRENCY_RE.search(context)) or bool(_FACT_CURRENCY_RE.search(candidate_value_raw))
-        in_attachment = bool(attachment_source_norm) and candidate_value_raw in attachment_source
+        has_currency = bool(_FACT_CURRENCY_RE.search(context)) or bool(
+            _FACT_CURRENCY_RE.search(candidate_value_raw)
+        )
+        in_attachment = (
+            bool(attachment_source_norm) and candidate_value_raw in attachment_source
+        )
         if explicit_invoice and in_attachment and not has_currency:
             continue
         if has_positive or has_currency:
             amount = candidate_value
             break
     if not amount and amount_candidates and not explicit_invoice:
-        amount = _normalize_amount_candidate(str(amount_candidates[0].get("amount") or "").strip())
+        amount = _normalize_amount_candidate(
+            str(amount_candidates[0].get("amount") or "").strip()
+        )
 
     due_date = ""
     due_match = _FACT_DUE_RE.search(evidence_text)
@@ -3326,23 +3539,29 @@ def _collect_message_facts(
     elif _contains_any(lowered, ("до", "срок", "deadline")):
         generic_date = _FACT_DATE_RE.search(evidence_text)
         due_date = generic_date.group(0) if generic_date else ""
-    if not due_date and _contains_any(lowered, ("счет", "счёт", "invoice", "оплат", "due")):
+    if not due_date and _contains_any(
+        lowered, ("счет", "счёт", "invoice", "оплат", "due")
+    ):
         generic_date = _FACT_DATE_RE.search(evidence_text)
         due_date = generic_date.group(0) if generic_date else ""
 
     doc_number_match = _FACT_DOC_NUMBER_RE.search(evidence_text)
     doc_number = doc_number_match.group(1) if doc_number_match else ""
-    payroll_signal = explicit_payroll or (not explicit_invoice and _contains_any(lowered, _FACT_PAYROLL_MARKERS))
-    invoice_signal = (explicit_invoice or _contains_any(lowered, _FACT_INVOICE_MARKERS)) and not payroll_signal
+    payroll_signal = explicit_payroll or (
+        not explicit_invoice and _contains_any(lowered, _FACT_PAYROLL_MARKERS)
+    )
+    invoice_signal = (
+        explicit_invoice or _contains_any(lowered, _FACT_INVOICE_MARKERS)
+    ) and not payroll_signal
     contract_signal = (
         normalized_mail_type.startswith("contract")
         or "agreement" in normalized_mail_type
         or _contains_any(lowered, _FACT_CONTRACT_MARKERS)
     )
-    incident_signal = (
-        normalized_mail_type in {"incident", "securityalert"}
-        or _contains_any(lowered, _FACT_INCIDENT_MARKERS)
-    )
+    incident_signal = normalized_mail_type in {
+        "incident",
+        "securityalert",
+    } or _contains_any(lowered, _FACT_INCIDENT_MARKERS)
 
     doc_kind = ""
     if incident_signal:
@@ -3382,11 +3601,19 @@ def _detect_conversation_context(
         return "CONFIRMATION"
     if any(marker in normalized_body for marker in _CONTEXT_DISCUSSION_MARKERS):
         return "DISCUSSION"
-    if any(normalized_subject.startswith(marker) for marker in _CONTEXT_FORWARD_SUBJECT_MARKERS):
+    if any(
+        normalized_subject.startswith(marker)
+        for marker in _CONTEXT_FORWARD_SUBJECT_MARKERS
+    ):
         return "FORWARD"
-    if any(normalized_subject.startswith(marker) for marker in _CONTEXT_REPLY_SUBJECT_MARKERS):
+    if any(
+        normalized_subject.startswith(marker)
+        for marker in _CONTEXT_REPLY_SUBJECT_MARKERS
+    ):
         return "REPLY"
-    if message_facts.get("contract_signal") and any(token in normalized_body for token in ("правк", "коммент", "обсуд")):
+    if message_facts.get("contract_signal") and any(
+        token in normalized_body for token in ("правк", "коммент", "обсуд")
+    ):
         return "DISCUSSION"
     return "NEW_MESSAGE"
 
@@ -3400,7 +3627,10 @@ def _build_document_identity(
     sender_local = (sender_email or "").split("@", 1)[0].strip().lower()
     sender_token = re.sub(r"[^0-9a-zа-я]+", "_", sender_local).strip("_") or "unknown"
     normalized_subject = _normalize_subject_for_compare(subject)
-    subject_token = re.sub(r"[^0-9a-zа-я]+", "_", normalized_subject).strip("_")[:40] or "no_subject"
+    subject_token = (
+        re.sub(r"[^0-9a-zа-я]+", "_", normalized_subject).strip("_")[:40]
+        or "no_subject"
+    )
     doc_number = re.sub(
         r"[^0-9a-zа-я]+",
         "",
@@ -3428,7 +3658,11 @@ def _build_sender_relationship_profile(
             sender_email=sender_email,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("sender_relationship_profile_failed", sender_email=sender_email, error=str(exc))
+        logger.error(
+            "sender_relationship_profile_failed",
+            sender_email=sender_email,
+            error=str(exc),
+        )
         return None
 
 
@@ -3464,7 +3698,9 @@ def _find_duplicate_document_event(
                     continue
                 if str(payload.get("document_id") or "") != document_id:
                     continue
-                if current_email_id is not None and str(row[1] or "") == str(current_email_id):
+                if current_email_id is not None and str(row[1] or "") == str(
+                    current_email_id
+                ):
                     continue
                 return {
                     "event_id": row[0],
@@ -3509,15 +3745,22 @@ def _build_message_interpretation(
     action: str | None = None,
     priority: str | None = None,
 ) -> MessageInterpretation:
-    due_date = str(decision.due_date or message_facts.get("due_date") or "").strip() or None
-    doc_kind = str(decision.doc_kind or message_facts.get("doc_kind") or "").strip().lower() or None
+    due_date = (
+        str(decision.due_date or message_facts.get("due_date") or "").strip() or None
+    )
+    doc_kind = (
+        str(decision.doc_kind or message_facts.get("doc_kind") or "").strip().lower()
+        or None
+    )
     resolved_action = str(action or decision.action or "").strip()
     resolved_priority = str(priority or decision.priority or "").strip()
     return MessageInterpretation(
         email_id=str(email_id),
         sender_email=str(sender_email or "").strip(),
         doc_kind=doc_kind,
-        amount=_parse_interpretation_amount(decision.amount or message_facts.get("amount")),
+        amount=_parse_interpretation_amount(
+            decision.amount or message_facts.get("amount")
+        ),
         due_date=due_date,
         action=resolved_action,
         priority=resolved_priority,
@@ -3525,6 +3768,7 @@ def _build_message_interpretation(
         context=str(decision.context or "").strip() or "NEW_MESSAGE",
         document_id=(str(document_id).strip() or None) if document_id else None,
     )
+
 
 def _normalize_summary_text(summary: str) -> str:
     cleaned = re.sub(r"[\W_]+", " ", (summary or "").lower()).strip()
@@ -3552,8 +3796,6 @@ def _is_meaningful_summary(summary: str) -> bool:
     if len(words) < _MIN_SUMMARY_WORDS:
         return False
     return True
-
-
 
 
 def _normalize_mojibake_text(text: str) -> str:
@@ -3743,9 +3985,17 @@ def _extract_narrative_insight(
     remaining: list[Insight] = []
     for insight in insights:
         if insight.type == "Narrative":
-            fact = insight.metadata.get("fact") if insight.metadata else insight.explanation
+            fact = (
+                insight.metadata.get("fact")
+                if insight.metadata
+                else insight.explanation
+            )
             pattern = insight.metadata.get("pattern") if insight.metadata else None
-            action = insight.metadata.get("action") if insight.metadata else insight.recommendation
+            action = (
+                insight.metadata.get("action")
+                if insight.metadata
+                else insight.recommendation
+            )
             if fact:
                 narrative = NarrativeResult(
                     fact=fact,
@@ -3840,7 +4090,9 @@ def build_telegram_payload(
                 attachment_summary=None,
             )
         except Exception as exc:
-            logger.error("tg_fallback_render_failed", email_id=context.email_id, error=str(exc))
+            logger.error(
+                "tg_fallback_render_failed", email_id=context.email_id, error=str(exc)
+            )
             telegram_text_raw = ""
     if render_mode == TelegramRenderMode.SHORT_TEMPLATE:
         try:
@@ -3850,7 +4102,9 @@ def build_telegram_payload(
                 from_email=context.from_email,
             )
         except Exception as exc:
-            logger.error("tg_short_render_failed", email_id=context.email_id, error=str(exc))
+            logger.error(
+                "tg_short_render_failed", email_id=context.email_id, error=str(exc)
+            )
             telegram_text_raw = ""
     if not telegram_text_raw:
         telegram_text_raw = _build_tg_plain_text(
@@ -3954,7 +4208,11 @@ def build_telegram_payload(
     if context.preview_hint:
         telegram_text = f"{telegram_text}\n💡 {escape_tg_html(_sanitize_preview_line(context.preview_hint))}"
     if render_mode != TelegramRenderMode.FULL or payload_invalid:
-        fallback_reason = ",".join(fallback_reasons) if fallback_reasons else "payload_validation_failed"
+        fallback_reason = (
+            ",".join(fallback_reasons)
+            if fallback_reasons
+            else "payload_validation_failed"
+        )
         event_emitter.emit(
             type="telegram_payload_fallback_used",
             timestamp=context.received_at,
@@ -4052,7 +4310,9 @@ def _get_correction_count(account_email: str) -> int:
     try:
         value = int(analytics.count_all_time_corrections(account_emails=[key]))
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("preview_corrections_query_failed", account_email=key, error=str(exc))
+        logger.error(
+            "preview_corrections_query_failed", account_email=key, error=str(exc)
+        )
         value = 0
     _CORRECTION_COUNT_CACHE[key] = (max(0, value), now_mono)
     return max(0, value)
@@ -4104,7 +4364,9 @@ def _extract_llm_tokens(llm_result: Any) -> Optional[int]:
         return None
 
 
-def _estimate_input_chars(body_text: str, attachments: list[dict[str, Any]], subject: str) -> int:
+def _estimate_input_chars(
+    body_text: str, attachments: list[dict[str, Any]], subject: str
+) -> int:
     total = len(subject or "") + len(body_text or "")
     for attachment in attachments:
         text = attachment.get("text") or ""
@@ -4143,7 +4405,13 @@ def _build_heuristic_llm_result(
 ) -> SimpleNamespace:
     fact_body_text = _main_body_for_facts(body_text)
     fact_text = " ".join(
-        part for part in (subject, fact_body_text, " ".join(str(item.get("text") or "") for item in attachments)) if part
+        part
+        for part in (
+            subject,
+            fact_body_text,
+            " ".join(str(item.get("text") or "") for item in attachments),
+        )
+        if part
     )
     message_facts = _collect_message_facts(
         subject=subject,
@@ -4155,7 +4423,9 @@ def _build_heuristic_llm_result(
     message_facts = _score_message_facts(
         message_facts,
         evidence_text=fact_text,
-        attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+        attachment_text=" ".join(
+            str(attachment.get("text") or "") for attachment in attachments
+        ),
     )
     message_facts = _consistency_check_message_facts(
         message_facts,
@@ -4166,7 +4436,9 @@ def _build_heuristic_llm_result(
         body_text=body_text,
         message_facts=message_facts,
     )
-    action_line = _build_heuristic_action_line(priority=priority, message_facts=message_facts)
+    action_line = _build_heuristic_action_line(
+        priority=priority, message_facts=message_facts
+    )
     summary = _build_heuristic_summary(
         subject=subject,
         body_text=body_text,
@@ -4202,7 +4474,9 @@ def _build_heuristic_summary(
     text = clean_email_body(body_text or "").strip()
     attachment_items = attachments or []
     if not text and attachment_items:
-        attachment_text = " ".join(str(item.get("text") or "") for item in attachment_items).strip()
+        attachment_text = " ".join(
+            str(item.get("text") or "") for item in attachment_items
+        ).strip()
         if attachment_text:
             text = clean_email_body(attachment_text).strip()
     if not text:
@@ -4219,11 +4493,15 @@ def _build_heuristic_summary(
 
     for paragraph in text.split("\n"):
         normalized = re.sub(r"\s+", " ", paragraph).strip()
-        if len(normalized) >= _MIN_SUMMARY_CHARS and not _contains_probable_blob(normalized):
+        if len(normalized) >= _MIN_SUMMARY_CHARS and not _contains_probable_blob(
+            normalized
+        ):
             text = normalized[:200]
             break
     normalized_text = re.sub(r"\s+", " ", text)
-    if len(normalized_text) >= _MIN_SUMMARY_CHARS and not _contains_probable_blob(normalized_text):
+    if len(normalized_text) >= _MIN_SUMMARY_CHARS and not _contains_probable_blob(
+        normalized_text
+    ):
         text = normalized_text[:200]
     else:
         text = ""
@@ -4239,7 +4517,9 @@ def _build_heuristic_summary(
     return text[:200]
 
 
-def _build_heuristic_action_line(*, priority: str, message_facts: dict[str, Any] | None = None) -> str:
+def _build_heuristic_action_line(
+    *, priority: str, message_facts: dict[str, Any] | None = None
+) -> str:
     facts = message_facts or {}
     if facts.get("incident_signal"):
         return "Зафиксировать"
@@ -4273,15 +4553,23 @@ def _build_message_decision(
         body_text=body_text,
         attachments=attachments or [],
     )
-    resolved_action = _normalize_mojibake_text((action_line or "").strip()) or _build_heuristic_action_line(
+    resolved_action = _normalize_mojibake_text(
+        (action_line or "").strip()
+    ) or _build_heuristic_action_line(
         priority=priority,
         message_facts=message_facts,
     )
     resolved_action_lower = _normalized_lower(resolved_action)
 
-    if doc_kind == "invoice" and resolved_action_lower in {"проверить", "проверить письмо"}:
+    if doc_kind == "invoice" and resolved_action_lower in {
+        "проверить",
+        "проверить письмо",
+    }:
         resolved_action = "Оплатить"
-    if doc_kind == "contract" and resolved_action_lower in {"проверить", "проверить письмо"}:
+    if doc_kind == "contract" and resolved_action_lower in {
+        "проверить",
+        "проверить письмо",
+    }:
         resolved_action = "Проверить договор"
     if doc_kind == "incident" and "оплат" in resolved_action_lower:
         resolved_action = "Зафиксировать"
@@ -4292,7 +4580,12 @@ def _build_message_decision(
         _normalized_lower(action_line or ""),
         ("оплат", "счет", "счёт", "invoice"),
     )
-    if doc_kind == "invoice" and confidence < 0.45 and _normalized_lower(resolved_action) == "оплатить" and payment_action_hits < 2:
+    if (
+        doc_kind == "invoice"
+        and confidence < 0.45
+        and _normalized_lower(resolved_action) == "оплатить"
+        and payment_action_hits < 2
+    ):
         resolved_action = "Проверить"
 
     if (
@@ -4304,7 +4597,9 @@ def _build_message_decision(
     if (
         context == "DISCUSSION"
         and message_facts.get("contract_signal")
-        and _contains_any(_normalized_lower(resolved_action), _CONTRACT_FINAL_ACTION_MARKERS)
+        and _contains_any(
+            _normalized_lower(resolved_action), _CONTRACT_FINAL_ACTION_MARKERS
+        )
     ):
         resolved_action = "Обсудить правки"
 
@@ -4335,7 +4630,9 @@ def _build_message_decision(
     )
 
 
-def _build_heuristic_attachment_summaries(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_heuristic_attachment_summaries(
+    attachments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     summaries: list[dict[str, Any]] = []
     for attachment in attachments:
         filename = str(attachment.get("filename") or "")
@@ -4348,7 +4645,9 @@ def _build_heuristic_attachment_summaries(attachments: list[dict[str, Any]]) -> 
             )
             fact = pick_attachment_fact(raw_text, filename, doc_type)
             source = fact or raw_text
-            normalized = re.sub(r"\s+", " ", source.replace(";", " ").replace("|", " ")).strip()
+            normalized = re.sub(
+                r"\s+", " ", source.replace(";", " ").replace("|", " ")
+            ).strip()
             if normalized:
                 words = [word for word in normalized.split() if len(word) > 1]
                 if len(words) >= 4:
@@ -4370,14 +4669,23 @@ def _detect_attachment_doc_type(*, filename: str, content_type: Any) -> str:
     lowered_filename = (filename or "").casefold()
     lowered_filename_norm = _normalized_lower(lowered_filename)
     lowered_type = _normalized_lower(str(content_type or ""))
-    if lowered_filename.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")) or "excel" in lowered_type:
+    if (
+        lowered_filename.endswith((".xls", ".xlsx", ".xlsm", ".xlsb"))
+        or "excel" in lowered_type
+    ):
         return "TABLE"
     contract_tokens = ("contract", "agreement", "договор")
     invoice_tokens = ("invoice", "bill", "счёт", "счет")
     table_doc_tokens = ("акт", "накладная", "листок")
     if lowered_filename.endswith((".doc", ".docx")) or "word" in lowered_type:
-        return "CONTRACT" if _contains_any(lowered_filename_norm, contract_tokens) else "OTHER"
-    if lowered_filename.endswith(".pdf") and _contains_any(lowered_filename_norm, (*invoice_tokens, *table_doc_tokens)):
+        return (
+            "CONTRACT"
+            if _contains_any(lowered_filename_norm, contract_tokens)
+            else "OTHER"
+        )
+    if lowered_filename.endswith(".pdf") and _contains_any(
+        lowered_filename_norm, (*invoice_tokens, *table_doc_tokens)
+    ):
         return "TABLE"
     return "OTHER"
 
@@ -4409,12 +4717,20 @@ def _compute_heuristic_priority(
 
 
 _PRIORITY_LEVEL_TO_SCORE = {_PRIORITY_BLUE: 25, _PRIORITY_YELLOW: 45, _PRIORITY_RED: 80}
-_PRIORITY_SCORE_TO_LEVEL = ((70, _PRIORITY_RED), (35, _PRIORITY_YELLOW), (0, _PRIORITY_BLUE))
+_PRIORITY_SCORE_TO_LEVEL = (
+    (70, _PRIORITY_RED),
+    (35, _PRIORITY_YELLOW),
+    (0, _PRIORITY_BLUE),
+)
 _SENDER_MEMORY_WINDOW_DAYS = 45
 _SENDER_MEMORY_MIN_CORRECTIONS = 3
 _SENDER_MEMORY_MAX_ABS_BIAS = 12
 _SENDER_MEMORY_STEP = 4
-_SENDER_MEMORY_CORRECTION_SCORES = {_PRIORITY_BLUE: -1, _PRIORITY_YELLOW: 0, _PRIORITY_RED: 1}
+_SENDER_MEMORY_CORRECTION_SCORES = {
+    _PRIORITY_BLUE: -1,
+    _PRIORITY_YELLOW: 0,
+    _PRIORITY_RED: 1,
+}
 
 
 def _sender_memory_bias_for_priority(*, sender_email: str) -> tuple[int, int]:
@@ -4437,7 +4753,11 @@ def _sender_memory_bias_for_priority(*, sender_email: str) -> tuple[int, int]:
                 (normalized_sender, cutoff.isoformat()),
             ).fetchall()
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("sender_memory_lookup_failed", sender_email=normalized_sender, error=str(exc))
+        logger.error(
+            "sender_memory_lookup_failed",
+            sender_email=normalized_sender,
+            error=str(exc),
+        )
         return 0, 0
 
     corrections: list[int] = []
@@ -4476,7 +4796,10 @@ def _is_dampening_protected_high_signal(
     if not priority_v2_result:
         return False
     joined = " ".join(priority_v2_result.reason_codes).upper()
-    return any(marker in joined for marker in ("INVOICE", "SECURITY", "ALERT", "CLAIM", "DEADLINE"))
+    return any(
+        marker in joined
+        for marker in ("INVOICE", "SECURITY", "ALERT", "CLAIM", "DEADLINE")
+    )
 
 
 def _apply_sender_memory_to_priority(
@@ -4550,7 +4873,9 @@ def _process_llm_queue_request(request: LLMRequest) -> None:
             from_email=request.from_email,
             subject=request.subject,
             body_text=request.body_text,
-            attachments_text=[str(item.get("text") or "") for item in request.attachments],
+            attachments_text=[
+                str(item.get("text") or "") for item in request.attachments
+            ],
             llm_result=None,
         )
         llm_result = run_llm_stage(
@@ -4561,13 +4886,17 @@ def _process_llm_queue_request(request: LLMRequest) -> None:
             ctx=llm_ctx,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("llm_queue_request_failed", email_id=request.email_id, error=str(exc))
+        logger.error(
+            "llm_queue_request_failed", email_id=request.email_id, error=str(exc)
+        )
         return
     if not llm_result:
         logger.warning("llm_queue_empty_result", email_id=request.email_id)
         return
     tokens_used = _extract_llm_tokens(llm_result)
-    model_name = str(_read_llm_field(llm_result, "llm_provider", "gigachat") or "gigachat")
+    model_name = str(
+        _read_llm_field(llm_result, "llm_provider", "gigachat") or "gigachat"
+    )
     budget_consumer.on_llm_call(
         account_email=request.account_email,
         tokens_used=tokens_used,
@@ -4631,7 +4960,6 @@ def _enqueue_llm_request_with_retry(request: LLMRequest, *, email_id: int) -> bo
         timeout_sec=timeout_sec,
     )
     return False
-
 
 
 _PREVIEW_DECISION_LINE = "[Принять] [Отклонить]"
@@ -4768,7 +5096,9 @@ def _build_preview_message(
     action_line = _sanitize_preview_line(action_text)
     localized_reasons = humanize_reason_codes(reasons, locale=_UI_LOCALE)
     safe_reasons = [
-        _sanitize_preview_line(reason) for reason in (localized_reasons or reasons) if reason
+        _sanitize_preview_line(reason)
+        for reason in (localized_reasons or reasons)
+        if reason
     ]
     if not safe_reasons:
         safe_reasons = ["нет данных"]
@@ -4785,7 +5115,9 @@ def _build_preview_message(
         lines.append("")
         lines.append(t("preview.why", locale=_UI_LOCALE))
         lines.extend(f"- {line}" for line in priority_explain_lines)
-    lines.append(f"{t('preview.confidence', locale=_UI_LOCALE)}: {confidence_value:.2f}")
+    lines.append(
+        f"{t('preview.confidence', locale=_UI_LOCALE)}: {confidence_value:.2f}"
+    )
     lines.append("")
     lines.append(_PREVIEW_DECISION_LINE)
     lines.append(_PREVIEW_PRIORITY_LINE)
@@ -4809,7 +5141,7 @@ def _append_commitments_preview(
         icon, label = status_labels.get(
             commitment.status, ("", commitment.status or "неизвестно")
         )
-        line = f"• \"{safe_text}\" — {label}".replace("  ", " ").strip()
+        line = f'• "{safe_text}" — {label}'.replace("  ", " ").strip()
         lines.append(line)
     return "\n".join(lines)
 
@@ -4902,7 +5234,9 @@ def _append_anomalies_preview(
     lines = [preview_text, "", t("preview.signals", locale=_UI_LOCALE)]
     for anomaly in anomalies:
         title = _sanitize_preview_line(anomaly.title)
-        severity = _sanitize_preview_line(humanize_severity(anomaly.severity, locale=_UI_LOCALE))
+        severity = _sanitize_preview_line(
+            humanize_severity(anomaly.severity, locale=_UI_LOCALE)
+        )
         details = _sanitize_preview_line(anomaly.details)
         lines.append(f"• {title} ({severity})")
         if details:
@@ -4958,7 +5292,6 @@ def _check_crm_available() -> bool:
         return False
 
 
-
 def _load_priority_snapshot(email_id: int) -> tuple[str | None, str]:
     try:
         with sqlite3.connect(knowledge_db.path) as conn:
@@ -4986,6 +5319,7 @@ def _load_priority_snapshot(email_id: int) -> tuple[str | None, str]:
         source = "auto"
 
     return priority, source
+
 
 def _build_context(
     *,
@@ -5139,7 +5473,11 @@ def _record_analytics(
                                 EventType.COMMITMENT_STATUS_CHANGED,
                                 ts_utc=received_at.timestamp(),
                                 account_id=account_email,
-                                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                                entity_id=(
+                                    entity_resolution.entity_id
+                                    if entity_resolution
+                                    else None
+                                ),
                                 email_id=message_id,
                                 payload={
                                     "commitment_id": update.commitment_id,
@@ -5180,7 +5518,11 @@ def _record_analytics(
                                     EventType.COMMITMENT_EXPIRED,
                                     ts_utc=received_at.timestamp(),
                                     account_id=account_email,
-                                    entity_id=entity_resolution.entity_id if entity_resolution else None,
+                                    entity_id=(
+                                        entity_resolution.entity_id
+                                        if entity_resolution
+                                        else None
+                                    ),
                                     email_id=message_id,
                                     payload={
                                         "commitment_id": update.commitment_id,
@@ -5221,8 +5563,6 @@ def _record_analytics(
             or ""
         )
         llm_model = _read_llm_field(llm_result, "llm_model", "") or ""
-        llm_model_for_span = llm_model or None
-
         decision_trace_writer.write(
             email_id=str(message_id),
             account_email=account_email,
@@ -5294,8 +5634,7 @@ def _record_analytics(
             references=references,
             thread_key=thread_key,
             attachment_summaries=[
-                (a["filename"], a["summary"])
-                for a in attachment_summaries
+                (a["filename"], a["summary"]) for a in attachment_summaries
             ],
         )
         if feature_flags.ENABLE_SHADOW_PERSISTENCE:
@@ -5397,7 +5736,11 @@ def _record_analytics(
                                 EventType.COMMITMENT_CREATED,
                                 ts_utc=received_at.timestamp(),
                                 account_id=account_email,
-                                entity_id=entity_resolution.entity_id if entity_resolution else None,
+                                entity_id=(
+                                    entity_resolution.entity_id
+                                    if entity_resolution
+                                    else None
+                                ),
                                 email_id=message_id,
                                 payload={
                                     "commitment_text": commitment.commitment_text,
@@ -5824,7 +6167,9 @@ def _render_notification(
             "chat_id": telegram_chat_id,
             "bot_token": telegram_bot_token,
             "account_email": account_email,
-            "action_line": (interpretation.action if interpretation is not None else action_line),
+            "action_line": (
+                interpretation.action if interpretation is not None else action_line
+            ),
             "body_summary": body_summary,
             "attachment_summaries": attachment_summaries,
         },
@@ -5871,9 +6216,7 @@ def process_message(
         received_at = datetime.now(timezone.utc)
         anchor_received_at = None
 
-    span = processing_span_recorder.start(
-        account_id=account_email, email_id=message_id
-    )
+    span = processing_span_recorder.start(account_id=account_email, email_id=message_id)
     processing_started_at = time.monotonic()
     outcome = "ok"
     error_code = ""
@@ -5916,11 +6259,15 @@ def process_message(
         )
         mail_type: str | None = None
         mail_type_reasons: list[str] = []
-        hierarchy_enabled = getattr(feature_flags, "ENABLE_HIERARCHICAL_MAIL_TYPES", False)
+        hierarchy_enabled = getattr(
+            feature_flags, "ENABLE_HIERARCHICAL_MAIL_TYPES", False
+        )
         mail_type_attachments = [
             MailTypeAttachment(
                 filename=attachment.get("filename"),
-                content_type=attachment.get("content_type") or attachment.get("type") or "",
+                content_type=attachment.get("content_type")
+                or attachment.get("type")
+                or "",
             )
             for attachment in attachments or []
         ]
@@ -5971,7 +6318,7 @@ def process_message(
                     email_id=message_id,
                     error=str(exc),
                 )
-    
+
         try:
             event_emitter.emit(
                 type="email_received",
@@ -6025,7 +6372,8 @@ def process_message(
                 email_id=message_id,
                 payload={
                     "filename": attachment.get("filename"),
-                    "content_type": attachment.get("content_type") or attachment.get("type"),
+                    "content_type": attachment.get("content_type")
+                    or attachment.get("type"),
                     "size_bytes": _attachment_size_bytes(attachment),
                     "text_length": _attachment_text_length(attachment),
                 },
@@ -6048,7 +6396,9 @@ def process_message(
                 occurred_at=received_at,
             )
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("importance_score_store_failed", email_id=message_id, error=str(exc))
+            logger.error(
+                "importance_score_store_failed", email_id=message_id, error=str(exc)
+            )
 
         # Root cause: anchor budget percentile window to received_at for deterministic tests.
         use_llm_candidate = False
@@ -6063,7 +6413,9 @@ def process_message(
                 current_score=importance.score,
                 percentile_threshold=usage_config.llm_percentile_threshold,
                 window_days=usage_config.window_days,
-                anchor_ts_utc=anchor_received_at.timestamp() if anchor_received_at else None,
+                anchor_ts_utc=(
+                    anchor_received_at.timestamp() if anchor_received_at else None
+                ),
                 received_at=anchor_received_at,
             )
             prior_history_count = _count_recent_importance_history(
@@ -6072,7 +6424,9 @@ def process_message(
                 window_days=usage_config.window_days,
                 current_email_id=message_id,
             )
-            has_insufficient_history = prior_history_count is not None and prior_history_count < 3
+            has_insufficient_history = (
+                prior_history_count is not None and prior_history_count < 3
+            )
             if not percentile_result.anchored:
                 logger.warning(
                     "importance_score_anchor_missing",
@@ -6090,11 +6444,13 @@ def process_message(
                 )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("importance_score_percentile_failed", error=str(exc))
-        can_use_llm, budget_gate_allow, llm_budget_override = _resolve_llm_budget_access(
-            account_email=account_email,
-            use_llm_candidate=use_llm_candidate,
-            force_llm_always=force_llm_always,
-            email_id=message_id,
+        can_use_llm, budget_gate_allow, llm_budget_override = (
+            _resolve_llm_budget_access(
+                account_email=account_email,
+                use_llm_candidate=use_llm_candidate,
+                force_llm_always=force_llm_always,
+                email_id=message_id,
+            )
         )
         if use_llm_candidate and not can_use_llm:
             _emit_contract_event(
@@ -6165,9 +6521,12 @@ def process_message(
             ts_utc=anchor_ts_utc,
         )
 
-        snapshot_priority, snapshot_priority_source = _load_priority_snapshot(message_id)
+        snapshot_priority, snapshot_priority_source = _load_priority_snapshot(
+            message_id
+        )
         priority_locked_by_user = (
-            snapshot_priority_source == "user_override" and snapshot_priority is not None
+            snapshot_priority_source == "user_override"
+            and snapshot_priority is not None
         )
 
         if priority_locked_by_user:
@@ -6188,9 +6547,13 @@ def process_message(
                 commitments=commitments,
                 attachments=attachments,
             )
-            heuristic_priority = priority_v2_result.priority if priority_v2_result else "🔵"
+            heuristic_priority = (
+                priority_v2_result.priority if priority_v2_result else "🔵"
+            )
         if priority_v2_result:
-            priority_body_text = _build_priority_signal_text(body_text or "", attachments)
+            priority_body_text = _build_priority_signal_text(
+                body_text or "", attachments
+            )
             priority_signals = priority_engine_v2.evaluate_signals(
                 subject=subject,
                 body_text=priority_body_text,
@@ -6249,7 +6612,9 @@ def process_message(
                     from_email=from_email,
                     subject=subject,
                     body_text=llm_body_text,
-                    attachments_text=[str(item.get("text") or "") for item in attachments],
+                    attachments_text=[
+                        str(item.get("text") or "") for item in attachments
+                    ],
                     llm_result=None,
                 )
                 llm_result = run_llm_stage(
@@ -6415,7 +6780,9 @@ def process_message(
                 subject,
                 body_summary,
                 fact_body_text,
-                " ".join(str(attachment.get("text") or "") for attachment in attachments),
+                " ".join(
+                    str(attachment.get("text") or "") for attachment in attachments
+                ),
             )
             if part
         )
@@ -6429,7 +6796,9 @@ def process_message(
         message_facts = _score_message_facts(
             message_facts,
             evidence_text=fact_text,
-            attachment_text=" ".join(str(attachment.get("text") or "") for attachment in attachments),
+            attachment_text=" ".join(
+                str(attachment.get("text") or "") for attachment in attachments
+            ),
         )
         message_facts = _consistency_check_message_facts(
             message_facts,
@@ -6486,13 +6855,17 @@ def process_message(
                 payload={
                     "account_email": account_email,
                     "document_id": document_id,
-                    "status": "DOCUMENT_DUPLICATE" if duplicate_event else "DOCUMENT_NEW",
+                    "status": (
+                        "DOCUMENT_DUPLICATE" if duplicate_event else "DOCUMENT_NEW"
+                    ),
                     "doc_number": decision.facts.get("doc_number"),
                     "amount": decision.facts.get("amount"),
                     "sender_email": from_email,
                     "subject": subject,
                     "context": decision.context,
-                    "duplicate_of_email_id": duplicate_event.get("email_id") if duplicate_event else None,
+                    "duplicate_of_email_id": (
+                        duplicate_event.get("email_id") if duplicate_event else None
+                    ),
                 },
             )
         else:
@@ -6527,12 +6900,17 @@ def process_message(
                 success=True,
             )
 
-# ---------- Shadow Priority (read-only, dry run) ----------
+        # ---------- Shadow Priority (read-only, dry run) ----------
         priority_v2_result = None
-        priority_v2_enabled = bool(getattr(feature_flags, "ENABLE_PRIORITY_V2", False)) and not priority_locked_by_user
+        priority_v2_enabled = (
+            bool(getattr(feature_flags, "ENABLE_PRIORITY_V2", False))
+            and not priority_locked_by_user
+        )
         if priority_v2_enabled:
             try:
-                priority_body_text = _build_priority_signal_text(body_text or "", attachments)
+                priority_body_text = _build_priority_signal_text(
+                    body_text or "", attachments
+                )
                 priority_v2_result = priority_engine_v2.compute(
                     subject=subject,
                     body_text=priority_body_text,
@@ -6552,7 +6930,7 @@ def process_message(
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.error("priority_v2_failed", error=str(exc))
                 priority_v2_result = None
-    
+
         if priority_locked_by_user:
             shadow_priority = priority
             shadow_reason = "user_override_lock"
@@ -6577,9 +6955,13 @@ def process_message(
                 shadow_priority=shadow_priority,
                 reason=shadow_reason or "",
             )
-    
-        priority_engine_label = "user_override" if priority_locked_by_user else ("priority_v2_shadow" if priority_v2_result else "llm")
-    
+
+        priority_engine_label = (
+            "user_override"
+            if priority_locked_by_user
+            else ("priority_v2_shadow" if priority_v2_result else "llm")
+        )
+
         # ---------- Stage 1.4: AUTO PRIORITY (feature-flagged + runtime) ----------
         confidence_score: float | None = None
         confidence_decision: str | None = None
@@ -6594,7 +6976,7 @@ def process_message(
                 sender_stats=_lookup_sender_stats(from_email),
                 recent_history=_recent_history(from_email),
             )
-    
+
         policy_decision = _evaluate_policy(policy_inputs)
         auto_priority_outcome = AutoPriorityOutcome(
             final_priority=priority,
@@ -6650,7 +7032,7 @@ def process_message(
                 email_id=message_id,
                 system_mode=policy_decision.mode.value,
             )
-    
+
         if auto_priority_outcome.applied:
             original_priority = auto_priority_outcome.original_priority
             priority = auto_priority_outcome.final_priority
@@ -6696,7 +7078,7 @@ def process_message(
                 "document_id": interpretation.document_id,
             },
         )
-    
+
         if policy_decision.allow_auto_priority and should_score_confidence:
             logger.info(
                 "auto_priority_confidence_scored",
@@ -6706,7 +7088,7 @@ def process_message(
                 threshold=AutoPriorityGates.MIN_CONFIDENCE,
                 decision=confidence_decision or "SKIPPED",
             )
-    
+
         logger.info(
             "auto_priority_summary",
             enabled=auto_priority_outcome.applied,
@@ -6716,7 +7098,7 @@ def process_message(
             final_priority=priority,
             confidence=confidence_score or 0.0,
         )
-    
+
         logger.info(
             "llm_decision",
             email_id=message_id,
@@ -6728,7 +7110,7 @@ def process_message(
             action_line=action_line,
             latency_ms=llm_latency_ms,
         )
-    
+
         try:
             _emit_contract_event(
                 EventType.EMAIL_RECEIVED,
@@ -6740,7 +7122,7 @@ def process_message(
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("contract_event_emit_failed", error=str(exc))
-    
+
         if policy_decision.allow_auto_priority or feature_flags.ENABLE_AUTO_PRIORITY:
             logger.info(
                 "auto_priority_evaluated",
@@ -6751,7 +7133,7 @@ def process_message(
                 reason=priority_reason or "",
                 skipped_reason=auto_priority_outcome.skipped_reason or "",
             )
-    
+
         # ---------- Shadow Action (read-only, dry run) ----------
         shadow_tasks = shadow_action_engine.compute(
             account_email=account_email,
@@ -6768,7 +7150,7 @@ def process_message(
                 task=task or "",
                 reason=reason or "",
             )
-    
+
         shadow_priority_to_persist: str | None = None
         shadow_priority_reason_to_persist: str | None = None
         shadow_action_line_to_persist: str | None = None
@@ -6786,7 +7168,7 @@ def process_message(
                 priority=priority,
                 confidence=confidence_score or 0.0,
             )
-    
+
             if proposed_action:
                 logger.info(
                     "auto_action_stored",
@@ -6796,7 +7178,7 @@ def process_message(
                 )
             else:
                 logger.info("auto_action_skipped", reason="conditions_not_met")
-    
+
         preview_hint: str | None = None
         if (
             getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False)
@@ -6839,7 +7221,9 @@ def process_message(
                     )
                 except Exception as exc:  # pragma: no cover - defensive logging
                     logger.error("preview_action_persist_failed", error=str(exc))
-        elif getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False) and proposed_action:
+        elif (
+            getattr(feature_flags, "ENABLE_PREVIEW_ACTIONS", False) and proposed_action
+        ):
             preview_skip_reason = "insufficient_corrections"
             if not policy_decision.allow_preview:
                 preview_skip_reason = (
@@ -6854,7 +7238,7 @@ def process_message(
                 account_email=account_email,
                 system_mode=policy_decision.mode.value,
             )
-    
+
         if feature_flags.ENABLE_SHADOW_PERSISTENCE:
             shadow_priority_to_persist = shadow_priority
             shadow_priority_reason_to_persist = shadow_reason
@@ -6871,7 +7255,7 @@ def process_message(
             proposed_action_confidence_to_persist = (
                 proposed_action.get("confidence") if proposed_action else None
             )
-    
+
         analytics_result = _record_analytics(
             account_email=account_email,
             message_id=message_id,
@@ -6911,7 +7295,7 @@ def process_message(
             fallback_used=fallback_used,
             telegram_chat_id=telegram_chat_id,
         )
-    
+
         narrative: NarrativeResult | None = None
         if getattr(feature_flags, "ENABLE_NARRATIVE_BINDING", True):
             narrative = compose_narrative(
@@ -6925,7 +7309,9 @@ def process_message(
                 entity_id=entity_resolution.entity_id if entity_resolution else None,
                 analytics=analytics,
                 commitments=commitments,
-                enable_patterns=getattr(feature_flags, "ENABLE_NARRATIVE_PATTERNS", True),
+                enable_patterns=getattr(
+                    feature_flags, "ENABLE_NARRATIVE_PATTERNS", True
+                ),
             )
             if narrative:
                 append_narrative_insight(
@@ -6934,7 +7320,7 @@ def process_message(
                     pattern=narrative.pattern,
                     action=narrative.action,
                 )
-    
+
         policy_decision = _evaluate_policy(policy_inputs)
         anomalies: list[Anomaly] = []
         if policy_decision.allow_anomaly_alerts and entity_resolution:
@@ -6959,7 +7345,7 @@ def process_message(
                     error=str(exc),
                 )
                 anomalies = []
-    
+
         enable_premium_clarity = bool(
             getattr(feature_flags, "ENABLE_PREMIUM_CLARITY_V1", False)
         )
@@ -7003,7 +7389,9 @@ def process_message(
         deadlines_count = sum(
             1 for commitment in commitments if commitment.deadline_iso
         )
-        attachments_only = render_result.extracted_text_len <= 0 and len(attachments) > 0
+        attachments_only = (
+            render_result.extracted_text_len <= 0 and len(attachments) > 0
+        )
         confidence_percent = _priority_confidence_percent(
             confidence_score=confidence_score,
             deadlines_count=deadlines_count,
@@ -7014,7 +7402,9 @@ def process_message(
         )
         if render_result.premium_clarity_enabled:
             confidence_available = confidence_score is not None
-            extraction_failed = render_result.extracted_text_len <= 0 and len(attachments) > 0
+            extraction_failed = (
+                render_result.extracted_text_len <= 0 and len(attachments) > 0
+            )
             premium_payload = TelegramPayload(
                 html_text=_build_premium_clarity_text(
                     priority=priority,
@@ -7086,7 +7476,9 @@ def process_message(
             or _is_urgent_action(action_text)
         )
         low_confidence = confidence_percent <= 40
-        extraction_failed = render_result.extracted_text_len <= 0 and len(attachments) > 0
+        extraction_failed = (
+            render_result.extracted_text_len <= 0 and len(attachments) > 0
+        )
         suppress_numeric_facts = _should_suppress_numeric_facts(
             extraction_failed=extraction_failed,
             confidence_available=confidence_score is not None,
@@ -7111,8 +7503,7 @@ def process_message(
             if source and source not in fact_sources:
                 fact_sources.append(source)
         has_attachment_fact_provenance = any(
-            item.tag and item.tag not in {"тема", "письмо"}
-            for item in shown_fact_items
+            item.tag and item.tag not in {"тема", "письмо"} for item in shown_fact_items
         )
         if high_impact or low_confidence or extraction_failed:
             _emit_contract_event(
@@ -7136,7 +7527,9 @@ def process_message(
             )
         relationship_health_delta: float | None = None
         if analytics_result.health_snapshot is not None:
-            value = analytics_result.health_snapshot.components_breakdown.get("trend_delta")
+            value = analytics_result.health_snapshot.components_breakdown.get(
+                "trend_delta"
+            )
             try:
                 relationship_health_delta = float(value)
             except (TypeError, ValueError):
@@ -7168,7 +7561,7 @@ def process_message(
             )
             attention_gate_deferred = False
             attention_reason = "gate_failed"
-    
+
         enable_circadian = bool(
             getattr(feature_flags, "ENABLE_CIRCADIAN_DELIVERY", False)
         )
@@ -7178,10 +7571,12 @@ def process_message(
         enable_attention_debt = bool(
             getattr(feature_flags, "ENABLE_ATTENTION_DEBT", False)
         )
-        behavior_enabled = enable_circadian or enable_attention_debt or enable_flow_protection
+        behavior_enabled = (
+            enable_circadian or enable_attention_debt or enable_flow_protection
+        )
         delivery_decision: DeliveryDecision | None = None
         delivery_context: DeliveryContext | None = None
-    
+
         if behavior_enabled:
             try:
                 policy_config = load_delivery_policy_config()
@@ -7200,7 +7595,9 @@ def process_message(
                     priority=priority,
                     commitments_count=len(commitments),
                     deadlines_count=deadlines_count,
-                    insight_severity=max_insight_severity(analytics_result.aggregated_insights),
+                    insight_severity=max_insight_severity(
+                        analytics_result.aggregated_insights
+                    ),
                     relationship_health_delta=relationship_health_delta,
                 )
                 context = _build_delivery_context(
@@ -7218,8 +7615,10 @@ def process_message(
                     policy=policy_config,
                     attention_gate_deferred=attention_gate_deferred,
                 )
-                attention_reason = ",".join(delivery_decision.reason_codes) or attention_reason
-    
+                attention_reason = (
+                    ",".join(delivery_decision.reason_codes) or attention_reason
+                )
+
                 if enable_attention_debt:
                     debt_bucket = "low"
                     if delivery_decision.attention_debt >= 70:
@@ -7230,7 +7629,9 @@ def process_message(
                         EventType.ATTENTION_DEBT_UPDATED,
                         ts_utc=received_at.timestamp(),
                         account_id=account_email,
-                        entity_id=entity_resolution.entity_id if entity_resolution else None,
+                        entity_id=(
+                            entity_resolution.entity_id if entity_resolution else None
+                        ),
                         email_id=message_id,
                         payload={
                             "attention_debt": delivery_decision.attention_debt,
@@ -7239,7 +7640,7 @@ def process_message(
                             "max_per_hour": policy_config.max_immediate_per_hour,
                         },
                     )
-    
+
             except Exception as exc:  # pragma: no cover - defensive fallback
                 logger.error(
                     "[BEHAVIOR-ENGINE] failed",
@@ -7249,7 +7650,7 @@ def process_message(
                 behavior_enabled = False
                 delivery_decision = None
                 attention_reason = "behavior_failed"
-    
+
         sources = _render_sources(
             subject=subject or "",
             body_text=body_text or "",
@@ -7260,8 +7661,12 @@ def process_message(
         )
         if behavior_enabled and delivery_decision and delivery_context:
             resolved_scope = resolve_account_scope(account_email)
-            scope_chat_id = telegram_chat_id or (resolved_scope.chat_id if resolved_scope else None)
-            scope_emails = list(resolved_scope.account_emails) if resolved_scope else None
+            scope_chat_id = telegram_chat_id or (
+                resolved_scope.chat_id if resolved_scope else None
+            )
+            scope_emails = (
+                list(resolved_scope.account_emails) if resolved_scope else None
+            )
             if not scope_emails and account_email:
                 scope_emails = [account_email]
             scope_payload = get_account_scope(
@@ -7287,7 +7692,7 @@ def process_message(
                     **scope_payload,
                 },
             )
-    
+
         send_start = time.perf_counter()
         telegram_delivered = False
         delivery_ts = time.time()
@@ -7298,8 +7703,12 @@ def process_message(
         elapsed_to_first_send_seconds = 0.0
         edit_applied = False
         elapsed_before_delivery = max(0.0, time.perf_counter() - processing_started_at)
-        progressive_debug_enabled = str(os.getenv("MAILBOT_ENABLE_PROGRESSIVE_PREMESSAGE", "")).strip().lower() in {"1", "true", "yes", "on", "debug", "dev"}
-        progressive_mode_enabled = progressive_debug_enabled and (bool(attachments) or elapsed_before_delivery > 1.0)
+        progressive_debug_enabled = str(
+            os.getenv("MAILBOT_ENABLE_PROGRESSIVE_PREMESSAGE", "")
+        ).strip().lower() in {"1", "true", "yes", "on", "debug", "dev"}
+        progressive_mode_enabled = progressive_debug_enabled and (
+            bool(attachments) or elapsed_before_delivery > 1.0
+        )
         minimal_payload = _build_minimal_telegram_payload(
             priority=priority,
             from_email=from_email,
@@ -7368,7 +7777,9 @@ def process_message(
                 raise RuntimeError("telegram_delivery_result_missing")
             if not delivery_result.delivered:
                 if delivery_result.retryable:
-                    raise RuntimeError(delivery_result.error or "Telegram delivery failed")
+                    raise RuntimeError(
+                        delivery_result.error or "Telegram delivery failed"
+                    )
                 logger.error(
                     "telegram_delivery_non_retryable",
                     email_id=message_id,
@@ -7462,7 +7873,9 @@ def process_message(
                     "render_mode": render_mode.name,
                     "delivery_mode": delivery_mode_for_span,
                     "edit_applied": edit_applied,
-                    "message_id": delivery_result.message_id if delivery_result else None,
+                    "message_id": (
+                        delivery_result.message_id if delivery_result else None
+                    ),
                 },
             )
             _emit_contract_event(
@@ -7479,8 +7892,12 @@ def process_message(
                     "delivered": True,
                     "occurred_at_utc": delivery_ts,
                     "mode": delivery_result.mode if delivery_result else "html",
-                    "retry_count": delivery_result.retry_count if delivery_result else 0,
-                    "message_id": delivery_result.message_id if delivery_result else None,
+                    "retry_count": (
+                        delivery_result.retry_count if delivery_result else 0
+                    ),
+                    "message_id": (
+                        delivery_result.message_id if delivery_result else None
+                    ),
                     "chat_id": telegram_chat_id,
                     "delivery_mode": delivery_mode_for_span,
                 },

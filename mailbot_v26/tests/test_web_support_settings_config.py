@@ -39,7 +39,9 @@ support:
     assert len(settings.methods) == 1
 
 
-def test_load_support_settings_support_switch_overrides_legacy_feature(tmp_path: Path) -> None:
+def test_load_support_settings_support_switch_overrides_legacy_feature(
+    tmp_path: Path,
+) -> None:
     config_path = _write_config(
         tmp_path,
         """

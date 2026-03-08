@@ -29,11 +29,22 @@ def _build_parser() -> argparse.ArgumentParser:
         default=str(CONFIG_DIR),
         help="Config directory.",
     )
-    init_parser = subparsers.add_parser("init-config", help="Create configuration templates.")
-    init_parser.add_argument("--config-dir", default=str(CONFIG_DIR), help="Config directory.")
-    migrate_parser = subparsers.add_parser("migrate-config", help="Migrate legacy config files to settings.ini/accounts.ini.")
-    migrate_parser.add_argument("--config-dir", default=str(CONFIG_DIR), help="Config directory.")
-    validate_parser = subparsers.add_parser("validate-config", help="Validate configuration files.")
+    init_parser = subparsers.add_parser(
+        "init-config", help="Create configuration templates."
+    )
+    init_parser.add_argument(
+        "--config-dir", default=str(CONFIG_DIR), help="Config directory."
+    )
+    migrate_parser = subparsers.add_parser(
+        "migrate-config",
+        help="Migrate legacy config files to settings.ini/accounts.ini.",
+    )
+    migrate_parser.add_argument(
+        "--config-dir", default=str(CONFIG_DIR), help="Config directory."
+    )
+    validate_parser = subparsers.add_parser(
+        "validate-config", help="Validate configuration files."
+    )
     validate_parser.add_argument(
         "--compat",
         action="store_true",
@@ -65,10 +76,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subparsers.add_parser("backup", help="Create a data backup archive.")
 
-    restore_parser = subparsers.add_parser("restore", help="Restore data from a backup archive.")
+    restore_parser = subparsers.add_parser(
+        "restore", help="Restore data from a backup archive."
+    )
     restore_parser.add_argument("path", help="Path to backup archive (.zip).")
 
-    export_parser = subparsers.add_parser("export", help="Export events/commitments/snapshots.")
+    export_parser = subparsers.add_parser(
+        "export", help="Export events/commitments/snapshots."
+    )
     export_parser.add_argument(
         "--since",
         default="30d",
@@ -122,12 +137,18 @@ def _run() -> None:
             require_runtime_for("validate_config")
             from mailbot_v26.tools.config_bootstrap import run_validate_config
 
-            sys.exit(run_validate_config(Path(args.config_dir), compat=bool(args.compat), strict=True))
+            sys.exit(
+                run_validate_config(
+                    Path(args.config_dir), compat=bool(args.compat), strict=True
+                )
+            )
 
         if args.command == "config-ready":
             from mailbot_v26.tools.config_bootstrap import run_config_ready
 
-            sys.exit(run_config_ready(Path(args.config_dir), verbose=bool(args.verbose)))
+            sys.exit(
+                run_config_ready(Path(args.config_dir), verbose=bool(args.verbose))
+            )
 
         if args.command == "backup":
             from mailbot_v26.tools.backup import run_backup

@@ -101,6 +101,7 @@ def _assert_deterministic(fn: Callable[[], object]) -> object:
 
 def test_budget_gate_available_tokens() -> None:
     with resource_guard():
+
         def run() -> bool:
             conn = _connect_memory()
             gate = BudgetGate(
@@ -120,6 +121,7 @@ def test_budget_gate_available_tokens() -> None:
 
 def test_budget_gate_exhausted_tokens() -> None:
     with resource_guard():
+
         def run() -> bool:
             conn = _connect_memory()
             gate = BudgetGate(
@@ -151,6 +153,7 @@ def test_budget_gate_exhausted_tokens() -> None:
 
 def test_heuristic_importance_deterministic() -> None:
     with resource_guard():
+
         def run() -> tuple[int, tuple[str, ...]]:
             score = heuristic_importance(
                 subject="Срочно: счет",
@@ -169,6 +172,7 @@ def test_heuristic_importance_deterministic() -> None:
 
 def test_percentile_selection_top_20_percent() -> None:
     with resource_guard():
+
         def run() -> bool:
             conn = _connect_memory()
             account = "user@example.com"
@@ -205,6 +209,7 @@ def test_percentile_selection_top_20_percent() -> None:
 
 def test_queue_enqueue_synchronous_timeout() -> None:
     with resource_guard():
+
         def run() -> bool:
             queue = LLMRequestQueue(max_size=1)
             request = LLMRequest(
@@ -230,6 +235,7 @@ def test_queue_enqueue_synchronous_timeout() -> None:
 
 def test_queue_full_fallback_to_heuristic() -> None:
     with resource_guard():
+
         def run() -> str:
             queue = LLMRequestQueue(max_size=1)
             request = LLMRequest(
@@ -249,13 +255,16 @@ def test_queue_full_fallback_to_heuristic() -> None:
 
         result = _assert_deterministic(run)
         conn = _connect_memory()
-        _log_test_event(conn, "test_queue_full_fallback_to_heuristic", result == "heuristic")
+        _log_test_event(
+            conn, "test_queue_full_fallback_to_heuristic", result == "heuristic"
+        )
         conn.close()
         assert result == "heuristic"
 
 
 def test_budget_consumed_event_logged() -> None:
     with resource_guard():
+
         def run() -> bool:
             conn = _connect_memory()
             gate = BudgetGate(
@@ -287,6 +296,7 @@ def test_budget_consumed_event_logged() -> None:
 
 def test_graceful_degradation_db_error() -> None:
     with resource_guard():
+
         def run() -> bool:
             conn = _connect_memory()
             conn.close()

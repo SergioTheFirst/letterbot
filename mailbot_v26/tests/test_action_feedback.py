@@ -17,7 +17,11 @@ def _write_accounts(tmp_path, content: str) -> None:
 def test_feedback_persisted_and_logged(tmp_path, caplog) -> None:
     db_path = tmp_path / "feedback.sqlite"
     knowledge_db = KnowledgeDB(db_path)
-    proposed_action = {"type": "FOLLOW_UP", "text": "Follow-up через 2 дня", "confidence": 0.88}
+    proposed_action = {
+        "type": "FOLLOW_UP",
+        "text": "Follow-up через 2 дня",
+        "confidence": 0.88,
+    }
 
     caplog.set_level("INFO")
     feedback_id = record_action_feedback(
@@ -65,12 +69,10 @@ def test_priority_correction_persisted(tmp_path, caplog) -> None:
     )
 
     with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT id, email_id, kind, value, entity_id, sender_email, account_email
             FROM priority_feedback
-            """
-        ).fetchone()
+            """).fetchone()
 
     assert row is not None
     assert row[0] == feedback_id

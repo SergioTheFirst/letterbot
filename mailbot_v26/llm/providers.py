@@ -14,6 +14,7 @@ from mailbot_v26.llm.global_lock import gigachat_lock
 logger = logging.getLogger(__name__)
 _GIGACHAT_LOCK_WAIT_LOG_THRESHOLD_MS = 200
 
+
 class LLMProviderError(RuntimeError):
     """Provider-level exception raised on LLM failures."""
 
@@ -123,7 +124,9 @@ class GigaChatProvider(LLMProvider):
         request.add_header("Authorization", f"Bearer {self.config.api_key}")
         request.add_header("Content-Type", "application/json")
         try:
-            with urllib.request.urlopen(request, timeout=self.config.timeout_s) as response:
+            with urllib.request.urlopen(
+                request, timeout=self.config.timeout_s
+            ) as response:
                 body = response.read().decode("utf-8")
             data = json.loads(body)
             choices = data.get("choices", [])
@@ -131,7 +134,12 @@ class GigaChatProvider(LLMProvider):
                 message = choices[0].get("message", {})
                 return str(message.get("content", "")).strip()
             return str(data.get("result", "")).strip()
-        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, ValueError) as exc:
+        except (
+            urllib.error.URLError,
+            json.JSONDecodeError,
+            TimeoutError,
+            ValueError,
+        ) as exc:
             raise LLMProviderError(str(exc)) from exc
 
     def complete(

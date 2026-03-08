@@ -22,12 +22,26 @@ def _setup_processor(monkeypatch, captured: dict) -> None:
         captured.update(kwargs)
         return 1
 
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=_save_email))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=_save_email)
+    )
     monkeypatch.setattr(processor, "_check_crm_available", lambda: True)
-    monkeypatch.setattr(processor, "decision_trace_writer", SimpleNamespace(write=lambda **_kwargs: None))
-    monkeypatch.setattr(processor, "event_emitter", SimpleNamespace(emit=lambda **_kwargs: None))
-    monkeypatch.setattr(processor, "contract_event_emitter", SimpleNamespace(emit=lambda _event: True))
-    monkeypatch.setattr(processor, "enqueue_tg", lambda **_kwargs: DeliveryResult(delivered=True, retryable=False))
+    monkeypatch.setattr(
+        processor,
+        "decision_trace_writer",
+        SimpleNamespace(write=lambda **_kwargs: None),
+    )
+    monkeypatch.setattr(
+        processor, "event_emitter", SimpleNamespace(emit=lambda **_kwargs: None)
+    )
+    monkeypatch.setattr(
+        processor, "contract_event_emitter", SimpleNamespace(emit=lambda _event: True)
+    )
+    monkeypatch.setattr(
+        processor,
+        "enqueue_tg",
+        lambda **_kwargs: DeliveryResult(delivered=True, retryable=False),
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -49,7 +63,9 @@ def _setup_processor(monkeypatch, captured: dict) -> None:
         "compute",
         lambda account_email, from_email: [],
     )
-    monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        processor.context_store, "resolve_sender_entity", lambda **_kwargs: None
+    )
     monkeypatch.setattr(
         processor.context_store,
         "record_interaction_event",

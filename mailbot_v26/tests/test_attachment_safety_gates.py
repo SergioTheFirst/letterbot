@@ -5,7 +5,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mailbot_v26.bot_core import pipeline as core_pipeline
-from mailbot_v26.config_loader import BotConfig, GeneralConfig, KeysConfig, StorageConfig
+from mailbot_v26.config_loader import (
+    BotConfig,
+    GeneralConfig,
+    KeysConfig,
+    StorageConfig,
+)
 from mailbot_v26.constants import MAX_CHARS_PER_ATTACHMENT, MAX_TOTAL_MAIL_BYTES
 from mailbot_v26.pipeline import tg_renderer
 

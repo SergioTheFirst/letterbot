@@ -34,7 +34,9 @@ def test_doctor_diagnostics_metadata_contains_version(tmp_path: Path) -> None:
     log_path.write_text("line-1\n", encoding="utf-8")
     dist_root = tmp_path / "dist"
     dist_root.mkdir()
-    (dist_root / "manifest.sha256.json").write_text(json.dumps({}, sort_keys=True), encoding="utf-8")
+    (dist_root / "manifest.sha256.json").write_text(
+        json.dumps({}, sort_keys=True), encoding="utf-8"
+    )
 
     archive_bytes = build_diagnostics_zip(
         config_path=config_path,

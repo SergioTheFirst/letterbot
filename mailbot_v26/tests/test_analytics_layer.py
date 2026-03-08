@@ -98,7 +98,9 @@ def test_views_and_read_only_analytics(tmp_path: Path) -> None:
     account_stats = analytics.account_stats()
     escalations = analytics.priority_escalations()
 
-    alpha = next(row for row in sender_stats if row["sender_email"] == "alpha@example.com")
+    alpha = next(
+        row for row in sender_stats if row["sender_email"] == "alpha@example.com"
+    )
     assert alpha["emails_total"] == 3
     assert alpha["account_count"] == 2
     assert alpha["red_count"] == 1
@@ -106,18 +108,24 @@ def test_views_and_read_only_analytics(tmp_path: Path) -> None:
     assert alpha["blue_count"] == 1
     assert alpha["escalations"] == 1
 
-    bravo = next(row for row in sender_stats if row["sender_email"] == "bravo@example.com")
+    bravo = next(
+        row for row in sender_stats if row["sender_email"] == "bravo@example.com"
+    )
     assert bravo["emails_total"] == 1
     assert bravo["escalations"] == 1
 
-    account_a1 = next(row for row in account_stats if row["account_email"] == "a1@example.com")
+    account_a1 = next(
+        row for row in account_stats if row["account_email"] == "a1@example.com"
+    )
     assert account_a1["emails_total"] == 2
     assert account_a1["sender_count"] == 1
     assert account_a1["red_count"] == 1
     assert account_a1["yellow_count"] == 1
     assert account_a1["escalations"] == 1
 
-    account_a2 = next(row for row in account_stats if row["account_email"] == "a2@example.com")
+    account_a2 = next(
+        row for row in account_stats if row["account_email"] == "a2@example.com"
+    )
     assert account_a2["emails_total"] == 2
     assert account_a2["sender_count"] == 2
     assert account_a2["blue_count"] == 1
@@ -129,8 +137,7 @@ def test_views_and_read_only_analytics(tmp_path: Path) -> None:
 
     with analytics._connect_readonly() as conn:  # type: ignore[attr-defined]
         with pytest.raises(sqlite3.OperationalError):
-            conn.execute(
-                """
+            conn.execute("""
                 INSERT INTO emails (
                     account_email,
                     from_email,
@@ -142,8 +149,7 @@ def test_views_and_read_only_analytics(tmp_path: Path) -> None:
                     raw_body_hash
                 )
                 VALUES ('', '', '', '', '', '', '', '')
-                """
-            )
+                """)
 
 
 def test_cockpit_contact_methods_return_empty_on_empty_db(tmp_path: Path) -> None:

@@ -31,9 +31,7 @@ def _seed_response_times(
         )
 
 
-def _seed_email_events(
-    db_path, entity_id: str, events: list[datetime]
-) -> None:
+def _seed_email_events(db_path, entity_id: str, events: list[datetime]) -> None:
     store = ContextStore(db_path)
     for event_time in events:
         store.record_interaction_event(

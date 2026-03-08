@@ -126,7 +126,9 @@ def test_attention_auth_required(tmp_path: Path) -> None:
         assert response.status_code == 200
 
 
-def test_attention_api_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attention_api_deterministic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     app = _prepare_app(tmp_path, attention_cost=120.0)
     monkeypatch.setattr(
         "mailbot_v26.storage.analytics.KnowledgeAnalytics._window_start_ts",
@@ -154,7 +156,9 @@ def test_attention_api_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyP
         assert payload["sort"] == "time"
 
 
-def test_attention_scope_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attention_scope_isolation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     app = _prepare_app(tmp_path)
     monkeypatch.setattr(
         "mailbot_v26.storage.analytics.KnowledgeAnalytics._window_start_ts",
@@ -176,8 +180,12 @@ def test_attention_scope_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPat
                 "account_emails": "secondary@example.com",
             },
         )
-        primary_entities = {item["entity_id"] for item in primary_response.get_json()["entities"]}
-        secondary_entities = {item["entity_id"] for item in secondary_response.get_json()["entities"]}
+        primary_entities = {
+            item["entity_id"] for item in primary_response.get_json()["entities"]
+        }
+        secondary_entities = {
+            item["entity_id"] for item in secondary_response.get_json()["entities"]
+        }
         assert "intruder@example.com" not in primary_entities
         assert primary_entities
         assert secondary_entities == {"intruder@example.com"}

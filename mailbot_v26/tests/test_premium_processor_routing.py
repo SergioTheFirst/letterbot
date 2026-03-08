@@ -76,7 +76,9 @@ def test_premium_flag_off_skips_premium_processor(monkeypatch, tmp_path) -> None
         telegram_chat_id="chat",
     )
     config = build_config(tmp_path, [account])
-    inbound = InboundMessage(subject="Test subject", body="Hello", sender="sender@example.com")
+    inbound = InboundMessage(
+        subject="Test subject", body="Hello", sender="sender@example.com"
+    )
     storage, email_id = _seed_queue(
         tmp_path=tmp_path,
         account_email="account@example.com",
@@ -127,7 +129,9 @@ def test_premium_flag_on_routes_to_premium_processor(monkeypatch, tmp_path) -> N
         telegram_chat_id="chat",
     )
     config = build_config(tmp_path, [account])
-    inbound = InboundMessage(subject="Test subject", body="Hello", sender="sender@example.com")
+    inbound = InboundMessage(
+        subject="Test subject", body="Hello", sender="sender@example.com"
+    )
     storage, email_id = _seed_queue(
         tmp_path=tmp_path,
         account_email="account@example.com",
@@ -142,7 +146,9 @@ def test_premium_flag_on_routes_to_premium_processor(monkeypatch, tmp_path) -> N
     def fake_premium(**kwargs):
         called["account_email"] = kwargs.get("account_email")
 
-    monkeypatch.setattr("mailbot_v26.start.processor_module.process_message", fake_premium)
+    monkeypatch.setattr(
+        "mailbot_v26.start.processor_module.process_message", fake_premium
+    )
 
     monkeypatch.setattr(
         "mailbot_v26.start.stage_parse",
@@ -172,7 +178,9 @@ def test_premium_failure_falls_back(monkeypatch, tmp_path) -> None:
         telegram_chat_id="chat",
     )
     config = build_config(tmp_path, [account])
-    inbound = InboundMessage(subject="Test subject", body="Hello", sender="sender@example.com")
+    inbound = InboundMessage(
+        subject="Test subject", body="Hello", sender="sender@example.com"
+    )
     storage, email_id = _seed_queue(
         tmp_path=tmp_path,
         account_email="account@example.com",

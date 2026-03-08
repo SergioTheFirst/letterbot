@@ -106,13 +106,11 @@ def test_entity_resolution_links_by_email_match(tmp_path) -> None:
     )
 
     with sqlite3.connect(db_path) as conn:
-        relationship = conn.execute(
-            """
+        relationship = conn.execute("""
             SELECT entity_from, entity_to, type, strength
             FROM relationships
             WHERE type = 'entity_resolution';
-            """
-        ).fetchone()
+            """).fetchone()
 
     assert relationship is not None
     assert {relationship[0], relationship[1]} == {first.entity_id, second.entity_id}

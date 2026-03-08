@@ -87,14 +87,22 @@ def _prepare_app(tmp_path: Path) -> object:
         ts_utc=base_ts + 70,
         account_id="primary@example.com",
         email_id=1,
-        payload={"bucket": "high", "attention_debt": 90, "from_email": "pii@example.com"},
+        payload={
+            "bucket": "high",
+            "attention_debt": 90,
+            "from_email": "pii@example.com",
+        },
     )
     _emit_event(
         emitter,
         event_type=EventType.CALIBRATION_PROPOSALS_GENERATED,
         ts_utc=base_ts + 80,
         account_id="primary@example.com",
-        payload={"week_key": "2026-W01", "proposals_count": 2, "top_labels": ["label-a"]},
+        payload={
+            "week_key": "2026-W01",
+            "proposals_count": 2,
+            "top_labels": ["label-a"],
+        },
     )
     _emit_event(
         emitter,
@@ -133,7 +141,9 @@ def test_learning_auth_required(tmp_path: Path) -> None:
         assert api_response.status_code == 302
 
 
-def test_learning_api_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_learning_api_deterministic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     app = _prepare_app(tmp_path)
     _freeze_now(monkeypatch, ts=2_000.0)
     with app.test_client() as client:
@@ -154,18 +164,26 @@ def test_learning_api_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         assert payload["surprises"] == 1
 
 
-def test_learning_scope_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_learning_scope_isolation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     app = _prepare_app(tmp_path)
     _freeze_now(monkeypatch, ts=2_000.0)
     with app.test_client() as client:
         login_with_csrf(client, "pw")
         primary = client.get(
             "/api/v1/intelligence/learning_summary",
-            query_string={"account_email": "primary@example.com", "account_emails": "primary@example.com"},
+            query_string={
+                "account_email": "primary@example.com",
+                "account_emails": "primary@example.com",
+            },
         )
         secondary = client.get(
             "/api/v1/intelligence/learning_summary",
-            query_string={"account_email": "secondary@example.com", "account_emails": "secondary@example.com"},
+            query_string={
+                "account_email": "secondary@example.com",
+                "account_emails": "secondary@example.com",
+            },
         )
         assert primary.status_code == 200
         assert secondary.status_code == 200
@@ -173,7 +191,9 @@ def test_learning_scope_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         assert secondary.get_json()["surprises"] == 0
 
 
-def test_learning_default_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_learning_default_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     app = _prepare_app(tmp_path)
     _freeze_now(monkeypatch, ts=2_000.0)
     with app.test_client() as client:
@@ -185,7 +205,9 @@ def test_learning_default_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         assert response.status_code == 200
         payload = response.get_json()
         assert payload["window_days"] == 30
-        page_response = client.get("/learning", query_string={"account_email": "primary@example.com"})
+        page_response = client.get(
+            "/learning", query_string={"account_email": "primary@example.com"}
+        )
         assert page_response.status_code == 200
         assert "Learning timeline" in page_response.get_data(as_text=True)
 

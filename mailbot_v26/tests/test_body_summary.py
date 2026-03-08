@@ -23,10 +23,10 @@ def _word_count(text: str) -> int:
 def test_html_body_becomes_neutral_summary():
     processor = _processor()
     msg = InboundMessage(
-        subject="Отчет", 
+        subject="Отчет",
         sender="team@example.com",
         body=(
-            "<html><body><p>Здравствуйте!</p><div>Прикрепляем отчет за май." 
+            "<html><body><p>Здравствуйте!</p><div>Прикрепляем отчет за май."
             "</div><div>Срок сдачи до 10.06. </div><div>С уважением, Иван</div></body></html>"
         ),
     )
@@ -53,7 +53,9 @@ def test_empty_body_uses_fallback_phrase():
 def test_long_body_trims_to_word_budget():
     processor = _processor()
     long_body = " ".join(["Подробно" for _ in range(50)])
-    msg = InboundMessage(subject="Длинное письмо", sender="ops@example.com", body=long_body)
+    msg = InboundMessage(
+        subject="Длинное письмо", sender="ops@example.com", body=long_body
+    )
 
     result = processor.process("user@example.com", msg)
     summary = _summary_line(result or "")

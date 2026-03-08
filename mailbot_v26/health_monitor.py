@@ -17,7 +17,6 @@ from typing import Deque, Dict
 
 from mailbot_v26.state_manager import AccountState, StateManager
 
-
 logger = logging.getLogger(__name__)
 
 start_time = datetime.now()

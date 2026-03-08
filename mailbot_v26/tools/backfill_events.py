@@ -11,7 +11,9 @@ from mailbot_v26.events.contract import EventType, EventV1, fingerprint
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.observability import get_logger
-from mailbot_v26.observability.event_emitter import EventEmitter as ObservabilityEventEmitter
+from mailbot_v26.observability.event_emitter import (
+    EventEmitter as ObservabilityEventEmitter,
+)
 
 logger = get_logger("mailbot")
 
@@ -33,15 +35,13 @@ def _parse_ts(value: object | None) -> datetime:
 
 
 def _ensure_state_table(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS events_backfill_state (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             status TEXT NOT NULL,
             completed_at TEXT
         );
-        """
-    )
+        """)
 
 
 def _is_backfill_done(conn: sqlite3.Connection) -> bool:
@@ -121,23 +121,19 @@ def _insert_events(conn: sqlite3.Connection, events: list[EventV1]) -> BackfillS
 
 def _load_email_events(conn: sqlite3.Connection) -> list[EventV1]:
     try:
-        attachments_rows = conn.execute(
-            """
+        attachments_rows = conn.execute("""
             SELECT email_id, COUNT(*) AS attachment_count
             FROM attachments
             GROUP BY email_id
-            """
-        ).fetchall()
+            """).fetchall()
     except sqlite3.OperationalError:
         attachments_rows = []
     attachments = {
-        int(row["email_id"]): int(row["attachment_count"])
-        for row in attachments_rows
+        int(row["email_id"]): int(row["attachment_count"]) for row in attachments_rows
     }
     events: list[EventV1] = []
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT
                 id,
                 account_email,
@@ -148,8 +144,7 @@ def _load_email_events(conn: sqlite3.Connection) -> list[EventV1]:
                 deferred_for_digest,
                 raw_body_hash
             FROM emails
-            """
-        ).fetchall()
+            """).fetchall()
     except sqlite3.OperationalError:
         return []
     for row in rows:
@@ -172,7 +167,9 @@ def _load_email_events(conn: sqlite3.Connection) -> list[EventV1]:
             )
         )
         if int(row["deferred_for_digest"] or 0) == 1:
-            attachments_only = bool((row["raw_body_hash"] or "") == "" and attachments_count > 0)
+            attachments_only = bool(
+                (row["raw_body_hash"] or "") == "" and attachments_count > 0
+            )
             events.append(
                 EventV1(
                     event_type=EventType.ATTENTION_DEFERRED_FOR_DIGEST,
@@ -193,8 +190,7 @@ def _load_email_events(conn: sqlite3.Connection) -> list[EventV1]:
 def _load_commitment_events(conn: sqlite3.Connection) -> list[EventV1]:
     events: list[EventV1] = []
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT
                 c.id,
                 c.commitment_text,
@@ -208,8 +204,7 @@ def _load_commitment_events(conn: sqlite3.Connection) -> list[EventV1]:
                 e.id AS email_id
             FROM commitments c
             JOIN emails e ON e.id = c.email_row_id
-            """
-        ).fetchall()
+            """).fetchall()
     except sqlite3.OperationalError:
         return []
     for row in rows:
@@ -261,20 +256,16 @@ def _load_commitment_events(conn: sqlite3.Connection) -> list[EventV1]:
 def _load_trust_events(conn: sqlite3.Connection) -> list[EventV1]:
     events: list[EventV1] = []
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT entity_id, trust_score, reason, sample_size, data_quality, model_version, created_at
             FROM trust_snapshots
-            """
-        ).fetchall()
+            """).fetchall()
     except sqlite3.OperationalError:
         try:
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT entity_id, trust_score, reason, sample_size, created_at
                 FROM trust_snapshots
-                """
-            ).fetchall()
+                """).fetchall()
         except sqlite3.OperationalError:
             return []
         else:
@@ -314,12 +305,10 @@ def _load_trust_events(conn: sqlite3.Connection) -> list[EventV1]:
 def _load_relationship_health_events(conn: sqlite3.Connection) -> list[EventV1]:
     events: list[EventV1] = []
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT entity_id, health_score, reason, components_breakdown, data_window_days, created_at
             FROM relationship_health_snapshots
-            """
-        ).fetchall()
+            """).fetchall()
     except sqlite3.OperationalError:
         return []
     for row in rows:
@@ -351,12 +340,10 @@ def _load_relationship_health_events(conn: sqlite3.Connection) -> list[EventV1]:
 def _load_digest_events(conn: sqlite3.Connection) -> list[EventV1]:
     events: list[EventV1] = []
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT account_email, last_digest_sent_at
             FROM digest_state
-            """
-        ).fetchall()
+            """).fetchall()
     except sqlite3.OperationalError:
         rows = []
     for row in rows:
@@ -372,12 +359,10 @@ def _load_digest_events(conn: sqlite3.Connection) -> list[EventV1]:
             )
         )
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT account_email, last_week_key, last_sent_at
             FROM weekly_digest_state
-            """
-        ).fetchall()
+            """).fetchall()
     except sqlite3.OperationalError:
         rows = []
     for row in rows:
@@ -398,7 +383,9 @@ def _load_digest_events(conn: sqlite3.Connection) -> list[EventV1]:
     return events
 
 
-def run_backfill(db_path: Path, *, batch_size: int = 500, force: bool = False) -> BackfillStats:
+def run_backfill(
+    db_path: Path, *, batch_size: int = 500, force: bool = False
+) -> BackfillStats:
     ObservabilityEventEmitter(db_path)
     ContractEventEmitter(db_path)
     total_inserted = 0

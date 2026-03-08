@@ -11,6 +11,7 @@ from mailbot_v26.text.mojibake import normalize_mojibake_text
 DEFAULT_LOCALE = "ru"
 _LOGGER = logging.getLogger(__name__)
 
+
 def _clean_i18n_text(text: str) -> str:
     return normalize_mojibake_text(str(text or ""))
 
@@ -210,7 +211,8 @@ def get_locale(config: configparser.ConfigParser | dict | None) -> str:
     try:
         if isinstance(config, configparser.ConfigParser):
             return (
-                config.get("ui", "locale", fallback=DEFAULT_LOCALE).strip() or DEFAULT_LOCALE
+                config.get("ui", "locale", fallback=DEFAULT_LOCALE).strip()
+                or DEFAULT_LOCALE
             )
         if isinstance(config, dict):
             ui_section = config.get("ui") or config.get("UI")

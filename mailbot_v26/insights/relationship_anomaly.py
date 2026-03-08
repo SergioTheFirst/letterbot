@@ -62,7 +62,9 @@ class RelationshipAnomalyDetector:
                     )
                 )
 
-        commitments_expired_30d = self._commitments_expired(from_email, self.COMMITMENT_WINDOW_DAYS)
+        commitments_expired_30d = self._commitments_expired(
+            from_email, self.COMMITMENT_WINDOW_DAYS
+        )
         rhs_30d = self._compute_rhs_score(entity_id, from_email, 30, 60)
         rhs_60d = self._compute_rhs_score(entity_id, from_email, 60, 120)
         rhs_delta = None
@@ -75,7 +77,9 @@ class RelationshipAnomalyDetector:
                 RelationshipAnomaly(
                     entity_id=entity_id,
                     anomaly_type="COMMITMENT_BREAK_PATTERN",
-                    severity=self._severity_for_commitment_break(commitments_expired_30d),
+                    severity=self._severity_for_commitment_break(
+                        commitments_expired_30d
+                    ),
                     detected_at=detected_at,
                     evidence={
                         "commitments_expired_30d": commitments_expired_30d,
@@ -175,7 +179,9 @@ class RelationshipAnomalyDetector:
         ):
             return None
 
-        commitments_expired = self._commitments_expired(from_email, response_window_days)
+        commitments_expired = self._commitments_expired(
+            from_email, response_window_days
+        )
         commitment_health = 0.0
         if commitments_expired == 0:
             commitment_health = 20.0
@@ -193,11 +199,18 @@ class RelationshipAnomalyDetector:
         elif trend_delta < 0:
             trend_direction = -10.0
 
-        total = trust_short * 100.0 + commitment_health + responsiveness_anomaly + trend_direction
+        total = (
+            trust_short * 100.0
+            + commitment_health
+            + responsiveness_anomaly
+            + trend_direction
+        )
         return round(max(0.0, min(100.0, total)), 2)
 
     def _email_frequency_baseline(self, entity_id: str) -> float | None:
-        baseline = self.analytics.entity_baseline(entity_id=entity_id, metric="email_frequency")
+        baseline = self.analytics.entity_baseline(
+            entity_id=entity_id, metric="email_frequency"
+        )
         value = baseline.get("baseline_value")
         if value is None:
             return None

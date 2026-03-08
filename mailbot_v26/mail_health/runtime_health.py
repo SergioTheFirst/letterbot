@@ -85,7 +85,9 @@ class AccountRuntimeHealthManager:
         state = self._get_state(account_id)
         message = self._normalize_error_message(exc)
         error_class = exc.__class__.__name__
-        failure_bucket = self._classify_failure(error_class=error_class, message=message)
+        failure_bucket = self._classify_failure(
+            error_class=error_class, message=message
+        )
         if failure_bucket == state.failure_bucket:
             consecutive_failures = state.consecutive_failures + 1
         else:
@@ -182,7 +184,9 @@ class AccountRuntimeHealthManager:
         lowered = f"{state.last_error_class or ''} {state.last_error or ''}".lower()
         if state.failure_bucket == "imap_auth":
             return "неверный логин или пароль"
-        if state.failure_bucket == "imap_network_timeout" and ("handshake" in lowered or "ssl" in lowered):
+        if state.failure_bucket == "imap_network_timeout" and (
+            "handshake" in lowered or "ssl" in lowered
+        ):
             return "ошибка защищенного соединения"
         if state.failure_bucket == "imap_network_timeout":
             return "сервер долго не отвечает"
@@ -243,9 +247,7 @@ class AccountRuntimeHealthManager:
         if not parts:
             parts.append("0 мин")
         retry_at_text = (
-            next_retry_at.astimezone(timezone.utc)
-            .isoformat()
-            .replace("+00:00", "Z")
+            next_retry_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         )
         return f"через {' '.join(parts)} (в {retry_at_text})"
 
@@ -294,9 +296,7 @@ class AccountRuntimeHealthManager:
                 **asdict(state),
                 "next_retry_at_utc": self._format_dt(state.next_retry_at_utc),
                 "cooldown_until_utc": self._format_dt(state.cooldown_until_utc),
-                "last_alert_sent_at_utc": self._format_dt(
-                    state.last_alert_sent_at_utc
-                ),
+                "last_alert_sent_at_utc": self._format_dt(state.last_alert_sent_at_utc),
             }
         tmp_path = self._state_path.with_suffix(".tmp")
         tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

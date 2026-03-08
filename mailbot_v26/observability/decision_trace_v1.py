@@ -73,7 +73,9 @@ def from_canonical_json(payload_json: str) -> DecisionTraceV1 | None:
             decision_kind=str(raw.get("decision_kind") or ""),
             anchor_ts_utc=float(raw.get("anchor_ts_utc") or 0.0),
             signals_evaluated=[
-                str(item) for item in raw.get("signals_evaluated", []) if item is not None
+                str(item)
+                for item in raw.get("signals_evaluated", [])
+                if item is not None
             ],
             signals_fired=[
                 str(item) for item in raw.get("signals_fired", []) if item is not None
@@ -116,7 +118,9 @@ def _normalize_config(config_obj: Any) -> Any:
     if isinstance(config_obj, (list, tuple)):
         return [_normalize_config(item) for item in config_obj]
     if hasattr(config_obj, "__dict__"):
-        return {key: _normalize_config(value) for key, value in vars(config_obj).items()}
+        return {
+            key: _normalize_config(value) for key, value in vars(config_obj).items()
+        }
     return config_obj
 
 
@@ -170,7 +174,9 @@ class DecisionTraceEmitter:
     failure_log_path: Path | None = None
     breaker_until_ts: float | None = None
     last_drop_reason: str | None = None
-    _lock: threading.Lock = field(init=False, repr=False, default_factory=threading.Lock)
+    _lock: threading.Lock = field(
+        init=False, repr=False, default_factory=threading.Lock
+    )
 
     def emit(self, emitter: ContractEventEmitter, event: EventV1) -> bool:
         with self._lock:
@@ -260,7 +266,9 @@ class DecisionTraceEmitter:
                 "decision_type": sanitize_code(
                     str(event.payload.get("decision_kind") or "")
                 ),
-                "decision_key": _sanitize_failure_key(self._extract_decision_key(event)),
+                "decision_key": _sanitize_failure_key(
+                    self._extract_decision_key(event)
+                ),
                 "error_type": _sanitize_failure_text(error_type, limit=60),
                 "breaker_state": breaker_state,
             }

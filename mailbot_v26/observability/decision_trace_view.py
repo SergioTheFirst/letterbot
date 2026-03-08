@@ -33,7 +33,9 @@ class DecisionTraceSummary:
 def build_decision_trace_summary(trace: DecisionTraceV1) -> DecisionTraceSummary:
     signals, fired_signals = _signals_map(trace)
     decision_kind = trace.decision_kind
-    config = load_priority_v2_config() if decision_kind == "PRIORITY_HEURISTIC" else None
+    config = (
+        load_priority_v2_config() if decision_kind == "PRIORITY_HEURISTIC" else None
+    )
     eval_result = _evaluate_trace(decision_kind, trace, signals, config)
     counterfactuals = _build_counterfactuals(
         decision_kind, trace, signals, fired_signals, eval_result, config
@@ -95,9 +97,14 @@ def _evaluate_trace(
     return DecisionEvalResult(
         decision="UNKNOWN",
         signals_evaluated=sanitize_codes(sorted(signals.keys())),
-        signals_fired=sanitize_codes(sorted([key for key, fired in signals.items() if fired])),
+        signals_fired=sanitize_codes(
+            sorted([key for key, fired in signals.items() if fired])
+        ),
         explain_codes=_sanitize_explain_codes(trace),
-        evidence={"matched": len(trace.signals_fired), "total": len(trace.signals_evaluated)},
+        evidence={
+            "matched": len(trace.signals_fired),
+            "total": len(trace.signals_evaluated),
+        },
     )
 
 
@@ -142,7 +149,10 @@ def _normalize_evidence(
     matched = int(evidence.get("matched") or 0)
     total = int(evidence.get("total") or 0)
     if total <= 0:
-        return {"matched": len(result.signals_fired), "total": len(result.signals_evaluated)}
+        return {
+            "matched": len(result.signals_fired),
+            "total": len(result.signals_evaluated),
+        }
     return {"matched": matched, "total": total}
 
 
@@ -150,4 +160,9 @@ def _sanitize_explain_codes(trace: DecisionTraceV1) -> list[str]:
     return sanitize_codes(trace.explain_codes)
 
 
-__all__ = ["DecisionTraceSummary", "CounterfactualDelta", "build_decision_trace_summary", "summaries_as_payload"]
+__all__ = [
+    "DecisionTraceSummary",
+    "CounterfactualDelta",
+    "build_decision_trace_summary",
+    "summaries_as_payload",
+]

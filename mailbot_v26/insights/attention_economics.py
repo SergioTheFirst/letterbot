@@ -160,12 +160,16 @@ def compute_attention_economics(
                 attachment_count=int(item.get("attachment_count") or 0),
                 estimated_read_minutes=float(item.get("estimated_read_minutes") or 0.0),
                 deferred_count=int(item.get("deferred_count") or 0),
-                trust_delta=float(delta_entry.get("trust_delta"))
-                if "trust_delta" in delta_entry
-                else None,
-                health_delta=float(delta_entry.get("health_delta"))
-                if "health_delta" in delta_entry
-                else None,
+                trust_delta=(
+                    float(delta_entry.get("trust_delta"))
+                    if "trust_delta" in delta_entry
+                    else None
+                ),
+                health_delta=(
+                    float(delta_entry.get("health_delta"))
+                    if "health_delta" in delta_entry
+                    else None
+                ),
             )
         )
 

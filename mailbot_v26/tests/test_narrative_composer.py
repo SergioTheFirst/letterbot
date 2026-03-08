@@ -10,20 +10,20 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics
 def _analytics(tmp_path) -> KnowledgeAnalytics:
     db_path = tmp_path / "events.sqlite"
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE interaction_events (
                 entity_id TEXT,
                 event_type TEXT,
                 event_time TEXT,
                 metadata TEXT
             )
-            """
-        )
+            """)
     return KnowledgeAnalytics(db_path)
 
 
-def _insert_event(conn, *, entity_id: str, event_type: str, event_time: datetime) -> None:
+def _insert_event(
+    conn, *, entity_id: str, event_type: str, event_time: datetime
+) -> None:
     conn.execute(
         """
         INSERT INTO interaction_events (entity_id, event_type, event_time, metadata)
@@ -58,8 +58,18 @@ def test_pattern_suppressed_without_samples(tmp_path) -> None:
     entity_id = "entity-1"
     now = datetime.now(timezone.utc)
     with sqlite3.connect(analytics.path) as conn:
-        _insert_event(conn, entity_id=entity_id, event_type="email_received", event_time=now - timedelta(days=2))
-        _insert_event(conn, entity_id=entity_id, event_type="email_received", event_time=now - timedelta(days=10))
+        _insert_event(
+            conn,
+            entity_id=entity_id,
+            event_type="email_received",
+            event_time=now - timedelta(days=2),
+        )
+        _insert_event(
+            conn,
+            entity_id=entity_id,
+            event_type="email_received",
+            event_time=now - timedelta(days=10),
+        )
         conn.commit()
 
     narrative = compose_narrative(

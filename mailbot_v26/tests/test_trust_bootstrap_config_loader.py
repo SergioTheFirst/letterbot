@@ -33,7 +33,9 @@ templates_min_corrections = 99
 
 
 def test_trust_bootstrap_falls_back_to_legacy_config_ini(tmp_path: Path) -> None:
-    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval = 120\n", encoding="utf-8")
+    (tmp_path / "settings.ini").write_text(
+        "[general]\ncheck_interval = 120\n", encoding="utf-8"
+    )
     (tmp_path / "config.ini").write_text(
         """
 [trust_bootstrap]

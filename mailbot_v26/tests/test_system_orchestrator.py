@@ -125,7 +125,11 @@ def test_orchestrator_fallback_path_logs(caplog) -> None:
     exploding_flags = type(
         "ExplodingFlags",
         (),
-        {"__getattr__": lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom"))},
+        {
+            "__getattr__": lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("boom")
+            )
+        },
     )()
 
     with caplog.at_level(logging.ERROR):

@@ -27,9 +27,13 @@ def _setup_processor(monkeypatch, db_path) -> None:
     monkeypatch.setattr(
         processor, "contract_event_emitter", ContractEventEmitter(db_path)
     )
-    monkeypatch.setattr(processor, "event_emitter", SimpleNamespace(emit=lambda **_k: None))
+    monkeypatch.setattr(
+        processor, "event_emitter", SimpleNamespace(emit=lambda **_k: None)
+    )
     monkeypatch.setattr(processor, "_check_crm_available", lambda: True)
-    monkeypatch.setattr(processor, "decision_trace_writer", SimpleNamespace(write=lambda **_k: None))
+    monkeypatch.setattr(
+        processor, "decision_trace_writer", SimpleNamespace(write=lambda **_k: None)
+    )
     monkeypatch.setattr(
         processor,
         "enqueue_tg",
@@ -67,7 +71,9 @@ def _setup_processor(monkeypatch, db_path) -> None:
         "compute",
         lambda account_email, from_email: [],
     )
-    monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **_k: None)
+    monkeypatch.setattr(
+        processor.context_store, "resolve_sender_entity", lambda **_k: None
+    )
     monkeypatch.setattr(
         processor.context_store,
         "record_interaction_event",

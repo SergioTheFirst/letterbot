@@ -35,6 +35,7 @@ try:
         session,
         url_for,
     )
+
     USING_FLASK_STUB = False
 except ModuleNotFoundError:
     from mailbot_v26.web_observability.flask_stub import (
@@ -64,7 +65,9 @@ from mailbot_v26.config_yaml import (
     validate_config as validate_yaml_config,
     resolve_support_enabled,
 )
-from mailbot_v26.observability.calibration_report import compute_priority_calibration_report
+from mailbot_v26.observability.calibration_report import (
+    compute_priority_calibration_report,
+)
 from mailbot_v26.observability.decision_trace_store import load_latest_decision_traces
 from mailbot_v26.observability.decision_trace_v1 import (
     from_canonical_json,
@@ -74,6 +77,7 @@ from mailbot_v26.observability.decision_trace_view import summaries_as_payload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.version import get_version
 from mailbot_v26.web_observability.doctor_export import build_diagnostics_zip
+from mailbot_v26.tools.networking import get_primary_ipv4
 
 logger = logging.getLogger(__name__)
 
@@ -221,15 +225,23 @@ def _render_template(app: Flask, template_name: str, **context: object) -> str:
 def _render_stub_html(
     template_name: str, context: Mapping[str, object], template_path: Path
 ) -> str:
-    dashboard_vars = context.get("dashboard_vars") if isinstance(context, Mapping) else None
+    dashboard_vars = (
+        context.get("dashboard_vars") if isinstance(context, Mapping) else None
+    )
     window_val = getattr(dashboard_vars, "window_days", 7) if dashboard_vars else 7
     limit_val = getattr(dashboard_vars, "limit", 25) if dashboard_vars else 25
     account_scope = ""
     if dashboard_vars and getattr(dashboard_vars, "account_emails", None):
         account_scope = ",".join(getattr(dashboard_vars, "account_emails"))
     account_email = html.escape(str(context.get("account_email") or ""))
-    lane_value = html.escape(str(context.get("lane") or "")) if "lane" in context else ""
-    share_url = html.escape(str(context.get("share_url") or "")) if "share_url" in context else ""
+    lane_value = (
+        html.escape(str(context.get("lane") or "")) if "lane" in context else ""
+    )
+    share_url = (
+        html.escape(str(context.get("share_url") or ""))
+        if "share_url" in context
+        else ""
+    )
 
     def _options(values: list[int], selected: int) -> str:
         opts: list[str] = []
@@ -241,14 +253,22 @@ def _render_stub_html(
         return "".join(opts)
 
     account_hidden = (
-        f'<input type="hidden" name="account_email" value="{account_email}">' if account_email else ""
+        f'<input type="hidden" name="account_email" value="{account_email}">'
+        if account_email
+        else ""
     )
-    lane_hidden = f'<input type="hidden" name="lane" value="{lane_value}">' if lane_value else ""
+    lane_hidden = (
+        f'<input type="hidden" name="lane" value="{lane_value}">' if lane_value else ""
+    )
     cfg = context.get("cfg") if isinstance(context, Mapping) else {}
     features = cfg.get("features") if isinstance(cfg, Mapping) else {}
-    donate_enabled = bool(features.get("donate_enabled")) if isinstance(features, Mapping) else False
+    donate_enabled = (
+        bool(features.get("donate_enabled")) if isinstance(features, Mapping) else False
+    )
     support_enabled = (
-        bool(context.get("support_nav_enabled")) if isinstance(context, Mapping) else False
+        bool(context.get("support_nav_enabled"))
+        if isinstance(context, Mapping)
+        else False
     ) and donate_enabled
     nav_links = [
         '<a href="/" class="nav-link">Cockpit</a>',
@@ -261,7 +281,7 @@ def _render_stub_html(
         nav_links.append('<a href="/support" class="nav-link">Support</a>')
     header = (
         f"<nav>{''.join(nav_links)}</nav>"
-        "<div class=\"dashboard-vars\">"
+        '<div class="dashboard-vars">'
         f'<input id="account_emails" name="account_emails" value="{html.escape(account_scope)}">'
         f'<select name="window_days">{_options([7, 30, 90], int(window_val))}</select>'
         f'<select name="limit">{_options([10, 25, 50], int(limit_val))}</select>'
@@ -272,25 +292,37 @@ def _render_stub_html(
     )
 
     if template_name in {"bridge.html", "cockpit.html"}:
-        activity_rows = context.get("activity_rows") if isinstance(context, Mapping) else []
-        digest_today = context.get("digest_today") if isinstance(context, Mapping) else []
+        activity_rows = (
+            context.get("activity_rows") if isinstance(context, Mapping) else []
+        )
+        digest_today = (
+            context.get("digest_today") if isinstance(context, Mapping) else []
+        )
         digest_week = context.get("digest_week") if isinstance(context, Mapping) else []
-        engineer_mode = bool(context.get("engineer_mode")) if isinstance(context, Mapping) else False
+        engineer_mode = (
+            bool(context.get("engineer_mode"))
+            if isinstance(context, Mapping)
+            else False
+        )
         lane_pills = context.get("lane_pills") if isinstance(context, Mapping) else []
         lane_html = ""
         if isinstance(lane_pills, list) and lane_pills:
-            lane_html = "<div class=\"lane-pills\">" + "".join(
-                (
-                    "<a class=\"lane-pill {active}\" href=\"{url}\">"
-                    "{label} {count}</a>"
-                ).format(
-                    active="active" if pill.get("active") else "",
-                    url=html.escape(str(pill.get("url") or "")),
-                    label=html.escape(str(pill.get("label") or "")),
-                    count=html.escape(str(pill.get("count") or "")),
+            lane_html = (
+                '<div class="lane-pills">'
+                + "".join(
+                    (
+                        '<a class="lane-pill {active}" href="{url}">'
+                        "{label} {count}</a>"
+                    ).format(
+                        active="active" if pill.get("active") else "",
+                        url=html.escape(str(pill.get("url") or "")),
+                        label=html.escape(str(pill.get("label") or "")),
+                        count=html.escape(str(pill.get("count") or "")),
+                    )
+                    for pill in lane_pills
                 )
-                for pill in lane_pills
-            ) + "</div>"
+                + "</div>"
+            )
         activity_body = "".join(
             """
             <tr>
@@ -308,30 +340,44 @@ def _render_stub_html(
             )
             for row in (activity_rows or [])
         )
-        digest_today_block = "".join(
-            f"<li>{html.escape(str(item.get('title') or ''))} {html.escape(str(item.get('time') or ''))}</li>"
-            for item in (digest_today or [])
-        ) or "<div class=\"hint\">Adjust filters to view today's highlights.</div>"
-        digest_week_block = "".join(
-            f"<li>{html.escape(str(item.get('title') or ''))} {html.escape(str(item.get('time') or ''))}</li>"
-            for item in (digest_week or [])
-        ) or "<div class=\"hint\">Expand window to see weekly digest.</div>"
+        digest_today_block = (
+            "".join(
+                f"<li>{html.escape(str(item.get('title') or ''))} {html.escape(str(item.get('time') or ''))}</li>"
+                for item in (digest_today or [])
+            )
+            or '<div class="hint">Adjust filters to view today\'s highlights.</div>'
+        )
+        digest_week_block = (
+            "".join(
+                f"<li>{html.escape(str(item.get('title') or ''))} {html.escape(str(item.get('time') or ''))}</li>"
+                for item in (digest_week or [])
+            )
+            or '<div class="hint">Expand window to see weekly digest.</div>'
+        )
         engineer_block = (
-            "<div data-testid=\"engineer-blocks\"><details><summary>Engineer</summary></details></div>"
+            '<div data-testid="engineer-blocks"><details><summary>Engineer</summary></details></div>'
             if engineer_mode
             else ""
         )
         support_card = ""
         if support_enabled:
             support_preview = ""
-            methods = context.get("support_methods") if isinstance(context, Mapping) else []
+            methods = (
+                context.get("support_methods") if isinstance(context, Mapping) else []
+            )
             if isinstance(methods, list) and methods:
                 qr_uri = str(getattr(methods[0], "qr_image_data_uri", "") or "")
                 if qr_uri:
-                    support_preview = '<img alt="Support QR" src="%s">' % html.escape(qr_uri)
-            support_card = f"<h2>Support Letterbot</h2><a href=\"/support\">/support</a>{support_preview}"
-        quality_summary = context.get("quality_summary") if isinstance(context, Mapping) else {}
-        quality_summary = quality_summary if isinstance(quality_summary, Mapping) else {}
+                    support_preview = '<img alt="Support QR" src="%s">' % html.escape(
+                        qr_uri
+                    )
+            support_card = f'<h2>Support Letterbot</h2><a href="/support">/support</a>{support_preview}'
+        quality_summary = (
+            context.get("quality_summary") if isinstance(context, Mapping) else {}
+        )
+        quality_summary = (
+            quality_summary if isinstance(quality_summary, Mapping) else {}
+        )
         quality_block = ""
         if bool(quality_summary.get("available")):
             quality_block = (
@@ -353,10 +399,18 @@ def _render_stub_html(
         )
 
     if template_name in {"health.html", "partials/health_overview.html"}:
-        component_matrix = context.get("component_matrix") if isinstance(context, Mapping) else []
+        component_matrix = (
+            context.get("component_matrix") if isinstance(context, Mapping) else []
+        )
         incidents = context.get("incidents") if isinstance(context, Mapping) else []
-        engineer_mode = bool(context.get("engineer_mode")) if isinstance(context, Mapping) else False
-        health_trend = context.get("health_trend") if isinstance(context, Mapping) else []
+        engineer_mode = (
+            bool(context.get("engineer_mode"))
+            if isinstance(context, Mapping)
+            else False
+        )
+        health_trend = (
+            context.get("health_trend") if isinstance(context, Mapping) else []
+        )
         component_rows = "".join(
             """
             <tr data-testid="component-row">
@@ -402,7 +456,7 @@ def _render_stub_html(
             '<div data-testid="health-engineer-block"></div>' if engineer_mode else ""
         )
         html_body = (
-            f"{header}<div data-testid=\"health-component-matrix\">Component matrix</div>"
+            f'{header}<div data-testid="health-component-matrix">Component matrix</div>'
             f"<table>{component_rows}</table><table>{incident_rows}</table>"
             f"<table>{trend_rows}</table>{engineer_block}"
         )
@@ -411,8 +465,14 @@ def _render_stub_html(
         return f"<html><body>{html_body}</body></html>"
 
     if template_name == "archive.html":
-        archive_rows = context.get("archive_rows") if isinstance(context, Mapping) else []
-        engineer_mode = bool(context.get("engineer_mode")) if isinstance(context, Mapping) else False
+        archive_rows = (
+            context.get("archive_rows") if isinstance(context, Mapping) else []
+        )
+        engineer_mode = (
+            bool(context.get("engineer_mode"))
+            if isinstance(context, Mapping)
+            else False
+        )
         rows = []
         for row in archive_rows or []:
             extra_cols = ""
@@ -443,12 +503,12 @@ def _render_stub_html(
             "<tr><th>Time (UTC)</th><th>From</th><th>Account</th>"
             "<th>Preview</th><th>TG status</th><th>E2E latency</th></tr>"
         )
-        return (
-            f"<html><body>{header}<table>{header_row}{''.join(rows)}</table></body></html>"
-        )
+        return f"<html><body>{header}<table>{header_row}{''.join(rows)}</table></body></html>"
 
     if template_name == "commitments.html":
-        commitments_rows = context.get("commitments_rows") if isinstance(context, Mapping) else []
+        commitments_rows = (
+            context.get("commitments_rows") if isinstance(context, Mapping) else []
+        )
         rows = []
         for row in commitments_rows or []:
             rows.append(
@@ -472,14 +532,20 @@ def _render_stub_html(
             "<tr><th>Last activity (UTC)</th><th>Counterparty</th><th>Account</th>"
             "<th>Kind / Status</th><th>Age / Due</th><th>Evidence</th><th>Forensics</th></tr>"
         )
-        return (
-            f"<html><body>{header}<table>{header_row}{''.join(rows)}</table></body></html>"
-        )
+        return f"<html><body>{header}<table>{header_row}{''.join(rows)}</table></body></html>"
 
     if template_name == "email_detail.html":
-        timeline_rows = context.get("timeline_rows") if isinstance(context, Mapping) else []
-        evidence_rows = context.get("evidence_rows") if isinstance(context, Mapping) else []
-        engineer_mode = bool(context.get("engineer_mode")) if isinstance(context, Mapping) else False
+        timeline_rows = (
+            context.get("timeline_rows") if isinstance(context, Mapping) else []
+        )
+        evidence_rows = (
+            context.get("evidence_rows") if isinstance(context, Mapping) else []
+        )
+        engineer_mode = (
+            bool(context.get("engineer_mode"))
+            if isinstance(context, Mapping)
+            else False
+        )
         rows = []
         for row in timeline_rows or []:
             extra_cols = ""
@@ -498,7 +564,7 @@ def _render_stub_html(
                     outcome=html.escape(str(row.get("outcome") or "")),
                     extra_cols=extra_cols,
                 )
-        )
+            )
         evidence = []
         for row in evidence_rows or []:
             evidence.append(
@@ -515,9 +581,7 @@ def _render_stub_html(
                     duration=html.escape(str(row.get("duration") or "")),
                 )
             )
-        return (
-            f"<html><body>{header}<table>{''.join(evidence)}</table><table>{''.join(rows)}</table></body></html>"
-        )
+        return f"<html><body>{header}<table>{''.join(evidence)}</table><table>{''.join(rows)}</table></body></html>"
 
     if template_name == "support.html":
         methods = context.get("support_methods") if isinstance(context, Mapping) else []
@@ -540,13 +604,21 @@ def _render_stub_html(
             if not isinstance(group, Mapping):
                 continue
             group_kind = group.get("group_kind")
-            headline = group.get("headline") if isinstance(group.get("headline"), Mapping) else {}
+            headline = (
+                group.get("headline")
+                if isinstance(group.get("headline"), Mapping)
+                else {}
+            )
             if group_kind == "email":
                 label = f"Email {group.get('group_id')}"
             else:
                 label = str(headline.get("label") or group.get("group_id") or "")
-            blocks.append(f"<div class=\"event-group\">{html.escape(label)}</div>")
-        body = "".join(blocks) if blocks else "<div class=\"hint\">Adjust window_days or account scope.</div>"
+            blocks.append(f'<div class="event-group">{html.escape(label)}</div>')
+        body = (
+            "".join(blocks)
+            if blocks
+            else '<div class="hint">Adjust window_days or account scope.</div>'
+        )
         return f"<html><body>{header}{body}</body></html>"
 
     if template_name == "attention.html":
@@ -568,7 +640,7 @@ def _render_stub_html(
             if isinstance(row, Mapping)
         )
         table = (
-            "<table class=\"table compact fixed attention-table\">"
+            '<table class="table compact fixed attention-table">'
             f"<tbody>{rows}</tbody></table>"
         )
         return f"<html><body>{header}{table}</body></html>"
@@ -577,7 +649,11 @@ def _render_stub_html(
 
 
 def _static_url() -> str:
-    return url_for("static", filename="style.css") if not USING_FLASK_STUB else "/static/style.css"
+    return (
+        url_for("static", filename="style.css")
+        if not USING_FLASK_STUB
+        else "/static/style.css"
+    )
 
 
 def _build_select_options(values: list[str], selected: str | None) -> str:
@@ -585,7 +661,7 @@ def _build_select_options(values: list[str], selected: str | None) -> str:
     for value in values:
         escaped = html.escape(value)
         is_selected = " selected" if value == selected else ""
-        options.append(f"<option value=\"{escaped}\"{is_selected}>{escaped}</option>")
+        options.append(f'<option value="{escaped}"{is_selected}>{escaped}</option>')
     return "".join(options)
 
 
@@ -593,7 +669,9 @@ def _build_window_options(selected: int | None) -> str:
     options = []
     for value in [7, 30, 90]:
         is_selected = " selected" if value == selected else ""
-        options.append(f"<option value=\"{value}\"{is_selected}>Last {value} days</option>")
+        options.append(
+            f'<option value="{value}"{is_selected}>Last {value} days</option>'
+        )
     return "".join(options)
 
 
@@ -648,7 +726,7 @@ def _build_archive_window_options(selected: int | None) -> str:
     options = []
     for value in [1, 7, 30, 90]:
         is_selected = " selected" if value == selected else ""
-        options.append(f"<option value=\"{value}\"{is_selected}>{value} days</option>")
+        options.append(f'<option value="{value}"{is_selected}>{value} days</option>')
     return "".join(options)
 
 
@@ -769,12 +847,14 @@ def _events_table(items: list[dict[str, object]]) -> str:
                 break
             value = details.get(key)
             badges.append(
-                f"<span class=\"badge\">{html.escape(str(key))}: {html.escape(str(value))}</span>"
+                f'<span class="badge">{html.escape(str(key))}: {html.escape(str(value))}</span>'
             )
         return " ".join(badges)
 
     for item in items:
-        details_badges = _detail_badges(item.get("details") if isinstance(item, Mapping) else {})
+        details_badges = _detail_badges(
+            item.get("details") if isinstance(item, Mapping) else {}
+        )
         rows.append(
             """
             <tr>
@@ -795,13 +875,15 @@ def _events_table(items: list[dict[str, object]]) -> str:
             )
         )
     return (
-        "<table class=\"data-table\">"
+        '<table class="data-table">'
         "<thead><tr><th>Timestamp (UTC)</th><th>Type</th><th>Email ID</th><th>Entity ID</th><th>Summary</th><th>Details</th></tr></thead>"
         + f"<tbody>{''.join(rows)}</tbody></table>"
     )
 
 
-def _build_activity_table_rows(activity_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def _build_activity_table_rows(
+    activity_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
     if not activity_rows:
         return []
     table_rows: list[dict[str, object]] = []
@@ -820,7 +902,9 @@ def _build_activity_table_rows(activity_rows: list[dict[str, object]]) -> list[d
                 "e2e": _format_number(e2e_value) if e2e_value is not None else "",
                 "from_label": _sanitize_sender_label(row.get("from_label")),
                 "to_label": _sanitize_account_label(row.get("to_label")),
-                "telegram_preview": _sanitize_email_preview(row.get("telegram_preview")),
+                "telegram_preview": _sanitize_email_preview(
+                    row.get("telegram_preview")
+                ),
                 "status": status_text or "",
                 "status_class": status_class,
                 "mode": row.get("delivery_mode") or "",
@@ -930,13 +1014,17 @@ def _sanitize_archive_row(row: Mapping[str, object]) -> dict[str, object]:
     }
 
 
-def _sanitize_event_headline(headline: Mapping[str, object] | None) -> dict[str, object]:
+def _sanitize_event_headline(
+    headline: Mapping[str, object] | None,
+) -> dict[str, object]:
     if not headline:
         return {}
     sanitized = dict(headline)
     sanitized["from_masked"] = _sanitize_sender_label(headline.get("from_masked"))
     sanitized["to_masked"] = _sanitize_account_label(headline.get("to_masked"))
-    sanitized["preview_masked"] = _sanitize_email_preview(headline.get("preview_masked"))
+    sanitized["preview_masked"] = _sanitize_email_preview(
+        headline.get("preview_masked")
+    )
     return sanitized
 
 
@@ -949,26 +1037,18 @@ def _health_current_block(current: dict[str, object] | None) -> str:
     rows = []
     gates_summary = _summarize_mapping(gates_state)
     metrics_summary = _summarize_mapping(metrics_brief)
-    rows.append(
-        """
+    rows.append("""
         <div class="metric"><div class="label">System mode</div><div class="value"><span class="badge">{}</span></div></div>
-        """.format(system_mode or "–")
-    )
-    rows.append(
-        """
+        """.format(system_mode or "–"))
+    rows.append("""
         <div class="metric"><div class="label">Last check (UTC)</div><div class="value">{}</div></div>
-        """.format(_format_ts_utc(current.get("ts_end_utc")))
-    )
-    rows.append(
-        """
+        """.format(_format_ts_utc(current.get("ts_end_utc"))))
+    rows.append("""
         <div class="metric"><div class="label">Gates</div><div class="value">{}</div></div>
-        """.format(gates_summary)
-    )
-    rows.append(
-        """
+        """.format(gates_summary))
+    rows.append("""
         <div class="metric"><div class="label">Metrics</div><div class="value">{}</div></div>
-        """.format(metrics_summary)
-    )
+        """.format(metrics_summary))
     return f"<div class=\"metrics-grid\">{''.join(rows)}</div>"
 
 
@@ -995,7 +1075,7 @@ def _health_timeline_block(timeline: list[dict[str, object]]) -> str:
             )
         )
     return (
-        "<table class=\"data-table\">"
+        '<table class="data-table">'
         "<thead><tr><th>Timestamp (UTC)</th><th>Mode</th><th>Gates</th><th>Metrics</th><th>Snapshot</th></tr></thead>"
         + f"<tbody>{''.join(rows)}</tbody></table>"
     )
@@ -1022,7 +1102,9 @@ def _load_web_ui_settings(config_path: Path | None) -> WebUISettings:
     try:
         raw = load_yaml_config(config_path)
     except (FileNotFoundError, YamlConfigError) as exc:
-        logger.warning("config.yaml load failed for web UI; using defaults: %s", str(exc))
+        logger.warning(
+            "config.yaml load failed for web UI; using defaults: %s", str(exc)
+        )
         return _defaults()
     ok, error = validate_yaml_config(raw)
     if not ok:
@@ -1043,7 +1125,9 @@ def _load_web_ui_settings(config_path: Path | None) -> WebUISettings:
     allow_lan = bool(web_ui.get("allow_lan", False))
     allow_cidrs = web_ui.get("allow_cidrs") or []
     prod_server = bool(web_ui.get("prod_server", False))
-    require_strong_password_on_lan = bool(web_ui.get("require_strong_password_on_lan", True))
+    require_strong_password_on_lan = bool(
+        web_ui.get("require_strong_password_on_lan", True)
+    )
     allow_local_smoke_bypass = bool(web_ui.get("allow_local_smoke_bypass", False))
     if not isinstance(allow_cidrs, list):
         allow_cidrs = []
@@ -1069,10 +1153,14 @@ def _load_local_smoke_bypass_from_ini(config_dir: Path) -> bool:
         try:
             parser.read(candidate, encoding="utf-8")
         except (OSError, configparser.Error) as exc:
-            logger.warning("web_ui_smoke_bypass_read_failed path=%s error=%s", candidate, exc)
+            logger.warning(
+                "web_ui_smoke_bypass_read_failed path=%s error=%s", candidate, exc
+            )
             continue
         if parser.has_section("web_ui"):
-            return parser.getboolean("web_ui", "allow_local_smoke_bypass", fallback=False)
+            return parser.getboolean(
+                "web_ui", "allow_local_smoke_bypass", fallback=False
+            )
     return False
 
 
@@ -1103,7 +1191,11 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
         try:
             parser.read(settings_path, encoding="utf-8")
         except (OSError, configparser.Error) as exc:
-            logger.warning("support_settings_ini_load_failed", path=str(settings_path), error=str(exc))
+            logger.warning(
+                "support_settings_ini_load_failed",
+                path=str(settings_path),
+                error=str(exc),
+            )
             return SupportSettings(enabled=False, show_in_nav=False, methods=[])
         if not parser.has_section("support"):
             return SupportSettings(enabled=False, show_in_nav=False, methods=[])
@@ -1121,7 +1213,9 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
             try:
                 qr_uri = _image_data_uri(qr_path)
             except Exception as exc:
-                logger.warning("support_qr_load_failed", path=str(qr_path), error=str(exc))
+                logger.warning(
+                    "support_qr_load_failed", path=str(qr_path), error=str(exc)
+                )
                 qr_uri = ""
         method = SupportMethod(
             type="support",
@@ -1134,7 +1228,9 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
             qr_image_data_uri=qr_uri,
         )
         methods = [method] if enabled else []
-        return SupportSettings(enabled=enabled, show_in_nav=show_in_nav, methods=methods, text=text)
+        return SupportSettings(
+            enabled=enabled, show_in_nav=show_in_nav, methods=methods, text=text
+        )
 
     if config_path is None:
         return SupportSettings(enabled=False, show_in_nav=False, methods=[])
@@ -1156,7 +1252,9 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
     enabled = bool(support.get("enabled", False))
     ui = support.get("ui") if isinstance(support.get("ui"), dict) else {}
     show_in_nav = bool(ui.get("show_in_nav", False))
-    methods_raw = support.get("methods") if isinstance(support.get("methods"), list) else []
+    methods_raw = (
+        support.get("methods") if isinstance(support.get("methods"), list) else []
+    )
     if not enabled or not methods_raw:
         return _from_ini(settings_path)
     methods: list[SupportMethod] = []
@@ -1171,7 +1269,9 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
             try:
                 qr_uri = _image_data_uri(qr_path)
             except Exception as exc:
-                logger.warning("support_qr_load_failed", path=str(qr_path), error=str(exc))
+                logger.warning(
+                    "support_qr_load_failed", path=str(qr_path), error=str(exc)
+                )
                 qr_uri = ""
         methods.append(
             SupportMethod(
@@ -1200,9 +1300,7 @@ def _load_web_ui_secrets(config_dir: Path) -> tuple[str, float]:
         "general", "web_secret_key", fallback=""
     )
     if not secret_key:
-        logger.warning(
-            "WEB_SECRET_KEY missing; using deterministic local fallback key"
-        )
+        logger.warning("WEB_SECRET_KEY missing; using deterministic local fallback key")
         secret_key = "letterbot-local-web-secret"
     try:
         attention_cost = float(
@@ -1253,7 +1351,10 @@ def _parse_window_days(
 ) -> tuple[Optional[int], Optional[str]]:
     if raw is None or raw == "":
         if allowed is not None and default not in allowed:
-            return None, f"window_days must be one of {', '.join(map(str, sorted(allowed)))}"
+            return (
+                None,
+                f"window_days must be one of {', '.join(map(str, sorted(allowed)))}",
+            )
         if default < 1 or default > 365:
             return None, "window_days must be between 1 and 365"
         return default, None
@@ -1262,7 +1363,10 @@ def _parse_window_days(
     except (TypeError, ValueError):
         return None, "window_days must be an integer"
     if allowed is not None and value not in allowed:
-        return None, f"window_days must be one of {', '.join(map(str, sorted(allowed)))}"
+        return (
+            None,
+            f"window_days must be one of {', '.join(map(str, sorted(allowed)))}",
+        )
     if value < 1 or value > 365:
         return None, "window_days must be between 1 and 365"
     return value, None
@@ -1287,7 +1391,9 @@ def _parse_limit(
     return value, None
 
 
-def resolve_dashboard_vars(request, session, allow_pii: bool | None = None) -> DashboardVars:
+def resolve_dashboard_vars(
+    request, session, allow_pii: bool | None = None
+) -> DashboardVars:
     try:
         session_vars = session.get("dashboard_vars") or {}
     except Exception:
@@ -1301,9 +1407,7 @@ def resolve_dashboard_vars(request, session, allow_pii: bool | None = None) -> D
     def _parse_accounts(raw: object) -> list[str]:
         if isinstance(raw, list):
             return [
-                item for item in
-                (s.strip() for s in raw if isinstance(s, str))
-                if item
+                item for item in (s.strip() for s in raw if isinstance(s, str)) if item
             ]
         return _parse_account_emails(str(raw)) if raw not in (None, "") else []
 
@@ -1312,7 +1416,11 @@ def resolve_dashboard_vars(request, session, allow_pii: bool | None = None) -> D
         result: list[str] = []
         for item in emails:
             cleaned = str(item).strip()
-            if "@" in cleaned and not cleaned.startswith("[") and not cleaned.startswith('"'):
+            if (
+                "@" in cleaned
+                and not cleaned.startswith("[")
+                and not cleaned.startswith('"')
+            ):
                 result.append(cleaned)
         return result
 
@@ -1321,7 +1429,9 @@ def resolve_dashboard_vars(request, session, allow_pii: bool | None = None) -> D
     if not accounts:
         accounts = _parse_accounts(_session_value("account_emails"))
 
-    def _int_in_range(raw_value: object, minimum: int, maximum: int, default: int) -> int:
+    def _int_in_range(
+        raw_value: object, minimum: int, maximum: int, default: int
+    ) -> int:
         try:
             value = int(raw_value)
         except (TypeError, ValueError):
@@ -1410,7 +1520,17 @@ def _status_from_value(value: object) -> tuple[str, str]:
     if not text:
         return "unknown", "muted"
     lowered = text.lower()
-    if lowered in {"ok", "open", "healthy", "ready", "true", "1", "up", "pass", "green"}:
+    if lowered in {
+        "ok",
+        "open",
+        "healthy",
+        "ready",
+        "true",
+        "1",
+        "up",
+        "pass",
+        "green",
+    }:
         return "ok", "success"
     if lowered in {"warn", "warning", "degraded", "yellow"}:
         return "warn", "warn"
@@ -1419,7 +1539,9 @@ def _status_from_value(value: object) -> tuple[str, str]:
     return text, "muted"
 
 
-def _status_from_mapping(values: Mapping[str, object], *, keys: Iterable[str]) -> object | None:
+def _status_from_mapping(
+    values: Mapping[str, object], *, keys: Iterable[str]
+) -> object | None:
     for key in keys:
         if key in values:
             return values.get(key)
@@ -1437,8 +1559,12 @@ def _status_strip_view(
 ) -> dict[str, object]:
     status_strip = status_strip or {}
     system_mode = str(status_strip.get("system_mode") or "unknown")
-    gates_state = status_strip.get("gates_state") if isinstance(status_strip, Mapping) else {}
-    metrics_brief = status_strip.get("metrics_brief") if isinstance(status_strip, Mapping) else {}
+    gates_state = (
+        status_strip.get("gates_state") if isinstance(status_strip, Mapping) else {}
+    )
+    metrics_brief = (
+        status_strip.get("metrics_brief") if isinstance(status_strip, Mapping) else {}
+    )
     gates_state = gates_state if isinstance(gates_state, Mapping) else {}
     metrics_brief = metrics_brief if isinstance(metrics_brief, Mapping) else {}
     metrics_window = {}
@@ -1514,7 +1640,9 @@ def _golden_signals_view(golden_signals: Mapping[str, object] | None) -> dict[st
     tg_failure_rate = _format_percent(golden_signals.get("tg_failure_rate"))
     traffic_volume = _format_number(golden_signals.get("span_count"))
     db_size = _format_bytes(golden_signals.get("db_size_bytes"))
-    saturation_parts = [part for part in [db_size, f"{traffic_volume} spans"] if part != "–"]
+    saturation_parts = [
+        part for part in [db_size, f"{traffic_volume} spans"] if part != "–"
+    ]
     saturation = " • ".join(saturation_parts) if saturation_parts else "–"
     return {
         "latency_p50": f"{latency_p50} ms" if latency_p50 != "—" else "—",
@@ -1634,7 +1762,9 @@ def _status_class_for_label(label: str) -> str:
     return "muted"
 
 
-def _health_mode_explanation(mode: str, gates_state: Mapping[str, object] | None) -> str:
+def _health_mode_explanation(
+    mode: str, gates_state: Mapping[str, object] | None
+) -> str:
     if not mode:
         return "Health snapshots unavailable for this scope."
     normalized = mode.upper()
@@ -1748,15 +1878,19 @@ def _health_component_matrix_view(
             status_text = system_status or "unknown"
             status_class = system_class
         else:
-            status_entry = status_strip.get(key) if isinstance(status_strip, Mapping) else None
+            status_entry = (
+                status_strip.get(key) if isinstance(status_strip, Mapping) else None
+            )
             status_text = (
                 str(status_entry.get("text"))
-                if isinstance(status_entry, Mapping) and status_entry.get("text") is not None
+                if isinstance(status_entry, Mapping)
+                and status_entry.get("text") is not None
                 else "unknown"
             )
             status_class = (
                 str(status_entry.get("class"))
-                if isinstance(status_entry, Mapping) and status_entry.get("class") is not None
+                if isinstance(status_entry, Mapping)
+                and status_entry.get("class") is not None
                 else "muted"
             )
         incident = incident_by_component.get(label)
@@ -1820,14 +1954,22 @@ def _engineer_slowest_view(rows: list[dict[str, object]]) -> list[dict[str, obje
     for item in sorted_rows:
         results.append(
             {
-                "started": _format_ts_utc(item.get("started_at") or item.get("ts_start_utc")),
-                "total_ms": _format_number(item.get("total_ms") or item.get("total_duration_ms")),
+                "started": _format_ts_utc(
+                    item.get("started_at") or item.get("ts_start_utc")
+                ),
+                "total_ms": _format_number(
+                    item.get("total_ms") or item.get("total_duration_ms")
+                ),
                 "outcome": item.get("outcome") or "–",
                 "llm": " ".join(
-                    part for part in [item.get("llm_provider"), item.get("llm_model")] if part
+                    part
+                    for part in [item.get("llm_provider"), item.get("llm_model")]
+                    if part
                 )
                 or "–",
-                "snapshot": item.get("health_snapshot_id") or item.get("snapshot_id") or "–",
+                "snapshot": item.get("health_snapshot_id")
+                or item.get("snapshot_id")
+                or "–",
             }
         )
     return results
@@ -1851,7 +1993,9 @@ def _engineer_errors_view(rows: list[dict[str, object]]) -> list[dict[str, objec
                 "outcome": item.get("outcome") or "–",
                 "error_code": item.get("error_code") or "–",
                 "llm": " ".join(
-                    part for part in [item.get("llm_provider"), item.get("llm_model")] if part
+                    part
+                    for part in [item.get("llm_provider"), item.get("llm_model")]
+                    if part
                 )
                 or "–",
                 "total_ms": _format_number(item.get("total_duration_ms")),
@@ -1860,7 +2004,9 @@ def _engineer_errors_view(rows: list[dict[str, object]]) -> list[dict[str, objec
     return results
 
 
-def _latency_distribution_view(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def _latency_distribution_view(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
     if not rows:
         return []
     max_count = max(int(row.get("count") or 0) for row in rows) or 1
@@ -1946,7 +2092,9 @@ def _validate_learning_params(
     window_days, window_error = _parse_window_days(args.get("window"), 30)
     if window_error:
         return None, [], None, None, window_error
-    limit, limit_error = _parse_limit(args.get("limit"), default=50, max_limit=200, min_value=1)
+    limit, limit_error = _parse_limit(
+        args.get("limit"), default=50, max_limit=200, min_value=1
+    )
     if limit_error:
         return None, [], None, None, limit_error
     if account_emails and account_email and account_email not in account_emails:
@@ -1972,7 +2120,9 @@ def _available_accounts(db_path: Path) -> list[str]:
     accounts = [str(row[0]) for row in rows if row and row[0]]
     if accounts:
         return accounts
-    emails_query = "SELECT DISTINCT account_email FROM emails ORDER BY account_email ASC"
+    emails_query = (
+        "SELECT DISTINCT account_email FROM emails ORDER BY account_email ASC"
+    )
     try:
         with _open_readonly_connection(db_path) as conn:
             rows = conn.execute(emails_query).fetchall()
@@ -1997,7 +2147,9 @@ def _db_size_bytes(db_path: Path) -> int | None:
         return None
 
 
-def _decision_trace_payload(db_path: Path, email_id: int) -> tuple[list[dict[str, object]], str]:
+def _decision_trace_payload(
+    db_path: Path, email_id: int
+) -> tuple[list[dict[str, object]], str]:
     cache_key = ("decision_trace", str(db_path), int(email_id))
     cached = _DECISION_TRACE_CACHE.get(cache_key)
     if cached is not None:
@@ -2011,7 +2163,9 @@ def _decision_trace_payload(db_path: Path, email_id: int) -> tuple[list[dict[str
     return payload, updated
 
 
-def _decision_trace_histogram(db_path: Path, *, limit: int = 1000) -> tuple[list[dict[str, object]], str]:
+def _decision_trace_histogram(
+    db_path: Path, *, limit: int = 1000
+) -> tuple[list[dict[str, object]], str]:
     cache_key = ("decision_trace_hist", str(db_path), int(limit))
     cached = _DECISION_TRACE_HIST_CACHE.get(cache_key)
     if cached is not None:
@@ -2065,9 +2219,6 @@ def _validate_csrf_token() -> bool:
     return hmac.compare_digest(provided, expected)
 
 
-
-
-
 def _text_response(body: str, status_code: int) -> Response:
     if USING_FLASK_STUB:
         return Response(body, status_code=status_code)
@@ -2101,7 +2252,9 @@ def _extract_forwarded_ip() -> str | None:
     return real_ip or None
 
 
-def _trusted_forwarded_loopback_ip(remote_addr: str | None, bind_address: str) -> str | None:
+def _trusted_forwarded_loopback_ip(
+    remote_addr: str | None, bind_address: str
+) -> str | None:
     forwarded_ip = _extract_forwarded_ip()
     if not forwarded_ip:
         return None
@@ -2174,7 +2327,9 @@ def _parse_cidrs(values: Iterable[str]) -> list[ipaddress._BaseNetwork]:
     return networks
 
 
-def _ip_allowed(remote_addr: str | None, allow_cidrs: Iterable[ipaddress._BaseNetwork]) -> bool:
+def _ip_allowed(
+    remote_addr: str | None, allow_cidrs: Iterable[ipaddress._BaseNetwork]
+) -> bool:
     if _is_loopback(remote_addr):
         return True
     if not remote_addr:
@@ -2200,7 +2355,9 @@ def _is_loopback_bind(bind: str) -> bool:
         return False
 
 
-def _resolve_yaml_config_path(config_path: Path | None, config_dir: Path) -> Path | None:
+def _resolve_yaml_config_path(
+    config_path: Path | None, config_dir: Path
+) -> Path | None:
     if config_path is not None:
         return config_path
     resolved = resolve_config_paths(config_dir)
@@ -2258,16 +2415,18 @@ def _decision_trace_health_payload(
                     """,
                     ["DECISION_TRACE_RECORDED", *delivered_ids],
                 ).fetchall()
-                traces_found = {int(row[0]) for row in trace_rows if row and row[0] is not None}
+                traces_found = {
+                    int(row[0]) for row in trace_rows if row and row[0] is not None
+                }
     except sqlite3.OperationalError:
         delivered_ids = []
         traces_found = set()
     delivered_total = len(set(delivered_ids))
     traced_total = len(traces_found)
-    trace_coverage = (
-        traced_total / delivered_total if delivered_total else None
+    trace_coverage = traced_total / delivered_total if delivered_total else None
+    log_path = Path(
+        snapshot.get("drop_log_path") or "logs/decision_trace_failures.ndjson"
     )
-    log_path = Path(snapshot.get("drop_log_path") or "logs/decision_trace_failures.ndjson")
     tail_lines = _tail_lines(log_path, limit=50)
     tail_payload = [_scrub_pii_line(line) for line in tail_lines if line]
     return {
@@ -2310,7 +2469,9 @@ def create_app(
     app.config["ATTENTION_COST_PER_HOUR"] = max(0.0, float(attention_cost_per_hour))
     resolved_allow_pii = allow_pii
     if resolved_allow_pii is None:
-        resolved_allow_pii = str(os.getenv("WEB_OBSERVABILITY_ALLOW_PII", "0")).lower() in {
+        resolved_allow_pii = str(
+            os.getenv("WEB_OBSERVABILITY_ALLOW_PII", "0")
+        ).lower() in {
             "1",
             "true",
             "yes",
@@ -2327,7 +2488,9 @@ def create_app(
     app.config["WEB_UI_STARTED_AT"] = time.monotonic()
     app.config["DOCTOR_EXPORT_LAST_TS"] = {}
     app.config["DOCTOR_EXPORT_COOLDOWN_SECONDS"] = 60
-    app.config["DOCTOR_CONFIG_PATH"] = Path(config_path) if config_path else Path("config.yaml")
+    app.config["DOCTOR_CONFIG_PATH"] = (
+        Path(config_path) if config_path else Path("config.yaml")
+    )
     app.config["DOCTOR_LOG_PATH"] = Path(log_path) if log_path else Path("mailbot.log")
     app.config["DOCTOR_DIST_ROOT"] = Path(dist_root) if dist_root else Path.cwd()
     app.config["WEB_UI_BIND"] = str(web_ui_bind)
@@ -2361,11 +2524,11 @@ def create_app(
                 headers = request.headers
             except Exception:
                 headers = {}
-            header_token = headers.get("X-Api-Token") if isinstance(headers, Mapping) else None
+            header_token = (
+                headers.get("X-Api-Token") if isinstance(headers, Mapping) else None
+            )
             token = header_token or request.args.get("token")
-            if not _cockpit_token_ok(
-                token, app.config["COCKPIT_API_TOKEN"]
-            ):
+            if not _cockpit_token_ok(token, app.config["COCKPIT_API_TOKEN"]):
                 return Response("Forbidden", status=403)
             return None
         if request.endpoint in open_paths or request.path.startswith("/static"):
@@ -2428,7 +2591,10 @@ def create_app(
     @app.route("/support", methods=["GET"])
     def support() -> str:
         support_settings = app.config.get("SUPPORT_SETTINGS")
-        if not isinstance(support_settings, SupportSettings) or not support_settings.enabled:
+        if (
+            not isinstance(support_settings, SupportSettings)
+            or not support_settings.enabled
+        ):
             return _text_response("Not Found", 404)
         return _render_template(
             app,
@@ -2489,7 +2655,9 @@ def create_app(
             account_email = dashboard_vars.account_emails[0]
         if not account_email:
             account_email = default_account or ""
-        account_emails = dashboard_vars.account_emails or ([] if not account_email else [account_email])
+        account_emails = dashboard_vars.account_emails or (
+            [] if not account_email else [account_email]
+        )
         if account_email and account_email not in account_emails:
             account_emails.append(account_email)
         account_emails = sorted({email for email in account_emails if email})
@@ -2548,7 +2716,9 @@ def create_app(
                 )
             else:
                 cached_activity = (
-                    summary.get("recent_activity") if isinstance(summary, Mapping) else []
+                    summary.get("recent_activity")
+                    if isinstance(summary, Mapping)
+                    else []
                 )
             _COCKPIT_CACHE.set(activity_cache_key, cached_activity)
         activity_rows = _build_activity_table_rows(
@@ -2564,7 +2734,9 @@ def create_app(
             )
             cached_counts = _COCKPIT_CACHE.get(lane_cache_key)
             if isinstance(cached_counts, Mapping):
-                lane_counts = {key: int(cached_counts.get(key) or 0) for key in LANE_KEYS}
+                lane_counts = {
+                    key: int(cached_counts.get(key) or 0) for key in LANE_KEYS
+                }
             else:
                 lane_counts = analytics.lane_counts(
                     account_email=account_emails[0],
@@ -2572,7 +2744,9 @@ def create_app(
                     window_days=window_days,
                 )
                 _COCKPIT_CACHE.set(lane_cache_key, lane_counts)
-        digest_today = summary.get("today_digest") if isinstance(summary, Mapping) else {}
+        digest_today = (
+            summary.get("today_digest") if isinstance(summary, Mapping) else {}
+        )
         digest_week = summary.get("week_digest") if isinstance(summary, Mapping) else {}
         today_source = digest_today.get("items", []) if lane == "all" else []
         week_source = digest_week.get("items", []) if lane == "all" else []
@@ -2581,12 +2755,18 @@ def create_app(
         golden_signals = _golden_signals_view(
             summary.get("golden_signals") if isinstance(summary, Mapping) else {}
         )
-        engineer_payload = summary.get("engineer") if isinstance(summary, Mapping) else {}
+        engineer_payload = (
+            summary.get("engineer") if isinstance(summary, Mapping) else {}
+        )
         engineer_slowest = _engineer_slowest_view(
-            engineer_payload.get("slow_spans", []) if isinstance(engineer_payload, Mapping) else []
+            engineer_payload.get("slow_spans", [])
+            if isinstance(engineer_payload, Mapping)
+            else []
         )
         engineer_errors = _engineer_errors_view(
-            engineer_payload.get("recent_errors", []) if isinstance(engineer_payload, Mapping) else []
+            engineer_payload.get("recent_errors", [])
+            if isinstance(engineer_payload, Mapping)
+            else []
         )
         latency_distribution = _latency_distribution_view(
             engineer_payload.get("latency_distribution", [])
@@ -2598,7 +2778,9 @@ def create_app(
         stalled_threads: list[dict[str, object]] = []
         if account_emails:
             try:
-                top_senders = analytics.cockpit_top_senders(account_emails, days=30, limit=3)
+                top_senders = analytics.cockpit_top_senders(
+                    account_emails, days=30, limit=3
+                )
             except Exception:
                 top_senders = []
             try:
@@ -2612,7 +2794,9 @@ def create_app(
             except Exception:
                 silent_contacts = []
             try:
-                stalled_threads = analytics.cockpit_stalled_threads(account_emails, days=30, limit=3)
+                stalled_threads = analytics.cockpit_stalled_threads(
+                    account_emails, days=30, limit=3
+                )
             except Exception:
                 stalled_threads = []
 
@@ -2856,7 +3040,9 @@ def create_app(
                 )
                 cached_counts = _COCKPIT_CACHE.get(lane_cache_key)
                 if isinstance(cached_counts, Mapping):
-                    lane_counts = {key: int(cached_counts.get(key) or 0) for key in LANE_KEYS}
+                    lane_counts = {
+                        key: int(cached_counts.get(key) or 0) for key in LANE_KEYS
+                    }
                 else:
                     lane_counts = analytics.lane_counts(
                         account_email=account_emails[0],
@@ -2905,11 +3091,19 @@ def create_app(
             rows = payload.get("rows") if isinstance(payload, Mapping) else []
             if not isinstance(rows, list):
                 rows = []
-            total_count = int(payload.get("total_count") or 0) if isinstance(payload, Mapping) else 0
+            total_count = (
+                int(payload.get("total_count") or 0)
+                if isinstance(payload, Mapping)
+                else 0
+            )
         else:
             error_message = error_message or "Select an account to view the archive."
 
-        total_pages = max(1, int(math.ceil(total_count / ARCHIVE_PAGE_SIZE))) if total_count else 1
+        total_pages = (
+            max(1, int(math.ceil(total_count / ARCHIVE_PAGE_SIZE)))
+            if total_count
+            else 1
+        )
         if page > total_pages:
             page = total_pages
 
@@ -2951,7 +3145,9 @@ def create_app(
 
         formatted_rows = []
         for row in rows:
-            sanitized_row = _sanitize_archive_row(row if isinstance(row, Mapping) else {})
+            sanitized_row = _sanitize_archive_row(
+                row if isinstance(row, Mapping) else {}
+            )
             e2e_ms = None
             e2e_seconds = sanitized_row.get("e2e_seconds")
             if e2e_seconds is not None:
@@ -3056,12 +3252,18 @@ def create_app(
             rows = payload.get("rows") if isinstance(payload, Mapping) else []
             if not isinstance(rows, list):
                 rows = []
-            total_count = int(payload.get("total_count") or 0) if isinstance(payload, Mapping) else 0
+            total_count = (
+                int(payload.get("total_count") or 0)
+                if isinstance(payload, Mapping)
+                else 0
+            )
         else:
             error_message = error_message or "Select an account to view commitments."
 
         total_pages = (
-            max(1, int(math.ceil(total_count / COMMITMENTS_PAGE_SIZE))) if total_count else 1
+            max(1, int(math.ceil(total_count / COMMITMENTS_PAGE_SIZE)))
+            if total_count
+            else 1
         )
         if page > total_pages:
             page = total_pages
@@ -3116,9 +3318,11 @@ def create_app(
                             "event_type": evidence.get("event_type") or "",
                             "stage": evidence.get("stage") or "",
                             "outcome": evidence.get("outcome") or "",
-                            "duration": _format_duration_ms(duration_ms)
-                            if duration_ms is not None
-                            else "",
+                            "duration": (
+                                _format_duration_ms(duration_ms)
+                                if duration_ms is not None
+                                else ""
+                            ),
                             "event_id": evidence.get("event_id") or "",
                         }
                     )
@@ -3189,7 +3393,9 @@ def create_app(
         mode = _resolve_cockpit_mode(request, session)
         include_engineer = mode == "engineer"
         analytics = _analytics()
-        detail = analytics.email_forensics_detail(email_id=email_id, reveal_pii=reveal_pii)
+        detail = analytics.email_forensics_detail(
+            email_id=email_id, reveal_pii=reveal_pii
+        )
         if not detail:
             return (
                 _render_template(
@@ -3274,9 +3480,11 @@ def create_app(
                     "event_type": item.get("event_type") or "",
                     "stage": item.get("stage") or "",
                     "outcome": item.get("outcome") or "",
-                    "duration": _format_duration_ms(duration_ms)
-                    if duration_ms is not None
-                    else "",
+                    "duration": (
+                        _format_duration_ms(duration_ms)
+                        if duration_ms is not None
+                        else ""
+                    ),
                 }
             )
 
@@ -3317,7 +3525,9 @@ def create_app(
             pii_enabled=reveal_pii,
             cockpit_mode=mode,
             mode_basic_url=url_for("email_details", email_id=email_id, mode="basic"),
-            mode_engineer_url=url_for("email_details", email_id=email_id, mode="engineer"),
+            mode_engineer_url=url_for(
+                "email_details", email_id=email_id, mode="engineer"
+            ),
             engineer_mode=include_engineer,
             hide_limit=True,
             detail={
@@ -3352,7 +3562,9 @@ def create_app(
             account_email = dashboard_vars.account_emails[0]
         if not account_email:
             account_email = default_account or ""
-        account_emails = dashboard_vars.account_emails or ([] if not account_email else [account_email])
+        account_emails = dashboard_vars.account_emails or (
+            [] if not account_email else [account_email]
+        )
         if account_email and account_email not in account_emails:
             account_emails.append(account_email)
         account_emails = sorted({email for email in account_emails if email})
@@ -3434,7 +3646,11 @@ def create_app(
         if event_type == "email_processed":
             return payload_text or "email processed"
         if event_type == "priority_classified":
-            return f"priority {payload_text}".strip() if payload_text else "priority classified"
+            return (
+                f"priority {payload_text}".strip()
+                if payload_text
+                else "priority classified"
+            )
         if event_type == "llm_summary_generated":
             return payload_text or "llm summary generated"
         if event_type in {"priority_correction", "priority_correction_recorded"}:
@@ -3552,7 +3768,9 @@ def create_app(
                     (day_ago_ts, *account_event_params),
                 ).fetchone()
                 if fallback_row:
-                    payload["llm_fallback_today"] = int(fallback_row["llm_fallback_today"] or 0)
+                    payload["llm_fallback_today"] = int(
+                        fallback_row["llm_fallback_today"] or 0
+                    )
 
                 pr_row = conn.execute(
                     (
@@ -3598,7 +3816,9 @@ def create_app(
                     (week_ago_ts, *account_event_params),
                 ).fetchone()
                 surprises = int(surprise_row["surprises"] or 0) if surprise_row else 0
-                corrections = int(surprise_row["corrections"] or 0) if surprise_row else 0
+                corrections = (
+                    int(surprise_row["corrections"] or 0) if surprise_row else 0
+                )
                 payload["surprise_rate"] = (
                     round(surprises / corrections, 4) if corrections > 0 else 0.0
                 )
@@ -3622,8 +3842,12 @@ def create_app(
                 if interpretation_row:
                     payload["interpretation"] = {
                         "invoice_count": int(interpretation_row["invoice_count"] or 0),
-                        "contract_count": int(interpretation_row["contract_count"] or 0),
-                        "invoice_total": int(round(float(interpretation_row["invoice_total"] or 0))),
+                        "contract_count": int(
+                            interpretation_row["contract_count"] or 0
+                        ),
+                        "invoice_total": int(
+                            round(float(interpretation_row["invoice_total"] or 0))
+                        ),
                     }
 
                 try:
@@ -3663,14 +3887,18 @@ def create_app(
                     analytics = _analytics()
                     account_email = account_scope[0] if account_scope else ""
                     if account_email:
-                        payload["top_contacts"] = analytics.top_sender_relationship_profiles(
-                            account_email=account_email,
-                            account_emails=account_scope,
-                            days=7,
-                            limit=5,
+                        payload["top_contacts"] = (
+                            analytics.top_sender_relationship_profiles(
+                                account_email=account_email,
+                                account_emails=account_scope,
+                                days=7,
+                                limit=5,
+                            )
                         )
                 except Exception as exc:
-                    logger.warning("dashboard_top_contacts_failed", extra={"error": str(exc)})
+                    logger.warning(
+                        "dashboard_top_contacts_failed", extra={"error": str(exc)}
+                    )
                 _DASHBOARD_CACHE["payload"] = payload
                 _DASHBOARD_CACHE["ts"] = now
                 _DASHBOARD_CACHE["key"] = cache_key
@@ -3712,7 +3940,9 @@ def create_app(
             window_days=window_days,
             limit=50,
             sort=sort_mode,
-            attention_cost_per_hour=float(app.config.get("ATTENTION_COST_PER_HOUR", 0.0)),
+            attention_cost_per_hour=float(
+                app.config.get("ATTENTION_COST_PER_HOUR", 0.0)
+            ),
         )
         totals_payload = {
             "window_days": summary.get("window_days"),
@@ -3765,7 +3995,9 @@ def create_app(
             for entry in accounts:
                 if not isinstance(entry, Mapping):
                     continue
-                account_label = entry.get("account_label") or entry.get("account_email") or ""
+                account_label = (
+                    entry.get("account_label") or entry.get("account_email") or ""
+                )
                 masked_label = _mask_email_address(account_label)
                 sanitized = dict(entry)
                 sanitized["account_label"] = masked_label or ""
@@ -4118,7 +4350,9 @@ def create_app(
         )
         if error:
             return jsonify({"error": error}), 400
-        limit, limit_error = _parse_limit(request.args.get("limit"), default=200, max_limit=500)
+        limit, limit_error = _parse_limit(
+            request.args.get("limit"), default=200, max_limit=500
+        )
         if limit_error:
             return jsonify({"error": limit_error}), 400
         resolved_window = window_days or 30
@@ -4147,7 +4381,9 @@ def create_app(
             resp = jsonify({"error": error})
             resp.status_code = 400
             return resp
-        limit, limit_error = _parse_limit(request.args.get("limit"), default=50, max_limit=200)
+        limit, limit_error = _parse_limit(
+            request.args.get("limit"), default=50, max_limit=200
+        )
         if limit_error:
             resp = jsonify({"error": limit_error})
             resp.status_code = 400
@@ -4208,8 +4444,10 @@ def create_app(
     def api_learning_summary():
         accounts = _available_accounts(app.config["DB_PATH"])
         default_account = accounts[0] if accounts else None
-        account_email, account_emails, window_days, limit, error = _validate_learning_params(
-            args=request.args, default_account=default_account
+        account_email, account_emails, window_days, limit, error = (
+            _validate_learning_params(
+                args=request.args, default_account=default_account
+            )
         )
         if error:
             resp = jsonify({"error": error})
@@ -4228,8 +4466,10 @@ def create_app(
     def api_learning_timeline():
         accounts = _available_accounts(app.config["DB_PATH"])
         default_account = accounts[0] if accounts else None
-        account_email, account_emails, window_days, limit, error = _validate_learning_params(
-            args=request.args, default_account=default_account
+        account_email, account_emails, window_days, limit, error = (
+            _validate_learning_params(
+                args=request.args, default_account=default_account
+            )
         )
         if error:
             resp = jsonify({"error": error})
@@ -4251,7 +4491,9 @@ def create_app(
         accounts = _available_accounts(app.config["DB_PATH"])
         default_account = accounts[0] if accounts else None
         account_email_arg = (request.args.get("account_email") or "").strip()
-        resolved_account = account_email_arg or (dashboard_vars.account_emails[0] if dashboard_vars.account_emails else "")
+        resolved_account = account_email_arg or (
+            dashboard_vars.account_emails[0] if dashboard_vars.account_emails else ""
+        )
         if not resolved_account and default_account:
             resolved_account = default_account
         account_email, account_emails, window_days, error = _validate_latency_params(
@@ -4265,7 +4507,9 @@ def create_app(
             default_account=default_account,
             allowed_windows=None,
         )
-        error_message = error or ("Select an account to view latency." if not account_email else "")
+        error_message = error or (
+            "Select an account to view latency." if not account_email else ""
+        )
         analytics = _analytics()
         summary: dict[str, object] | None = None
         recent_errors: list[dict[str, object]] = []
@@ -4305,21 +4549,57 @@ def create_app(
         stage_breakdown: list[dict[str, object]] = []
         slowest_rows: list[dict[str, object]] = []
         error_rows: list[dict[str, object]] = []
-        activity_table_rows: list[dict[str, object]] = _build_activity_table_rows(activity_rows)
+        activity_table_rows: list[dict[str, object]] = _build_activity_table_rows(
+            activity_rows
+        )
 
         if summary:
             metrics_cards = [
-                {"label": "Pipeline p50", "value": _format_number(summary.get("total_duration_ms_p50")), "suffix": "ms"},
-                {"label": "Pipeline p90", "value": _format_number(summary.get("total_duration_ms_p90")), "suffix": "ms"},
-                {"label": "Pipeline p95", "value": _format_number(summary.get("total_duration_ms_p95")), "suffix": "ms"},
-                {"label": "LLM p90", "value": _format_number(summary.get("llm_latency_ms_p90")), "suffix": "ms"},
-                {"label": "Error rate", "value": _format_percent(summary.get("error_rate")), "suffix": "%"},
-                {"label": "Fallback rate", "value": _format_percent(summary.get("fallback_rate")), "suffix": "%"},
-                {"label": "Quality avg", "value": _format_number(summary.get("llm_quality_avg")), "suffix": "score"},
-                {"label": "Samples", "value": _format_number(sample_size), "suffix": "spans"},
+                {
+                    "label": "Pipeline p50",
+                    "value": _format_number(summary.get("total_duration_ms_p50")),
+                    "suffix": "ms",
+                },
+                {
+                    "label": "Pipeline p90",
+                    "value": _format_number(summary.get("total_duration_ms_p90")),
+                    "suffix": "ms",
+                },
+                {
+                    "label": "Pipeline p95",
+                    "value": _format_number(summary.get("total_duration_ms_p95")),
+                    "suffix": "ms",
+                },
+                {
+                    "label": "LLM p90",
+                    "value": _format_number(summary.get("llm_latency_ms_p90")),
+                    "suffix": "ms",
+                },
+                {
+                    "label": "Error rate",
+                    "value": _format_percent(summary.get("error_rate")),
+                    "suffix": "%",
+                },
+                {
+                    "label": "Fallback rate",
+                    "value": _format_percent(summary.get("fallback_rate")),
+                    "suffix": "%",
+                },
+                {
+                    "label": "Quality avg",
+                    "value": _format_number(summary.get("llm_quality_avg")),
+                    "suffix": "score",
+                },
+                {
+                    "label": "Samples",
+                    "value": _format_number(sample_size),
+                    "suffix": "spans",
+                },
             ]
             total_avg = _safe_float(summary.get("total_duration_ms_avg")) or 0.0
-            stage_stats = summary.get("stage_durations") if isinstance(summary, dict) else {}
+            stage_stats = (
+                summary.get("stage_durations") if isinstance(summary, dict) else {}
+            )
             for stage_name in sorted(stage_stats.keys()):
                 stats = stage_stats.get(stage_name) or {}
                 avg = _safe_float(stats.get("avg")) or 0.0
@@ -4353,7 +4633,12 @@ def create_app(
                         "total_ms": _format_number(item.get("total_ms")),
                         "outcome": item.get("outcome") or "–",
                         "llm": " ".join(
-                            part for part in [item.get("llm_provider"), item.get("llm_model")] if part
+                            part
+                            for part in [
+                                item.get("llm_provider"),
+                                item.get("llm_model"),
+                            ]
+                            if part
                         )
                         or "–",
                         "snapshot": item.get("health_snapshot_id") or "–",
@@ -4375,7 +4660,12 @@ def create_app(
                         "outcome": item.get("outcome") or "–",
                         "error_code": item.get("error_code") or "–",
                         "llm": " ".join(
-                            part for part in [item.get("llm_provider"), item.get("llm_model")] if part
+                            part
+                            for part in [
+                                item.get("llm_provider"),
+                                item.get("llm_model"),
+                            ]
+                            if part
                         )
                         or "–",
                         "total_ms": _format_number(item.get("total_duration_ms")),
@@ -4445,7 +4735,9 @@ def create_app(
             if len(account_emails) == 1:
                 scope_hint = f"{account_emails[0]} • last {window_days or 30} days"
             else:
-                scope_hint = f"{len(account_emails)} accounts • last {window_days or 30} days"
+                scope_hint = (
+                    f"{len(account_emails)} accounts • last {window_days or 30} days"
+                )
         total_minutes = float(
             summary.get("totals", {}).get("estimated_read_minutes") or 0.0
         )
@@ -4503,7 +4795,9 @@ def create_app(
         rows = summary.get("entities", [])
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["Contact", "Emails", "Attention minutes", "Estimated cost", "Signals"])
+        writer.writerow(
+            ["Contact", "Emails", "Attention minutes", "Estimated cost", "Signals"]
+        )
         for row in rows if isinstance(rows, list) else []:
             writer.writerow(
                 [
@@ -4515,7 +4809,9 @@ def create_app(
                 ]
             )
         csv_text = output.getvalue()
-        response = Response(csv_text.encode("utf-8"), mimetype="text/csv; charset=utf-8")
+        response = Response(
+            csv_text.encode("utf-8"), mimetype="text/csv; charset=utf-8"
+        )
         response.headers = {"Content-Disposition": "attachment; filename=attention.csv"}
         return response
 
@@ -4523,10 +4819,14 @@ def create_app(
     def learning():
         accounts = _available_accounts(app.config["DB_PATH"])
         default_account = accounts[0] if accounts else None
-        account_email, account_emails, window_days, limit, error = _validate_learning_params(
-            args=request.args, default_account=default_account
+        account_email, account_emails, window_days, limit, error = (
+            _validate_learning_params(
+                args=request.args, default_account=default_account
+            )
         )
-        error_message = error or ("Account selection required" if not account_email else "")
+        error_message = error or (
+            "Account selection required" if not account_email else ""
+        )
         analytics = _analytics()
         summary: dict[str, object] | None = None
         timeline: dict[str, object] | None = None
@@ -4561,7 +4861,11 @@ def create_app(
         account_options = _build_select_options(accounts, account_email)
         window_options = _build_window_options(window_days or 30)
         limit_value = str(limit or 50)
-        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+        error_block = (
+            f'<div class="alert">{html.escape(error_message)}</div>'
+            if error_message
+            else ""
+        )
         return _render_template(
             app,
             "learning.html",
@@ -4594,7 +4898,9 @@ def create_app(
             account_email = dashboard_vars.account_emails[0]
         if not account_email:
             account_email = default_account or ""
-        account_emails = dashboard_vars.account_emails or ([] if not account_email else [account_email])
+        account_emails = dashboard_vars.account_emails or (
+            [] if not account_email else [account_email]
+        )
         if account_email and account_email not in account_emails:
             account_emails.append(account_email)
         account_emails = sorted({email for email in account_emails if email})
@@ -4612,9 +4918,15 @@ def create_app(
             mode=mode,
         )
         current = summary.get("current") if isinstance(summary, Mapping) else None
-        status_strip = summary.get("status_strip") if isinstance(summary, Mapping) else None
-        metrics_digest = summary.get("metrics_digest") if isinstance(summary, Mapping) else {}
-        metrics_brief = summary.get("metrics_brief") if isinstance(summary, Mapping) else {}
+        status_strip = (
+            summary.get("status_strip") if isinstance(summary, Mapping) else None
+        )
+        metrics_digest = (
+            summary.get("metrics_digest") if isinstance(summary, Mapping) else {}
+        )
+        metrics_brief = (
+            summary.get("metrics_brief") if isinstance(summary, Mapping) else {}
+        )
         trend = summary.get("trend") if isinstance(summary, Mapping) else []
 
         incidents = _health_incidents_payload(
@@ -4635,7 +4947,11 @@ def create_app(
 
         if isinstance(current, Mapping):
             system_mode = str(current.get("system_mode") or "")
-            gates_state = current.get("gates_state") if isinstance(current.get("gates_state"), Mapping) else {}
+            gates_state = (
+                current.get("gates_state")
+                if isinstance(current.get("gates_state"), Mapping)
+                else {}
+            )
             last_snapshot = _format_ts_utc(current.get("ts_end_utc"))
         else:
             system_mode = ""
@@ -4721,7 +5037,9 @@ def create_app(
             account_email = dashboard_vars.account_emails[0]
         if not account_email:
             account_email = default_account or ""
-        account_emails = dashboard_vars.account_emails or ([] if not account_email else [account_email])
+        account_emails = dashboard_vars.account_emails or (
+            [] if not account_email else [account_email]
+        )
         if account_email and account_email not in account_emails:
             account_emails.append(account_email)
         account_emails = sorted({email for email in account_emails if email})
@@ -4738,7 +5056,9 @@ def create_app(
             mode=mode,
         )
         current = summary.get("current") if isinstance(summary, Mapping) else None
-        status_strip = summary.get("status_strip") if isinstance(summary, Mapping) else None
+        status_strip = (
+            summary.get("status_strip") if isinstance(summary, Mapping) else None
+        )
         incidents = _health_incidents_payload(
             account_emails=account_emails,
             window_days=window_days,
@@ -4840,7 +5160,9 @@ def create_app(
                 )
                 cached_counts = _COCKPIT_CACHE.get(lane_cache_key)
                 if isinstance(cached_counts, Mapping):
-                    lane_counts = {key: int(cached_counts.get(key) or 0) for key in LANE_KEYS}
+                    lane_counts = {
+                        key: int(cached_counts.get(key) or 0) for key in LANE_KEYS
+                    }
                 else:
                     lane_counts = analytics.lane_counts(
                         account_email=account_emails[0],
@@ -4898,7 +5220,11 @@ def create_app(
             )
 
         total_groups = int(narrative.get("total_groups") or 0)
-        total_pages = max(1, int(math.ceil(total_groups / EVENTS_GROUP_PAGE_SIZE))) if total_groups else 1
+        total_pages = (
+            max(1, int(math.ceil(total_groups / EVENTS_GROUP_PAGE_SIZE)))
+            if total_groups
+            else 1
+        )
         if page > total_pages:
             page = total_pages
 
@@ -4982,9 +5308,13 @@ def create_app(
             default_account=default_account,
             window_default=30,
         )
-        limit, limit_error = _parse_limit(request.args.get("limit"), default=50, max_limit=200)
-        error_message = error or limit_error or (
-            "Account selection required" if not account_email else ""
+        limit, limit_error = _parse_limit(
+            request.args.get("limit"), default=50, max_limit=200
+        )
+        error_message = (
+            error
+            or limit_error
+            or ("Account selection required" if not account_email else "")
         )
         analytics = _analytics()
         graph: dict[str, object] | None = None
@@ -4998,7 +5328,11 @@ def create_app(
         account_options = _build_select_options(accounts, account_email)
         window_options = _build_window_options(window_days or 30)
         limit_value = str(limit or 50)
-        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+        error_block = (
+            f'<div class="alert">{html.escape(error_message)}</div>'
+            if error_message
+            else ""
+        )
         graph_json = json.dumps(graph or {}, ensure_ascii=False)
         return _render_template(
             app,
@@ -5043,7 +5377,11 @@ def create_app(
                 error_message = "Contact unavailable"
         account_options = _build_select_options(accounts, account_email)
         window_options = _build_window_options(window_days or 30)
-        error_block = f'<div class="alert">{html.escape(error_message)}</div>' if error_message else ""
+        error_block = (
+            f'<div class="alert">{html.escape(error_message)}</div>'
+            if error_message
+            else ""
+        )
         detail_json = json.dumps(detail or {}, ensure_ascii=False)
         return _render_template(
             app,
@@ -5084,16 +5422,22 @@ def _build_access_urls(*, bind_address: str, port: int) -> tuple[str, str | None
     return f"http://127.0.0.1:{port}/", None
 
 
-
-
 def main() -> None:
     require_runtime_for("web_ui")
     parser = argparse.ArgumentParser(description="Letterbot Observability Console")
     parser.add_argument("--db", type=Path, help="Path to SQLite database")
-    parser.add_argument("--config", type=Path, default=CONFIG_DIR, help="Config directory")
+    parser.add_argument(
+        "--config", type=Path, default=CONFIG_DIR, help="Config directory"
+    )
     parser.add_argument("--config-yaml", type=Path, help="Path to config.yaml")
-    parser.add_argument("--bind", help="Bind address (default from settings.ini [web].host)")
-    parser.add_argument("--port", type=int, help="Port to listen on (default from settings.ini [web].port)")
+    parser.add_argument(
+        "--bind", help="Bind address (default from settings.ini [web].host)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        help="Port to listen on (default from settings.ini [web].port)",
+    )
     args = parser.parse_args()
 
     config_dir = args.config if args.config else CONFIG_DIR
@@ -5149,11 +5493,15 @@ def main() -> None:
         storage = load_storage_config(config_dir)
         db_path = storage.db_path
 
-    local_url, lan_url = _build_access_urls(bind_address=str(bind_address), port=int(port))
+    local_url, lan_url = _build_access_urls(
+        bind_address=str(bind_address), port=int(port)
+    )
     logger.info("WEB_UI_URL_LOCAL %s", local_url)
     if lan_url:
         logger.info("WEB_UI_URL_LAN %s", lan_url)
-        logger.info("WEB_UI_FIREWALL_HINT Firewall may block incoming connections; see docs.")
+        logger.info(
+            "WEB_UI_FIREWALL_HINT Firewall may block incoming connections; see docs."
+        )
 
     project_root = Path(__file__).resolve().parents[2]
     app = create_app(

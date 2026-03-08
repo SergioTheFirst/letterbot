@@ -105,9 +105,7 @@ def test_deadlock_insights_dedupe_and_fields(tmp_path) -> None:
         window_days=7,
         limit=5,
     )
-    item = next(
-        insight for insight in insights if insight["thread_key"] == thread_one
-    )
+    item = next(insight for insight in insights if insight["thread_key"] == thread_one)
     assert item["subject"] == "Сделка"
     assert item["from_email"] == "new@example.com"
 

@@ -5,8 +5,13 @@ from pathlib import Path
 
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
-from mailbot_v26.observability.calibration_report import compute_priority_calibration_report
-from mailbot_v26.observability.decision_trace_v1 import DecisionTraceV1, to_canonical_json
+from mailbot_v26.observability.calibration_report import (
+    compute_priority_calibration_report,
+)
+from mailbot_v26.observability.decision_trace_v1 import (
+    DecisionTraceV1,
+    to_canonical_json,
+)
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 
@@ -110,18 +115,32 @@ def test_priority_calibration_report_basic_and_drift(tmp_path: Path) -> None:
         )
 
     _emit_correction(
-        emitter, email_id=100, ts_utc=(prev_start + timedelta(hours=1)).timestamp(), decision_key="prev-1"
+        emitter,
+        email_id=100,
+        ts_utc=(prev_start + timedelta(hours=1)).timestamp(),
+        decision_key="prev-1",
     )
     _emit_correction(
-        emitter, email_id=200, ts_utc=(last_start + timedelta(hours=1)).timestamp(), decision_key="last-1"
+        emitter,
+        email_id=200,
+        ts_utc=(last_start + timedelta(hours=1)).timestamp(),
+        decision_key="last-1",
     )
     _emit_correction(
-        emitter, email_id=201, ts_utc=(last_start + timedelta(hours=2)).timestamp(), decision_key="last-2"
+        emitter,
+        email_id=201,
+        ts_utc=(last_start + timedelta(hours=2)).timestamp(),
+        decision_key="last-2",
     )
     _emit_correction(
-        emitter, email_id=202, ts_utc=(last_start + timedelta(hours=3)).timestamp(), decision_key="last-3"
+        emitter,
+        email_id=202,
+        ts_utc=(last_start + timedelta(hours=3)).timestamp(),
+        decision_key="last-3",
     )
-    _emit_surprise(emitter, email_id=200, ts_utc=(last_start + timedelta(hours=1)).timestamp())
+    _emit_surprise(
+        emitter, email_id=200, ts_utc=(last_start + timedelta(hours=1)).timestamp()
+    )
 
     report = compute_priority_calibration_report(
         db_path=db_path,

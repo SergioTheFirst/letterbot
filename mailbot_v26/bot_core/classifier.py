@@ -4,12 +4,12 @@ Section IV: attachments are classified purely by heuristics (no ML).
 Section II.3: deterministic, low-memory rules only.
 Section VIII: guaranteed mode—safe handling of corrupt files.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
-
 
 Category = str
 
@@ -69,13 +69,19 @@ class AttachmentProbe:
         return (self.content_bytes or b"")[:length]
 
 
-def classify_attachment(filename: str = "", mime_type: str = "", content_bytes: bytes = b"") -> Category:
+def classify_attachment(
+    filename: str = "", mime_type: str = "", content_bytes: bytes = b""
+) -> Category:
     """Classify an attachment without ML.
 
     Priority order: MIME → extension → magic sniff → text heuristic → UNKNOWN.
     """
 
-    probe = AttachmentProbe(filename=filename or "", mime_type=(mime_type or "").lower(), content_bytes=content_bytes or b"")
+    probe = AttachmentProbe(
+        filename=filename or "",
+        mime_type=(mime_type or "").lower(),
+        content_bytes=content_bytes or b"",
+    )
 
     # 1) MIME type (already authoritative)
     if probe.mime_type in _MIME_MAP:
@@ -120,7 +126,9 @@ def classify_attachment(filename: str = "", mime_type: str = "", content_bytes: 
     return "UNKNOWN"
 
 
-def classify_by_keywords(filename: str, text_sample: str = "", content_type: str = "") -> Tuple[Category | None, float]:
+def classify_by_keywords(
+    filename: str, text_sample: str = "", content_type: str = ""
+) -> Tuple[Category | None, float]:
     """Compatibility wrapper returning deterministic attachment categories.
 
     Returns (category, confidence) with 1.0 for known deterministic matches,
@@ -133,7 +141,9 @@ def classify_by_keywords(filename: str, text_sample: str = "", content_type: str
     return (category, 1.0)
 
 
-def _looks_like_text(data: bytes, sample: int = 256, binary_threshold: float = 0.10) -> bool:
+def _looks_like_text(
+    data: bytes, sample: int = 256, binary_threshold: float = 0.10
+) -> bool:
     sample_bytes = data[:sample]
     if not sample_bytes:
         return False
@@ -143,12 +153,17 @@ def _looks_like_text(data: bytes, sample: int = 256, binary_threshold: float = 0
 
 # -------------------- Self-test --------------------
 
+
 def _self_test_entries() -> List[Tuple[str, str, bytes]]:
     return [
         ("report.pdf", "application/pdf", _PDF_MAGIC + b" test"),
         ("contract.DOCX", "", _ZIP_MAGIC + b"..."),
         ("legacy_form.doc", "application/msword", _DOC_MAGIC + b"..."),
-        ("sheet.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", _ZIP_MAGIC + b"..."),
+        (
+            "sheet.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            _ZIP_MAGIC + b"...",
+        ),
         ("legacy.xls", "", _DOC_MAGIC + b"..."),
         ("photo.jpeg", "image/jpeg", _JPEG_MAGIC + b"morebytes"),
         ("diagram.png", "", _PNG_MAGIC + b"..."),
@@ -162,7 +177,9 @@ def _run_self_test() -> bool:
     entries = _self_test_entries()
     results: List[Tuple[str, Category]] = []
     for name, mime, data in entries:
-        category = classify_attachment(filename=name, mime_type=mime, content_bytes=data)
+        category = classify_attachment(
+            filename=name, mime_type=mime, content_bytes=data
+        )
         results.append((name, category))
         print(f"{name:15s} | mime={mime or '-':45s} | -> {category}")
 

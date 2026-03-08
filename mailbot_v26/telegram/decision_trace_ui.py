@@ -41,7 +41,9 @@ def _safe_callback(value: str) -> str:
 
 def _fallback_keyboard(*, email_id: int, expanded: bool) -> dict[str, Any]:
     label = "◀ Скрыть" if expanded else "Почему так?"
-    callback = build_decision_trace_callback(HIDE_PREFIX if expanded else DETAILS_PREFIX, email_id)
+    callback = build_decision_trace_callback(
+        HIDE_PREFIX if expanded else DETAILS_PREFIX, email_id
+    )
     return {"inline_keyboard": [[{"text": label, "callback_data": callback}]]}
 
 
@@ -90,21 +92,40 @@ def build_email_actions_keyboard(
             back_row = [
                 {
                     "text": "↩ Назад",
-                    "callback_data": _safe_callback(f"{PRIO_BACK_PREFIX}{email_id_int}"),
+                    "callback_data": _safe_callback(
+                        f"{PRIO_BACK_PREFIX}{email_id_int}"
+                    ),
                 }
             ]
             return {"inline_keyboard": [priority_row, back_row]}
 
         if snooze_menu:
             snooze_row = [
-                {"text": "2ч", "callback_data": _safe_callback(f"{SNOOZE_SET_PREFIX}{email_id_int}:2h")},
-                {"text": "6ч", "callback_data": _safe_callback(f"{SNOOZE_SET_PREFIX}{email_id_int}:6h")},
-                {"text": "Завтра", "callback_data": _safe_callback(f"{SNOOZE_SET_PREFIX}{email_id_int}:tom")},
+                {
+                    "text": "2ч",
+                    "callback_data": _safe_callback(
+                        f"{SNOOZE_SET_PREFIX}{email_id_int}:2h"
+                    ),
+                },
+                {
+                    "text": "6ч",
+                    "callback_data": _safe_callback(
+                        f"{SNOOZE_SET_PREFIX}{email_id_int}:6h"
+                    ),
+                },
+                {
+                    "text": "Завтра",
+                    "callback_data": _safe_callback(
+                        f"{SNOOZE_SET_PREFIX}{email_id_int}:tom"
+                    ),
+                },
             ]
             back_row = [
                 {
                     "text": "↩ Назад",
-                    "callback_data": _safe_callback(f"{SNOOZE_BACK_PREFIX}{email_id_int}"),
+                    "callback_data": _safe_callback(
+                        f"{SNOOZE_BACK_PREFIX}{email_id_int}"
+                    ),
                 }
             ]
             return {"inline_keyboard": [snooze_row, back_row]}

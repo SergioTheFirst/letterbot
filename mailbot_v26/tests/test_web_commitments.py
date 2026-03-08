@@ -193,7 +193,9 @@ def test_commitments_deterministic_ordering_and_pagination(tmp_path: Path) -> No
             "/commitments", query_string={"account_emails": "acct@example.com"}
         )
         body1 = page1.get_data(as_text=True)
-        ids_page1 = [int(match) for match in re.findall(r'data-commitment-id="(\d+)"', body1)]
+        ids_page1 = [
+            int(match) for match in re.findall(r'data-commitment-id="(\d+)"', body1)
+        ]
         assert ids_page1[:3] == [55, 54, 53]
         assert ids_page1[-1] == 6
 
@@ -202,7 +204,9 @@ def test_commitments_deterministic_ordering_and_pagination(tmp_path: Path) -> No
             query_string={"account_emails": "acct@example.com", "page": "2"},
         )
         body2 = page2.get_data(as_text=True)
-        ids_page2 = [int(match) for match in re.findall(r'data-commitment-id="(\d+)"', body2)]
+        ids_page2 = [
+            int(match) for match in re.findall(r'data-commitment-id="(\d+)"', body2)
+        ]
         assert ids_page2 == [5, 4, 3, 2, 1]
 
 

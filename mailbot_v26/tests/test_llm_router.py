@@ -58,7 +58,7 @@ def test_gigachat_healthcheck_failure_falls_back(tmp_path) -> None:
     gigachat = StubProvider(name="gigachat", response="giga", healthy=False)
     cloudflare = StubProvider(name="cloudflare", response="cf")
     runtime_flags = tmp_path / "runtime_flags.json"
-    runtime_flags.write_text("{\"enable_gigachat\": true}", encoding="utf-8")
+    runtime_flags.write_text('{"enable_gigachat": true}', encoding="utf-8")
     router = LLMRouter(
         LLMRouterConfig(
             primary="gigachat",
@@ -77,7 +77,7 @@ def test_gigachat_healthcheck_failure_falls_back(tmp_path) -> None:
     assert cloudflare.calls == 1
     assert (
         runtime_flags.read_text(encoding="utf-8")
-        == "{\"enable_gigachat\": false, \"enable_auto_priority\": true}"
+        == '{"enable_gigachat": false, "enable_auto_priority": true}'
     )
 
 
@@ -141,7 +141,7 @@ def test_runtime_override_enables_gigachat(tmp_path) -> None:
     gigachat = StubProvider(name="gigachat", response="giga")
     cloudflare = StubProvider(name="cloudflare", response="cf")
     runtime_flags = tmp_path / "runtime_flags.json"
-    runtime_flags.write_text("{\"enable_gigachat\": true}", encoding="utf-8")
+    runtime_flags.write_text('{"enable_gigachat": true}', encoding="utf-8")
     router = LLMRouter(
         LLMRouterConfig(
             primary="gigachat",
@@ -175,7 +175,7 @@ def test_auto_disable_on_consecutive_errors(tmp_path, caplog) -> None:
     gigachat = FailingProvider()
     cloudflare = StubProvider(name="cloudflare", response="fallback")
     runtime_flags = tmp_path / "runtime_flags.json"
-    runtime_flags.write_text("{\"enable_gigachat\": true}", encoding="utf-8")
+    runtime_flags.write_text('{"enable_gigachat": true}', encoding="utf-8")
     router = LLMRouter(
         LLMRouterConfig(
             primary="gigachat",
@@ -200,7 +200,7 @@ def test_auto_disable_on_consecutive_errors(tmp_path, caplog) -> None:
     assert cloudflare.calls == 3
     assert (
         runtime_flags.read_text(encoding="utf-8")
-        == "{\"enable_gigachat\": false, \"enable_auto_priority\": true}"
+        == '{"enable_gigachat": false, "enable_auto_priority": true}'
     )
     assert router._circuit_open_until is not None
     assert any(
@@ -229,7 +229,7 @@ def test_auto_disable_on_latency(tmp_path, caplog) -> None:
     gigachat = SlowProvider()
     cloudflare = StubProvider(name="cloudflare", response="fallback")
     runtime_flags = tmp_path / "runtime_flags.json"
-    runtime_flags.write_text("{\"enable_gigachat\": true}", encoding="utf-8")
+    runtime_flags.write_text('{"enable_gigachat": true}', encoding="utf-8")
     router = LLMRouter(
         LLMRouterConfig(
             primary="gigachat",
@@ -250,7 +250,7 @@ def test_auto_disable_on_latency(tmp_path, caplog) -> None:
     assert cloudflare.calls == 1
     assert (
         runtime_flags.read_text(encoding="utf-8")
-        == "{\"enable_gigachat\": false, \"enable_auto_priority\": true}"
+        == '{"enable_gigachat": false, "enable_auto_priority": true}'
     )
     assert any(
         "[LLM-SAFETY]" in record.message and "latency_exceeded" in record.message
@@ -281,7 +281,7 @@ def test_router_serializes_gigachat_calls(tmp_path) -> None:
 
     gigachat = SerialGigaChat()
     runtime_flags = tmp_path / "runtime_flags.json"
-    runtime_flags.write_text("{\"enable_gigachat\": true}", encoding="utf-8")
+    runtime_flags.write_text('{"enable_gigachat": true}', encoding="utf-8")
     router = LLMRouter(
         LLMRouterConfig(
             primary="gigachat",
@@ -324,7 +324,7 @@ def test_runtime_error_trips_circuit(tmp_path, caplog) -> None:
     gigachat = FailingProvider()
     cloudflare = StubProvider(name="cloudflare", response="fallback")
     runtime_flags = tmp_path / "runtime_flags.json"
-    runtime_flags.write_text("{\"enable_gigachat\": true}", encoding="utf-8")
+    runtime_flags.write_text('{"enable_gigachat": true}', encoding="utf-8")
     router = LLMRouter(
         LLMRouterConfig(
             primary="gigachat",

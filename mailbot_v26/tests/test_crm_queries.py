@@ -121,7 +121,9 @@ def test_queries_do_not_write(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
         conn.set_trace_callback(executed.append)
         return conn
 
-    monkeypatch.setattr("mailbot_v26.storage.knowledge_query.sqlite3.connect", traced_connect)
+    monkeypatch.setattr(
+        "mailbot_v26.storage.knowledge_query.sqlite3.connect", traced_connect
+    )
 
     query = KnowledgeQuery(db_path)
     query.top_senders()

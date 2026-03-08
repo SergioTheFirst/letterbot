@@ -26,7 +26,9 @@ def _attachment_lines(result: str, names: set[str]) -> list[str]:
 
 
 @pytest.mark.parametrize("include_image", [True, False])
-def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch, include_image):
+def test_renders_all_non_image_attachments_even_if_extraction_fails(
+    monkeypatch, include_image
+):
     # Force the class to drop items when the cap is applied, so we can assert the fix explicitly.
     monkeypatch.setattr(MessageProcessor, "_MAX_ATTACHMENTS", 3)
 
@@ -47,7 +49,9 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
     monkeypatch.setattr(MessageProcessor, "_summarize_attachment", fake_summarize)
 
     attachments = [
-        Attachment(filename="a.doc", content=b"1", content_type="application/msword", text=""),
+        Attachment(
+            filename="a.doc", content=b"1", content_type="application/msword", text=""
+        ),
         Attachment(
             filename="b.docx",
             content=b"22",
@@ -69,7 +73,11 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
     ]
 
     if include_image:
-        attachments.append(Attachment(filename="image.png", content=b"", content_type="image/png", text=""))
+        attachments.append(
+            Attachment(
+                filename="image.png", content=b"", content_type="image/png", text=""
+            )
+        )
 
     msg = InboundMessage(
         subject="Комплект файлов",
@@ -83,13 +91,17 @@ def test_renders_all_non_image_attachments_even_if_extraction_fails(monkeypatch,
 
     names = {att.filename for att in attachments}
     attachment_lines = _attachment_lines(result, names)
-    attachment_entries = [line for line in attachment_lines if not line.startswith("ещё ")]
+    attachment_entries = [
+        line for line in attachment_lines if not line.startswith("ещё ")
+    ]
     total_non_image = 4
     expected_count = total_non_image
 
     assert len(attachment_entries) == expected_count
     expected = {"a.doc", "b.docx", "c.xlsx", "d.xlsx"}
-    rendered_files = {line.split(" — ")[0] if " — " in line else line for line in attachment_entries}
+    rendered_files = {
+        line.split(" — ")[0] if " — " in line else line for line in attachment_entries
+    }
     assert expected == rendered_files
 
     assert "ещё" not in "\n".join(attachment_lines)

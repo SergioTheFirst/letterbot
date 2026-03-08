@@ -125,7 +125,9 @@ def decide_delivery(
     )
 
 
-def packaging_directives(*, confidence: int, evidence_flags: dict[str, bool]) -> dict[str, bool]:
+def packaging_directives(
+    *, confidence: int, evidence_flags: dict[str, bool]
+) -> dict[str, bool]:
     show_uncertainty = confidence < 50
     show_consequences = bool(evidence_flags.get("has_evidence"))
     return {

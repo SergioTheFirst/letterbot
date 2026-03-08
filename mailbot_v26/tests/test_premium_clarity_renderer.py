@@ -82,7 +82,10 @@ def test_premium_clarity_default_without_attachments() -> None:
 def test_premium_clarity_generic_attention_actions_normalized_to_check() -> None:
     assert _render(action_line="Проверьте вручную").splitlines()[2] == "Проверить"
     assert _render(action_line="Attention Needed").splitlines()[2] == "Проверить"
-    assert _render(action_line="Недостаточно данных для оценки").splitlines()[2] == "Проверить"
+    assert (
+        _render(action_line="Недостаточно данных для оценки").splitlines()[2]
+        == "Проверить"
+    )
 
 
 def test_premium_clarity_invoice_with_excel_attachment_prefers_pay_action() -> None:
@@ -129,8 +132,6 @@ def test_premium_clarity_information_only_prefers_read_action() -> None:
     assert rendered.splitlines()[2] == "Ознакомиться"
 
 
-
-
 def test_premium_clarity_outage_alert_is_check_not_pay() -> None:
     rendered = processor._build_premium_clarity_text(
         priority="🔵",
@@ -165,6 +166,8 @@ def test_premium_clarity_investment_promo_prefers_read_not_pay() -> None:
         body_summary="Инвестиционный дайджест: высокая доходность, рекламная рассылка",
     )
     assert rendered.splitlines()[2] == "Ознакомиться"
+
+
 def test_premium_clarity_signed_contract_prefers_record_action() -> None:
     rendered = processor._build_premium_clarity_text(
         priority="🟡",

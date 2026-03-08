@@ -33,18 +33,23 @@ class FakeAnalytics:
             "week_digest": {"counts": [], "items": []},
             "recent_activity": [],
             "golden_signals": {},
-            "engineer": {
-                "slow_spans": [],
-                "recent_errors": [],
-                "latency_distribution": [],
-            }
-            if include_engineer
-            else {},
+            "engineer": (
+                {
+                    "slow_spans": [],
+                    "recent_errors": [],
+                    "latency_distribution": [],
+                }
+                if include_engineer
+                else {}
+            ),
         }
+
     def cockpit_top_senders(self, account_emails, days=30, limit=3):
         return []
 
-    def cockpit_silent_contacts(self, account_emails, silent_days=14, days=90, min_msgs=3, limit=3):
+    def cockpit_silent_contacts(
+        self, account_emails, silent_days=14, days=90, min_msgs=3, limit=3
+    ):
         return []
 
     def cockpit_stalled_threads(self, account_emails, days=30, limit=3):
@@ -65,7 +70,6 @@ class FakeAnalytics:
         return None
 
 
-
 def _build_app_with_email(tmp_path: Path, *, allow_pii: bool = False):
     db_path = tmp_path / "cockpit.sqlite"
     KnowledgeDB(db_path)
@@ -83,7 +87,9 @@ def _build_app_with_email(tmp_path: Path, *, allow_pii: bool = False):
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
-    return create_app(db_path=db_path, password="pw", secret_key="secret", allow_pii=allow_pii)
+    return create_app(
+        db_path=db_path, password="pw", secret_key="secret", allow_pii=allow_pii
+    )
 
 
 def test_cockpit_mode_gating(tmp_path: Path) -> None:
@@ -98,12 +104,12 @@ def test_cockpit_mode_gating(tmp_path: Path) -> None:
         basic_resp = client.get("/")
         assert basic_resp.status_code == 200
         assert analytics.calls == [False]
-        assert "data-testid=\"engineer-blocks\"" not in basic_resp.get_data(as_text=True)
+        assert 'data-testid="engineer-blocks"' not in basic_resp.get_data(as_text=True)
 
         engineer_resp = client.get("/?mode=engineer")
         assert engineer_resp.status_code == 200
         assert analytics.calls[-1] is True
-        assert "data-testid=\"engineer-blocks\"" in engineer_resp.get_data(as_text=True)
+        assert 'data-testid="engineer-blocks"' in engineer_resp.get_data(as_text=True)
 
 
 def test_cockpit_pii_default_and_override(tmp_path: Path) -> None:
@@ -121,7 +127,6 @@ def test_cockpit_pii_default_and_override(tmp_path: Path) -> None:
         assert "a…@example.com" not in unmasked_body
 
 
-
 def test_cockpit_home_survives_contacts_analytics_exceptions(tmp_path: Path) -> None:
     db_path = tmp_path / "errors.sqlite"
     KnowledgeDB(db_path)
@@ -131,7 +136,9 @@ def test_cockpit_home_survives_contacts_analytics_exceptions(tmp_path: Path) -> 
         def cockpit_top_senders(self, account_emails, days=30, limit=3):
             raise RuntimeError("boom")
 
-        def cockpit_silent_contacts(self, account_emails, silent_days=14, days=90, min_msgs=3, limit=3):
+        def cockpit_silent_contacts(
+            self, account_emails, silent_days=14, days=90, min_msgs=3, limit=3
+        ):
             raise RuntimeError("boom")
 
         def cockpit_stalled_threads(self, account_emails, days=30, limit=3):
@@ -184,7 +191,7 @@ def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
     assert ">Commitments<" not in body
     assert ">Latency<" not in body
     assert ">Attention<" not in body
-    assert "class=\"nav-link active\">Cockpit<" in body
+    assert 'class="nav-link active">Cockpit<' in body
     assert ">Relationships<" not in body
 
 
@@ -294,7 +301,7 @@ def test_footer_support_link_visibility(tmp_path: Path) -> None:
     with app.test_client() as client:
         login_with_csrf(client, "pw")
         resp = client.get("/")
-        assert 'app-footer' in resp.get_data(as_text=True)
+        assert "app-footer" in resp.get_data(as_text=True)
         assert 'href="/support"' in resp.get_data(as_text=True)
 
     app_hidden = create_app(
@@ -306,5 +313,5 @@ def test_footer_support_link_visibility(tmp_path: Path) -> None:
     with app_hidden.test_client() as client:
         login_with_csrf(client, "pw")
         resp = client.get("/")
-        assert 'app-footer' in resp.get_data(as_text=True)
+        assert "app-footer" in resp.get_data(as_text=True)
         assert 'href="/support"' not in resp.get_data(as_text=True)

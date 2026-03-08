@@ -50,18 +50,24 @@ def test_event_core_emits_expected_events(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(processor, "event_emitter", emitter)
     monkeypatch.setattr(processor, "feature_flags", _feature_flags())
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: _stub_llm_result())
-    monkeypatch.setattr(processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", ""))
+    monkeypatch.setattr(
+        processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", "")
+    )
     monkeypatch.setattr(processor.shadow_action_engine, "compute", lambda **kwargs: [])
     monkeypatch.setattr(processor, "_check_crm_available", lambda: True)
-    monkeypatch.setattr(processor, "detect_commitments", lambda *_args, **_kwargs: [
-        Commitment(
-            commitment_text="Отправлю файлы",
-            deadline_iso="2024-07-12",
-            status="pending",
-            source="heuristic",
-            confidence=0.9,
-        )
-    ])
+    monkeypatch.setattr(
+        processor,
+        "detect_commitments",
+        lambda *_args, **_kwargs: [
+            Commitment(
+                commitment_text="Отправлю файлы",
+                deadline_iso="2024-07-12",
+                status="pending",
+                source="heuristic",
+                confidence=0.9,
+            )
+        ],
+    )
     monkeypatch.setattr(
         processor,
         "evaluate_commitment_updates",
@@ -104,9 +110,17 @@ def test_event_core_emits_expected_events(monkeypatch, tmp_path) -> None:
             confidence=1.0,
         ),
     )
-    monkeypatch.setattr(processor.context_store, "resolve_entity_relationships", lambda **kwargs: None)
-    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
-    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor.context_store, "resolve_entity_relationships", lambda **kwargs: None
+    )
+    monkeypatch.setattr(
+        processor.context_store,
+        "record_interaction_event",
+        lambda **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0)
+    )
     monkeypatch.setattr(
         processor.trust_score_calculator,
         "compute",
@@ -136,7 +150,11 @@ def test_event_core_emits_expected_events(monkeypatch, tmp_path) -> None:
             reason=None,
         ),
     )
-    monkeypatch.setattr(processor, "trust_snapshot_writer", SimpleNamespace(write=lambda *args, **kwargs: None))
+    monkeypatch.setattr(
+        processor,
+        "trust_snapshot_writer",
+        SimpleNamespace(write=lambda *args, **kwargs: None),
+    )
     monkeypatch.setattr(
         processor,
         "relationship_health_snapshot_writer",
@@ -182,7 +200,9 @@ def test_event_emit_errors_do_not_break_pipeline(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(processor, "event_emitter", emitter)
     monkeypatch.setattr(processor, "feature_flags", _feature_flags())
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: _stub_llm_result())
-    monkeypatch.setattr(processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", ""))
+    monkeypatch.setattr(
+        processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", "")
+    )
     monkeypatch.setattr(processor.shadow_action_engine, "compute", lambda **kwargs: [])
     monkeypatch.setattr(processor, "_check_crm_available", lambda: True)
     monkeypatch.setattr(processor, "detect_commitments", lambda *_args, **_kwargs: [])
@@ -197,10 +217,22 @@ def test_event_emit_errors_do_not_break_pipeline(monkeypatch, tmp_path) -> None:
             upsert_entity_signal=lambda **kwargs: None,
         ),
     )
-    monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **kwargs: None)
-    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
-    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
-    monkeypatch.setattr(processor, "trust_snapshot_writer", SimpleNamespace(write=lambda *args, **kwargs: None))
+    monkeypatch.setattr(
+        processor.context_store, "resolve_sender_entity", lambda **kwargs: None
+    )
+    monkeypatch.setattr(
+        processor.context_store,
+        "record_interaction_event",
+        lambda **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0)
+    )
+    monkeypatch.setattr(
+        processor,
+        "trust_snapshot_writer",
+        SimpleNamespace(write=lambda *args, **kwargs: None),
+    )
     monkeypatch.setattr(
         processor,
         "relationship_health_snapshot_writer",

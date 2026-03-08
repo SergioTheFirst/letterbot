@@ -66,7 +66,9 @@ def _prepare_app(tmp_path: Path) -> object:
     )
 
 
-def test_attention_sort_determinism(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attention_sort_determinism(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     app = _prepare_app(tmp_path)
     monkeypatch.setattr(
         "mailbot_v26.storage.analytics.KnowledgeAnalytics._window_start_ts",
@@ -91,7 +93,9 @@ def test_attention_sort_determinism(tmp_path: Path, monkeypatch: pytest.MonkeyPa
             assert order == expected
 
 
-def test_attention_csv_matches_html_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attention_csv_matches_html_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     app = _prepare_app(tmp_path)
     monkeypatch.setattr(
         "mailbot_v26.storage.analytics.KnowledgeAnalytics._window_start_ts",
@@ -118,7 +122,9 @@ def test_attention_csv_matches_html_rows(tmp_path: Path, monkeypatch: pytest.Mon
         assert len(rows) - 1 == table_rows
 
 
-def test_attention_outputs_avoid_banned_phrases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attention_outputs_avoid_banned_phrases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     app = _prepare_app(tmp_path)
     monkeypatch.setattr(
         "mailbot_v26.storage.analytics.KnowledgeAnalytics._window_start_ts",
@@ -133,7 +139,9 @@ def test_attention_outputs_avoid_banned_phrases(tmp_path: Path, monkeypatch: pyt
     with app.test_client() as client:
         login_with_csrf(client, "pw")
         for path in ("/attention", "/attention.csv"):
-            response = client.get(path, query_string={"account_emails": "primary@example.com"})
+            response = client.get(
+                path, query_string={"account_emails": "primary@example.com"}
+            )
             assert response.status_code == 200
             body = response.get_data(as_text=True).lower()
             for phrase in forbidden_phrases:

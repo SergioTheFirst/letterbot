@@ -22,8 +22,7 @@ class DecisionTraceWriter:
         try:
             with sqlite3.connect(self.path) as conn:
                 conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS decision_traces (
                         id TEXT PRIMARY KEY,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -43,8 +42,7 @@ class DecisionTraceWriter:
                         shadow_priority TEXT,
                         compressed BOOLEAN DEFAULT FALSE
                     );
-                    """
-                )
+                    """)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("decision_trace_init_failed", error=str(exc))
 

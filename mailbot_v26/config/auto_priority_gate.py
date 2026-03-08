@@ -5,7 +5,6 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -32,9 +31,7 @@ def load_auto_priority_gate_config(
         enabled=_get_bool(section, "enabled", default=True),
         window_days=_get_int(section, "window_days", default=30),
         min_samples=_get_int(section, "min_samples", default=10),
-        max_correction_rate=_get_float(
-            section, "max_correction_rate", default=0.15
-        ),
+        max_correction_rate=_get_float(section, "max_correction_rate", default=0.15),
         cooldown_hours=_get_int(section, "cooldown_hours", default=24),
     )
 
@@ -84,7 +81,10 @@ def _load_auto_priority_gate_parser(config_path: Path) -> configparser.ConfigPar
         )
         try:
             legacy_parser.read_string(f"[main]\n{raw_text}")
-        except (configparser.MissingSectionHeaderError, configparser.ParsingError) as legacy_exc:
+        except (
+            configparser.MissingSectionHeaderError,
+            configparser.ParsingError,
+        ) as legacy_exc:
             _LOGGER.warning(
                 "Legacy parse also failed for %s; using deterministic defaults.",
                 config_path,

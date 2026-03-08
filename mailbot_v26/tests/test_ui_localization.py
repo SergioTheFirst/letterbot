@@ -3,7 +3,10 @@ from pathlib import Path
 
 from mailbot_v26.doctor import DoctorEntry, _format_report
 from mailbot_v26.insights.quality_metrics import CountBreakdown, QualityMetricsSnapshot
-from mailbot_v26.observability.notification_sla import ErrorBreakdown, NotificationSLAResult
+from mailbot_v26.observability.notification_sla import (
+    ErrorBreakdown,
+    NotificationSLAResult,
+)
 from mailbot_v26.pipeline import daily_digest, processor, weekly_digest
 from mailbot_v26.ui.i18n import (
     humanize_domain,
@@ -34,9 +37,9 @@ def test_priority_explain_lines_hide_internal_codes() -> None:
     combined = " ".join(lines).lower()
     assert "invoice" not in combined
     assert any("сч" in line.lower() for line in lines)
-    assert humanize_reason_codes(["mt.invoice.final.keyword=финальн"], locale="ru")[0].startswith(
-        "финальный"
-    )
+    assert humanize_reason_codes(["mt.invoice.final.keyword=финальн"], locale="ru")[
+        0
+    ].startswith("финальный")
 
 
 def _sample_quality() -> QualityMetricsSnapshot:

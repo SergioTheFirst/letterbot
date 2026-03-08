@@ -64,8 +64,7 @@ class ProcessingSpanRecorder:
         try:
             with sqlite3.connect(self.path) as conn:
                 conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS processing_spans (
                         span_id TEXT PRIMARY KEY,
                         ts_start_utc REAL NOT NULL,
@@ -87,8 +86,7 @@ class ProcessingSpanRecorder:
                         elapsed_to_first_send_ms INTEGER DEFAULT 0,
                         edit_applied INTEGER NOT NULL DEFAULT 0
                     );
-                    """
-                )
+                    """)
                 self._ensure_column(
                     conn,
                     table="processing_spans",
@@ -113,8 +111,7 @@ class ProcessingSpanRecorder:
                     column="edit_applied",
                     definition="INTEGER NOT NULL DEFAULT 0",
                 )
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS system_health_snapshots (
                         snapshot_id TEXT PRIMARY KEY,
                         ts_utc REAL NOT NULL,
@@ -123,8 +120,7 @@ class ProcessingSpanRecorder:
                         metrics_brief TEXT,
                         system_mode TEXT
                     );
-                    """
-                )
+                    """)
                 self._ensure_column(
                     conn,
                     table="system_health_snapshots",
@@ -143,42 +139,30 @@ class ProcessingSpanRecorder:
                     column="system_mode",
                     definition="TEXT",
                 )
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_processing_spans_account_ts
                         ON processing_spans(account_id, ts_start_utc);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_processing_spans_email_id
                         ON processing_spans(email_id);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_processing_spans_email_ts
                         ON processing_spans(email_id, ts_start_utc, span_id);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_processing_spans_ts_start
                         ON processing_spans(ts_start_utc);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_system_health_snapshots_ts
                         ON system_health_snapshots(ts_utc);
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_system_health_snapshots_ts_snapshot
                         ON system_health_snapshots(ts_utc DESC, snapshot_id);
-                    """
-                )
+                    """)
                 conn.commit()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("processing_span_init_failed", error=str(exc))
@@ -188,14 +172,10 @@ class ProcessingSpanRecorder:
         conn: sqlite3.Connection, *, table: str, column: str, definition: str
     ) -> None:
         try:
-            existing = conn.execute(
-                "PRAGMA table_info({})".format(table)
-            ).fetchall()
+            existing = conn.execute("PRAGMA table_info({})".format(table)).fetchall()
             if any(row[1] == column for row in existing):
                 return
-            conn.execute(
-                f"ALTER TABLE {table} ADD COLUMN {column} {definition};"
-            )
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition};")
             conn.commit()
         except sqlite3.OperationalError:
             return
@@ -361,15 +341,21 @@ class ProcessingSpanRecorder:
         sanitized_payload = _sanitize_payload(payload)
         try:
             canonical_json = json.dumps(
-                sanitized_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                sanitized_payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
             )
         except (TypeError, ValueError):
             canonical_json = "{}"
-        snapshot_id = hashlib.sha256(canonical_json.encode("utf-8", errors="ignore")).hexdigest()
+        snapshot_id = hashlib.sha256(
+            canonical_json.encode("utf-8", errors="ignore")
+        ).hexdigest()
         try:
             with sqlite3.connect(self.path) as conn:
                 existing = conn.execute(
-                    "SELECT 1 FROM system_health_snapshots WHERE snapshot_id = ?", (snapshot_id,)
+                    "SELECT 1 FROM system_health_snapshots WHERE snapshot_id = ?",
+                    (snapshot_id,),
                 ).fetchone()
                 if not existing:
                     conn.execute(

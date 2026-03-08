@@ -11,8 +11,7 @@ from mailbot_v26.tests._web_helpers import login_with_csrf
 
 def _create_events_db(db_path: Path) -> None:
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE events_v1 (
                 event_type TEXT,
                 ts_utc REAL,
@@ -22,8 +21,7 @@ def _create_events_db(db_path: Path) -> None:
                 payload TEXT,
                 payload_json TEXT
             )
-            """
-        )
+            """)
 
 
 def _insert_event(
@@ -130,11 +128,16 @@ def test_relationships_auth_required(tmp_path: Path) -> None:
         assert "/login" in response.headers.get("Location", "")
         api_graph = client.get("/api/v1/relationships/graph")
         assert api_graph.status_code == 302
-        api_contact = client.get("/api/v1/relationships/contact", query_string={"contact_id": "contact:contact-a"})
+        api_contact = client.get(
+            "/api/v1/relationships/contact",
+            query_string={"contact_id": "contact:contact-a"},
+        )
         assert api_contact.status_code == 302
 
 
-def test_relationships_deterministic_and_sorted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_relationships_deterministic_and_sorted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db_path = _build_relationships_app(tmp_path)
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     monkeypatch.setattr(
@@ -143,18 +146,29 @@ def test_relationships_deterministic_and_sorted(tmp_path: Path, monkeypatch: pyt
     )
     with app.test_client() as client:
         login_with_csrf(client, "pw")
-        query = {"account_email": "primary@example.com", "window_days": "30", "limit": "50"}
+        query = {
+            "account_email": "primary@example.com",
+            "window_days": "30",
+            "limit": "50",
+        }
         first = client.get("/api/v1/relationships/graph", query_string=query).get_json()
-        second = client.get("/api/v1/relationships/graph", query_string=query).get_json()
+        second = client.get(
+            "/api/v1/relationships/graph", query_string=query
+        ).get_json()
         assert first == second
         nodes = [node for node in first["nodes"] if node["id"] != "user:me"]
-        assert [node["id"] for node in nodes] == ["contact:contact-b", "contact:contact-a"]
+        assert [node["id"] for node in nodes] == [
+            "contact:contact-b",
+            "contact:contact-a",
+        ]
         assert nodes[0]["trust_score"] == 8.5
         assert "trust_delta" not in nodes[0]
         assert nodes[1]["trust_delta"] == 1.0
 
 
-def test_relationships_scope_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_relationships_scope_isolation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db_path = _build_relationships_app(tmp_path)
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     monkeypatch.setattr(
@@ -163,7 +177,10 @@ def test_relationships_scope_isolation(tmp_path: Path, monkeypatch: pytest.Monke
     )
     with app.test_client() as client:
         login_with_csrf(client, "pw")
-        query = {"account_email": "other@example.com", "account_emails": "other@example.com"}
+        query = {
+            "account_email": "other@example.com",
+            "account_emails": "other@example.com",
+        }
         response = client.get("/api/v1/relationships/graph", query_string=query)
         assert response.status_code == 200
         data = response.get_json()
@@ -171,7 +188,9 @@ def test_relationships_scope_isolation(tmp_path: Path, monkeypatch: pytest.Monke
         assert contact_ids == ["contact:contact-c"]
 
 
-def test_relationships_pii_and_escaping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_relationships_pii_and_escaping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db_path = _build_relationships_app(tmp_path)
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     monkeypatch.setattr(
@@ -196,7 +215,9 @@ def test_relationships_pii_and_escaping(tmp_path: Path, monkeypatch: pytest.Monk
         text = api_response.get_data(as_text=True)
         for token in forbidden:
             assert token not in text
-        page_response = client.get("/relationships", query_string={"account_email": "primary@example.com"})
+        page_response = client.get(
+            "/relationships", query_string={"account_email": "primary@example.com"}
+        )
         page_text = page_response.get_data(as_text=True)
     for token in forbidden:
         assert token not in page_text

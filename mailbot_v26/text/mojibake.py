@@ -6,35 +6,37 @@ _MOJIBAKE_MARKERS = (
     "\u0432\u0402",
     "\u0440\u045f",
     "\u0420\u045f",
-    "\u00D0",
-    "\u00D1",
-    "\u00F0\u0178",
-    "\u00F0",
-    "\u00E2\u20AC\u201D",
-    "\u00E2\u20AC\u201C",
-    "\u00E2\u20AC\u00A6",
-    "\u00E2\u20AC\u00A2",
-    "\u00C3",
-    "\u00C2",
-    "\uFFFD",
+    "\u00d0",
+    "\u00d1",
+    "\u00f0\u0178",
+    "\u00f0",
+    "\u00e2\u20ac\u201d",
+    "\u00e2\u20ac\u201c",
+    "\u00e2\u20ac\u00a6",
+    "\u00e2\u20ac\u00a2",
+    "\u00c3",
+    "\u00c2",
+    "\ufffd",
 )
 
-_MOJIBAKE_PAIR_RE = re.compile(r"(?:[\u0420\u0421\u0440\u0441][\u0080-\u00FF\u0400-\u04FF]){2,}")
+_MOJIBAKE_PAIR_RE = re.compile(
+    r"(?:[\u0420\u0421\u0440\u0441][\u0080-\u00FF\u0400-\u04FF]){2,}"
+)
 _LATIN1_GARBAGE_RE = re.compile(r"[\u00C0-\u00FF]{3,}")
 
 _PUNCTUATION_REPLACEMENTS = {
-    "\u0432\u0402\u201D": "\u2014",
-    "\u0432\u0402\u201C": "\u2013",
-    "\u0432\u0402\u00A6": "\u2026",
-    "\u0432\u0402\u045E": "\u2022",
-    "\u00E2\u20AC\u201D": "\u2014",
-    "\u00E2\u20AC\u201C": "\u2013",
-    "\u00E2\u20AC\u00A6": "\u2026",
-    "\u00E2\u20AC\u00A2": "\u2022",
-    "\u00E2\u201E\u2016": "\u2116",
-    "\u0420\u0455\u0421\u201A": "\u043E\u0442",
-    "\u00D0\u00BE\u00D1\u201A": "\u043E\u0442",
-    "\u0412\u00B7": "\u00B7",
+    "\u0432\u0402\u201d": "\u2014",
+    "\u0432\u0402\u201c": "\u2013",
+    "\u0432\u0402\u00a6": "\u2026",
+    "\u0432\u0402\u045e": "\u2022",
+    "\u00e2\u20ac\u201d": "\u2014",
+    "\u00e2\u20ac\u201c": "\u2013",
+    "\u00e2\u20ac\u00a6": "\u2026",
+    "\u00e2\u20ac\u00a2": "\u2022",
+    "\u00e2\u201e\u2016": "\u2116",
+    "\u0420\u0455\u0421\u201a": "\u043e\u0442",
+    "\u00d0\u00be\u00d1\u201a": "\u043e\u0442",
+    "\u0412\u00b7": "\u00b7",
     # Common mojibake sequences for priority circles
     "\u0440\u045f\u201d\u0491": "🔴",
     "\u0440\u045f\u201f\u0160": "🟡",
@@ -42,9 +44,9 @@ _PUNCTUATION_REPLACEMENTS = {
     "\u0441\u0452\u0441\u045f\u0432\u0402\u045c\u0422\u2018": "🔴",
     "\u0441\u0452\u0441\u045f\u0421\u045f\u045f\u0420\u040b": "🟡",
     "\u0441\u0452\u0441\u045f\u0432\u0402\u045c\u0412\u00b5": "🔵",
-    "\u00F0\u0178\u201d\u00B4": "🔴",
-    "\u00F0\u0178\u0178\u00A1": "🟡",
-    "\u00F0\u0178\u201d\u00B5": "🔵",
+    "\u00f0\u0178\u201d\u00b4": "🔴",
+    "\u00f0\u0178\u0178\u00a1": "🟡",
+    "\u00f0\u0178\u201d\u00b5": "🔵",
 }
 
 
@@ -56,7 +58,9 @@ def _contains_mojibake(text: str) -> bool:
     return _MOJIBAKE_PAIR_RE.search(text) is not None
 
 
-def _repair_with_encoding(source: str, encode_encoding: str, decode_encoding: str) -> str:
+def _repair_with_encoding(
+    source: str, encode_encoding: str, decode_encoding: str
+) -> str:
     protected_parts: list[str] = []
     placeholders: dict[str, str] = {}
     protected_index = 0

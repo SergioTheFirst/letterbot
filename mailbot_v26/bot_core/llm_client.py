@@ -4,12 +4,14 @@ The client is deliberately lightweight and defensive. If credentials are
 missing or a request fails, the caller receives an empty string to keep
 pipeline stability, satisfying Constitution Section VI.1.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
 from mailbot_v26.llm.router import LLMRouter, LLMRouterConfig
+
 
 @dataclass
 class CloudflareConfig:

@@ -17,7 +17,9 @@ def _init_db(tmp_path) -> tuple[KnowledgeDB, ContextStore, KnowledgeAnalytics]:
     return db, store, analytics
 
 
-def _insert_email(conn: sqlite3.Connection, *, from_email: str, received_at: str) -> int:
+def _insert_email(
+    conn: sqlite3.Connection, *, from_email: str, received_at: str
+) -> int:
     cur = conn.execute(
         """
         INSERT INTO emails (
@@ -89,7 +91,9 @@ def test_temporal_reasoning_detects_commitment_deadline_risk(tmp_path) -> None:
     assert any(state.state_type == "commitment_deadline_risk" for state in states)
 
 
-def test_temporal_reasoning_detects_response_overdue_and_silence_break(tmp_path) -> None:
+def test_temporal_reasoning_detects_response_overdue_and_silence_break(
+    tmp_path,
+) -> None:
     _, store, analytics = _init_db(tmp_path)
     now = datetime.now(timezone.utc)
 

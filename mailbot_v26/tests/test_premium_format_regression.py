@@ -64,7 +64,9 @@ def test_full_render_contains_attachment_line() -> None:
 
 
 def test_initial_keyboard_priority_buttons() -> None:
-    keyboard = build_email_actions_keyboard(email_id=1, expanded=False, initial_prio=True)
+    keyboard = build_email_actions_keyboard(
+        email_id=1, expanded=False, initial_prio=True
+    )
 
     labels = [button["text"] for button in keyboard["inline_keyboard"][0]]
     assert "🔴 Срочно" in labels
@@ -161,6 +163,7 @@ def test_render_notification_applies_arbiter_without_runtime_error() -> None:
     )
 
     assert "Автоматическая сводка слишком общая." in result.body_summary
+
 
 def test_default_mode_sends_only_processed_message() -> None:
     payload, _, _ = processor.build_telegram_payload(_base_context())

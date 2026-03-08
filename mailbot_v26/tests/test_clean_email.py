@@ -21,12 +21,7 @@ def test_clean_email_removes_forward_headers():
 
 
 def test_clean_email_removes_signature_block():
-    body = (
-        "Основной текст\n"
-        "С уважением,\n"
-        "Имя\n"
-        "Телефон"
-    )
+    body = "Основной текст\n" "С уважением,\n" "Имя\n" "Телефон"
     cleaned = clean_email_body(body)
     assert cleaned == "Основной текст"
 

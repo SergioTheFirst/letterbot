@@ -100,7 +100,6 @@ def test_doctor_mode_reports_and_sends(monkeypatch, tmp_path, capsys):
     assert any(entry.component == "SQLite" for entry in report.entries)
 
 
-
 def test_doctor_yaml_path_does_not_use_repo_root_implicitly(tmp_path):
     config_dir = tmp_path / "mailbot_v26" / "config"
     config_dir.mkdir(parents=True)

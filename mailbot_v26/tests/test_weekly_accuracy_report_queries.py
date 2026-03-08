@@ -131,7 +131,9 @@ def test_weekly_compact_summary_returns_expected_counts(tmp_path) -> None:
                 "h1",
             ),
         )
-        email_id = conn.execute("SELECT id FROM emails ORDER BY id DESC LIMIT 1").fetchone()[0]
+        email_id = conn.execute(
+            "SELECT id FROM emails ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0]
         conn.execute(
             """
             INSERT INTO commitments (email_row_id, source, commitment_text, deadline_iso, status, confidence, created_at)

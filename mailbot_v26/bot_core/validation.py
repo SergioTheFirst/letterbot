@@ -1,4 +1,5 @@
 """Validation helpers for post-LLM cleaning."""
+
 from __future__ import annotations
 
 import re
@@ -59,9 +60,7 @@ STOP_WORDS = {
 
 def validate_dates(summary: str, original: str) -> bool:
     date_re = re.compile(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}")
-    summary_dates = [
-        _normalize_date(match) for match in date_re.findall(summary or "")
-    ]
+    summary_dates = [_normalize_date(match) for match in date_re.findall(summary or "")]
     if not summary_dates:
         return True
 
@@ -93,7 +92,9 @@ def jaccard_similarity(text1: str, text2: str) -> float:
     return len(intersection) / len(union) if union else 0.0
 
 
-def validate_summary(summary: str, original: str, min_similarity: float = 0.35) -> str | None:
+def validate_summary(
+    summary: str, original: str, min_similarity: float = 0.35
+) -> str | None:
     cleaned = clean_none(summary)
     if not cleaned:
         return None

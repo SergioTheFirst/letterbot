@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import re
 
-from mailbot_v26.pipeline.processor import Attachment, AttachmentSummary, InboundMessage, MessageProcessor
+from mailbot_v26.pipeline.processor import AttachmentSummary, MessageProcessor
 
 
 class DummyState:

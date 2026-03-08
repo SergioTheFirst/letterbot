@@ -171,7 +171,9 @@ def test_archive_pagination_order_deterministic(tmp_path: Path) -> None:
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
         login_with_csrf(client, "pw")
-        page = client.get("/archive", query_string={"account_emails": "acct@example.com"})
+        page = client.get(
+            "/archive", query_string={"account_emails": "acct@example.com"}
+        )
         body = page.get_data(as_text=True)
         ids = [int(match) for match in re.findall(r'data-email-id="(\d+)"', body)]
         assert ids[:3] == [3, 2, 1]
@@ -240,7 +242,14 @@ def test_cockpit_renders_flat_text_instead_of_serialized_repr(tmp_path: Path) ->
             return []
 
         def lane_counts(self, **kwargs):
-            return {"all": 1, "critical": 0, "commitments": 0, "deferred": 0, "failures": 0, "learning": 0}
+            return {
+                "all": 1,
+                "critical": 0,
+                "commitments": 0,
+                "deferred": 0,
+                "failures": 0,
+                "learning": 0,
+            }
 
         def cockpit_top_senders(self, *args, **kwargs):
             return [{"display_name": ["Alice", ["Ops"]], "count": 3}]
@@ -249,7 +258,14 @@ def test_cockpit_renders_flat_text_instead_of_serialized_repr(tmp_path: Path) ->
             return [{"display_name": ["Bob", ["Vendor"]], "days_silent": 10}]
 
         def cockpit_stalled_threads(self, *args, **kwargs):
-            return [{"from_email": ["sender@example.com"], "subject": ["[\"Invoice\"]"], "snippet": [["Need action"]], "days_ago": 2}]
+            return [
+                {
+                    "from_email": ["sender@example.com"],
+                    "subject": ['["Invoice"]'],
+                    "snippet": [["Need action"]],
+                    "days_ago": 2,
+                }
+            ]
 
         def commitment_status_counts(self, **kwargs):
             return {"pending": 0}
@@ -281,7 +297,9 @@ def test_archive_page_shows_rows_for_existing_db_emails(tmp_path: Path) -> None:
 
     with app.test_client() as client:
         login_with_csrf(client, "pw")
-        page = client.get("/archive", query_string={"account_emails": "acct@example.com"})
+        page = client.get(
+            "/archive", query_string={"account_emails": "acct@example.com"}
+        )
         body = page.get_data(as_text=True)
         assert page.status_code == 200
         assert 'data-email-id="11"' in body
@@ -292,7 +310,9 @@ def test_archive_empty_state_human_readable(tmp_path: Path) -> None:
     _, app = _build_app(tmp_path)
     with app.test_client() as client:
         login_with_csrf(client, "pw")
-        page = client.get("/archive", query_string={"account_emails": "unknown@example.com"})
+        page = client.get(
+            "/archive", query_string={"account_emails": "unknown@example.com"}
+        )
         body = page.get_data(as_text=True)
         assert page.status_code == 200
         assert "No archive entries found." in body

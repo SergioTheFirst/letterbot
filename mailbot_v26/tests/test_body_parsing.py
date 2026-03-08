@@ -4,7 +4,9 @@ import mailbot_v26.start as start
 
 
 def test_extract_body_handles_unencoded_text():
-    raw_email = b"""From: sender@example.com\r\nSubject: Test\r\n\r\nPlain text body\r\n"""
+    raw_email = (
+        b"""From: sender@example.com\r\nSubject: Test\r\n\r\nPlain text body\r\n"""
+    )
     email_obj = message_from_bytes(raw_email)
 
     body = start._extract_body(email_obj)

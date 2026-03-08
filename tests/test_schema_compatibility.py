@@ -46,7 +46,11 @@ def test_validate_config_compat_fails_for_newer_schema(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(config_bootstrap, "load_yaml_config", lambda _path: _valid_config_dict(schema_version=999))
+    monkeypatch.setattr(
+        config_bootstrap,
+        "load_yaml_config",
+        lambda _path: _valid_config_dict(schema_version=999),
+    )
 
     code = config_bootstrap.run_validate_config(base_dir=tmp_path, compat=True)
     output = capsys.readouterr().out
@@ -63,7 +67,11 @@ def test_validate_config_compat_prints_single_hint_for_older_schema(
 ) -> None:
     monkeypatch.setattr(config_yaml, "SUPPORTED_SCHEMA_VERSION", 2)
     monkeypatch.setattr(config_bootstrap, "SUPPORTED_SCHEMA_VERSION", 2)
-    monkeypatch.setattr(config_bootstrap, "load_yaml_config", lambda _path: _valid_config_dict(schema_version=1))
+    monkeypatch.setattr(
+        config_bootstrap,
+        "load_yaml_config",
+        lambda _path: _valid_config_dict(schema_version=1),
+    )
 
     code = config_bootstrap.run_validate_config(base_dir=tmp_path, compat=True)
     output = capsys.readouterr().out
@@ -81,7 +89,9 @@ def test_start_schema_mismatch_exits_cleanly(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     config_path = tmp_path / "config.yaml"
-    monkeypatch.setattr(start, "load_yaml_config", lambda _path: _valid_config_dict(schema_version=999))
+    monkeypatch.setattr(
+        start, "load_yaml_config", lambda _path: _valid_config_dict(schema_version=999)
+    )
 
     with pytest.raises(SystemExit) as exc_info:
         start._load_yaml_config_or_exit(config_path)

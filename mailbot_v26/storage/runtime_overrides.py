@@ -29,15 +29,13 @@ class RuntimeOverrideStore:
     def _init_db(self) -> None:
         try:
             with sqlite3.connect(self._path) as conn:
-                conn.execute(
-                    """
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS runtime_overrides (
                         key TEXT PRIMARY KEY,
                         value TEXT,
                         updated_at TEXT
                     );
-                    """
-                )
+                    """)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("runtime_overrides_init_failed", error=str(exc))
 
@@ -69,8 +67,6 @@ class RuntimeOverrideStore:
 
     def get_insider_since(self, *, chat_id: str | None = None) -> str | None:
         return self._read_text(_insider_since_key(chat_id))
-
-
 
     def _read_text(self, key: str) -> str | None:
         try:

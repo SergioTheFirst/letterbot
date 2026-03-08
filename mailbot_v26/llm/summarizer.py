@@ -64,7 +64,9 @@ class LLMSummarizer:
         combined = f"{summary}\n{raw_text}".lower()
         for key, triggers in prompts_ru.TRIGGERS.items():
             if any(trigger.lower() in combined for trigger in triggers):
-                return prompts_ru.FINAL_PROMPTS.get(key, prompts_ru.FINAL_PROMPTS["GENERIC"])
+                return prompts_ru.FINAL_PROMPTS.get(
+                    key, prompts_ru.FINAL_PROMPTS["GENERIC"]
+                )
         return prompts_ru.FINAL_PROMPTS["GENERIC"]
 
     def _safe_call(self, prompt: str) -> str:

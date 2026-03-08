@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import configparser
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
-
 
 _LOGGER = logging.getLogger(__name__)
 

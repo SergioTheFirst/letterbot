@@ -13,7 +13,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from mailbot_v26.account_identity import normalize_login
 
@@ -81,7 +81,8 @@ class StateManager:
             if candidate.last_uid > existing.last_uid:
                 existing.last_uid = candidate.last_uid
             if candidate.last_check_time and (
-                not existing.last_check_time or candidate.last_check_time > existing.last_check_time
+                not existing.last_check_time
+                or candidate.last_check_time > existing.last_check_time
             ):
                 existing.last_check_time = candidate.last_check_time
             if candidate.last_error:
@@ -110,7 +111,9 @@ class StateManager:
             account.last_uid = uid
             self._mark_dirty()
 
-    def update_check_time(self, login: str, timestamp: Optional[datetime] = None) -> None:
+    def update_check_time(
+        self, login: str, timestamp: Optional[datetime] = None
+    ) -> None:
         key = normalize_login(login)
         if not key:
             return
@@ -163,12 +166,19 @@ class StateManager:
     def save(self, force: bool = False) -> None:
         with self._lock:
             now = datetime.now()
-            should_save = force or self._dirty or (now - self._last_save_ts) > timedelta(seconds=60)
+            should_save = (
+                force
+                or self._dirty
+                or (now - self._last_save_ts) > timedelta(seconds=60)
+            )
             if not should_save:
                 return
 
             payload = {
-                "accounts": {login: account.__dict__ for login, account in self._state.accounts.items()},
+                "accounts": {
+                    login: account.__dict__
+                    for login, account in self._state.accounts.items()
+                },
                 "llm": self._state.llm.__dict__,
                 "meta": {**self._state.meta.__dict__, "last_save": now.isoformat()},
             }

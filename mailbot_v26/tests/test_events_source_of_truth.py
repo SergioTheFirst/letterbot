@@ -158,7 +158,9 @@ def test_analytics_from_events(tmp_path) -> None:
     deferred = analytics.deferred_digest_counts(account_email="account@example.com")
     assert deferred["total"] == 1
 
-    commitments = analytics.weekly_commitment_counts(account_email="account@example.com", days=7)
+    commitments = analytics.weekly_commitment_counts(
+        account_email="account@example.com", days=7
+    )
     assert commitments["created"] == 1
     assert commitments["fulfilled"] == 1
 
@@ -207,7 +209,11 @@ def test_weekly_metrics_scoped_multi_account(tmp_path) -> None:
             account_id="account@example.com",
             entity_id=None,
             email_id=201,
-            payload={"reason": "test", "attachments_only": False, "attachments_count": 0},
+            payload={
+                "reason": "test",
+                "attachments_only": False,
+                "attachments_count": 0,
+            },
         )
     )
     contract_emitter.emit(
@@ -217,7 +223,11 @@ def test_weekly_metrics_scoped_multi_account(tmp_path) -> None:
             account_id="alt@example.com",
             entity_id=None,
             email_id=202,
-            payload={"reason": "test", "attachments_only": False, "attachments_count": 0},
+            payload={
+                "reason": "test",
+                "attachments_only": False,
+                "attachments_count": 0,
+            },
         )
     )
     contract_emitter.emit(
@@ -362,7 +372,11 @@ def test_weekly_metrics_empty_scope_fallback(tmp_path) -> None:
             account_id="account@example.com",
             entity_id=None,
             email_id=401,
-            payload={"reason": "test", "attachments_only": False, "attachments_count": 0},
+            payload={
+                "reason": "test",
+                "attachments_only": False,
+                "attachments_count": 0,
+            },
         )
     )
     contract_emitter.emit(
@@ -474,7 +488,11 @@ def test_scoped_deferred_commitments_aggregate(tmp_path) -> None:
             account_id="account@example.com",
             entity_id=None,
             email_id=email_id_primary,
-            payload={"reason": "test", "attachments_only": False, "attachments_count": 0},
+            payload={
+                "reason": "test",
+                "attachments_only": False,
+                "attachments_count": 0,
+            },
         )
     )
     contract_emitter.emit(
@@ -484,7 +502,11 @@ def test_scoped_deferred_commitments_aggregate(tmp_path) -> None:
             account_id="alt@example.com",
             entity_id=None,
             email_id=email_id_alt,
-            payload={"reason": "test", "attachments_only": True, "attachments_count": 1},
+            payload={
+                "reason": "test",
+                "attachments_only": True,
+                "attachments_count": 1,
+            },
         )
     )
     contract_emitter.emit(

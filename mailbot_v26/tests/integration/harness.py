@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from email import message_from_bytes
 from email.message import EmailMessage
 from email.utils import parseaddr
@@ -46,7 +46,9 @@ class DummyState:
     def update_last_uid(self, _login: str, _uid: int) -> None:
         return None
 
-    def update_check_time(self, _login: str, _timestamp: datetime | None = None) -> None:
+    def update_check_time(
+        self, _login: str, _timestamp: datetime | None = None
+    ) -> None:
         return None
 
     def set_imap_status(self, _login: str, _status: str, _error: str = "") -> None:
@@ -75,7 +77,9 @@ def build_config(tmp_path: Path, accounts: list[AccountConfig]) -> BotConfig:
     return BotConfig(general=general, accounts=accounts, keys=keys, storage=storage)
 
 
-def build_raw_email(*, subject: str, body: str, sender: str = "sender@example.com") -> bytes:
+def build_raw_email(
+    *, subject: str, body: str, sender: str = "sender@example.com"
+) -> bytes:
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = sender
@@ -114,7 +118,9 @@ def run_single_cycle(
             new_messages = imap.fetch_new_messages()
             runtime_health.on_success(account.account_id, now)
         except Exception as exc:
-            should_alert, alert_text = runtime_health.on_failure(account.account_id, exc, now)
+            should_alert, alert_text = runtime_health.on_failure(
+                account.account_id, exc, now
+            )
             if should_alert:
                 payload = _build_system_payload(
                     text=alert_text,
@@ -129,9 +135,13 @@ def run_single_cycle(
             inbound = parse_raw_email(raw, config)
             message_obj = message_from_bytes(raw)
             message_id = message_obj.get("Message-ID") if message_obj else None
-            from_header = decode_mime_header(message_obj.get("From", "")) if message_obj else ""
+            from_header = (
+                decode_mime_header(message_obj.get("From", "")) if message_obj else ""
+            )
             _, from_email = parseaddr(from_header or inbound.sender)
-            received_at = decode_mime_header(message_obj.get("Date", "")) if message_obj else None
+            received_at = (
+                decode_mime_header(message_obj.get("Date", "")) if message_obj else None
+            )
             attachments_count = len(inbound.attachments or [])
 
             email_id = storage.upsert_email(
@@ -144,7 +154,9 @@ def run_single_cycle(
                 received_at=received_at or None,
                 attachments_count=attachments_count,
             )
-            ctx = PipelineContext(email_id=email_id, account_email=account.login, uid=uid)
+            ctx = PipelineContext(
+                email_id=email_id, account_email=account.login, uid=uid
+            )
             PIPELINE_CACHE[email_id] = ctx
             remember_raw_email(email_id, raw)
             store_inbound(email_id, inbound)

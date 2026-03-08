@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import pytest
 
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
@@ -8,7 +7,6 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 import sqlite3
 from mailbot_v26.tests._web_helpers import login_with_csrf
-
 
 FORBIDDEN = [
     "no " + "data",
@@ -49,15 +47,15 @@ def test_dashboard_vars_precedence(tmp_path: Path) -> None:
 
         page = client.get("/?window_days=30")
         text = page.get_data(as_text=True)
-        assert "value=\"30\" selected" in text
+        assert 'value="30" selected' in text
 
         page = client.get("/")
         text = page.get_data(as_text=True)
-        assert "value=\"30\" selected" in text
+        assert 'value="30" selected' in text
 
         page = client.get("/?window_days=7")
         text = page.get_data(as_text=True)
-        assert "value=\"7\" selected" in text
+        assert 'value="7" selected' in text
 
 
 def test_share_link_button_present(tmp_path: Path) -> None:
@@ -94,7 +92,7 @@ def test_live_dashboard_template_renders_with_scope_vars(tmp_path: Path) -> None
         login_with_csrf(client, "pw")
         page = client.get("/?account_emails=acct@example.com&window_days=7&limit=10")
         body = page.get_data(as_text=True)
-        assert "data-testid=\"live-dashboard\"" in body
+        assert 'data-testid="live-dashboard"' in body
         assert "fetch('/api/dashboard'" in body
         assert ">Priority<" in body
 
@@ -106,10 +104,12 @@ def test_dashboard_renders_for_lane_query_without_errors(tmp_path: Path) -> None
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
         login_with_csrf(client, "pw")
-        page = client.get("/?account_emails=acct@example.com&window_days=7&lane=critical")
+        page = client.get(
+            "/?account_emails=acct@example.com&window_days=7&lane=critical"
+        )
         body = page.get_data(as_text=True)
         assert page.status_code == 200
-        assert "data-testid=\"live-dashboard\"" in body
+        assert 'data-testid="live-dashboard"' in body
         lowered = body.lower()
         for phrase in FORBIDDEN:
             assert phrase not in lowered
@@ -128,6 +128,9 @@ def test_share_link_includes_lane_and_vars(tmp_path: Path) -> None:
         body = page.get_data(as_text=True)
         assert "data-share-url" in body
         assert "lane=critical" in body
-        assert (f"account_emails={quote('acct@example.com')}" in body or "account_emails=acct@example.com" in body)
+        assert (
+            f"account_emails={quote('acct@example.com')}" in body
+            or "account_emails=acct@example.com" in body
+        )
         assert "window_days=30" in body
         assert "limit=25" in body

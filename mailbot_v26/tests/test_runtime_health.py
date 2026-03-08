@@ -17,7 +17,9 @@ def _account(account_id: str = "acc1") -> AccountConfig:
 
 
 def _manager(tmp_path, cooldown_minutes: int = 60) -> AccountRuntimeHealthManager:
-    mgr = AccountRuntimeHealthManager(tmp_path / "runtime_state.json", alert_cooldown_minutes=cooldown_minutes)
+    mgr = AccountRuntimeHealthManager(
+        tmp_path / "runtime_state.json", alert_cooldown_minutes=cooldown_minutes
+    )
     mgr.register_account(_account())
     return mgr
 
@@ -54,7 +56,9 @@ def test_alert_when_fingerprint_changes(tmp_path):
     mgr = _manager(tmp_path)
     now = datetime(2024, 1, 1, tzinfo=timezone.utc)
     mgr.on_failure("acc1", RuntimeError("boom"), now)
-    should_alert, _ = mgr.on_failure("acc1", ValueError("boom"), now + timedelta(minutes=1))
+    should_alert, _ = mgr.on_failure(
+        "acc1", ValueError("boom"), now + timedelta(minutes=1)
+    )
     assert should_alert is True
 
 
@@ -84,12 +88,15 @@ def test_other_accounts_continue(tmp_path):
     assert mgr.should_attempt("bad", now) is False
     assert mgr.should_attempt("good", now) is True
 
+
 def test_imap_repeated_handshake_failure_enters_24h_cooldown(tmp_path):
     mgr = _manager(tmp_path)
     now = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
     for i in range(3):
-        mgr.on_failure("acc1", TimeoutError("SSL handshake timed out"), now + timedelta(minutes=i))
+        mgr.on_failure(
+            "acc1", TimeoutError("SSL handshake timed out"), now + timedelta(minutes=i)
+        )
 
     state = mgr.get_state("acc1")
     assert state.cooldown_until_utc is not None
@@ -113,9 +120,15 @@ def test_imap_cooldown_suppresses_minutely_retry_spam(tmp_path):
     mgr = _manager(tmp_path)
     now = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
-    should_alert_1, _ = mgr.on_failure("acc1", TimeoutError("SSL handshake timed out"), now)
-    should_alert_2, _ = mgr.on_failure("acc1", TimeoutError("SSL handshake timed out"), now + timedelta(minutes=1))
-    should_alert_3, _ = mgr.on_failure("acc1", TimeoutError("SSL handshake timed out"), now + timedelta(minutes=2))
+    should_alert_1, _ = mgr.on_failure(
+        "acc1", TimeoutError("SSL handshake timed out"), now
+    )
+    should_alert_2, _ = mgr.on_failure(
+        "acc1", TimeoutError("SSL handshake timed out"), now + timedelta(minutes=1)
+    )
+    should_alert_3, _ = mgr.on_failure(
+        "acc1", TimeoutError("SSL handshake timed out"), now + timedelta(minutes=2)
+    )
 
     assert should_alert_1 is True
     assert should_alert_2 is False
@@ -124,13 +137,19 @@ def test_imap_cooldown_suppresses_minutely_retry_spam(tmp_path):
     state = mgr.get_state("acc1")
     assert state.cooldown_until_utc is not None
     assert mgr.should_attempt("acc1", now + timedelta(minutes=30)) is False
-    assert mgr.should_attempt("acc1", state.cooldown_until_utc + timedelta(minutes=1)) is True
+    assert (
+        mgr.should_attempt("acc1", state.cooldown_until_utc + timedelta(minutes=1))
+        is True
+    )
+
 
 def test_imap_runtime_failure_is_localized_for_user(tmp_path):
     mgr = _manager(tmp_path)
     now = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
-    should_alert, text = mgr.on_failure("acc1", TimeoutError("SSL handshake timed out"), now)
+    should_alert, text = mgr.on_failure(
+        "acc1", TimeoutError("SSL handshake timed out"), now
+    )
 
     assert should_alert is True
     assert "Почта" in text
@@ -143,9 +162,12 @@ def test_auth_error_has_human_readable_russian_diagnosis(tmp_path):
     mgr = _manager(tmp_path)
     now = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
-    _should_alert, text = mgr.on_failure("acc1", RuntimeError("AUTHENTICATIONFAILED invalid credentials"), now)
+    _should_alert, text = mgr.on_failure(
+        "acc1", RuntimeError("AUTHENTICATIONFAILED invalid credentials"), now
+    )
 
     assert "неверный логин или пароль" in text.lower()
+
 
 def test_repeated_handshake_timeouts_enter_24h_cooldown(tmp_path):
     test_imap_repeated_handshake_failure_enters_24h_cooldown(tmp_path)

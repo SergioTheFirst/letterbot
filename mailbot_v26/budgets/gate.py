@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-from mailbot_v26.budgets.contract import BudgetPeriod, BudgetStatus, BudgetType, ResourceBudget
+from mailbot_v26.budgets.contract import (
+    BudgetPeriod,
+    BudgetStatus,
+    BudgetType,
+    ResourceBudget,
+)
 from mailbot_v26.events.contract import EventType, EventV1, fingerprint
 from mailbot_v26.events.emitter import EventEmitter
 from mailbot_v26.observability import get_logger
@@ -104,7 +109,9 @@ class BudgetGate:
             )
             return False
 
-    def get_budget_status(self, account_email: str, budget_type: BudgetType) -> BudgetStatus:
+    def get_budget_status(
+        self, account_email: str, budget_type: BudgetType
+    ) -> BudgetStatus:
         """EN: Get budget status. RU: Получить статус бюджета."""
 
         with self._connect() as conn:
@@ -137,7 +144,9 @@ class BudgetGate:
                 created_at=_parse_dt(row["created_at"]),
                 updated_at=_parse_dt(row["updated_at"]),
             )
-            consumed = self._get_period_consumption(conn, account_email, budget_type, budget.period)
+            consumed = self._get_period_consumption(
+                conn, account_email, budget_type, budget.period
+            )
             remaining = max(0, budget.limit_value - consumed)
             percentage = consumed / budget.limit_value if budget.limit_value else 1.0
             reset_at = budget.reset_date()
@@ -241,7 +250,9 @@ class BudgetGate:
             return 0
         return int(row["total"] or 0)
 
-    def _emit_event(self, event_type: EventType, *, account_email: str, payload: dict) -> None:
+    def _emit_event(
+        self, event_type: EventType, *, account_email: str, payload: dict
+    ) -> None:
         event = EventV1(
             event_type=event_type,
             ts_utc=datetime.now(timezone.utc).timestamp(),
@@ -256,7 +267,9 @@ class BudgetGate:
         try:
             with self._connect() as conn:
                 fp = fingerprint(event)
-                ts_iso = datetime.fromtimestamp(event.ts_utc, tz=timezone.utc).isoformat()
+                ts_iso = datetime.fromtimestamp(
+                    event.ts_utc, tz=timezone.utc
+                ).isoformat()
                 payload_json = json.dumps(event.payload, ensure_ascii=False)
                 conn.execute(
                     """
@@ -288,7 +301,9 @@ class BudgetGate:
                 )
                 conn.commit()
         except sqlite3.Error as exc:  # pragma: no cover - defensive logging
-            logger.error("budget_event_emit_failed", account=account_email, error=str(exc))
+            logger.error(
+                "budget_event_emit_failed", account=account_email, error=str(exc)
+            )
 
     def _connect(self) -> contextlib.AbstractContextManager[sqlite3.Connection]:
         if self._connection_factory is not None:

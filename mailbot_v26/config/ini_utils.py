@@ -41,7 +41,11 @@ def read_user_ini_with_defaults(
                 template_path=resolved_template,
             )
         return parsed
-    except (configparser.MissingSectionHeaderError, configparser.ParsingError, OSError) as exc:
+    except (
+        configparser.MissingSectionHeaderError,
+        configparser.ParsingError,
+        OSError,
+    ) as exc:
         _warn_once(
             active_logger,
             ini_path,

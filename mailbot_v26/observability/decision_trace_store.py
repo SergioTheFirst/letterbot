@@ -4,7 +4,10 @@ import sqlite3
 from pathlib import Path
 
 from mailbot_v26.events.contract import EventType
-from mailbot_v26.observability.decision_trace_v1 import DecisionTraceV1, from_canonical_json
+from mailbot_v26.observability.decision_trace_v1 import (
+    DecisionTraceV1,
+    from_canonical_json,
+)
 
 
 def load_latest_decision_traces(

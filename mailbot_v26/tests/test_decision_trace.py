@@ -29,7 +29,9 @@ def _llm_result() -> SimpleNamespace:
 def _common_monkeypatches(monkeypatch, db_path) -> None:
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: _llm_result())
     monkeypatch.setattr(processor, "knowledge_db", KnowledgeDB(db_path))
-    monkeypatch.setattr(processor, "decision_trace_writer", DecisionTraceWriter(db_path))
+    monkeypatch.setattr(
+        processor, "decision_trace_writer", DecisionTraceWriter(db_path)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -70,14 +72,12 @@ def test_decision_trace_persists_prompt_and_response(monkeypatch, tmp_path) -> N
     )
 
     with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT prompt_full, response_full
             FROM decision_traces
             ORDER BY created_at DESC
             LIMIT 1
-            """
-        ).fetchone()
+            """).fetchone()
 
     assert row == ("FULL PROMPT\nline2", '{"output":"result"}')
 
@@ -113,14 +113,18 @@ def test_decision_trace_does_not_change_telegram_payload(monkeypatch, tmp_path) 
     ]
 
 
-def test_decision_trace_write_failure_does_not_stop_pipeline(monkeypatch, tmp_path) -> None:
+def test_decision_trace_write_failure_does_not_stop_pipeline(
+    monkeypatch, tmp_path
+) -> None:
     db_path = tmp_path / "decision_trace_fail.sqlite"
     _common_monkeypatches(monkeypatch, db_path)
 
     def _raise_write(**kwargs) -> None:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(processor, "decision_trace_writer", SimpleNamespace(write=_raise_write))
+    monkeypatch.setattr(
+        processor, "decision_trace_writer", SimpleNamespace(write=_raise_write)
+    )
 
     sent: dict[str, object] = {}
 
@@ -160,14 +164,12 @@ def test_decision_trace_records_signal_fallback(monkeypatch, tmp_path) -> None:
     )
 
     with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT signal_fallback_used
             FROM decision_traces
             ORDER BY created_at DESC
             LIMIT 1
-            """
-        ).fetchone()
+            """).fetchone()
 
     assert row == (1,)
 
@@ -175,7 +177,9 @@ def test_decision_trace_records_signal_fallback(monkeypatch, tmp_path) -> None:
 def test_message_interpretation_created(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "message_interpretation.sqlite"
     _common_monkeypatches(monkeypatch, db_path)
-    monkeypatch.setattr(processor, "contract_event_emitter", ContractEventEmitter(db_path))
+    monkeypatch.setattr(
+        processor, "contract_event_emitter", ContractEventEmitter(db_path)
+    )
     monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: None)
 
     processor.process_message(
@@ -190,15 +194,13 @@ def test_message_interpretation_created(monkeypatch, tmp_path) -> None:
     )
 
     with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT event_type, payload
             FROM events_v1
             WHERE event_type = 'message_interpretation'
             ORDER BY ts_utc DESC
             LIMIT 1
-            """
-        ).fetchone()
+            """).fetchone()
 
     assert row is not None
     assert row[0] == "message_interpretation"
@@ -211,7 +213,9 @@ def test_interpretation_matches_decision() -> None:
         attachments=[],
         mail_type="INVOICE",
     )
-    facts = processor._validate_message_facts(facts, evidence_text="Счет №445 87 500 руб до 15.04.2026")  # noqa: SLF001
+    facts = processor._validate_message_facts(
+        facts, evidence_text="Счет №445 87 500 руб до 15.04.2026"
+    )  # noqa: SLF001
     context = processor._detect_conversation_context(  # noqa: SLF001
         subject="Счет №445",
         body_text="К оплате 87 500 руб до 15.04.2026",
@@ -245,7 +249,9 @@ def test_interpretation_matches_decision() -> None:
 def test_no_behavior_change_in_telegram_payload(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "telegram_payload_stable.sqlite"
     _common_monkeypatches(monkeypatch, db_path)
-    monkeypatch.setattr(processor, "contract_event_emitter", ContractEventEmitter(db_path))
+    monkeypatch.setattr(
+        processor, "contract_event_emitter", ContractEventEmitter(db_path)
+    )
 
     payload_store: dict[str, object] = {}
 

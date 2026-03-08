@@ -41,7 +41,9 @@ def _load_cache_file() -> dict[str, object] | None:
 def _write_cache_file(payload: dict[str, object]) -> None:
     try:
         _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _CACHE_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        _CACHE_FILE.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
     except OSError:
         return
 
@@ -71,7 +73,11 @@ def compute_priority_calibration_report(
         if isinstance(cached_entry, dict):
             file_watermark = float(cached_entry.get("watermark") or 0.0)
             file_report = cached_entry.get("report")
-            if file_watermark and file_watermark >= since_ts and isinstance(file_report, dict):
+            if (
+                file_watermark
+                and file_watermark >= since_ts
+                and isinstance(file_report, dict)
+            ):
                 _CACHE[cache_key] = _CacheEntry(file_watermark, file_report)
                 return file_report
 
@@ -100,7 +106,11 @@ def compute_priority_calibration_report(
                 ORDER BY ts_utc DESC
                 LIMIT ?
                 """,
-                (EventType.PRIORITY_CORRECTION_RECORDED.value, since_ts, resolved_max_rows),
+                (
+                    EventType.PRIORITY_CORRECTION_RECORDED.value,
+                    since_ts,
+                    resolved_max_rows,
+                ),
             ).fetchall()
             surprise_rows = conn.execute(
                 """
@@ -149,14 +159,18 @@ def compute_priority_calibration_report(
             }
         )
 
-    max_ts = max(trace_ts + correction_ts + [float(ts) for ts, _ in surprise_rows] or [0.0])
+    max_ts = max(
+        trace_ts + correction_ts + [float(ts) for ts, _ in surprise_rows] or [0.0]
+    )
 
     aggregates: dict[str, dict[str, object]] = {}
     total_decisions = 0
     total_corrected = 0
     for trace in traces:
         model = str(trace.get("model_fingerprint") or "unknown")
-        bucket_evidence = trace.get("evidence") if isinstance(trace.get("evidence"), dict) else {}
+        bucket_evidence = (
+            trace.get("evidence") if isinstance(trace.get("evidence"), dict) else {}
+        )
         matched = int(bucket_evidence.get("matched") or 0)
         total = int(bucket_evidence.get("total") or 0)
         bucket = f"{matched}/{total}"
@@ -177,7 +191,9 @@ def compute_priority_calibration_report(
         )
         model_entry["decisions_total"] = int(model_entry["decisions_total"]) + 1
         if corrected:
-            model_entry["decisions_corrected"] = int(model_entry["decisions_corrected"]) + 1
+            model_entry["decisions_corrected"] = (
+                int(model_entry["decisions_corrected"]) + 1
+            )
         bucket_entry = model_entry["buckets"].setdefault(
             bucket,
             {"total": 0, "corrected": 0},
@@ -199,7 +215,9 @@ def compute_priority_calibration_report(
         bucket_payload = []
         buckets = entry.get("buckets", {})
         if isinstance(buckets, dict):
-            for bucket_key, bucket_entry in sorted(buckets.items(), key=lambda item: item[0]):
+            for bucket_key, bucket_entry in sorted(
+                buckets.items(), key=lambda item: item[0]
+            ):
                 bucket_total = int(bucket_entry.get("total") or 0)
                 bucket_corrected = int(bucket_entry.get("corrected") or 0)
                 bucket_payload.append(
@@ -207,9 +225,9 @@ def compute_priority_calibration_report(
                         "bucket": bucket_key,
                         "total": bucket_total,
                         "corrected": bucket_corrected,
-                        "correction_rate": bucket_corrected / bucket_total
-                        if bucket_total
-                        else None,
+                        "correction_rate": (
+                            bucket_corrected / bucket_total if bucket_total else None
+                        ),
                     }
                 )
         models_payload.append(
@@ -222,23 +240,33 @@ def compute_priority_calibration_report(
             }
         )
 
-    total_correction_rate = total_corrected / total_decisions if total_decisions else None
+    total_correction_rate = (
+        total_corrected / total_decisions if total_decisions else None
+    )
 
     last_7d_start = now_ts - 7 * 24 * 60 * 60
     prev_7d_start = now_ts - 14 * 24 * 60 * 60
-    decisions_last_7d = sum(1 for trace in traces if trace.get("ts_utc", 0.0) >= last_7d_start)
+    decisions_last_7d = sum(
+        1 for trace in traces if trace.get("ts_utc", 0.0) >= last_7d_start
+    )
     decisions_prev_7d = sum(
-        1 for trace in traces if prev_7d_start <= trace.get("ts_utc", 0.0) < last_7d_start
+        1
+        for trace in traces
+        if prev_7d_start <= trace.get("ts_utc", 0.0) < last_7d_start
     )
     corrections_last_7d = sum(1 for ts in correction_ts if ts >= last_7d_start)
-    corrections_prev_7d = sum(1 for ts in correction_ts if prev_7d_start <= ts < last_7d_start)
+    corrections_prev_7d = sum(
+        1 for ts in correction_ts if prev_7d_start <= ts < last_7d_start
+    )
     correction_rate_last_7d = (
         corrections_last_7d / decisions_last_7d if decisions_last_7d else None
     )
     correction_rate_prev_7d = (
         corrections_prev_7d / decisions_prev_7d if decisions_prev_7d else None
     )
-    surprises_last_7d = sum(1 for ts, _ in surprise_rows if float(ts or 0.0) >= last_7d_start)
+    surprises_last_7d = sum(
+        1 for ts, _ in surprise_rows if float(ts or 0.0) >= last_7d_start
+    )
     surprise_rate_last_7d = (
         surprises_last_7d / decisions_last_7d if decisions_last_7d else None
     )

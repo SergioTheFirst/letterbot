@@ -6,7 +6,6 @@ from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
 from mailbot_v26.tests._web_helpers import login_with_csrf
 
-
 BANNED_PHRASES = [
     "No " + "data",
     "Nothing " + "to show",
@@ -33,12 +32,10 @@ def test_banned_phrases_not_present(tmp_path: Path) -> None:
 
         login_with_csrf(client, "pw")
         with sqlite3.connect(db_path) as conn:
-            conn.execute(
-                """
+            conn.execute("""
                 INSERT INTO emails (id, account_email, from_email, received_at)
                 VALUES (1, 'acct@example.com', 'sender@example.com', '2026-01-01T00:00:00+00:00')
-                """
-            )
+                """)
         for path in [
             "/",
             "/latency",

@@ -33,13 +33,18 @@ class StubRuntimeFlagStore:
         self.enabled = enabled
 
     def get_flags(self, *, force: bool = False):
-        return RuntimeFlags(enable_gigachat=False, enable_auto_priority=self.enabled), False
+        return (
+            RuntimeFlags(enable_gigachat=False, enable_auto_priority=self.enabled),
+            False,
+        )
 
     def set_enable_auto_priority(self, enabled: bool) -> None:
         self.enabled = enabled
 
 
-def _llm_result(priority: str = "🔴", action_line: str = "Позвонить клиенту") -> SimpleNamespace:
+def _llm_result(
+    priority: str = "🔴", action_line: str = "Позвонить клиенту"
+) -> SimpleNamespace:
     return SimpleNamespace(
         priority=priority,
         action_line=action_line,
@@ -156,7 +161,9 @@ def test_flag_off_skips_auto_actions(monkeypatch):
         lambda account_email, from_email: [("Позвонить клиенту", "reason")],
     )
 
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -272,8 +279,7 @@ def test_valid_auto_action_persisted(monkeypatch, tmp_path):
     )
 
     with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT
                 priority,
                 original_priority,
@@ -281,8 +287,7 @@ def test_valid_auto_action_persisted(monkeypatch, tmp_path):
                 proposed_action_text,
                 proposed_action_confidence
             FROM emails ORDER BY id DESC LIMIT 1
-            """
-        ).fetchone()
+            """).fetchone()
 
     assert row == (
         "🔴",
@@ -308,7 +313,9 @@ def test_telegram_payload_not_changed(monkeypatch):
     )
 
     baseline_payload: dict[str, object] = {}
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -322,6 +329,7 @@ def test_telegram_payload_not_changed(monkeypatch):
         ),
     )
     monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(False))
+
     def _enqueue_baseline(*, email_id: int, payload) -> None:
         baseline_payload["payload"] = payload
 
@@ -352,12 +360,17 @@ def test_telegram_payload_not_changed(monkeypatch):
         ),
     )
     monkeypatch.setattr(processor, "runtime_flag_store", StubRuntimeFlagStore(False))
-    monkeypatch.setattr(processor.auto_action_engine, "propose", lambda **kwargs: {
-        "type": "REVIEW",
-        "text": "Проверить оплату",
-        "source": "shadow",
-        "confidence": 0.8,
-    })
+    monkeypatch.setattr(
+        processor.auto_action_engine,
+        "propose",
+        lambda **kwargs: {
+            "type": "REVIEW",
+            "text": "Проверить оплату",
+            "source": "shadow",
+            "confidence": 0.8,
+        },
+    )
+
     def _enqueue_with_auto(*, email_id: int, payload) -> None:
         with_auto_actions["payload"] = payload
 

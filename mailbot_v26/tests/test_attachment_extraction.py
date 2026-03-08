@@ -16,7 +16,11 @@ def test_png_attachment_extraction_is_empty():
 
 def test_zip_like_attachment_not_leaking_pk():
     data = b"PK\x03\x04fakezipdata"
-    att = Attachment(filename="file.docx", content=data, content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    att = Attachment(
+        filename="file.docx",
+        content=data,
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
     text = start._extract_attachment_text(att)
     assert "PK" not in text
     assert text in {"", None}
@@ -53,7 +57,11 @@ def _build_minimal_docx():
 
 def test_excel_text_is_extracted():
     data = _build_minimal_xlsx()
-    att = Attachment(filename="table.xlsx", content=data, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    att = Attachment(
+        filename="table.xlsx",
+        content=data,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
     text = start._extract_attachment_text(att)
     assert "Цена" in text
     assert "123" in text
@@ -61,7 +69,11 @@ def test_excel_text_is_extracted():
 
 def test_docx_text_is_extracted():
     data = _build_minimal_docx()
-    att = Attachment(filename="offer.docx", content=data, content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    att = Attachment(
+        filename="offer.docx",
+        content=data,
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
     text = start._extract_attachment_text(att)
     assert "Договор" in text
 

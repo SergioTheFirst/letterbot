@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 _CSRF_INPUT_RE = re.compile(r'name="csrf_token"\s+value="([^"]+)"')
 
 

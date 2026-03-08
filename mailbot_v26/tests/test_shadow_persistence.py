@@ -63,6 +63,7 @@ def _process_once(monkeypatch, tmp_path, *, enable_shadow: bool):
     sent: dict[str, object] = {}
 
     _common_monkeypatches(monkeypatch, db_path, enable_shadow=enable_shadow)
+
     def _enqueue_tg(*, email_id: int, payload) -> None:
         sent["payload"] = payload
 
@@ -109,16 +110,14 @@ def test_flag_off_skips_shadow_fields(monkeypatch, tmp_path):
         }
 
         if shadow_cols.issubset(columns):
-            row = conn.execute(
-                """
+            row = conn.execute("""
                 SELECT
                     shadow_priority,
                     shadow_priority_reason,
                     shadow_action_line,
                     shadow_action_reason
                 FROM emails ORDER BY id DESC LIMIT 1
-                """
-            ).fetchone()
+                """).fetchone()
             assert row == (None, None, None, None)
         else:
             assert not shadow_cols & columns
@@ -142,16 +141,14 @@ def test_flag_on_persists_shadow_fields(monkeypatch, tmp_path):
     )
 
     with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT
                 shadow_priority,
                 shadow_priority_reason,
                 shadow_action_line,
                 shadow_action_reason
             FROM emails ORDER BY id DESC LIMIT 1
-            """
-        ).fetchone()
+            """).fetchone()
 
     assert row == ("🟡", "reason1", "Перезвонить поставщику", "reason2")
 

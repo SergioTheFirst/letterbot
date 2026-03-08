@@ -137,9 +137,7 @@ def test_deadlock_does_not_emit_below_threshold(tmp_path) -> None:
 
     assert emitted is False
     with sqlite3.connect(db_path) as conn:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM events_v1"
-        ).fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM events_v1").fetchone()[0]
     assert count == 0
 
 

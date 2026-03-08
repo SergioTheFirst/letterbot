@@ -149,7 +149,11 @@ def collect_import_targets(py_files: Iterable[Path]) -> Set[str]:
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ""
                 for alias in node.names:
-                    target = module if alias.name == "*" else f"{module}.{alias.name}" if module else alias.name
+                    target = (
+                        module
+                        if alias.name == "*"
+                        else f"{module}.{alias.name}" if module else alias.name
+                    )
                     imports.add(target)
     return imports
 
@@ -165,7 +169,10 @@ def detect_unused_modules(infos: List[FileInfo]) -> List[FileInfo]:
             continue
         if path.name.startswith("test_") or "tests" in path.parts:
             continue
-        if any(module_name.startswith(target) or target.startswith(module_name) for target in imports):
+        if any(
+            module_name.startswith(target) or target.startswith(module_name)
+            for target in imports
+        ):
             continue
         if "__main__" in path.read_text(encoding="utf-8", errors="ignore"):
             continue
@@ -293,6 +300,7 @@ def print_report(report: AuditReport) -> None:
 
 
 # === SELF-TEST ===
+
 
 def run_self_test(base_path: Path) -> None:
     report = build_report(base_path)

@@ -37,8 +37,12 @@ def _stub_llm_result():
 def test_trust_score_compute_failure_does_not_break_pipeline(monkeypatch) -> None:
     monkeypatch.setattr(processor, "feature_flags", _common_flags())
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: _stub_llm_result())
-    monkeypatch.setattr(processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", ""))
-    monkeypatch.setattr(processor.shadow_action_engine, "compute", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", "")
+    )
+    monkeypatch.setattr(
+        processor.shadow_action_engine, "compute", lambda *args, **kwargs: []
+    )
     monkeypatch.setattr(processor, "send_preview_to_telegram", lambda **kwargs: None)
 
     sent: list[object] = []
@@ -57,8 +61,14 @@ def test_trust_score_compute_failure_does_not_break_pipeline(monkeypatch) -> Non
             confidence=1.0,
         ),
     )
-    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
-    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor.context_store,
+        "record_interaction_event",
+        lambda **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0)
+    )
     monkeypatch.setattr(
         processor,
         "evaluate_signal_quality",
@@ -70,8 +80,14 @@ def test_trust_score_compute_failure_does_not_break_pipeline(monkeypatch) -> Non
             reason="ok",
         ),
     )
-    monkeypatch.setattr(processor.trust_score_calculator, "compute", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: 1))
+    monkeypatch.setattr(
+        processor.trust_score_calculator,
+        "compute",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: 1)
+    )
 
     processor.process_message(
         account_email="account@example.com",
@@ -90,8 +106,12 @@ def test_trust_score_compute_failure_does_not_break_pipeline(monkeypatch) -> Non
 def test_trust_score_does_not_change_telegram_payload(monkeypatch) -> None:
     monkeypatch.setattr(processor, "feature_flags", _common_flags())
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: _stub_llm_result())
-    monkeypatch.setattr(processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", ""))
-    monkeypatch.setattr(processor.shadow_action_engine, "compute", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", "")
+    )
+    monkeypatch.setattr(
+        processor.shadow_action_engine, "compute", lambda *args, **kwargs: []
+    )
     monkeypatch.setattr(processor, "send_preview_to_telegram", lambda **kwargs: None)
 
     sent: list[object] = []
@@ -110,8 +130,14 @@ def test_trust_score_does_not_change_telegram_payload(monkeypatch) -> None:
             confidence=1.0,
         ),
     )
-    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
-    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor.context_store,
+        "record_interaction_event",
+        lambda **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0)
+    )
     monkeypatch.setattr(
         processor,
         "evaluate_signal_quality",
@@ -123,7 +149,9 @@ def test_trust_score_does_not_change_telegram_payload(monkeypatch) -> None:
             reason="ok",
         ),
     )
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: 1))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: 1)
+    )
     monkeypatch.setattr(
         processor,
         "trust_snapshot_writer",

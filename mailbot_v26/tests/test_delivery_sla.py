@@ -4,7 +4,9 @@ from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 def _payload(text: str) -> TelegramPayload:
-    return TelegramPayload(html_text=text, priority="🔵", metadata={"chat_id": "1", "bot_token": "t"})
+    return TelegramPayload(
+        html_text=text, priority="🔵", metadata={"chat_id": "1", "bot_token": "t"}
+    )
 
 
 def _monotonic_sequence(values: list[float]):
@@ -98,7 +100,6 @@ def test_edit_failure_does_not_trigger_second_send() -> None:
     assert edit_failures == ["edit_failed"]
     assert outcome.result.delivered is True
     assert outcome.edit_applied is False
-
 
 
 def test_progressive_message_edit() -> None:

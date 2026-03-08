@@ -43,4 +43,3 @@ def test_marketing_over_personal_priority():
     result = classifier.classify(sender, subject, body)
 
     assert result == "MARKETING"
-

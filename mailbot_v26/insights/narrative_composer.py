@@ -156,7 +156,7 @@ def _select_amount(amounts: list[str]) -> str | None:
 def _parse_amount(value: str) -> float | None:
     if not value:
         return None
-    cleaned = value.replace("\u00A0", " ").replace(" ", "")
+    cleaned = value.replace("\u00a0", " ").replace(" ", "")
     cleaned = cleaned.replace(",", ".")
     digits = "".join(ch for ch in cleaned if ch.isdigit() or ch == ".")
     if not digits:
@@ -194,7 +194,9 @@ def _find_urgency(text: str) -> str | None:
 def _attachment_summary(attachments: list[dict[str, object]]) -> str | None:
     if not attachments:
         return None
-    types = sorted({_attachment_type_label(str(a.get("filename") or "")) for a in attachments})
+    types = sorted(
+        {_attachment_type_label(str(a.get("filename") or "")) for a in attachments}
+    )
     types = [label for label in types if label]
     if types:
         return f"Вложения: {len(attachments)} ({', '.join(types)})"
@@ -212,7 +214,9 @@ def _attachment_type_label(filename: str) -> str:
     return {"jpeg": "JPG", "jpg": "JPG"}.get(ext, ext.upper())
 
 
-def _chain_summary(entity_id: str | None, analytics: KnowledgeAnalytics | None) -> str | None:
+def _chain_summary(
+    entity_id: str | None, analytics: KnowledgeAnalytics | None
+) -> str | None:
     if not entity_id or analytics is None:
         return None
     count = analytics.interaction_event_count(
@@ -244,7 +248,9 @@ def _build_pattern_line(
             return f"Обычно {previous}/нед, сейчас {recent}/нед."
 
     now = datetime.now(timezone.utc)
-    current = analytics.get_avg_response_time(entity_id=entity_id, window=14, end_dt=now)
+    current = analytics.get_avg_response_time(
+        entity_id=entity_id, window=14, end_dt=now
+    )
     baseline_end = now - timedelta(days=14)
     baseline = analytics.get_avg_response_time(
         entity_id=entity_id,

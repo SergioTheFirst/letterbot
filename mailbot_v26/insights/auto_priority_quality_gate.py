@@ -96,9 +96,7 @@ class AutoPriorityQualityGate:
             return result
 
         samples = _count_rows_for_engine(processed_rows, self._analytics, engine)
-        corrections = _count_rows_for_engine(
-            correction_rows, self._analytics, engine
-        )
+        corrections = _count_rows_for_engine(correction_rows, self._analytics, engine)
         correction_rate = corrections / max(1, samples)
         state = self._state_store.load()
 

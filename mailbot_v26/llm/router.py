@@ -32,7 +32,9 @@ class LLMRouterConfig:
     fallback: str = "cloudflare"
     gigachat_enabled: bool = False
     gigachat_api_key: str = ""
-    gigachat_base_url: str = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+    gigachat_base_url: str = (
+        "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+    )
     gigachat_model: str | None = "GigaChat"
     cloudflare_enabled: bool = True
     cloudflare_account_id: str = ""
@@ -120,7 +122,9 @@ class LLMRouter:
             )
 
     def _fallback_log(self, *, reason: str) -> None:
-        breaker_until = self._circuit_open_until.isoformat() if self._circuit_open_until else ""
+        breaker_until = (
+            self._circuit_open_until.isoformat() if self._circuit_open_until else ""
+        )
         logger.info(
             "[LLM-FALLBACK] from=gigachat to=%s reason=%s breaker_until=%s",
             self._fallback_name,
@@ -190,7 +194,11 @@ class LLMRouter:
         if self._is_circuit_open():
             logger.info(
                 "[LLM-CIRCUIT] state=open until=%s",
-                self._circuit_open_until.isoformat() if self._circuit_open_until else "",
+                (
+                    self._circuit_open_until.isoformat()
+                    if self._circuit_open_until
+                    else ""
+                ),
             )
             if self._primary_name == "gigachat":
                 self._fallback_log(reason="circuit_open")
@@ -230,7 +238,11 @@ class LLMRouter:
                 self._gigachat_consecutive_errors = 0
             self._gigachat_last_latency_sec = latency
 
-            if not ok and self._gigachat_consecutive_errors >= self.config.gigachat_max_consecutive_errors:
+            if (
+                not ok
+                and self._gigachat_consecutive_errors
+                >= self.config.gigachat_max_consecutive_errors
+            ):
                 self._auto_disable_gigachat("consecutive_errors")
                 self._fallback_log(reason="consecutive_errors")
                 return self._fallback_complete(
@@ -314,18 +326,20 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         cloudflare_creds_section = (
             accounts_parser["cloudflare"]
             if "cloudflare" in accounts_parser
-            else keys_parser["cloudflare"]
-            if "cloudflare" in keys_parser
-            else accounts_parser["DEFAULT"]
+            else (
+                keys_parser["cloudflare"]
+                if "cloudflare" in keys_parser
+                else accounts_parser["DEFAULT"]
+            )
         )
         gigachat_creds_section = (
             accounts_parser["gigachat"]
             if "gigachat" in accounts_parser
-            else keys_parser["gigachat"]
-            if "gigachat" in keys_parser
-            else parser["gigachat"]
-            if "gigachat" in parser
-            else parser["DEFAULT"]
+            else (
+                keys_parser["gigachat"]
+                if "gigachat" in keys_parser
+                else parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
+            )
         )
     else:
         llm_section = parser["llm"] if "llm" in parser else parser["DEFAULT"]
@@ -334,12 +348,22 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
             if "cloudflare" in keys_parser
             else keys_parser["DEFAULT"]
         )
-        gigachat_creds_section = parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
+        gigachat_creds_section = (
+            parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
+        )
 
     gigachat_section = parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
-    gigachat_creds_section = accounts_parser["gigachat"] if "gigachat" in accounts_parser else gigachat_section
-    cloudflare_section = parser["cloudflare"] if "cloudflare" in parser else parser["DEFAULT"]
-    safety_section = parser["llm_safety"] if "llm_safety" in parser else parser["DEFAULT"]
+    gigachat_creds_section = (
+        accounts_parser["gigachat"]
+        if "gigachat" in accounts_parser
+        else gigachat_section
+    )
+    cloudflare_section = (
+        parser["cloudflare"] if "cloudflare" in parser else parser["DEFAULT"]
+    )
+    safety_section = (
+        parser["llm_safety"] if "llm_safety" in parser else parser["DEFAULT"]
+    )
 
     primary_provider = llm_section.get("primary", "cloudflare")
     fallback_provider = llm_section.get("fallback", primary_provider)
@@ -360,8 +384,12 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         ),
         cloudflare_model=cloudflare_section.get("model", DEFAULT_CLOUDFLARE_MODEL),
         runtime_flags_path=Path(__file__).resolve().parents[1] / "runtime_flags.json",
-        gigachat_max_consecutive_errors=_get_int(safety_section, "gigachat_max_consecutive_errors", 3),
-        gigachat_max_latency_sec=_get_int(safety_section, "gigachat_max_latency_sec", 10),
+        gigachat_max_consecutive_errors=_get_int(
+            safety_section, "gigachat_max_consecutive_errors", 3
+        ),
+        gigachat_max_latency_sec=_get_int(
+            safety_section, "gigachat_max_latency_sec", 10
+        ),
         gigachat_cooldown_sec=_get_int(safety_section, "gigachat_cooldown_sec", 600),
     )
 

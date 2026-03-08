@@ -27,7 +27,10 @@ from mailbot_v26.config.uncertainty_queue import (
     UncertaintyQueueConfig,
     load_uncertainty_queue_config,
 )
-from mailbot_v26.config.silence_policy import SilencePolicyConfig, load_silence_policy_config
+from mailbot_v26.config.silence_policy import (
+    SilencePolicyConfig,
+    load_silence_policy_config,
+)
 from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.config_yaml import (
     load_config as load_yaml_config,
@@ -36,7 +39,11 @@ from mailbot_v26.config_yaml import (
 from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.observability.logger import LoggerLike
 from mailbot_v26.observability.event_emitter import EventEmitter
-from mailbot_v26.observability.metrics import GateEvaluation, MetricsAggregator, SystemGates
+from mailbot_v26.observability.metrics import (
+    GateEvaluation,
+    MetricsAggregator,
+    SystemGates,
+)
 from mailbot_v26.pipeline import daily_digest, weekly_digest
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
@@ -180,9 +187,7 @@ def _load_weekly_accuracy_report_config() -> WeeklyAccuracyReportConfig:
     window_days = 7
     parser = _load_ini_parser()
     section = (
-        parser["weekly_accuracy_report"]
-        if "weekly_accuracy_report" in parser
-        else None
+        parser["weekly_accuracy_report"] if "weekly_accuracy_report" in parser else None
     )
     if section is not None:
         try:
@@ -243,7 +248,9 @@ def _load_behavior_metrics_digest_config() -> BehaviorMetricsDigestConfig:
     window_days = 7
     parser = _load_ini_parser()
     section = (
-        parser["behavior_metrics_digest"] if "behavior_metrics_digest" in parser else None
+        parser["behavior_metrics_digest"]
+        if "behavior_metrics_digest" in parser
+        else None
     )
     if section is not None:
         try:
@@ -366,7 +373,9 @@ def _load_support_config_from_settings(
     except ValueError:
         telegram_enabled = True
     try:
-        min_days_between_asks = max(1, section.getint("min_days_between_asks", fallback=30))
+        min_days_between_asks = max(
+            1, section.getint("min_days_between_asks", fallback=30)
+        )
     except ValueError:
         min_days_between_asks = 30
     url = str(section.get("url", fallback="")).strip()
@@ -406,7 +415,9 @@ def _load_support_telegram_config() -> SupportTelegramConfig:
     return SupportTelegramConfig(
         enabled=bool(telegram.get("enabled", False)),
         telegram=True,
-        min_days_between_asks=max(7, min(365, int(telegram.get("frequency_days", 30) or 30))),
+        min_days_between_asks=max(
+            7, min(365, int(telegram.get("frequency_days", 30) or 30))
+        ),
         url="",
         message=text,
     )
@@ -744,12 +755,8 @@ def _run_daily_digest(
     include_quality_metrics: bool = False,
     include_weekly_accuracy_report: bool = False,
 ) -> None:
-    resolved_scope = resolve_account_scope(
-        account_email, base_dir=_CONFIG_PATH.parent
-    )
-    scope_account_emails = (
-        resolved_scope.account_emails if resolved_scope else None
-    )
+    resolved_scope = resolve_account_scope(account_email, base_dir=_CONFIG_PATH.parent)
+    scope_account_emails = resolved_scope.account_emails if resolved_scope else None
     if not _is_daily_due(now, config):
         logger.info(
             "digest_tick_checked",
@@ -1042,7 +1049,11 @@ def _run_weekly_digest(
             support_config=support_cfg,
         )
     except Exception as exc:
-        logger.error("weekly_support_footer_unavailable", account_email=account_email, error=str(exc))
+        logger.error(
+            "weekly_support_footer_unavailable",
+            account_email=account_email,
+            error=str(exc),
+        )
 
     payload = _build_weekly_payload(
         account_email=account_email,
@@ -1149,4 +1160,9 @@ def _run_weekly_digest(
         )
 
 
-__all__ = ["DigestStorage", "DailyDigestConfig", "WeeklyDigestConfig", "run_digest_tick"]
+__all__ = [
+    "DigestStorage",
+    "DailyDigestConfig",
+    "WeeklyDigestConfig",
+    "run_digest_tick",
+]

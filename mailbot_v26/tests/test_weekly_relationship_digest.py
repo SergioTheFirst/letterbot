@@ -19,14 +19,28 @@ def test_weekly_digest_uses_relationship_top_senders(tmp_path: Path) -> None:
             INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("user@example.com", "vendor@example.com", "Invoice", "invoice payment", now.isoformat(), now.isoformat()),
+            (
+                "user@example.com",
+                "vendor@example.com",
+                "Invoice",
+                "invoice payment",
+                now.isoformat(),
+                now.isoformat(),
+            ),
         )
         conn.execute(
             """
             INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("user@example.com", "vendor@example.com", "Contract", "contract update", now.isoformat(), now.isoformat()),
+            (
+                "user@example.com",
+                "vendor@example.com",
+                "Contract",
+                "contract update",
+                now.isoformat(),
+                now.isoformat(),
+            ),
         )
         conn.commit()
 
@@ -41,4 +55,3 @@ def test_weekly_digest_uses_relationship_top_senders(tmp_path: Path) -> None:
 
     assert data.relationship_top_senders
     assert data.relationship_top_senders[0]["sender_email"] == "vendor@example.com"
-

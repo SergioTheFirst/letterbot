@@ -44,7 +44,9 @@ def _make_config(tmp_path: Path, accounts: list[AccountConfig]) -> BotConfig:
             admin_chat_id="admin-chat",
         ),
         accounts=accounts,
-        keys=KeysConfig(telegram_bot_token="token", cf_account_id="cf", cf_api_token="api"),
+        keys=KeysConfig(
+            telegram_bot_token="token", cf_account_id="cf", cf_api_token="api"
+        ),
         storage=StorageConfig(db_path=tmp_path / "mailbot.sqlite"),
     )
 
@@ -71,7 +73,9 @@ def test_all_accounts_ok_no_telegram_warning(monkeypatch, tmp_path: Path) -> Non
         messages.append(payload.html_text)
         return DeliveryResult(delivered=True, retryable=False)
 
-    accounts_to_poll = mail_accounts.run_startup_mail_account_healthcheck(config, _send_telegram)
+    accounts_to_poll = mail_accounts.run_startup_mail_account_healthcheck(
+        config, _send_telegram
+    )
 
     assert len(messages) == 0
     assert [account.login for account in accounts_to_poll] == ["ok@example.com"]
@@ -156,7 +160,9 @@ def test_healthcheck_error_message_not_none(monkeypatch) -> None:
         def login(self, login: str, password: str) -> None:
             raise Exception(None)
 
-    monkeypatch.setattr(mail_accounts, "_imap_client_cls", lambda: EmptyMessageIMAPClient)
+    monkeypatch.setattr(
+        mail_accounts, "_imap_client_cls", lambda: EmptyMessageIMAPClient
+    )
 
     results = mail_accounts.check_mail_accounts(
         [

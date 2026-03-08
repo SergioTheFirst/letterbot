@@ -40,7 +40,9 @@ def _setup(monkeypatch, tmp_path: Path) -> tuple[Path, dict[str, object]]:
     monkeypatch.setattr(
         processor,
         "runtime_flag_store",
-        SimpleNamespace(get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=False), False)),
+        SimpleNamespace(
+            get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=False), False)
+        ),
     )
     monkeypatch.setattr(
         processor,
@@ -87,7 +89,9 @@ def _setup(monkeypatch, tmp_path: Path) -> tuple[Path, dict[str, object]]:
     return db_path, sent
 
 
-def _insert_snapshot_row(*, db_path: Path, email_id: int, priority: str, priority_source: str) -> None:
+def _insert_snapshot_row(
+    *, db_path: Path, email_id: int, priority: str, priority_source: str
+) -> None:
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
@@ -133,14 +137,20 @@ def _process_once(*, email_id: int) -> None:
     )
 
 
-def test_user_priority_override_blocks_auto_priority(monkeypatch, tmp_path: Path) -> None:
+def test_user_priority_override_blocks_auto_priority(
+    monkeypatch, tmp_path: Path
+) -> None:
     db_path, sent = _setup(monkeypatch, tmp_path)
-    _insert_snapshot_row(db_path=db_path, email_id=101, priority="🟡", priority_source="user_override")
+    _insert_snapshot_row(
+        db_path=db_path, email_id=101, priority="🟡", priority_source="user_override"
+    )
 
     monkeypatch.setattr(
         processor,
         "_compute_heuristic_priority",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not compute auto priority")),
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("must not compute auto priority")
+        ),
     )
 
     _process_once(email_id=101)
@@ -155,12 +165,16 @@ def test_user_priority_override_blocks_auto_priority(monkeypatch, tmp_path: Path
 
 def test_enrichment_does_not_revert_priority(monkeypatch, tmp_path: Path) -> None:
     db_path, sent = _setup(monkeypatch, tmp_path)
-    _insert_snapshot_row(db_path=db_path, email_id=202, priority="🟡", priority_source="user_override")
+    _insert_snapshot_row(
+        db_path=db_path, email_id=202, priority="🟡", priority_source="user_override"
+    )
 
     monkeypatch.setattr(
         processor,
         "_compute_heuristic_priority",
-        lambda **kwargs: PriorityResultV2(priority="🔴", score=100, breakdown=(), reason_codes=("HIGH",)),
+        lambda **kwargs: PriorityResultV2(
+            priority="🔴", score=100, breakdown=(), reason_codes=("HIGH",)
+        ),
     )
 
     _process_once(email_id=202)
@@ -178,7 +192,9 @@ def test_new_email_still_uses_auto_priority(monkeypatch, tmp_path: Path) -> None
     monkeypatch.setattr(
         processor,
         "_compute_heuristic_priority",
-        lambda **kwargs: PriorityResultV2(priority="🔴", score=100, breakdown=(), reason_codes=("HIGH",)),
+        lambda **kwargs: PriorityResultV2(
+            priority="🔴", score=100, breakdown=(), reason_codes=("HIGH",)
+        ),
     )
     monkeypatch.setattr(
         processor,

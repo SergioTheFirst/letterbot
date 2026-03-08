@@ -6,7 +6,7 @@ def test_chunker_respects_overlap():
     chunks = chunk_text(text, size=100, overlap=10)
     assert len(chunks) > 5
     for idx in range(1, len(chunks)):
-        assert chunks[idx-1][-10:] == chunks[idx][:10]
+        assert chunks[idx - 1][-10:] == chunks[idx][:10]
 
 
 def test_chunker_handles_small_text():

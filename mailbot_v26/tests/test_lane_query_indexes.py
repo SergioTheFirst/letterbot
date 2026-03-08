@@ -4,7 +4,9 @@ from pathlib import Path
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 
-def _explain_plan(conn: sqlite3.Connection, query: str, params: tuple[object, ...]) -> str:
+def _explain_plan(
+    conn: sqlite3.Connection, query: str, params: tuple[object, ...]
+) -> str:
     rows = conn.execute(query, params).fetchall()
     return " ".join(str(row[3]) for row in rows if len(row) > 3)
 

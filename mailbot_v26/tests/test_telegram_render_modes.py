@@ -19,7 +19,9 @@ def _setup_processor(monkeypatch) -> None:
         failed=False,
     )
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -41,9 +43,17 @@ def _setup_processor(monkeypatch) -> None:
         "compute",
         lambda account_email, from_email: [],
     )
-    monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **kwargs: None)
-    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
-    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor.context_store, "resolve_sender_entity", lambda **kwargs: None
+    )
+    monkeypatch.setattr(
+        processor.context_store,
+        "record_interaction_event",
+        lambda **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0)
+    )
     monkeypatch.setattr(
         processor,
         "is_top_percentile",
@@ -53,7 +63,9 @@ def _setup_processor(monkeypatch) -> None:
             anchor_ts_utc=float(kwargs.get("anchor_ts_utc") or 0.0),
         ),
     )
-    monkeypatch.setattr(processor.budget_gate, "can_use_llm", lambda _account_email: True)
+    monkeypatch.setattr(
+        processor.budget_gate, "can_use_llm", lambda _account_email: True
+    )
 
 
 def test_no_short_template_when_data_exists() -> None:
@@ -110,7 +122,9 @@ def test_attachments_visible_without_llm(monkeypatch) -> None:
     )
 
     telegram_text = sent["payload"].html_text
-    assert telegram_text.startswith("📩 Письмо получено") or ("📎" in telegram_text and "one.doc" in telegram_text)
+    assert telegram_text.startswith("📩 Письмо получено") or (
+        "📎" in telegram_text and "one.doc" in telegram_text
+    )
 
 
 def test_safe_fallback_still_shows_attachments(monkeypatch) -> None:
@@ -145,8 +159,16 @@ def test_safe_fallback_still_shows_attachments(monkeypatch) -> None:
     )
 
     telegram_text = sent["payload"].html_text
-    assert telegram_text.startswith("📩 Письмо получено") or telegram_text.startswith("🔴 от sender@example.com:") or telegram_text.startswith("Письмо получено")
-    assert telegram_text.startswith("📩 Письмо получено") or "📎" in telegram_text or "Вложения:" in telegram_text
+    assert (
+        telegram_text.startswith("📩 Письмо получено")
+        or telegram_text.startswith("🔴 от sender@example.com:")
+        or telegram_text.startswith("Письмо получено")
+    )
+    assert (
+        telegram_text.startswith("📩 Письмо получено")
+        or "📎" in telegram_text
+        or "Вложения:" in telegram_text
+    )
 
 
 def test_renderer_mode_logged(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -277,7 +299,9 @@ def test_direct_llm_path_kept_without_regression(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(processor, "run_llm_stage", _run_llm_stage)
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -299,9 +323,17 @@ def test_direct_llm_path_kept_without_regression(monkeypatch) -> None:
         "compute",
         lambda account_email, from_email: [],
     )
-    monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **kwargs: None)
-    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
-    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor.context_store, "resolve_sender_entity", lambda **kwargs: None
+    )
+    monkeypatch.setattr(
+        processor.context_store,
+        "record_interaction_event",
+        lambda **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0)
+    )
     monkeypatch.setattr(
         processor,
         "is_top_percentile",
@@ -311,8 +343,14 @@ def test_direct_llm_path_kept_without_regression(monkeypatch) -> None:
             anchor_ts_utc=float(kwargs.get("anchor_ts_utc") or 0.0),
         ),
     )
-    monkeypatch.setattr(processor.budget_gate, "can_use_llm", lambda _account_email: True)
-    monkeypatch.setattr(processor, "enqueue_tg", lambda **kwargs: DeliveryResult(delivered=True, retryable=False))
+    monkeypatch.setattr(
+        processor.budget_gate, "can_use_llm", lambda _account_email: True
+    )
+    monkeypatch.setattr(
+        processor,
+        "enqueue_tg",
+        lambda **kwargs: DeliveryResult(delivered=True, retryable=False),
+    )
 
     processor.process_message(
         account_email="account@example.com",

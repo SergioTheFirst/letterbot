@@ -1,4 +1,5 @@
 """Letterbot Premium v26 - Runtime orchestrator"""
+
 from __future__ import annotations
 
 import logging
@@ -11,16 +12,14 @@ from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 from typing import List, Optional
 
-CURRENT_DIR = Path(__file__).resolve().parent
-
 from mailbot_v26.bot_core.pipeline import (
     PIPELINE_CACHE,
     PIPELINE_INBOUND_CACHE,
     PIPELINE_RAW_CACHE,
     PipelineContext,
-    _extract_body,
-    _extract_attachments,
     _extract_attachment_text,
+    _extract_attachments,
+    _extract_body,
     configure_pipeline,
     parse_raw_email,
     remember_raw_email,
@@ -29,14 +28,19 @@ from mailbot_v26.bot_core.pipeline import (
     stage_tg,
     store_inbound,
 )
-from mailbot_v26.bot_core import pipeline as core_pipeline_module
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.dist_self_check import validate_dist_runtime
 from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.config_loader import (
     AccountConfig,
     BotConfig,
+    load_accounts_config,
     load_config as load_ini_config,
+    load_general_config,
+    load_ingest_config,
+    load_keys_config,
+    load_maintenance_config,
+    load_storage_config,
     load_telegram_ui_config,
     validate_telegram_contract,
 )
@@ -54,7 +58,11 @@ from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthchec
 from mailbot_v26.imap_client import ResilientIMAP
 from mailbot_v26.integrity import verify_manifest
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
-from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor, event_emitter
+from mailbot_v26.pipeline.processor import (
+    InboundMessage,
+    MessageProcessor,
+    event_emitter,
+)
 from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.pipeline import processor as processor_module
@@ -87,7 +95,10 @@ from mailbot_v26.worker.telegram_sender import send_telegram
 from mailbot_v26.tools.backfill_events import maybe_backfill_events
 from mailbot_v26.version import __version__
 
+CURRENT_DIR = Path(__file__).resolve().parent
 LOG_PATH = CURRENT_DIR / "mailbot.log"
+# Backward-compatible start-module exports used by tests and tools.
+_START_COMPAT_EXPORTS = (_extract_body, _extract_attachments, _extract_attachment_text)
 RUN_STARTED_AT_UTC = datetime.now(timezone.utc)
 REPO_ROOT = CURRENT_DIR.parent
 
@@ -178,7 +189,9 @@ def _load_yaml_config_or_exit(config_path: Path) -> tuple[dict[str, object], Bot
     return raw_config, config
 
 
-def load_config(config_dir: Path | None) -> tuple[Path | None, dict[str, object], BotConfig]:
+def load_config(
+    config_dir: Path | None,
+) -> tuple[Path | None, dict[str, object], BotConfig]:
     paths = resolve_config_paths(config_dir)
     raw_config: dict[str, object] = {}
 
@@ -188,10 +201,14 @@ def load_config(config_dir: Path | None) -> tuple[Path | None, dict[str, object]
 
     config_path = paths.yaml_path
     if config_path is not None:
-        raw_config, config = _load_yaml_config_or_defaults(config_path, paths.config_dir)
+        raw_config, config = _load_yaml_config_or_defaults(
+            config_path, paths.config_dir
+        )
         return config_path, raw_config, config
 
-    logger.warning("config.yaml missing; using deterministic defaults for YAML-only features")
+    logger.warning(
+        "config.yaml missing; using deterministic defaults for YAML-only features"
+    )
     print("[INFO] config.yaml not found. YAML-only gates use deterministic defaults.")
     config = _load_ini_config_or_defaults(paths.config_dir)
     return None, raw_config, config
@@ -202,7 +219,9 @@ def _load_ini_config_or_defaults(config_dir: Path) -> BotConfig:
         config = load_ini_config(config_dir)
     except Exception as exc:
         logger.warning("config_ini_load_failed %s", exc)
-        print("[WARN] Failed to load INI config; using deterministic defaults where possible.")
+        print(
+            "[WARN] Failed to load INI config; using deterministic defaults where possible."
+        )
         config = BotConfig(
             general=load_general_config(config_dir),
             ingest=load_ingest_config(config_dir),
@@ -211,12 +230,16 @@ def _load_ini_config_or_defaults(config_dir: Path) -> BotConfig:
             keys=load_keys_config(config_dir),
             storage=load_storage_config(config_dir),
         )
-    if (config_dir / "settings.ini").exists() and (config_dir / "accounts.ini").exists():
+    if (config_dir / "settings.ini").exists() and (
+        config_dir / "accounts.ini"
+    ).exists():
         print("Using new 2-file config mode")
     return config
 
 
-def _load_yaml_config_or_defaults(config_path: Path, config_dir: Path) -> tuple[dict[str, object], BotConfig]:
+def _load_yaml_config_or_defaults(
+    config_path: Path, config_dir: Path
+) -> tuple[dict[str, object], BotConfig]:
     try:
         raw_config = load_yaml_config(config_path)
     except (FileNotFoundError, YamlConfigError) as exc:
@@ -234,7 +257,9 @@ def _load_yaml_config_or_defaults(config_path: Path, config_dir: Path) -> tuple[
         print(f"[INFO] {message}. Falling back to INI configuration.")
         if message == SCHEMA_NEWER_MESSAGE and bool(getattr(sys, "frozen", False)):
             print("[WARN] Обновление: распакуйте новый ZIP в новую папку.")
-            print("[WARN] Обновление: скопируйте старый config.yaml и запустите run.bat.")
+            print(
+                "[WARN] Обновление: скопируйте старый config.yaml и запустите run.bat."
+            )
         return raw_config, _load_ini_config_or_defaults(config_dir)
     config = build_bot_config(raw_config, repo_root=REPO_ROOT)
     return raw_config, config
@@ -339,9 +364,19 @@ def _run_premium_processor(
     in_reply_to = inbound.in_reply_to
     references = inbound.references
     if message_obj:
-        rfc_message_id = rfc_message_id or decode_mime_header(message_obj.get("Message-ID", "")) or None
-        in_reply_to = in_reply_to or decode_mime_header(message_obj.get("In-Reply-To", "")) or None
-        references = references or decode_mime_header(message_obj.get("References", "")) or None
+        rfc_message_id = (
+            rfc_message_id
+            or decode_mime_header(message_obj.get("Message-ID", ""))
+            or None
+        )
+        in_reply_to = (
+            in_reply_to
+            or decode_mime_header(message_obj.get("In-Reply-To", ""))
+            or None
+        )
+        references = (
+            references or decode_mime_header(message_obj.get("References", "")) or None
+        )
 
     account = _get_account_by_login(config, ctx.account_email)
     if not account:
@@ -378,7 +413,9 @@ def _fail_open_process(
             try:
                 inbound = parse_raw_email(raw_email, config)
             except Exception as exc:
-                logger.error("Fail-open parse failed for email %s: %s", ctx.email_id, exc)
+                logger.error(
+                    "Fail-open parse failed for email %s: %s", ctx.email_id, exc
+                )
 
     if inbound is None:
         logger.error("Fail-open skipped for email %s: no email content", ctx.email_id)
@@ -407,7 +444,9 @@ def _fail_open_process(
     result = send_telegram(payload)
     ok = result.delivered
     status = "OK" if ok else "FAIL"
-    logger.error("Fail-open Telegram send status for email %s: %s", ctx.email_id, status)
+    logger.error(
+        "Fail-open Telegram send status for email %s: %s", ctx.email_id, status
+    )
 
 
 def _emit_contract_event(
@@ -528,9 +567,7 @@ def _process_queue(
             ctx.attempts = attempts  # type: ignore[attr-defined]
 
         try:
-            print(
-                f"[QUEUE] Claimed {stage} for email_id={email_id} attempt={attempts}"
-            )
+            print(f"[QUEUE] Claimed {stage} for email_id={email_id} attempt={attempts}")
             if ctx is None:
                 raise RuntimeError(f"No pipeline context for email {email_id}")
 
@@ -565,8 +602,12 @@ def _process_queue(
                 storage.mark_done(queue_id)
                 storage.enqueue_stage(email_id, "TG")
             elif stage == "TG":
-                account = _get_account_by_login(config, ctx.account_email) if ctx else None
-                delivery_key = _build_telegram_delivery_key(email_id=email_id, kind="email")
+                account = (
+                    _get_account_by_login(config, ctx.account_email) if ctx else None
+                )
+                delivery_key = _build_telegram_delivery_key(
+                    email_id=email_id, kind="email"
+                )
                 dedup_state = storage.reserve_telegram_delivery(
                     delivery_key=delivery_key,
                     email_id=email_id,
@@ -575,7 +616,8 @@ def _process_queue(
                     kind="email",
                 )
                 if dedup_state == "duplicate" or (
-                    dedup_state == "unavailable" and storage.is_telegram_delivered(email_id)
+                    dedup_state == "unavailable"
+                    and storage.is_telegram_delivered(email_id)
                 ):
                     storage.mark_done(queue_id)
                     logger.info(
@@ -609,7 +651,11 @@ def _process_queue(
                     if dedup_state == "reserved":
                         storage.finalize_telegram_delivery(
                             delivery_key=delivery_key,
-                            telegram_message_id=(str(result.message_id) if result.message_id is not None else None),
+                            telegram_message_id=(
+                                str(result.message_id)
+                                if result.message_id is not None
+                                else None
+                            ),
                         )
                     storage.mark_done(queue_id)
                     event_emitter.emit(
@@ -668,18 +714,24 @@ def _process_queue(
                 logger.warning("Unknown stage %s for email %s", stage, email_id)
         except Exception as queue_exc:
             logger.exception("Queue handling error for email %s", email_id)
-            backoff = min(600, 10 * (2 ** attempts))
+            backoff = min(600, 10 * (2**attempts))
             if stage == "TG":
                 if attempts >= max_tg_attempts:
                     try:
                         storage.set_email_delivery_failed(email_id, str(queue_exc))
                         storage.mark_done(queue_id)
                     except Exception:
-                        logger.exception("Failed to mark delivery failed for queue_id %s", queue_id)
-                    account = _get_account_by_login(config, ctx.account_email) if ctx else None
+                        logger.exception(
+                            "Failed to mark delivery failed for queue_id %s", queue_id
+                        )
+                    account = (
+                        _get_account_by_login(config, ctx.account_email)
+                        if ctx
+                        else None
+                    )
                     if account:
                         notice = (
-                            "\U0001F534 TELEGRAM DELIVERY FAILED\n"
+                            "\U0001f534 TELEGRAM DELIVERY FAILED\n"
                             f"Email ID: {email_id}\n"
                             f"Account: {ctx.account_email}\n"
                             f"Reason: {queue_exc}"
@@ -720,7 +772,9 @@ def _process_queue(
                     try:
                         storage.mark_error(queue_id, str(queue_exc), backoff)
                     except Exception:
-                        logger.exception("Failed to mark error for queue_id %s", queue_id)
+                        logger.exception(
+                            "Failed to mark error for queue_id %s", queue_id
+                        )
                     logger.info(
                         "telegram_delivery_retry email_id=%s attempt=%s backoff_seconds=%s",
                         email_id,
@@ -742,7 +796,9 @@ def _process_queue(
     _process_due_snoozes(storage=storage, config=config)
 
 
-def _render_snooze_reminder_text(storage: Storage, *, email_id: int, reminder_text: str) -> str:
+def _render_snooze_reminder_text(
+    storage: Storage, *, email_id: int, reminder_text: str
+) -> str:
     existing = str(reminder_text or "").strip()
     if existing:
         return existing
@@ -816,7 +872,11 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
             if dedup_state == "reserved":
                 storage.finalize_telegram_delivery(
                     delivery_key=delivery_key,
-                    telegram_message_id=(str(result.message_id) if result.message_id is not None else None),
+                    telegram_message_id=(
+                        str(result.message_id)
+                        if result.message_id is not None
+                        else None
+                    ),
                 )
             continue
         if dedup_state == "reserved":
@@ -856,7 +916,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         logger.error("system_health_snapshot_failed error=%s", exc)
 
     storage: Storage | None = None
-    runtime_health = AccountRuntimeHealthManager(CURRENT_DIR / "data" / "runtime_health.json")
+    runtime_health = AccountRuntimeHealthManager(
+        CURRENT_DIR / "data" / "runtime_health.json"
+    )
     try:
         config_result = load_config(config_dir)
         if (
@@ -886,17 +948,25 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             f"telegram_bot_token_present={str(bool(str(config.keys.telegram_bot_token or '').strip())).lower()}"
         )
 
-        telegram_errors = validate_telegram_contract(config, config_dir=resolved_config_dir)
+        telegram_errors = validate_telegram_contract(
+            config, config_dir=resolved_config_dir
+        )
         if telegram_errors:
-            logger.error("telegram_startup_validation_failed errors=%s", telegram_errors)
-            print("[ERROR] Telegram configuration is invalid. Fix accounts.ini and restart.")
+            logger.error(
+                "telegram_startup_validation_failed errors=%s", telegram_errors
+            )
+            print(
+                "[ERROR] Telegram configuration is invalid. Fix accounts.ini and restart."
+            )
             for error in telegram_errors:
                 print(f"[ERROR] {error}")
             sys.exit(2)
 
-        print(f"[CONFIG] telegram configured: yes (bot_token present)")
+        print("[CONFIG] telegram configured: yes (bot_token present)")
         for account in config.accounts:
-            print(f"[CONFIG] account [{account.account_id}] chat_id={account.telegram_chat_id}")
+            print(
+                f"[CONFIG] account [{account.account_id}] chat_id={account.telegram_chat_id}"
+            )
 
         polling_interval, reload_interval = get_polling_intervals(raw_config)
         last_reload_at = time.monotonic()
@@ -929,7 +999,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 str(item.get("status") or "").upper() == "OK"
                 for item in health_results
                 if isinstance(item, dict)
-                and str(item.get("component") or "") in {"GigaChat", "Cloudflare", "LLM Direct"}
+                and str(item.get("component") or "")
+                in {"GigaChat", "Cloudflare", "LLM Direct"}
             )
             mode = health_checker.evaluate_mode(results)
             report = LaunchReportBuilder(
@@ -1037,7 +1108,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             )
             return client, processor, frozenset(allowed_ids)
 
-        inbound_client, inbound_processor, allowed_chat_ids = _build_inbound_stack(config)
+        inbound_client, inbound_processor, allowed_chat_ids = _build_inbound_stack(
+            config
+        )
         print("[OK] Ready to work\n")
 
         bootstrap_notice_sent = False
@@ -1073,23 +1146,27 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                     )
                                     config = updated_config
                                     raw_config = reloaded_raw
-                                    polling_interval, reload_interval = get_polling_intervals(
-                                        raw_config
+                                    polling_interval, reload_interval = (
+                                        get_polling_intervals(raw_config)
                                     )
                                     processor.config = config
                                     configure_pipeline(config, processor)
                                     accounts_to_poll = list(config.accounts)
                                     for account in config.accounts:
                                         runtime_health.register_account(account)
-                                    inbound_client, inbound_processor, allowed_chat_ids = _build_inbound_stack(
-                                        config
-                                    )
+                                    (
+                                        inbound_client,
+                                        inbound_processor,
+                                        allowed_chat_ids,
+                                    ) = _build_inbound_stack(config)
                                     logger.info(
                                         "config_reloaded accounts=%s",
                                         len(config.accounts),
                                     )
                                 else:
-                                    logger.error("config_reload_invalid error=%s", error)
+                                    logger.error(
+                                        "config_reload_invalid error=%s", error
+                                    )
 
                     try:
                         run_inbound_polling(
@@ -1104,7 +1181,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                         login = account.login or "no_login"
                         now_utc = datetime.now(timezone.utc)
                         state_snapshot = runtime_health.get_state(account.account_id)
-                        if not runtime_health.should_attempt(account.account_id, now_utc):
+                        if not runtime_health.should_attempt(
+                            account.account_id, now_utc
+                        ):
                             digest_logger.warning(
                                 "imap_account_skipped_backoff",
                                 account_id=account.account_id,
@@ -1116,8 +1195,10 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                     state_snapshot.next_retry_at_utc
                                 ),
                                 consecutive_failures=state_snapshot.consecutive_failures,
-                            cooldown_until=runtime_health.format_timestamp(state_snapshot.cooldown_until_utc),
-                            cooldown_reason=state_snapshot.cooldown_reason,
+                                cooldown_until=runtime_health.format_timestamp(
+                                    state_snapshot.cooldown_until_utc
+                                ),
+                                cooldown_reason=state_snapshot.cooldown_reason,
                             )
                             continue
 
@@ -1130,15 +1211,25 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             port=account.port,
                             use_ssl=account.use_ssl,
                             consecutive_failures=state_snapshot.consecutive_failures,
-                            cooldown_until=runtime_health.format_timestamp(state_snapshot.cooldown_until_utc),
+                            cooldown_until=runtime_health.format_timestamp(
+                                state_snapshot.cooldown_until_utc
+                            ),
                             cooldown_reason=state_snapshot.cooldown_reason,
                         )
 
                         try:
                             state_last_uid = state.get_last_uid(login)
                             state_last_check = state.get_last_check_time(login)
-                            has_db_history = _storage_has_account_history(storage, login)
-                            state_file_exists = bool(getattr(getattr(state, "state_file", None), "exists", lambda: False)())
+                            has_db_history = _storage_has_account_history(
+                                storage, login
+                            )
+                            state_file_exists = bool(
+                                getattr(
+                                    getattr(state, "state_file", None),
+                                    "exists",
+                                    lambda: False,
+                                )()
+                            )
                             first_run_detected = _is_first_run_account(
                                 state=state,
                                 storage=storage,
@@ -1155,7 +1246,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 state_file_exists=state_file_exists,
                                 state_last_uid=state_last_uid,
                                 state_last_check=(
-                                    state_last_check.isoformat() if state_last_check else None
+                                    state_last_check.isoformat()
+                                    if state_last_check
+                                    else None
                                 ),
                                 db_history_detected=has_db_history,
                             )
@@ -1219,34 +1312,58 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 print(f"      в”њв”Ђ UID {uid}")
                                 try:
                                     inbound = parse_raw_email(raw, config)
-                                    subject = inbound.subject[:60] if inbound.subject else "(no subject)"
+                                    subject = (
+                                        inbound.subject[:60]
+                                        if inbound.subject
+                                        else "(no subject)"
+                                    )
                                     print(f"      в”‚  Subject: {subject}")
 
                                     message_obj = message_from_bytes(raw)
-                                    message_id = message_obj.get("Message-ID") if message_obj else None
-                                    from_header = decode_mime_header(message_obj.get("From", "")) if message_obj else ""
-                                    from_name, from_email = parseaddr(from_header or inbound.sender)
-                                    received_at = decode_mime_header(message_obj.get("Date", "")) if message_obj else None
+                                    message_id = (
+                                        message_obj.get("Message-ID")
+                                        if message_obj
+                                        else None
+                                    )
+                                    from_header = (
+                                        decode_mime_header(message_obj.get("From", ""))
+                                        if message_obj
+                                        else ""
+                                    )
+                                    from_name, from_email = parseaddr(
+                                        from_header or inbound.sender
+                                    )
+                                    received_at = (
+                                        decode_mime_header(message_obj.get("Date", ""))
+                                        if message_obj
+                                        else None
+                                    )
                                     attachments_count = len(inbound.attachments or [])
 
                                     if storage:
-                                        email_id, enqueued = _persist_inbound_and_enqueue_parse(
-                                            storage=storage,
-                                            account_email=account.login,
-                                            uid=uid,
-                                            message_id=message_id,
-                                            from_email=from_email or None,
-                                            from_name=from_name or None,
-                                            subject=inbound.subject,
-                                            received_at=received_at or None,
-                                            attachments_count=attachments_count,
-                                            raw_email=raw,
-                                            inbound=inbound,
+                                        email_id, enqueued = (
+                                            _persist_inbound_and_enqueue_parse(
+                                                storage=storage,
+                                                account_email=account.login,
+                                                uid=uid,
+                                                message_id=message_id,
+                                                from_email=from_email or None,
+                                                from_name=from_name or None,
+                                                subject=inbound.subject,
+                                                received_at=received_at or None,
+                                                attachments_count=attachments_count,
+                                                raw_email=raw,
+                                                inbound=inbound,
+                                            )
                                         )
                                         if enqueued:
-                                            print(f"      в”‚  Enqueued PARSE for email_id={email_id}")
+                                            print(
+                                                f"      в”‚  Enqueued PARSE for email_id={email_id}"
+                                            )
                                         else:
-                                            print(f"      в”‚  Duplicate ingest skipped for email_id={email_id}")
+                                            print(
+                                                f"      в”‚  Duplicate ingest skipped for email_id={email_id}"
+                                            )
                                     else:
                                         final_text = processor.process(login, inbound)
                                         if final_text and final_text.strip():
@@ -1261,7 +1378,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                             )
                                             result = send_telegram(payload)
                                             ok = result.delivered
-                                            status = "[OK] sent" if ok else "[FAIL] failed"
+                                            status = (
+                                                "[OK] sent" if ok else "[FAIL] failed"
+                                            )
                                             print(f"      в”‚  Telegram: {status}")
                                             logger.info(
                                                 "UID %s: Telegram %s",
@@ -1282,13 +1401,17 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             should_alert, alert_text = runtime_health.on_failure(
                                 account.account_id, e, now_utc
                             )
-                            state_snapshot = runtime_health.get_state(account.account_id)
+                            state_snapshot = runtime_health.get_state(
+                                account.account_id
+                            )
                             print(f"   в””в”Ђ [IMAP ERROR] {e}")
                             backoff_minutes = 0
                             if state_snapshot.next_retry_at_utc:
                                 backoff_minutes = int(
                                     max(
-                                        (state_snapshot.next_retry_at_utc - now_utc).total_seconds()
+                                        (
+                                            state_snapshot.next_retry_at_utc - now_utc
+                                        ).total_seconds()
                                         // 60,
                                         0,
                                     )
@@ -1303,8 +1426,10 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 error_class=e.__class__.__name__,
                                 error_message=str(e),
                                 consecutive_failures=state_snapshot.consecutive_failures,
-                            cooldown_until=runtime_health.format_timestamp(state_snapshot.cooldown_until_utc),
-                            cooldown_reason=state_snapshot.cooldown_reason,
+                                cooldown_until=runtime_health.format_timestamp(
+                                    state_snapshot.cooldown_until_utc
+                                ),
+                                cooldown_reason=state_snapshot.cooldown_reason,
                                 next_retry_at=runtime_health.format_timestamp(
                                     state_snapshot.next_retry_at_utc
                                 ),
@@ -1318,8 +1443,10 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 port=account.port,
                                 use_ssl=account.use_ssl,
                                 consecutive_failures=state_snapshot.consecutive_failures,
-                            cooldown_until=runtime_health.format_timestamp(state_snapshot.cooldown_until_utc),
-                            cooldown_reason=state_snapshot.cooldown_reason,
+                                cooldown_until=runtime_health.format_timestamp(
+                                    state_snapshot.cooldown_until_utc
+                                ),
+                                cooldown_reason=state_snapshot.cooldown_reason,
                                 next_retry_at=runtime_health.format_timestamp(
                                     state_snapshot.next_retry_at_utc
                                 ),
@@ -1416,4 +1543,3 @@ def main_cli(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main_cli())
-

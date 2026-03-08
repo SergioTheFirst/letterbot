@@ -42,7 +42,9 @@ def _setup(monkeypatch) -> dict[str, object]:
     monkeypatch.setattr(
         processor,
         "runtime_flag_store",
-        SimpleNamespace(get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=False), False)),
+        SimpleNamespace(
+            get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=False), False)
+        ),
     )
     monkeypatch.setattr(
         processor,

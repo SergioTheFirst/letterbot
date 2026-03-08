@@ -1,4 +1,5 @@
 """Lightweight regex-based action extractor (Guaranteed Mode)."""
+
 from __future__ import annotations
 
 import re
@@ -16,10 +17,15 @@ class ActionFacts:
     confidence: float
 
 
-_AMOUNT_RE = re.compile(r"(?P<amount>\d+[\d\s]*[\.,]?\d*)\s*(?P<currency>₽|руб|рублей|usd|eur|€|\$)?", re.IGNORECASE)
+_AMOUNT_RE = re.compile(
+    r"(?P<amount>\d+[\d\s]*[\.,]?\d*)\s*(?P<currency>₽|руб|рублей|usd|eur|€|\$)?",
+    re.IGNORECASE,
+)
 _DATE_RE = re.compile(r"(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})")
 _DOC_RE = re.compile(r"(?:№|no\.?|num(?:ber)?)[\s:]*([A-Za-z0-9_-]{3,})", re.IGNORECASE)
-_ACTION_RE = re.compile(r"(оплатить|оплата|pay|payment|approve|утвердить|подписать)", re.IGNORECASE)
+_ACTION_RE = re.compile(
+    r"(оплатить|оплата|pay|payment|approve|утвердить|подписать)", re.IGNORECASE
+)
 _URGENT_RE = re.compile(r"(срочно|urgent|asap|немедленно)", re.IGNORECASE)
 
 

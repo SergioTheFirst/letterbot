@@ -84,24 +84,47 @@ def _setup_processor(monkeypatch, processor_module) -> None:
         llm_provider="gigachat",
     )
     monkeypatch.setattr(processor_module, "run_llm_stage", lambda **kwargs: llm_result)
-    monkeypatch.setattr(processor_module, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
     monkeypatch.setattr(
-        processor_module, "shadow_priority_engine", SimpleNamespace(compute=lambda **kwargs: ("🟡", "shadow"))
+        processor_module,
+        "knowledge_db",
+        SimpleNamespace(save_email=lambda **kwargs: None),
     )
-    monkeypatch.setattr(processor_module, "shadow_action_engine", SimpleNamespace(compute=lambda **kwargs: []))
-    monkeypatch.setattr(processor_module, "priority_confidence_engine", SimpleNamespace(score=lambda **kwargs: 0.95))
     monkeypatch.setattr(
-        processor_module, "auto_priority_gates", SimpleNamespace(evaluate=lambda **kwargs: GateDecision(open=True, reasons=()))
+        processor_module,
+        "shadow_priority_engine",
+        SimpleNamespace(compute=lambda **kwargs: ("🟡", "shadow")),
+    )
+    monkeypatch.setattr(
+        processor_module,
+        "shadow_action_engine",
+        SimpleNamespace(compute=lambda **kwargs: []),
+    )
+    monkeypatch.setattr(
+        processor_module,
+        "priority_confidence_engine",
+        SimpleNamespace(score=lambda **kwargs: 0.95),
+    )
+    monkeypatch.setattr(
+        processor_module,
+        "auto_priority_gates",
+        SimpleNamespace(evaluate=lambda **kwargs: GateDecision(open=True, reasons=())),
     )
     monkeypatch.setattr(
         processor_module,
         "auto_priority_breaker",
-        SimpleNamespace(check=lambda: CircuitBreakerStatus(tripped=False, reason=None, reject_rate=None, confidence_p50=None)),
+        SimpleNamespace(
+            check=lambda: CircuitBreakerStatus(
+                tripped=False, reason=None, reject_rate=None, confidence_p50=None
+            )
+        ),
     )
     monkeypatch.setattr(
         processor_module,
         "runtime_flag_store",
-        SimpleNamespace(get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=True), False), set_enable_auto_priority=lambda **kwargs: None),
+        SimpleNamespace(
+            get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=True), False),
+            set_enable_auto_priority=lambda **kwargs: None,
+        ),
     )
     monkeypatch.setattr(
         processor_module,
@@ -193,7 +216,9 @@ def test_telegram_payload_stability(monkeypatch) -> None:
         llm_provider="gigachat",
     )
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: None)
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -256,9 +281,7 @@ def test_signal_fallback_logging(monkeypatch) -> None:
         root_logger.removeHandler(handler)
 
     payloads = [
-        json.loads(line)
-        for line in stream.getvalue().splitlines()
-        if line.strip()
+        json.loads(line) for line in stream.getvalue().splitlines() if line.strip()
     ]
     evaluated = [entry for entry in payloads if entry["event"] == "signal_evaluated"]
     assert evaluated
@@ -305,16 +328,40 @@ def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
         llm_provider="gigachat",
     )
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: llm_result)
-    monkeypatch.setattr(processor, "shadow_priority_engine", SimpleNamespace(compute=lambda **kwargs: ("🔴", "shadow")))
-    monkeypatch.setattr(processor, "shadow_action_engine", SimpleNamespace(compute=lambda **kwargs: []))
-    monkeypatch.setattr(processor, "priority_confidence_engine", SimpleNamespace(score=lambda **kwargs: 0.95))
-    monkeypatch.setattr(processor, "auto_priority_gates", SimpleNamespace(evaluate=lambda **kwargs: GateDecision(open=True, reasons=())))
+    monkeypatch.setattr(
+        processor,
+        "shadow_priority_engine",
+        SimpleNamespace(compute=lambda **kwargs: ("🔴", "shadow")),
+    )
+    monkeypatch.setattr(
+        processor, "shadow_action_engine", SimpleNamespace(compute=lambda **kwargs: [])
+    )
+    monkeypatch.setattr(
+        processor,
+        "priority_confidence_engine",
+        SimpleNamespace(score=lambda **kwargs: 0.95),
+    )
+    monkeypatch.setattr(
+        processor,
+        "auto_priority_gates",
+        SimpleNamespace(evaluate=lambda **kwargs: GateDecision(open=True, reasons=())),
+    )
     monkeypatch.setattr(
         processor,
         "auto_priority_breaker",
-        SimpleNamespace(check=lambda: CircuitBreakerStatus(tripped=False, reason=None, reject_rate=None, confidence_p50=None)),
+        SimpleNamespace(
+            check=lambda: CircuitBreakerStatus(
+                tripped=False, reason=None, reject_rate=None, confidence_p50=None
+            )
+        ),
     )
-    monkeypatch.setattr(processor, "runtime_flag_store", SimpleNamespace(get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=True), False)))
+    monkeypatch.setattr(
+        processor,
+        "runtime_flag_store",
+        SimpleNamespace(
+            get_flags=lambda **kwargs: (RuntimeFlags(enable_auto_priority=True), False)
+        ),
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -342,7 +389,12 @@ def test_auto_priority_behavior_unchanged(monkeypatch) -> None:
     _enable_auto_priority_gate(monkeypatch)
 
     saved_payload: dict[str, object] = {}
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: saved_payload.update(kwargs)))
+    monkeypatch.setattr(
+        processor,
+        "knowledge_db",
+        SimpleNamespace(save_email=lambda **kwargs: saved_payload.update(kwargs)),
+    )
+
     def _capture_payload(*, email_id: int, payload) -> None:
         payload_store["payload"] = payload
         return DeliveryResult(delivered=True, retryable=False)
@@ -370,9 +422,7 @@ def test_system_health_snapshot_logging_does_not_break(monkeypatch) -> None:
     monkeypatch.setattr(
         processor,
         "system_snapshotter",
-        SimpleNamespace(
-            maybe_log=lambda: (_ for _ in ()).throw(RuntimeError("boom"))
-        ),
+        SimpleNamespace(maybe_log=lambda: (_ for _ in ()).throw(RuntimeError("boom"))),
     )
 
     payload_store: dict[str, object] = {}

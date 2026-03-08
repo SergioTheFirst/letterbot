@@ -19,11 +19,27 @@ def test_web_ui_prod_dependency_guard_message(monkeypatch: pytest.MonkeyPatch) -
     assert "python -m pip install waitress" in message
 
 
-def test_web_ui_main_fails_cleanly_when_waitress_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(web_app, "require_runtime_for", lambda mode="runtime": (_ for _ in ()).throw(
-        deps.DependencyError("Missing dependency: waitress. Install: python -m pip install waitress")
-    ) if mode == "web_ui_prod" else None)
-    monkeypatch.setattr(web_app, "_resolve_yaml_config_path", lambda _path, _config_dir: Path("config.yaml"))
+def test_web_ui_main_fails_cleanly_when_waitress_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        web_app,
+        "require_runtime_for",
+        lambda mode="runtime": (
+            (_ for _ in ()).throw(
+                deps.DependencyError(
+                    "Missing dependency: waitress. Install: python -m pip install waitress"
+                )
+            )
+            if mode == "web_ui_prod"
+            else None
+        ),
+    )
+    monkeypatch.setattr(
+        web_app,
+        "_resolve_yaml_config_path",
+        lambda _path, _config_dir: Path("config.yaml"),
+    )
     monkeypatch.setattr(
         web_app,
         "_load_web_ui_settings",
@@ -39,7 +55,13 @@ def test_web_ui_main_fails_cleanly_when_waitress_missing(monkeypatch: pytest.Mon
             require_strong_password_on_lan=True,
         ),
     )
-    monkeypatch.setattr(web_app.argparse.ArgumentParser, "parse_args", lambda _self: web_app.argparse.Namespace(db=None, config=Path('.'), config_yaml=None, bind=None, port=None))
+    monkeypatch.setattr(
+        web_app.argparse.ArgumentParser,
+        "parse_args",
+        lambda _self: web_app.argparse.Namespace(
+            db=None, config=Path("."), config_yaml=None, bind=None, port=None
+        ),
+    )
 
     with pytest.raises(deps.DependencyError) as exc_info:
         web_app.main()

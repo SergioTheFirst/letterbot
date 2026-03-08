@@ -7,7 +7,7 @@ import sqlite3
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from mailbot_v26.config.llm_queue import load_llm_queue_config
 from mailbot_v26.config_loader import BotConfig
@@ -32,7 +32,11 @@ class HealthCheckResult:
     details: str
 
     def as_dict(self) -> dict[str, str]:
-        return {"component": self.component, "status": self.status, "details": self.details}
+        return {
+            "component": self.component,
+            "status": self.status,
+            "details": self.details,
+        }
 
 
 class StartupHealthChecker:
@@ -74,7 +78,9 @@ class StartupHealthChecker:
         if db_status:
             system_health.update_component("CRM", db_status == HealthStatus.OK)
         if telegram_status:
-            system_health.update_component("Telegram", telegram_status == HealthStatus.OK)
+            system_health.update_component(
+                "Telegram", telegram_status == HealthStatus.OK
+            )
         system_health.update_component("LLM", llm_ok)
         return system_health.mode
 
@@ -87,7 +93,11 @@ class StartupHealthChecker:
         try:
             return fn()
         except Exception as exc:  # pragma: no cover - defensive
-            logger.error("startup_health_check_failed", extra={"component": fn.__name__}, exc_info=True)
+            logger.error(
+                "startup_health_check_failed",
+                extra={"component": fn.__name__},
+                exc_info=True,
+            )
             return (
                 fallback
                 if fallback is not None
@@ -117,7 +127,9 @@ class StartupHealthChecker:
         try:
             with sqlite3.connect(f"file:{db_path}?mode=rwc", uri=True) as conn:
                 conn.execute("BEGIN;")
-                conn.execute("CREATE TEMP TABLE IF NOT EXISTS startup_health_probe (id INTEGER);")
+                conn.execute(
+                    "CREATE TEMP TABLE IF NOT EXISTS startup_health_probe (id INTEGER);"
+                )
                 conn.execute("INSERT INTO startup_health_probe (id) VALUES (1);")
                 conn.execute("ROLLBACK;")
         except sqlite3.Error as exc:
@@ -135,13 +147,19 @@ class StartupHealthChecker:
             config = llm_router._load_llm_config(self._config_dir)
             router = llm_router.LLMRouter(config)
         except Exception as exc:
-            return [HealthCheckResult("GigaChat", HealthStatus.FAILED, f"config error: {exc}")]
+            return [
+                HealthCheckResult(
+                    "GigaChat", HealthStatus.FAILED, f"config error: {exc}"
+                )
+            ]
         provider = router._providers.get("gigachat")
         enabled = bool(config.gigachat_enabled or config.gigachat_api_key)
         if not enabled or not provider:
             return [HealthCheckResult("GigaChat", HealthStatus.DEGRADED, "disabled")]
         if not config.gigachat_api_key:
-            return [HealthCheckResult("GigaChat", HealthStatus.FAILED, "missing api key")]
+            return [
+                HealthCheckResult("GigaChat", HealthStatus.FAILED, "missing api key")
+            ]
         ok = provider.healthcheck()
         status = HealthStatus.OK if ok else HealthStatus.FAILED
         details = "active" if ok else "healthcheck failed"
@@ -153,13 +171,19 @@ class StartupHealthChecker:
             router = llm_router.LLMRouter(config)
         except Exception as exc:
             return [
-                HealthCheckResult("Cloudflare", HealthStatus.FAILED, f"config error: {exc}")
+                HealthCheckResult(
+                    "Cloudflare", HealthStatus.FAILED, f"config error: {exc}"
+                )
             ]
         provider = router._providers.get("cloudflare")
         if not config.cloudflare_enabled or not provider:
             return [HealthCheckResult("Cloudflare", HealthStatus.DEGRADED, "disabled")]
         if not config.cloudflare_account_id or not config.cloudflare_api_key:
-            return [HealthCheckResult("Cloudflare", HealthStatus.FAILED, "missing credentials")]
+            return [
+                HealthCheckResult(
+                    "Cloudflare", HealthStatus.FAILED, "missing credentials"
+                )
+            ]
         ok = provider.healthcheck()
         status = HealthStatus.OK if ok else HealthStatus.FAILED
         details = "active" if ok else "healthcheck failed"
@@ -250,7 +274,9 @@ class LaunchReportBuilder:
         unavailable_reason: str | None,
     ) -> list[str]:
         if unavailable_reason:
-            return [f"- check unavailable ({self._sanitize_details(unavailable_reason)})"]
+            return [
+                f"- check unavailable ({self._sanitize_details(unavailable_reason)})"
+            ]
         if not mail_accounts:
             return ["- none configured"]
         lines: list[str] = []
@@ -306,7 +332,10 @@ class LaunchReportBuilder:
 
     def _get_background_queue_mode(self) -> str:
         queue_config = load_llm_queue_config(self._config_dir)
-        if queue_config.llm_request_queue_enabled and queue_config.max_concurrent_llm_calls == 1:
+        if (
+            queue_config.llm_request_queue_enabled
+            and queue_config.max_concurrent_llm_calls == 1
+        ):
             return "enabled"
         return "disabled"
 
@@ -317,7 +346,9 @@ def dispatch_launch_report(bot_token: str, chat_id: str, report: str) -> bool:
     from mailbot_v26.worker.telegram_sender import send_telegram
 
     if not bot_token or not chat_id or not report:
-        logger.error("launch_report_skipped", extra={"reason": "missing_token_chat_or_report"})
+        logger.error(
+            "launch_report_skipped", extra={"reason": "missing_token_chat_or_report"}
+        )
         return False
     payload = TelegramPayload(
         html_text=telegram_safe(report),
@@ -327,7 +358,9 @@ def dispatch_launch_report(bot_token: str, chat_id: str, report: str) -> bool:
     try:
         return send_telegram(payload).delivered
     except Exception as exc:  # pragma: no cover - defensive
-        logger.error("launch_report_send_failed", extra={"error": str(exc)}, exc_info=True)
+        logger.error(
+            "launch_report_send_failed", extra={"error": str(exc)}, exc_info=True
+        )
         return False
 
 

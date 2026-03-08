@@ -67,7 +67,9 @@ def test_multiple_attachments_all_processed() -> None:
     attachment_lines = _attachment_lines(result, names)
 
     for name in names:
-        assert any(line.startswith(name) for line in attachment_lines), f"Missing {name}"
+        assert any(
+            line.startswith(name) for line in attachment_lines
+        ), f"Missing {name}"
 
     assert len(attachment_lines) == len(attachments)
 

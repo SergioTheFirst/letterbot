@@ -55,7 +55,14 @@ def test_bank_invoice_marked_red():
         subject="Счет на оплату услуг",
         sender="billing@bank.ru",
         body="Просим срочно оплатить счет до завтра, сумма 12000 руб.",
-        attachments=[Attachment(filename="invoice.pdf", content=b"", content_type="application/pdf", text="Счет на оплату")],
+        attachments=[
+            Attachment(
+                filename="invoice.pdf",
+                content=b"",
+                content_type="application/pdf",
+                text="Счет на оплату",
+            )
+        ],
         received_at=datetime(2024, 1, 1, 9, 30),
     )
 
@@ -71,7 +78,14 @@ def test_contract_approval_marked_yellow():
         subject="Согласование договора поставки",
         sender="manager@client.com",
         body="Просьба согласовать договор и вернуть подписанный экземпляр.",
-        attachments=[Attachment(filename="contract.docx", content=b"", content_type="application/msword", text="Условия договора")],
+        attachments=[
+            Attachment(
+                filename="contract.docx",
+                content=b"",
+                content_type="application/msword",
+                text="Условия договора",
+            )
+        ],
         received_at=datetime(2024, 2, 2, 10, 0),
     )
 
@@ -103,7 +117,11 @@ def test_image_only_email_has_no_attachments():
         subject="Фотографии",
         sender="studio@example.com",
         body="Смотрите снимки во вложении.",
-        attachments=[Attachment(filename="photo.jpg", content=b"", content_type="image/jpeg", text="")],
+        attachments=[
+            Attachment(
+                filename="photo.jpg", content=b"", content_type="image/jpeg", text=""
+            )
+        ],
         received_at=datetime(2024, 4, 4, 12, 0),
     )
 
@@ -119,7 +137,14 @@ def test_output_has_two_mandatory_lines():
         subject="Напоминание",
         sender="team@example.com",
         body="Проверить статус задач и ответить клиенту.",
-        attachments=[Attachment(filename="report.pdf", content=b"", content_type="application/pdf", text="Отчет по задачам")],
+        attachments=[
+            Attachment(
+                filename="report.pdf",
+                content=b"",
+                content_type="application/pdf",
+                text="Отчет по задачам",
+            )
+        ],
         received_at=datetime(2024, 5, 5, 13, 0),
     )
 
@@ -294,7 +319,14 @@ def test_body_placeholder_is_silent_when_empty():
         subject="Файлы",
         sender="sender@example.com",
         body="",
-        attachments=[Attachment(filename="info.pdf", content=b"", content_type="application/pdf", text="Вложение")],
+        attachments=[
+            Attachment(
+                filename="info.pdf",
+                content=b"",
+                content_type="application/pdf",
+                text="Вложение",
+            )
+        ],
     )
 
     result = processor.process("user@example.com", msg)
@@ -302,21 +334,18 @@ def test_body_placeholder_is_silent_when_empty():
     lines = result.split("\n")
     assert len(lines) >= 3
     assert "тело" not in result.lower()
-    assert any(line.startswith("info.pdf") for line in _attachment_lines(result, {"info.pdf"}))
+    assert any(
+        line.startswith("info.pdf") for line in _attachment_lines(result, {"info.pdf"})
+    )
 
 
 def test_normalize_action_subject_deduplicates_tokens():
     processor = _processor()
-    action_one = processor._normalize_action_subject(
-        "", "Прайс лист", []
-    )
+    action_one = processor._normalize_action_subject("", "Прайс лист", [])
     assert action_one == "Проверить цены"
 
-    action_two = processor._normalize_action_subject(
-        "", "Проверка с документами", []
-    )
+    action_two = processor._normalize_action_subject("", "Проверка с документами", [])
     assert action_two == "Проверить письмо"
-
 
 
 def test_process_drops_duplicate_subject_line_in_body():
@@ -341,6 +370,7 @@ def test_duplicate_subject_helper_keeps_non_matching_next_line():
 
     assert lines == ["Проверить таблицу"]
 
+
 def test_action_line_prefers_mail_type_over_excel_attachment():
     processor = _processor()
     msg = InboundMessage(
@@ -349,7 +379,12 @@ def test_action_line_prefers_mail_type_over_excel_attachment():
         body="Во вложении акт сверки и таблица.",
         mail_type="ACT_RECONCILIATION",
         attachments=[
-            Attachment(filename="reconciliation.xls", content=b"", content_type="application/vnd.ms-excel", text="")
+            Attachment(
+                filename="reconciliation.xls",
+                content=b"",
+                content_type="application/vnd.ms-excel",
+                text="",
+            )
         ],
     )
 
@@ -366,7 +401,12 @@ def test_action_line_invoice_mail_type_overrides_excel_attachment():
         body="Просим оплатить в срок.",
         mail_type="INVOICE",
         attachments=[
-            Attachment(filename="invoice.xls", content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text="")
+            Attachment(
+                filename="invoice.xls",
+                content=b"",
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                text="",
+            )
         ],
     )
 
@@ -397,7 +437,12 @@ def test_action_line_falls_back_to_excel_attachment_when_mail_type_unknown():
         body="",
         mail_type="",
         attachments=[
-            Attachment(filename="totals.xls", content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text="")
+            Attachment(
+                filename="totals.xls",
+                content=b"",
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                text="",
+            )
         ],
     )
 
@@ -589,7 +634,9 @@ def test_sender_memory_insufficient_history_no_change(monkeypatch) -> None:
     assert result == "🟡"
 
 
-def test_sender_memory_dampening_does_not_suppress_high_signal_mail(monkeypatch) -> None:
+def test_sender_memory_dampening_does_not_suppress_high_signal_mail(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         pipeline_processor,
         "_sender_memory_bias_for_priority",
@@ -618,7 +665,9 @@ def test_sender_memory_scoped_per_sender(monkeypatch) -> None:
             return (12, 5)
         return (0, 5)
 
-    monkeypatch.setattr(pipeline_processor, "_sender_memory_bias_for_priority", _fake_bias)
+    monkeypatch.setattr(
+        pipeline_processor, "_sender_memory_bias_for_priority", _fake_bias
+    )
 
     favored = _apply_sender_memory_to_priority(
         priority="🔵",
@@ -639,7 +688,9 @@ def test_sender_memory_scoped_per_sender(monkeypatch) -> None:
     assert other == "🔵"
 
 
-def test_sender_memory_empty_sender_or_query_failure_keeps_priority(monkeypatch) -> None:
+def test_sender_memory_empty_sender_or_query_failure_keeps_priority(
+    monkeypatch,
+) -> None:
     empty_sender = _apply_sender_memory_to_priority(
         priority="🔵",
         sender_email="",
@@ -838,8 +889,6 @@ def test_summary_uses_decision_facts() -> None:
     assert "15.04.2026" in summary
 
 
-
-
 def test_amount_scoring_prefers_total_keyword() -> None:
     facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}
 
@@ -887,6 +936,7 @@ def test_amount_scoring_attachment_context() -> None:
 
     assert scored["amount"] == "87500"
 
+
 def test_validate_amount_filters_table_numbers() -> None:
     facts = {
         "amount": "150",
@@ -919,7 +969,9 @@ def test_validate_doc_number_reasonable_length() -> None:
         "doc_number": "AB",
     }
 
-    validated = _validate_message_facts(facts, evidence_text="счет №AB сумма 87 500 руб")
+    validated = _validate_message_facts(
+        facts, evidence_text="счет №AB сумма 87 500 руб"
+    )
 
     assert validated["doc_number"] == ""
 
@@ -950,7 +1002,9 @@ def test_reply_payment_confirmation_not_pay_action() -> None:
         mail_type="INVOICE",
     )
     facts = _validate_message_facts(facts, evidence_text="RE: счет оплатили вчера")
-    context = _detect_conversation_context(subject="RE: счет", body_text="оплатили вчера", message_facts=facts)
+    context = _detect_conversation_context(
+        subject="RE: счет", body_text="оплатили вчера", message_facts=facts
+    )
 
     decision = _build_message_decision(
         priority="🟡",
@@ -1005,7 +1059,9 @@ def test_new_invoice_keeps_pay_action() -> None:
         attachments=[],
         mail_type="INVOICE",
     )
-    facts = _validate_message_facts(facts, evidence_text="новый счет к оплате 87 500 руб")
+    facts = _validate_message_facts(
+        facts, evidence_text="новый счет к оплате 87 500 руб"
+    )
     context = _detect_conversation_context(
         subject="новый счет",
         body_text="к оплате 87 500 руб до 15.04.2026",
@@ -1045,6 +1101,7 @@ def test_context_detection_forward() -> None:
     )
 
     assert context == "FORWARD"
+
 
 def test_document_identity_same_invoice_detected() -> None:
     facts = {"doc_kind": "invoice", "doc_number": "123", "amount": "87 500"}
@@ -1110,14 +1167,28 @@ def test_relationship_profile_counts(tmp_path) -> None:
             INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("user@example.com", "vendor@example.com", "Счет №1", "invoice to pay", now.isoformat(), now.isoformat()),
+            (
+                "user@example.com",
+                "vendor@example.com",
+                "Счет №1",
+                "invoice to pay",
+                now.isoformat(),
+                now.isoformat(),
+            ),
         )
         conn.execute(
             """
             INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("user@example.com", "vendor@example.com", "Договор поставки", "contract draft", now.isoformat(), now.isoformat()),
+            (
+                "user@example.com",
+                "vendor@example.com",
+                "Договор поставки",
+                "contract draft",
+                now.isoformat(),
+                now.isoformat(),
+            ),
         )
         conn.execute(
             """
@@ -1163,7 +1234,14 @@ def test_relationship_last_contact_days(tmp_path) -> None:
             INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("user@example.com", "vendor@example.com", "Ping", "status update", old.isoformat(), old.isoformat()),
+            (
+                "user@example.com",
+                "vendor@example.com",
+                "Ping",
+                "status update",
+                old.isoformat(),
+                old.isoformat(),
+            ),
         )
         conn.commit()
 
@@ -1187,13 +1265,32 @@ def test_relationship_trust_score(tmp_path) -> None:
             INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("user@example.com", "vendor@example.com", "Счет", "invoice", now.isoformat(), now.isoformat()),
+            (
+                "user@example.com",
+                "vendor@example.com",
+                "Счет",
+                "invoice",
+                now.isoformat(),
+                now.isoformat(),
+            ),
         )
         events = [
-            ("invoice_paid", '{"sender_email": "vendor@example.com"}', "rel-trust-paid"),
+            (
+                "invoice_paid",
+                '{"sender_email": "vendor@example.com"}',
+                "rel-trust-paid",
+            ),
             ("fast_reply", '{"sender_email": "vendor@example.com"}', "rel-trust-fast"),
-            ("dispute_opened", '{"sender_email": "vendor@example.com"}', "rel-trust-dispute"),
-            ("commitment_overdue", '{"sender_email": "vendor@example.com"}', "rel-trust-overdue"),
+            (
+                "dispute_opened",
+                '{"sender_email": "vendor@example.com"}',
+                "rel-trust-dispute",
+            ),
+            (
+                "commitment_overdue",
+                '{"sender_email": "vendor@example.com"}',
+                "rel-trust-overdue",
+            ),
         ]
         for event_type, payload, fingerprint in events:
             conn.execute(
@@ -1201,7 +1298,18 @@ def test_relationship_trust_score(tmp_path) -> None:
                 INSERT INTO events_v1 (event_type, ts_utc, ts, account_id, entity_id, email_id, payload, payload_json, schema_version, fingerprint)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (event_type, now.timestamp(), now.isoformat(), "user@example.com", "vendor", 1, payload, payload, 1, fingerprint),
+                (
+                    event_type,
+                    now.timestamp(),
+                    now.isoformat(),
+                    "user@example.com",
+                    "vendor",
+                    1,
+                    payload,
+                    payload,
+                    1,
+                    fingerprint,
+                ),
             )
         conn.commit()
 
@@ -1225,14 +1333,28 @@ def test_relationship_invoice_tracking(tmp_path) -> None:
             INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("user@example.com", "vendor@example.com", "Invoice #1", "please pay", now.isoformat(), now.isoformat()),
+            (
+                "user@example.com",
+                "vendor@example.com",
+                "Invoice #1",
+                "please pay",
+                now.isoformat(),
+                now.isoformat(),
+            ),
         )
         conn.execute(
             """
             INSERT INTO emails (account_email, from_email, subject, body_summary, received_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("user@example.com", "vendor@example.com", "Invoice #2", "invoice attached", now.isoformat(), now.isoformat()),
+            (
+                "user@example.com",
+                "vendor@example.com",
+                "Invoice #2",
+                "invoice attached",
+                now.isoformat(),
+                now.isoformat(),
+            ),
         )
         conn.commit()
 
@@ -1304,6 +1426,7 @@ def test_invoice_body_amount_detection() -> None:
     assert facts["invoice_signal"] is True
     assert facts["amount"].startswith("87 500")
 
+
 def test_forwarded_thread_not_used_for_fact_extraction() -> None:
     test_forwarded_thread_not_used()
 
@@ -1345,10 +1468,13 @@ def test_invoice_attachment_amount_detection() -> None:
         mail_type="",
     )
     facts = _validate_message_facts(facts, evidence_text=evidence_text)
-    facts = _score_message_facts(facts, evidence_text=evidence_text, attachment_text=attachment_text)
+    facts = _score_message_facts(
+        facts, evidence_text=evidence_text, attachment_text=attachment_text
+    )
 
     assert facts["invoice_signal"] is True
     assert facts["amount"].startswith("4200")
+
 
 def test_pdf_table_total_preferred_over_global_number_match() -> None:
     attachment_text = (
@@ -1363,7 +1489,10 @@ def test_pdf_table_total_preferred_over_global_number_match() -> None:
             "text": attachment_text,
         }
     ]
-    evidence_text = "\u041d\u043e\u043c\u0435\u0440 \u0434\u043e\u0433\u043e\u0432\u043e\u0440\u0430 999 999 \u0440\u0443\u0431. " + attachment_text
+    evidence_text = (
+        "\u041d\u043e\u043c\u0435\u0440 \u0434\u043e\u0433\u043e\u0432\u043e\u0440\u0430 999 999 \u0440\u0443\u0431. "
+        + attachment_text
+    )
 
     facts = _collect_message_facts(
         subject="\u0421\u0447\u0435\u0442 \u043d\u0430 \u043e\u043f\u043b\u0430\u0442\u0443",
@@ -1372,16 +1501,16 @@ def test_pdf_table_total_preferred_over_global_number_match() -> None:
         mail_type="INVOICE",
     )
     facts = _validate_message_facts(facts, evidence_text=evidence_text)
-    facts = _score_message_facts(facts, evidence_text=evidence_text, attachment_text=attachment_text)
+    facts = _score_message_facts(
+        facts, evidence_text=evidence_text, attachment_text=attachment_text
+    )
 
     assert facts["amount"].startswith("87 500")
 
 
 def test_invoice_attachment_amount_extracted_from_table_context() -> None:
     attachment_text = (
-        "item\tqty\tprice\n"
-        "service\t1\t1200 USD\n"
-        "total payable\t4200 USD\n"
+        "item\tqty\tprice\n" "service\t1\t1200 USD\n" "total payable\t4200 USD\n"
     )
     attachments = [
         {
@@ -1399,16 +1528,16 @@ def test_invoice_attachment_amount_extracted_from_table_context() -> None:
         mail_type="",
     )
     facts = _validate_message_facts(facts, evidence_text=evidence_text)
-    facts = _score_message_facts(facts, evidence_text=evidence_text, attachment_text=attachment_text)
+    facts = _score_message_facts(
+        facts, evidence_text=evidence_text, attachment_text=attachment_text
+    )
 
     assert facts["amount"].startswith("4200")
 
 
 def test_attachment_without_currency_does_not_become_total() -> None:
     attachment_text = (
-        "item\tqty\tprice\n"
-        "service\t1\t12500\n"
-        "total payable\t87500\n"
+        "item\tqty\tprice\n" "service\t1\t12500\n" "total payable\t87500\n"
     )
     attachments = [
         {
@@ -1426,7 +1555,9 @@ def test_attachment_without_currency_does_not_become_total() -> None:
         mail_type="INVOICE",
     )
     facts = _validate_message_facts(facts, evidence_text=evidence_text)
-    facts = _score_message_facts(facts, evidence_text=evidence_text, attachment_text=attachment_text)
+    facts = _score_message_facts(
+        facts, evidence_text=evidence_text, attachment_text=attachment_text
+    )
 
     assert facts["amount"] == ""
 
@@ -1444,7 +1575,10 @@ def test_payroll_attachment_never_invoice_action() -> None:
             "text": attachment_text,
         }
     ]
-    evidence_text = "\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a " + attachment_text
+    evidence_text = (
+        "\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a "
+        + attachment_text
+    )
 
     facts = _collect_message_facts(
         subject="\u0420\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a",
@@ -1453,7 +1587,9 @@ def test_payroll_attachment_never_invoice_action() -> None:
         mail_type="",
     )
     facts = _validate_message_facts(facts, evidence_text=evidence_text)
-    facts = _score_message_facts(facts, evidence_text=evidence_text, attachment_text=attachment_text)
+    facts = _score_message_facts(
+        facts, evidence_text=evidence_text, attachment_text=attachment_text
+    )
     facts = _consistency_check_message_facts(facts, evidence_text=evidence_text)
 
     decision = _build_message_decision(
@@ -1513,11 +1649,19 @@ def test_invoice_math_consistency() -> None:
         "incident_signal": False,
         "amount_context_missing": False,
     }
-    consistent_evidence = "Subtotal 100 USD Tax 20 USD Total 120 USD Invoice date: 10.03.2026"
-    inconsistent_evidence = "Subtotal 100 USD Tax 20 USD Total 170 USD Invoice date: 10.03.2026"
+    consistent_evidence = (
+        "Subtotal 100 USD Tax 20 USD Total 120 USD Invoice date: 10.03.2026"
+    )
+    inconsistent_evidence = (
+        "Subtotal 100 USD Tax 20 USD Total 170 USD Invoice date: 10.03.2026"
+    )
 
-    consistent = _consistency_check_message_facts(base_facts, evidence_text=consistent_evidence)
-    inconsistent = _consistency_check_message_facts(base_facts, evidence_text=inconsistent_evidence)
+    consistent = _consistency_check_message_facts(
+        base_facts, evidence_text=consistent_evidence
+    )
+    inconsistent = _consistency_check_message_facts(
+        base_facts, evidence_text=inconsistent_evidence
+    )
 
     consistent_decision = _build_message_decision(
         priority="\U0001f7e1",
@@ -1572,7 +1716,10 @@ def test_currency_context_required() -> None:
 
     assert "amount_without_currency" not in with_currency_checked["consistency_issues"]
     assert "amount_without_currency" in without_currency_checked["consistency_issues"]
-    assert without_currency_checked["consistency_penalty"] > with_currency_checked["consistency_penalty"]
+    assert (
+        without_currency_checked["consistency_penalty"]
+        > with_currency_checked["consistency_penalty"]
+    )
 
 
 def test_payroll_never_invoice() -> None:
@@ -1625,6 +1772,7 @@ def test_invalid_due_date_ignored() -> None:
     assert checked["due_date"] == ""
     assert "due_date_not_after_invoice_date" in checked["consistency_issues"]
     assert checked["consistency_penalty"] > 0
+
 
 def test_table_numbers_not_selected() -> None:
     facts = {"amount": "", "due_date": "", "doc_number": "", "doc_kind": "invoice"}

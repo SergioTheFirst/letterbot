@@ -127,10 +127,11 @@ def test_multiple_attachments_all_processed():
     result = processor.process("user@example.com", msg)
     assert result is not None
 
-    lines = result.split("\n")
     names = {att.filename for att in attachments}
     attachment_lines = _attachment_lines(result, names)
 
     expected = {"report.doc", "plan.docx", "sales.xlsx", "legacy.xls"}
-    rendered = {line.split(" — ")[0] if " — " in line else line for line in attachment_lines}
+    rendered = {
+        line.split(" — ")[0] if " — " in line else line for line in attachment_lines
+    }
     assert expected == rendered

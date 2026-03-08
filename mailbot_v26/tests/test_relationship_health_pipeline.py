@@ -33,8 +33,12 @@ def _stub_llm_result():
 def test_relationship_health_does_not_change_telegram_payload(monkeypatch) -> None:
     monkeypatch.setattr(processor, "feature_flags", _common_flags())
     monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: _stub_llm_result())
-    monkeypatch.setattr(processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", ""))
-    monkeypatch.setattr(processor.shadow_action_engine, "compute", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        processor.shadow_priority_engine, "compute", lambda *args, **kwargs: ("🔵", "")
+    )
+    monkeypatch.setattr(
+        processor.shadow_action_engine, "compute", lambda *args, **kwargs: []
+    )
     monkeypatch.setattr(processor, "send_preview_to_telegram", lambda **kwargs: None)
 
     sent: list[object] = []
@@ -53,8 +57,14 @@ def test_relationship_health_does_not_change_telegram_payload(monkeypatch) -> No
             confidence=1.0,
         ),
     )
-    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **kwargs: (None, None))
-    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0))
+    monkeypatch.setattr(
+        processor.context_store,
+        "record_interaction_event",
+        lambda **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        processor.context_store, "recompute_email_frequency", lambda **kwargs: (0.0, 0)
+    )
     monkeypatch.setattr(
         processor,
         "evaluate_signal_quality",
@@ -66,7 +76,9 @@ def test_relationship_health_does_not_change_telegram_payload(monkeypatch) -> No
             reason="ok",
         ),
     )
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: 1))
+    monkeypatch.setattr(
+        processor, "knowledge_db", SimpleNamespace(save_email=lambda **kwargs: 1)
+    )
     monkeypatch.setattr(
         processor,
         "trust_snapshot_writer",

@@ -18,8 +18,7 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics
 
 def _init_events_db(path: Path) -> None:
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE events (
                 id TEXT PRIMARY KEY,
                 type TEXT NOT NULL,
@@ -28,8 +27,7 @@ def _init_events_db(path: Path) -> None:
                 email_id TEXT,
                 payload JSON
             );
-            """
-        )
+            """)
         conn.commit()
 
 
@@ -343,7 +341,9 @@ def test_deterministic_output(tmp_path: Path) -> None:
     assert result_a.reason_codes == result_b.reason_codes
 
 
-def test_malformed_config_ini_falls_back_with_actionable_warning(tmp_path: Path, caplog) -> None:
+def test_malformed_config_ini_falls_back_with_actionable_warning(
+    tmp_path: Path, caplog
+) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "config.ini").write_text("check_interval=120\n", encoding="utf-8")
@@ -375,7 +375,9 @@ def test_missing_config_ini_uses_deterministic_defaults(tmp_path: Path, caplog) 
     assert "Windows command: copy" in caplog.text
 
 
-def test_invoice_subject_with_excel_attachment_signal_is_not_low_priority(tmp_path: Path) -> None:
+def test_invoice_subject_with_excel_attachment_signal_is_not_low_priority(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "priority_v2.sqlite"
     _init_events_db(db_path)
     engine = _engine_for(db_path)

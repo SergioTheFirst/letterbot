@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from mailbot_v26.integrity import compute_manifest, manifest_ignore_paths, verify_manifest
+from mailbot_v26.integrity import (
+    compute_manifest,
+    manifest_ignore_paths,
+    verify_manifest,
+)
 
 
 def _write(path: Path, content: str) -> None:

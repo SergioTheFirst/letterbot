@@ -39,10 +39,14 @@ class ResourceBudget:
             next_day = current + timedelta(days=1)
             return next_day.replace(hour=0, minute=0, second=0, microsecond=0)
         if self.period == BudgetPeriod.MONTHLY:
-            month_start = current.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            month_start = current.replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            )
             next_month = month_start + timedelta(days=32)
             return next_month.replace(day=1)
-        year_start = current.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        year_start = current.replace(
+            month=1, day=1, hour=0, minute=0, second=0, microsecond=0
+        )
         next_year = year_start.replace(year=year_start.year + 1)
         return next_year
 

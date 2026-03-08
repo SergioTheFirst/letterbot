@@ -37,9 +37,7 @@ class PriorityEngine:
             return final_priority, priority_reason
 
         try:
-            with sqlite3.connect(
-                f"file:{self.db_path}?mode=ro", uri=True
-            ) as conn:
+            with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as conn:
                 if llm_priority == "🟡":
                     if self._count_red_recent(conn, from_email, received_at) >= 3:
                         final_priority = "🔴"
@@ -48,9 +46,7 @@ class PriorityEngine:
                         )
 
                 if llm_priority == "🔵":
-                    if (
-                        self._count_hot_recent(conn, from_email, received_at) >= 2
-                    ):
+                    if self._count_hot_recent(conn, from_email, received_at) >= 2:
                         final_priority = "🟡"
                         priority_reason = (
                             "Повышен до 🟡: 2+ писем с 🟡/🔴 от отправителя за 14 дней"

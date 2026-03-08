@@ -33,7 +33,9 @@ def _insert_span(conn: sqlite3.Connection, span_id: str, ts_value: float) -> Non
     )
 
 
-def _insert_snapshot(conn: sqlite3.Connection, snapshot_id: str, ts_value: float) -> None:
+def _insert_snapshot(
+    conn: sqlite3.Connection, snapshot_id: str, ts_value: float
+) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO system_health_snapshots (

@@ -27,7 +27,12 @@ def _repo_root() -> Path:
 def _resolve_db_path(base_dir: Path) -> Path:
     config_dir = base_dir / "mailbot_v26" / "config"
     try:
-        return load_storage_config(config_dir).db_path
+        resolved = load_storage_config(config_dir).db_path
+        try:
+            resolved.relative_to(base_dir)
+        except ValueError:
+            return base_dir / "data" / "mailbot.sqlite"
+        return resolved
     except ConfigError:
         return base_dir / "data" / "mailbot.sqlite"
 
@@ -89,7 +94,9 @@ def _prune_backups(backups_dir: Path, retention: int) -> None:
         path.unlink(missing_ok=True)
 
 
-def create_backup(base_dir: Path | None = None, *, retention: int = DEFAULT_RETENTION) -> BackupResult:
+def create_backup(
+    base_dir: Path | None = None, *, retention: int = DEFAULT_RETENTION
+) -> BackupResult:
     root = base_dir or _repo_root()
     backups_dir = root / "backups"
     backups_dir.mkdir(parents=True, exist_ok=True)
@@ -99,12 +106,16 @@ def create_backup(base_dir: Path | None = None, *, retention: int = DEFAULT_RETE
     with tempfile.TemporaryDirectory() as temp_root:
         temp_dir = Path(temp_root)
         entries = _collect_backup_files(root, temp_dir)
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(
+            archive_path, "w", compression=zipfile.ZIP_DEFLATED
+        ) as archive:
             for source, arcname in entries:
                 archive.write(source, arcname)
 
     _prune_backups(backups_dir, retention)
-    return BackupResult(archive_path=archive_path, files_included=tuple(name for _, name in entries))
+    return BackupResult(
+        archive_path=archive_path, files_included=tuple(name for _, name in entries)
+    )
 
 
 def run_backup() -> None:

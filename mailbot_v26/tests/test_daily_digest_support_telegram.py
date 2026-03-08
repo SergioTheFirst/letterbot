@@ -35,15 +35,13 @@ def _base_digest_data() -> daily_digest.DigestData:
 
 def test_support_config_from_settings_section() -> None:
     parser = configparser.ConfigParser()
-    parser.read_string(
-        """[support]
+    parser.read_string("""[support]
 enabled = true
 telegram = true
 min_days_between_asks = 30
 url = https://example.com/insider
 message = Поддержать Letterbot → {url}
-"""
-    )
+""")
 
     cfg = digest_scheduler._load_support_config_from_settings(parser)
 
@@ -141,7 +139,9 @@ def test_weekly_support_footer_rate_limited_via_runtime_overrides(tmp_path) -> N
 
 
 def test_support_telegram_config_enabled_when_feature_flag_on(monkeypatch) -> None:
-    monkeypatch.setattr(digest_scheduler, "_resolve_yaml_config_path", lambda: Path("config.yaml"))
+    monkeypatch.setattr(
+        digest_scheduler, "_resolve_yaml_config_path", lambda: Path("config.yaml")
+    )
     monkeypatch.setattr(
         digest_scheduler,
         "load_yaml_config",

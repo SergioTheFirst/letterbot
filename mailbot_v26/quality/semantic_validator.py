@@ -1,7 +1,6 @@
 import re
 from typing import List, Set, Tuple
 
-
 STOPWORDS: Set[str] = {
     "and",
     "the",

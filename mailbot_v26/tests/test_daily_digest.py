@@ -81,9 +81,9 @@ def _seed_attention_emails(db: KnowledgeDB, emitter: ContractEventEmitter) -> No
                 entity_id=None,
                 email_id=email_id,
                 payload={
-                    "from_email": "client@example.com"
-                    if idx < 3
-                    else "vendor@example.com",
+                    "from_email": (
+                        "client@example.com" if idx < 3 else "vendor@example.com"
+                    ),
                     "subject": f"Subject {idx}",
                     "body_summary": f"Текст письма {idx} для метрик внимания",
                     "attachments_count": 0,

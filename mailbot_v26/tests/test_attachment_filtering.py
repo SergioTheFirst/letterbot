@@ -52,7 +52,9 @@ def test_no_attachment_bin_from_inline_parts():
     assert attachments == []
 
     processor = _processor()
-    msg = InboundMessage(subject="Inline", sender="user@example.com", body=body, attachments=attachments)
+    msg = InboundMessage(
+        subject="Inline", sender="user@example.com", body=body, attachments=attachments
+    )
 
     result = processor.process("user@example.com", msg)
 
@@ -93,8 +95,12 @@ def test_ignores_images_and_fonts():
         sender="ops@example.com",
         body="Смотрите вложения",
         attachments=[
-            Attachment(filename="photo.png", content=b"img", content_type="image/png", text=""),
-            Attachment(filename="font.woff", content=b"font", content_type="font/woff", text=""),
+            Attachment(
+                filename="photo.png", content=b"img", content_type="image/png", text=""
+            ),
+            Attachment(
+                filename="font.woff", content=b"font", content_type="font/woff", text=""
+            ),
             Attachment(
                 filename="report.docx",
                 content=b"data",
@@ -109,7 +115,9 @@ def test_ignores_images_and_fonts():
     result = processor.process("user@example.com", msg)
     assert result is not None
 
-    attachment_lines = _attachment_lines(result, {"report.docx", "photo.png", "font.woff"})
+    attachment_lines = _attachment_lines(
+        result, {"report.docx", "photo.png", "font.woff"}
+    )
     assert any(line.startswith("report.docx") for line in attachment_lines)
     assert not any("photo.png" in line for line in attachment_lines)
     assert any("font.woff" in line for line in attachment_lines)

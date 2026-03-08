@@ -55,9 +55,7 @@ def test_full_message_no_duplicate_lines() -> None:
     )
 
     matches = [
-        line
-        for line in rendered.splitlines()
-        if "Позвонить клиенту сегодня" in line
+        line for line in rendered.splitlines() if "Позвонить клиенту сегодня" in line
     ]
     assert len(matches) == 1
 
@@ -83,9 +81,24 @@ def test_processor_format_drops_duplicate_subject_first_body_line_with_fw_re() -
 
 def test_signal_hints_are_single_per_type() -> None:
     insights = [
-        processor.Insight(type="silence", severity="MEDIUM", explanation="Контакт молчит 9 дней", recommendation=""),
-        processor.Insight(type="silence", severity="HIGH", explanation="Контакт молчит 10 дней", recommendation=""),
-        processor.Insight(type="deadlock", severity="MEDIUM", explanation="3-е письмо без ответа", recommendation=""),
+        processor.Insight(
+            type="silence",
+            severity="MEDIUM",
+            explanation="Контакт молчит 9 дней",
+            recommendation="",
+        ),
+        processor.Insight(
+            type="silence",
+            severity="HIGH",
+            explanation="Контакт молчит 10 дней",
+            recommendation="",
+        ),
+        processor.Insight(
+            type="deadlock",
+            severity="MEDIUM",
+            explanation="3-е письмо без ответа",
+            recommendation="",
+        ),
     ]
 
     hints = processor._build_signal_hints(insights)

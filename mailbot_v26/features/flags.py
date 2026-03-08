@@ -15,7 +15,6 @@ from typing import Optional
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.paths import resolve_config_paths
 
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -80,14 +79,20 @@ class FeatureFlags:
             logger=_LOGGER,
             scope_label="feature flags",
         )
-        self.ENABLE_AUTO_PRIORITY = self._get_flag(parser, "enable_auto_priority", fallback_default=True)
+        self.ENABLE_AUTO_PRIORITY = self._get_flag(
+            parser, "enable_auto_priority", fallback_default=True
+        )
         self.ENABLE_AUTO_ACTIONS = self._get_flag(parser, "enable_auto_actions")
         self.ENABLE_TASK_SUGGESTIONS = self._get_flag(parser, "enable_task_suggestions")
         self.ENABLE_TG_EDITING = self._get_flag(parser, "enable_tg_editing")
-        self.ENABLE_SHADOW_PERSISTENCE = self._get_flag(parser, "enable_shadow_persistence")
+        self.ENABLE_SHADOW_PERSISTENCE = self._get_flag(
+            parser, "enable_shadow_persistence"
+        )
         self.ENABLE_CRM_DIAGNOSTICS = self._get_flag(parser, "enable_crm_diagnostics")
         self.ENABLE_PREVIEW_ACTIONS = self._get_flag(parser, "enable_preview_actions")
-        self.ENABLE_COMMITMENT_TRACKER = self._get_flag(parser, "enable_commitment_tracker")
+        self.ENABLE_COMMITMENT_TRACKER = self._get_flag(
+            parser, "enable_commitment_tracker"
+        )
         self.ENABLE_DAILY_DIGEST = self._get_flag_alias(
             parser, "enable_daily_digest", aliases=("daily_digest_enabled",)
         )
@@ -100,16 +105,12 @@ class FeatureFlags:
         self.ENABLE_WEEKLY_CALIBRATION_REPORT = self._get_flag(
             parser, "enable_weekly_calibration_report"
         )
-        self.ENABLE_DIGEST_INSIGHTS = self._get_flag(
-            parser, "enable_digest_insights"
-        )
+        self.ENABLE_DIGEST_INSIGHTS = self._get_flag(parser, "enable_digest_insights")
         self.ENABLE_ANOMALY_ALERTS = self._get_flag(parser, "enable_anomaly_alerts")
         self.ENABLE_ATTENTION_ECONOMICS = self._get_flag(
             parser, "enable_attention_economics"
         )
-        self.ENABLE_QUALITY_METRICS = self._get_flag(
-            parser, "enable_quality_metrics"
-        )
+        self.ENABLE_QUALITY_METRICS = self._get_flag(parser, "enable_quality_metrics")
         self.ENABLE_HIERARCHICAL_MAIL_TYPES = self._get_flag(
             parser, "enable_hierarchical_mail_types"
         )
@@ -130,9 +131,7 @@ class FeatureFlags:
         self.ENABLE_CIRCADIAN_DELIVERY = self._get_flag(
             parser, "enable_circadian_delivery"
         )
-        self.ENABLE_FLOW_PROTECTION = self._get_flag(
-            parser, "enable_flow_protection"
-        )
+        self.ENABLE_FLOW_PROTECTION = self._get_flag(parser, "enable_flow_protection")
         self.ENABLE_ATTENTION_DEBT = self._get_flag(parser, "enable_attention_debt")
         self.ENABLE_SURPRISE_BUDGET = self._get_flag_mode(
             parser, "enable_surprise_budget", default="shadow"
@@ -157,9 +156,7 @@ class FeatureFlags:
         self.ENABLE_DIGEST_ACTION_TEMPLATES = self._get_flag(
             parser, "enable_digest_action_templates"
         )
-        self.ENABLE_TRUST_BOOTSTRAP = self._get_flag(
-            parser, "enable_trust_bootstrap"
-        )
+        self.ENABLE_TRUST_BOOTSTRAP = self._get_flag(parser, "enable_trust_bootstrap")
         self.ENABLE_REGRET_MINIMIZATION = self._get_flag(
             parser, "enable_regret_minimization"
         )
@@ -176,7 +173,6 @@ class FeatureFlags:
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = self._get_float(
             parser, "auto_action_confidence_threshold", default=0.75
         )
-
 
     @staticmethod
     def _get_flag_alias(

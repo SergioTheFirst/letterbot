@@ -1,4 +1,9 @@
-from mailbot_v26.budgets.contract import BudgetPeriod, BudgetStatus, BudgetType, ResourceBudget
+from mailbot_v26.budgets.contract import (
+    BudgetPeriod,
+    BudgetStatus,
+    BudgetType,
+    ResourceBudget,
+)
 from mailbot_v26.budgets.consumer import BudgetConsumer
 from mailbot_v26.budgets.gate import BudgetGate, BudgetGateConfig
 from mailbot_v26.budgets.importance import (

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO_ROOT / "mailbot_v26" / "config"
 SOURCE_PATH = CONFIG_DIR / "config.ini.example"
@@ -10,8 +9,7 @@ TARGET_PATH = CONFIG_DIR / "config.ini.compact.example"
 
 
 def _build_compact_template() -> str:
-    sections = [
-        """; Letterbot compact INI template.
+    sections = ["""; Letterbot compact INI template.
 ; Full template with all options: mailbot_v26/config/config.ini.example
 
 [general]
@@ -56,12 +54,13 @@ enable_weekly_digest = true
 support = false
 ; Backward-compatible key (optional):
 donate_enabled = false
-"""
-    ]
+"""]
     return "\n".join(part.strip("\n") for part in sections) + "\n"
 
 
-def make_ini_compact(source_path: Path = SOURCE_PATH, target_path: Path = TARGET_PATH) -> Path:
+def make_ini_compact(
+    source_path: Path = SOURCE_PATH, target_path: Path = TARGET_PATH
+) -> Path:
     if not source_path.exists():
         raise FileNotFoundError(f"Missing source template: {source_path}")
     target_path.parent.mkdir(parents=True, exist_ok=True)

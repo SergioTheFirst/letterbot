@@ -77,14 +77,22 @@ def test_oversize_email_warns_in_telegram(monkeypatch, tmp_path: Path) -> None:
         message_size=2 * 1024 * 1024,
         raw_header=raw_header,
     )
-    monkeypatch.setattr(processor, "enqueue_tg", lambda **_: DeliveryResult(delivered=True, retryable=False))
-    monkeypatch.setattr(processor, "run_llm_stage", lambda **kwargs: SimpleNamespace(
-        priority="🔵",
-        action_line="Проверить письмо",
-        body_summary=kwargs["body_text"],
-        attachment_summaries=[],
-        llm_provider="gigachat",
-    ))
+    monkeypatch.setattr(
+        processor,
+        "enqueue_tg",
+        lambda **_: DeliveryResult(delivered=True, retryable=False),
+    )
+    monkeypatch.setattr(
+        processor,
+        "run_llm_stage",
+        lambda **kwargs: SimpleNamespace(
+            priority="🔵",
+            action_line="Проверить письмо",
+            body_summary=kwargs["body_text"],
+            attachment_summaries=[],
+            llm_provider="gigachat",
+        ),
+    )
     monkeypatch.setattr(
         processor,
         "feature_flags",
@@ -98,43 +106,69 @@ def test_oversize_email_warns_in_telegram(monkeypatch, tmp_path: Path) -> None:
             ENABLE_COMMITMENT_TRACKER=False,
         ),
     )
-    monkeypatch.setattr(processor.shadow_priority_engine, "compute", lambda **_: ("🔵", None))
+    monkeypatch.setattr(
+        processor.shadow_priority_engine, "compute", lambda **_: ("🔵", None)
+    )
     monkeypatch.setattr(processor.shadow_action_engine, "compute", lambda **_: [])
-    monkeypatch.setattr(processor, "evaluate_signal_quality", lambda *_args, **_kwargs: SimpleNamespace(
-        entropy=1.0,
-        printable_ratio=1.0,
-        quality_score=1.0,
-        is_usable=True,
-        reason="ok",
-    ))
+    monkeypatch.setattr(
+        processor,
+        "evaluate_signal_quality",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            entropy=1.0,
+            printable_ratio=1.0,
+            quality_score=1.0,
+            is_usable=True,
+            reason="ok",
+        ),
+    )
     monkeypatch.setattr(
         processor,
         "apply_attention_gate",
-        lambda *_args, **_kwargs: SimpleNamespace(deferred=False, reason="default_send"),
+        lambda *_args, **_kwargs: SimpleNamespace(
+            deferred=False, reason="default_send"
+        ),
     )
-    monkeypatch.setattr(processor, "knowledge_db", SimpleNamespace(
-        path=":memory:",
-        save_email=lambda **kwargs: None,
-        fetch_pending_commitments_by_sender=lambda **kwargs: [],
-        update_commitment_statuses=lambda **kwargs: True,
-        save_commitments=lambda **kwargs: True,
-        upsert_entity_signal=lambda **kwargs: None,
-    ))
-    monkeypatch.setattr(processor, "analytics", SimpleNamespace(
-        sender_stats=lambda: [],
-        priority_escalations=lambda **_: [],
-        commitment_stats_by_sender=lambda **_: {
-            "total_commitments": 0,
-            "fulfilled_count": 0,
-            "expired_count": 0,
-            "unknown_count": 0,
-        },
-    ))
-    monkeypatch.setattr(processor.context_store, "resolve_sender_entity", lambda **_: None)
-    monkeypatch.setattr(processor.context_store, "record_interaction_event", lambda **_: None)
-    monkeypatch.setattr(processor.context_store, "recompute_email_frequency", lambda **_: (0.0, 0))
-    monkeypatch.setattr(processor, "event_emitter", SimpleNamespace(emit=lambda **_: None))
-    monkeypatch.setattr(processor, "decision_trace_writer", SimpleNamespace(write=lambda **_: None))
+    monkeypatch.setattr(
+        processor,
+        "knowledge_db",
+        SimpleNamespace(
+            path=":memory:",
+            save_email=lambda **kwargs: None,
+            fetch_pending_commitments_by_sender=lambda **kwargs: [],
+            update_commitment_statuses=lambda **kwargs: True,
+            save_commitments=lambda **kwargs: True,
+            upsert_entity_signal=lambda **kwargs: None,
+        ),
+    )
+    monkeypatch.setattr(
+        processor,
+        "analytics",
+        SimpleNamespace(
+            sender_stats=lambda: [],
+            priority_escalations=lambda **_: [],
+            commitment_stats_by_sender=lambda **_: {
+                "total_commitments": 0,
+                "fulfilled_count": 0,
+                "expired_count": 0,
+                "unknown_count": 0,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        processor.context_store, "resolve_sender_entity", lambda **_: None
+    )
+    monkeypatch.setattr(
+        processor.context_store, "record_interaction_event", lambda **_: None
+    )
+    monkeypatch.setattr(
+        processor.context_store, "recompute_email_frequency", lambda **_: (0.0, 0)
+    )
+    monkeypatch.setattr(
+        processor, "event_emitter", SimpleNamespace(emit=lambda **_: None)
+    )
+    monkeypatch.setattr(
+        processor, "decision_trace_writer", SimpleNamespace(write=lambda **_: None)
+    )
 
     monkeypatch.setattr(imap_client, "IMAPClient", lambda *args, **kwargs: fake_client)
 
@@ -148,7 +182,9 @@ def test_oversize_email_warns_in_telegram(monkeypatch, tmp_path: Path) -> None:
         telegram_chat_id="chat",
     )
     state = StateManager(tmp_path / "state.json")
-    imap = ResilientIMAP(account, state, start_time=datetime(2024, 1, 2, 10, 0, 0), max_email_mb=1)
+    imap = ResilientIMAP(
+        account, state, start_time=datetime(2024, 1, 2, 10, 0, 0), max_email_mb=1
+    )
     messages = imap.fetch_new_messages()
     assert len(messages) == 1
 

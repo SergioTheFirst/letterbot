@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import pytest
 
 from mailbot_v26.config_loader import (
     BotConfig,
@@ -9,7 +8,6 @@ from mailbot_v26.config_loader import (
     load_config,
     load_general_config,
     load_ingest_config,
-    load_keys_config,
     parse_telegram_chat_id,
     load_storage_config,
     load_support_settings,
@@ -79,7 +77,9 @@ def test_load_full_config(tmp_path: Path) -> None:
     assert cfg.accounts[0].telegram_chat_id == "222"
 
 
-def test_accounts_use_global_telegram_chat_id_when_account_override_missing(tmp_path: Path) -> None:
+def test_accounts_use_global_telegram_chat_id_when_account_override_missing(
+    tmp_path: Path,
+) -> None:
     write_file(
         tmp_path,
         "accounts.ini",
@@ -105,7 +105,9 @@ def test_parse_telegram_chat_id_rejects_invalid_value() -> None:
     assert parse_telegram_chat_id("-100272123") == "-100272123"
 
 
-def test_validate_telegram_contract_fails_fast_on_missing_credentials(tmp_path: Path) -> None:
+def test_validate_telegram_contract_fails_fast_on_missing_credentials(
+    tmp_path: Path,
+) -> None:
     build_sample_config(tmp_path)
     (tmp_path / "accounts.ini").write_text(
         """[primary]
@@ -127,12 +129,15 @@ chat_id = =272123
     assert any("chat_id" in item for item in errors)
 
 
-
-
-def test_validate_telegram_contract_allows_missing_token_without_telegram_targets(tmp_path: Path) -> None:
-    (tmp_path / "settings.ini").write_text("""[general]
+def test_validate_telegram_contract_allows_missing_token_without_telegram_targets(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "settings.ini").write_text(
+        """[general]
 check_interval=120
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     (tmp_path / "accounts.ini").write_text(
         """[primary]
 login = sample@example.com
@@ -152,10 +157,15 @@ chat_id =
     assert not any("bot_token" in item for item in errors)
 
 
-def test_validate_telegram_contract_rejects_account_chat_id_with_leading_equal(tmp_path: Path) -> None:
-    (tmp_path / "settings.ini").write_text("""[general]
+def test_validate_telegram_contract_rejects_account_chat_id_with_leading_equal(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "settings.ini").write_text(
+        """[general]
 check_interval=120
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     (tmp_path / "accounts.ini").write_text(
         """[primary]
 login = sample@example.com
@@ -173,6 +183,8 @@ bot_token = 123:abc
     errors = validate_telegram_contract(cfg, config_dir=tmp_path)
 
     assert any("[primary].telegram_chat_id" in item for item in errors)
+
+
 def test_missing_files_use_deterministic_defaults() -> None:
     general = load_general_config(Path("/nonexistent"))
     assert general.check_interval == 120
@@ -358,7 +370,9 @@ host = imap.example.com
     assert support.frequency_days == 30
 
 
-def test_load_support_settings_invalid_frequency_falls_back_to_default(tmp_path: Path) -> None:
+def test_load_support_settings_invalid_frequency_falls_back_to_default(
+    tmp_path: Path,
+) -> None:
     write_file(
         tmp_path,
         "settings.ini",
@@ -387,14 +401,22 @@ host = imap.example.com
 
 
 def test_load_telegram_ui_config_defaults_to_hidden(tmp_path: Path) -> None:
-    write_file(tmp_path, "settings.ini", """[general]
+    write_file(
+        tmp_path,
+        "settings.ini",
+        """[general]
 check_interval=120
-""")
-    write_file(tmp_path, "accounts.ini", """[acc]
+""",
+    )
+    write_file(
+        tmp_path,
+        "accounts.ini",
+        """[acc]
 login=u
 password=p
 host=h
-""")
+""",
+    )
 
     cfg = load_telegram_ui_config(tmp_path)
 
@@ -402,14 +424,22 @@ host=h
 
 
 def test_load_telegram_ui_config_reads_flag(tmp_path: Path) -> None:
-    write_file(tmp_path, "settings.ini", """[telegram_ui]
+    write_file(
+        tmp_path,
+        "settings.ini",
+        """[telegram_ui]
 show_decision_trace=true
-""")
-    write_file(tmp_path, "accounts.ini", """[acc]
+""",
+    )
+    write_file(
+        tmp_path,
+        "accounts.ini",
+        """[acc]
 login=u
 password=p
 host=h
-""")
+""",
+    )
 
     cfg = load_telegram_ui_config(tmp_path)
 
@@ -435,14 +465,22 @@ def test_load_branding_config_reads_flag(tmp_path: Path) -> None:
 
 
 def test_load_web_ui_password_from_ini(tmp_path: Path) -> None:
-    write_file(tmp_path, "settings.ini", """[web_ui]
+    write_file(
+        tmp_path,
+        "settings.ini",
+        """[web_ui]
 password = ini-pass
-""")
-    write_file(tmp_path, "accounts.ini", """[acc]
+""",
+    )
+    write_file(
+        tmp_path,
+        "accounts.ini",
+        """[acc]
 login=u
 password=p
 host=h
-""")
+""",
+    )
 
     password = load_web_ui_password_from_ini(tmp_path)
 

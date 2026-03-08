@@ -64,11 +64,30 @@ def test_api_dashboard_returns_json(tmp_path: Path) -> None:
             INSERT INTO priority_feedback (id, email_id, kind, value, account_email, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("fb-1", "1", "priority_correction", "🔴", "primary@example.com", now.isoformat()),
+            (
+                "fb-1",
+                "1",
+                "priority_correction",
+                "🔴",
+                "primary@example.com",
+                now.isoformat(),
+            ),
         )
-        _insert_event(conn, event_type="email_processed", ts_utc=now.timestamp(), payload={"text": "processed"})
-        _insert_event(conn, event_type="llm_fallback", ts_utc=now.timestamp(), payload={"reason": "timeout"})
-        _insert_event(conn, event_type="priority_correction_recorded", ts_utc=now.timestamp())
+        _insert_event(
+            conn,
+            event_type="email_processed",
+            ts_utc=now.timestamp(),
+            payload={"text": "processed"},
+        )
+        _insert_event(
+            conn,
+            event_type="llm_fallback",
+            ts_utc=now.timestamp(),
+            payload={"reason": "timeout"},
+        )
+        _insert_event(
+            conn, event_type="priority_correction_recorded", ts_utc=now.timestamp()
+        )
         _insert_event(conn, event_type="surprise_detected", ts_utc=now.timestamp())
         conn.commit()
 
@@ -113,7 +132,9 @@ def test_api_dashboard_returns_recent_events(tmp_path: Path) -> None:
 
     assert resp.status_code == 200
     data = resp.get_json()
-    assert [item["type"] for item in data["recent_events"]][:5] == [event for event, _ in tracked]
+    assert [item["type"] for item in data["recent_events"]][:5] == [
+        event for event, _ in tracked
+    ]
     assert data["recent_events"][1]["text"] == "priority 🟡"
 
 
@@ -151,9 +172,9 @@ def test_dashboard_template_renders_events_block(tmp_path: Path) -> None:
         login_with_csrf(client, "pw")
         body = client.get("/dashboard").get_data(as_text=True)
 
-    assert "data-testid=\"live-dashboard\"" in body
+    assert 'data-testid="live-dashboard"' in body
     assert ">Recent events<" in body
-    assert "id=\"events-list\"" in body
+    assert 'id="events-list"' in body
 
 
 def test_api_dashboard_limits_recent_events_to_20(tmp_path: Path) -> None:
@@ -191,14 +212,30 @@ def test_api_dashboard_returns_top_contacts(tmp_path: Path) -> None:
             INSERT INTO emails (account_email, from_email, subject, body_summary, priority, received_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("primary@example.com", "alice@example.com", "Invoice", "invoice to pay", "🔴", now.isoformat(), now.isoformat()),
+            (
+                "primary@example.com",
+                "alice@example.com",
+                "Invoice",
+                "invoice to pay",
+                "🔴",
+                now.isoformat(),
+                now.isoformat(),
+            ),
         )
         conn.execute(
             """
             INSERT INTO emails (account_email, from_email, subject, body_summary, priority, received_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("primary@example.com", "alice@example.com", "Contract", "contract review", "🟡", now.isoformat(), now.isoformat()),
+            (
+                "primary@example.com",
+                "alice@example.com",
+                "Contract",
+                "contract review",
+                "🟡",
+                now.isoformat(),
+                now.isoformat(),
+            ),
         )
         conn.commit()
 
@@ -214,9 +251,9 @@ def test_api_dashboard_returns_top_contacts(tmp_path: Path) -> None:
     assert data["top_contacts"][0]["sender_email"] == "alice@example.com"
 
 
-
 def test_dashboard_uses_interpretation_events_only(tmp_path: Path) -> None:
     test_dashboard_uses_interpretation_events(tmp_path)
+
 
 def test_dashboard_uses_interpretation_events(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard-interpretation.sqlite"
@@ -227,13 +264,23 @@ def test_dashboard_uses_interpretation_events(tmp_path: Path) -> None:
             conn,
             event_type="message_interpretation",
             ts_utc=now.timestamp(),
-            payload={"doc_kind": "invoice", "amount": 87500, "sender_email": "vendor@example.com", "due_date": "2026-04-15"},
+            payload={
+                "doc_kind": "invoice",
+                "amount": 87500,
+                "sender_email": "vendor@example.com",
+                "due_date": "2026-04-15",
+            },
         )
         _insert_event(
             conn,
             event_type="message_interpretation",
             ts_utc=(now + timedelta(seconds=1)).timestamp(),
-            payload={"doc_kind": "contract", "amount": None, "sender_email": "legal@example.com", "due_date": None},
+            payload={
+                "doc_kind": "contract",
+                "amount": None,
+                "sender_email": "legal@example.com",
+                "due_date": None,
+            },
         )
         conn.commit()
 

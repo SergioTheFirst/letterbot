@@ -15,7 +15,9 @@ from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 
 class StubTrustScoreCalculator:
-    def __init__(self, scores: dict[tuple[int | None, int | None] | None, float | None]) -> None:
+    def __init__(
+        self, scores: dict[tuple[int | None, int | None] | None, float | None]
+    ) -> None:
         self.scores = scores
 
     def compute(
@@ -56,7 +58,9 @@ def _seed_entity(db_path, from_email: str) -> str:
     return resolution.entity_id
 
 
-def _insert_email(conn: sqlite3.Connection, *, from_email: str, received_at: str) -> int:
+def _insert_email(
+    conn: sqlite3.Connection, *, from_email: str, received_at: str
+) -> int:
     cur = conn.execute(
         """
         INSERT INTO emails (
@@ -73,7 +77,9 @@ def _insert_email(conn: sqlite3.Connection, *, from_email: str, received_at: str
     return int(cur.lastrowid)
 
 
-def _insert_commitment(conn: sqlite3.Connection, *, email_row_id: int, status: str) -> None:
+def _insert_commitment(
+    conn: sqlite3.Connection, *, email_row_id: int, status: str
+) -> None:
     conn.execute(
         """
         INSERT INTO commitments (
@@ -97,7 +103,9 @@ def _insert_commitment(conn: sqlite3.Connection, *, email_row_id: int, status: s
     conn.commit()
 
 
-def _seed_response_times(db_path, entity_id: str, now: datetime, entries: list[tuple[int, float]]) -> None:
+def _seed_response_times(
+    db_path, entity_id: str, now: datetime, entries: list[tuple[int, float]]
+) -> None:
     store = ContextStore(db_path)
     for offset, hours in entries:
         store.record_interaction_event(
@@ -116,7 +124,9 @@ def _compute_health_score(
     trust_scores: dict[tuple[int | None, int | None] | None, float | None],
 ) -> float | None:
     analytics = KnowledgeAnalytics(db_path)
-    calculator = RelationshipHealthCalculator(analytics, StubTrustScoreCalculator(trust_scores))
+    calculator = RelationshipHealthCalculator(
+        analytics, StubTrustScoreCalculator(trust_scores)
+    )
     snapshot = calculator.compute(entity_id=entity_id, from_email=from_email)
     return snapshot.health_score
 
@@ -261,8 +271,12 @@ def test_relationship_health_negative_trend_decreases_score(tmp_path) -> None:
         ),
     )
 
-    positive_snapshot = positive_calculator.compute(entity_id=entity_id, from_email="sender@example.com")
-    negative_snapshot = negative_calculator.compute(entity_id=entity_id, from_email="sender@example.com")
+    positive_snapshot = positive_calculator.compute(
+        entity_id=entity_id, from_email="sender@example.com"
+    )
+    negative_snapshot = negative_calculator.compute(
+        entity_id=entity_id, from_email="sender@example.com"
+    )
 
     assert positive_snapshot.health_score is not None
     assert negative_snapshot.health_score is not None

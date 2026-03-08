@@ -12,8 +12,7 @@ from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 def _configure_importance_db(monkeypatch):
     conn = sqlite3.connect(":memory:")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE email_importance_scores (
             account_email TEXT NOT NULL,
             email_id INTEGER NOT NULL,
@@ -21,10 +20,11 @@ def _configure_importance_db(monkeypatch):
             ts_utc REAL NOT NULL,
             PRIMARY KEY (account_email, email_id)
         )
-        """
-    )
+        """)
     conn.commit()
-    connection_factory = lambda: conn
+
+    def connection_factory():
+        return conn
 
     def _record_importance_score(**kwargs):
         kwargs.pop("db_path", None)
@@ -201,7 +201,9 @@ def test_pipeline_resilient_to_percentile_failure(monkeypatch) -> None:
     assert delivered == [42]
 
 
-def test_pipeline_allows_llm_for_cold_start_with_insufficient_history(monkeypatch, caplog) -> None:
+def test_pipeline_allows_llm_for_cold_start_with_insufficient_history(
+    monkeypatch, caplog
+) -> None:
     caplog.set_level("INFO")
     llm_calls: list[str] = []
     _configure_minimal_pipeline(monkeypatch, llm_calls)
@@ -216,7 +218,9 @@ def test_pipeline_allows_llm_for_cold_start_with_insufficient_history(monkeypatc
         ),
     )
     monkeypatch.setattr(processor, "record_importance_score", lambda **_kwargs: None)
-    monkeypatch.setattr(processor, "_count_recent_importance_history", lambda **_kwargs: 0)
+    monkeypatch.setattr(
+        processor, "_count_recent_importance_history", lambda **_kwargs: 0
+    )
 
     processor.process_message(
         account_email="account@example.com",

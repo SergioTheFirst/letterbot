@@ -70,7 +70,9 @@ def _extract_metadata_email(metadata: str | None) -> str | None:
 
 
 class EntityResolver:
-    def __init__(self, *, recent_window_days: int = 30, name_threshold: float = 0.84) -> None:
+    def __init__(
+        self, *, recent_window_days: int = 30, name_threshold: float = 0.84
+    ) -> None:
         self.recent_window_days = recent_window_days
         self.name_threshold = name_threshold
 
@@ -86,7 +88,9 @@ class EntityResolver:
         if not entity_id:
             return []
 
-        normalized_current = normalize_name((from_name or "").strip() or (from_email or "").strip())
+        normalized_current = normalize_name(
+            (from_name or "").strip() or (from_email or "").strip()
+        )
         if not normalized_current:
             return []
 
@@ -109,14 +113,22 @@ class EntityResolver:
         relationships: list[EntityRelationship] = []
         for row in rows:
             candidate_id = str(row["id"])
-            candidate_norm = str(row["normalized_name"] or "") or normalize_name(str(row["name"] or ""))
+            candidate_norm = str(row["normalized_name"] or "") or normalize_name(
+                str(row["name"] or "")
+            )
             if not candidate_norm:
                 continue
             candidate_email = _extract_metadata_email(row["metadata"])
             candidate_domain = _extract_domain(candidate_email)
-            email_match = bool(email_norm and candidate_email and email_norm == candidate_email)
-            same_domain = bool(domain_norm and candidate_domain and domain_norm == candidate_domain)
-            name_similarity = SequenceMatcher(None, normalized_current, candidate_norm).ratio()
+            email_match = bool(
+                email_norm and candidate_email and email_norm == candidate_email
+            )
+            same_domain = bool(
+                domain_norm and candidate_domain and domain_norm == candidate_domain
+            )
+            name_similarity = SequenceMatcher(
+                None, normalized_current, candidate_norm
+            ).ratio()
 
             heuristics: list[str] = ["recent_window"]
             confidence: float | None = None
@@ -135,7 +147,10 @@ class EntityResolver:
             if same_domain and "same_domain" not in heuristics:
                 heuristics.append("same_domain")
 
-            if name_similarity >= self.name_threshold and "name_similarity" not in heuristics:
+            if (
+                name_similarity >= self.name_threshold
+                and "name_similarity" not in heuristics
+            ):
                 heuristics.append("name_similarity")
 
             relationship = EntityRelationship(
@@ -315,7 +330,9 @@ class ContextStore:
                 event_time=event_time,
             )
             for relation in relationships:
-                entity_from, entity_to = sorted([relation.entity_from, relation.entity_to])
+                entity_from, entity_to = sorted(
+                    [relation.entity_from, relation.entity_to]
+                )
                 exists = conn.execute(
                     """
                     SELECT 1 FROM relationships

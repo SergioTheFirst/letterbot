@@ -12,7 +12,7 @@ def _read(path: str) -> str:
 
 def test_pyinstaller_spec_uses_main_entrypoint_and_2file_datas() -> None:
     spec = _read("pyinstaller.spec")
-    assert 'mailbot_v26/__main__.py' in spec
+    assert "mailbot_v26/__main__.py" in spec
     assert "Analysis(" in spec
     assert 'name="Letterbot"' in spec
     assert "settings.ini.example" in spec
@@ -68,7 +68,9 @@ def test_windows_docs_do_not_use_legacy_new_install_flow() -> None:
         text = _read(path)
         lowered = text.lower()
         for token in forbidden:
-            assert token.lower() not in lowered, f"{path} contains legacy token: {token}"
+            assert (
+                token.lower() not in lowered
+            ), f"{path} contains legacy token: {token}"
 
     troubleshooting = _read("docs/TROUBLESHOOTING_WINDOWS.md")
     assert "legacy" in troubleshooting.lower()

@@ -173,12 +173,16 @@ def _run_processes(
                 processes.remove(proc)
                 if code != 0:
                     exit_code = code
-                    name, log_path = process_meta.get(proc.pid, ("process", Path("unknown")))
+                    name, log_path = process_meta.get(
+                        proc.pid, ("process", Path("unknown"))
+                    )
                     print(f"[ERROR] {name} exited with code {code}")
                     print(f"[ERROR] {name} log: {log_path}")
                     tail_lines = _tail_log(log_path, lines=30)
                     if tail_lines:
-                        print(f"[ERROR] {name} log tail (last {len(tail_lines)} lines):")
+                        print(
+                            f"[ERROR] {name} log tail (last {len(tail_lines)} lines):"
+                        )
                         for line in tail_lines:
                             print(f"[ERROR][{name}] {line}")
                     else:

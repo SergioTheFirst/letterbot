@@ -9,14 +9,13 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from email import message_from_bytes
 from email.message import Message as EmailMessage
-from email.utils import parseaddr
 from pathlib import Path
 from typing import Dict, List
 import zipfile
 
 from mailbot_v26.bot_core.extractors.doc import extract_docx_text
 from mailbot_v26.bot_core.extractors.excel import extract_excel_text
-from mailbot_v26.bot_core.extractors.pdf import extract_pdf, extract_pdf_text
+from mailbot_v26.bot_core.extractors.pdf import extract_pdf
 from mailbot_v26.constants import (
     MAX_ATTACHMENT_BYTES,
     MAX_CHARS_PER_ATTACHMENT,
@@ -33,12 +32,19 @@ from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.worker.telegram_sender import DeliveryResult, send_telegram
 
 try:  # local import to avoid circular typing issues
-    from mailbot_v26.config_loader import AccountConfig, BotConfig, load_telegram_ui_config
+    from mailbot_v26.config_loader import (
+        AccountConfig,
+        BotConfig,
+        load_telegram_ui_config,
+    )
     from mailbot_v26.account_identity import normalize_login
 except Exception:  # pragma: no cover - defensive import for early boot
     AccountConfig = None  # type: ignore
     BotConfig = None  # type: ignore
-    load_telegram_ui_config = lambda: type("_TgUi", (), {"show_decision_trace": False})()  # type: ignore
+
+    def load_telegram_ui_config():  # type: ignore
+        return type("_TgUi", (), {"show_decision_trace": False})()
+
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +99,10 @@ def store_inbound(email_id: int, inbound: InboundMessage) -> None:
 
 def _strip_html_content(text: str) -> str:
     working = re.sub(
-        r"<(head|script|style)[^>]*>.*?</\1>", " ", text, flags=re.IGNORECASE | re.DOTALL
+        r"<(head|script|style)[^>]*>.*?</\1>",
+        " ",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
     )
     working = re.sub(r"<!--.*?-->", " ", working, flags=re.DOTALL)
     working = re.sub(
@@ -102,7 +111,9 @@ def _strip_html_content(text: str) -> str:
         working,
         flags=re.IGNORECASE,
     )
-    working = re.sub(r"</(p|div|tr|td|th|li|ul|ol|h[1-6])>", "\n", working, flags=re.IGNORECASE)
+    working = re.sub(
+        r"</(p|div|tr|td|th|li|ul|ol|h[1-6])>", "\n", working, flags=re.IGNORECASE
+    )
     working = re.sub(r"<[^>]+>", " ", working)
     working = html.unescape(working)
     working = re.sub(r"[ \t]+", " ", working)
@@ -286,9 +297,15 @@ def _extract_attachment_text(
     )
 
     try:
-        if name_lower.endswith((".zip", ".docx", ".xlsx")) and max_zip_uncompressed_bytes > 0:
+        if (
+            name_lower.endswith((".zip", ".docx", ".xlsx"))
+            and max_zip_uncompressed_bytes > 0
+        ):
             uncompressed_size = _zip_uncompressed_size(att.content)
-            if uncompressed_size is not None and uncompressed_size > max_zip_uncompressed_bytes:
+            if (
+                uncompressed_size is not None
+                and uncompressed_size > max_zip_uncompressed_bytes
+            ):
                 logger.warning(
                     "zip_bomb_guard_triggered filename=%s uncompressed_bytes=%s max_bytes=%s",
                     att.filename,
@@ -304,7 +321,9 @@ def _extract_attachment_text(
                 extracted_text,
                 max_len=sanitize_limit,
             )
-            text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
+            text = _hard_truncate_extracted_text(
+                text, filename=att.filename, max_chars=max_chars
+            )
             if text:
                 logger.info("PDF extraction: %d chars from %s", len(text), att.filename)
             else:
@@ -320,7 +339,9 @@ def _extract_attachment_text(
                 extract_docx_text(att.content, att.filename),
                 max_len=sanitize_limit,
             )
-            text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
+            text = _hard_truncate_extracted_text(
+                text, filename=att.filename, max_chars=max_chars
+            )
             logger.info("DOC extraction: %d chars from %s", len(text), att.filename)
             return text
 
@@ -329,7 +350,9 @@ def _extract_attachment_text(
                 extract_excel_text(att.content, att.filename),
                 max_len=sanitize_limit,
             )
-            text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
+            text = _hard_truncate_extracted_text(
+                text, filename=att.filename, max_chars=max_chars
+            )
             logger.info("Excel extraction: %d chars from %s", len(text), att.filename)
             return text
 
@@ -338,7 +361,9 @@ def _extract_attachment_text(
         ):
             decoded = att.content.decode("utf-8", errors="ignore")
             text = sanitize_text(decoded, max_len=sanitize_limit)
-            text = _hard_truncate_extracted_text(text, filename=att.filename, max_chars=max_chars)
+            text = _hard_truncate_extracted_text(
+                text, filename=att.filename, max_chars=max_chars
+            )
             logger.info("Text extraction: %d chars from %s", len(text), att.filename)
             return text
 
@@ -376,7 +401,9 @@ def _extract_attachments(
     byte_limit = min(max_attachment_mb * 1024 * 1024, MAX_ATTACHMENT_BYTES)
     total_mail_limit = MAX_TOTAL_MAIL_BYTES
     max_extracted_chars = min(max_extracted_chars, MAX_CHARS_PER_ATTACHMENT)
-    max_extracted_total_chars = min(max_extracted_total_chars, MAX_TOTAL_EXTRACTED_CHARS)
+    max_extracted_total_chars = min(
+        max_extracted_total_chars, MAX_TOTAL_EXTRACTED_CHARS
+    )
     max_zip_uncompressed_bytes = max_zip_uncompressed_mb * 1024 * 1024
     entries: list[tuple[str, str, bytes, int, str | None]] = []
     candidates: list[tuple[int, str, str, bytes, int]] = []
@@ -471,10 +498,16 @@ def _extract_attachments(
                 extracted_map[index] = extracted_text
 
     attachments: List[Attachment] = []
-    remaining_chars = max_extracted_total_chars if max_extracted_total_chars > 0 else None
-    for index, (filename, content_type, _payload, payload_size, skipped_reason) in enumerate(
-        entries
-    ):
+    remaining_chars = (
+        max_extracted_total_chars if max_extracted_total_chars > 0 else None
+    )
+    for index, (
+        filename,
+        content_type,
+        _payload,
+        payload_size,
+        skipped_reason,
+    ) in enumerate(entries):
         extracted_text = "" if skipped_reason else extracted_map.get(index, "")
         if remaining_chars is not None:
             if remaining_chars <= 0:
@@ -560,9 +593,7 @@ def stage_parse(ctx: PipelineContext) -> None:
 def stage_llm(ctx: PipelineContext) -> None:
     attempts = getattr(ctx, "attempts", 1)
     if attempts > 1:
-        logger.info(
-            "[PIPELINE] email_id=%s stage=LLM retry=%s", ctx.email_id, attempts
-        )
+        logger.info("[PIPELINE] email_id=%s stage=LLM retry=%s", ctx.email_id, attempts)
     inbound = PIPELINE_INBOUND_CACHE.get(ctx.email_id)
     if inbound is None:
         raise RuntimeError("No parsed email for LLM stage")
@@ -583,7 +614,8 @@ def stage_llm(ctx: PipelineContext) -> None:
         "body_text": body_text,
         "attachments_text": attachments_text,
         "priority": ordinary_result.get("priority"),
-        "attachments": ordinary_result.get("attachments") or [
+        "attachments": ordinary_result.get("attachments")
+        or [
             {
                 "filename": att.filename,
                 "text": att.text,
@@ -609,7 +641,9 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
 
     telegram_text = ""
     if ctx.llm_result:
-        telegram_text = ctx.llm_result.get("text") or ctx.llm_result.get("telegram_text") or ""
+        telegram_text = (
+            ctx.llm_result.get("text") or ctx.llm_result.get("telegram_text") or ""
+        )
     ctx.telegram_text = telegram_text
 
     if not telegram_text or not telegram_text.strip():

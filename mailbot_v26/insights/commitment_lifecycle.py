@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable
 
-
 CONFIRMATION_PATTERN = re.compile(
     r"\b(отправил|высылаю|прикладываю|сделал|готово)\b",
     re.IGNORECASE,

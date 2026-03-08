@@ -29,8 +29,12 @@ def test_gigachat_global_lock_serializes_across_instances(monkeypatch) -> None:
     monkeypatch.setattr(GigaChatProvider, "_request", fake_request, raising=True)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        future_a = executor.submit(provider_a.complete, [{"role": "user", "content": "a"}])
-        future_b = executor.submit(provider_b.complete, [{"role": "user", "content": "b"}])
+        future_a = executor.submit(
+            provider_a.complete, [{"role": "user", "content": "a"}]
+        )
+        future_b = executor.submit(
+            provider_b.complete, [{"role": "user", "content": "b"}]
+        )
         assert start_event.wait(timeout=1)
         release_time = time.monotonic()
         release_event.set()

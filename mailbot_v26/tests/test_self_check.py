@@ -18,7 +18,9 @@ def _init_db(tmp_path: Path) -> Path:
     return db_path
 
 
-def test_self_check_logs_and_preserves_data(tmp_path: Path, caplog: LogCaptureFixture) -> None:
+def test_self_check_logs_and_preserves_data(
+    tmp_path: Path, caplog: LogCaptureFixture
+) -> None:
     db_path = _init_db(tmp_path)
 
     with sqlite3.connect(db_path) as conn:
