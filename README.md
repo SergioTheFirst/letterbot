@@ -35,6 +35,12 @@
    - Проверка: `python -m mailbot_v26.doctor`
    - Запуск: `python -m mailbot_v26.start`
 
+## Release Discipline
+
+- User-facing Windows ZIP is published via GitHub Releases (`Letterbot.zip`).
+- Public source/release bundles do not include runtime state (DB/logs/caches/temp files/local INI configs).
+- Local runtime configs should live only in `mailbot_v26/config/settings.ini` and `mailbot_v26/config/accounts.ini` (generated from `*.example`).
+
 # Support
 
 Letterbot остаётся бесплатным и без рекламного спама.

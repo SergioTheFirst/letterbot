@@ -6,6 +6,7 @@ __pycache__/
 
 # logs
 *.log
+logs/
 
 # secrets / local configs
 mailbot_v26/config/accounts.ini
@@ -29,3 +30,16 @@ data/
 *.sqlite3
 *.db
 runtime/logs/
+runtime/tmp_*.ps1
+
+# caches
+.pytest_cache/
+.ruff_cache/
+
+# local runtime configs
+mailbot_v26/config/settings.ini
+settings.ini
+accounts.ini
+config.local.yaml
+*.local.ini
+*.local.yaml

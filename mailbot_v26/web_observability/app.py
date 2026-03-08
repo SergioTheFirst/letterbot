@@ -207,12 +207,24 @@ def _render_template(app: Flask, template_name: str, **context: object) -> str:
     context.setdefault("request", request)
     context.setdefault("session", session)
     support_settings = app.config.get("SUPPORT_SETTINGS")
+    support_enabled = bool(
+        isinstance(support_settings, SupportSettings) and support_settings.enabled
+    )
     support_nav_enabled = bool(
-        isinstance(support_settings, SupportSettings)
-        and support_settings.enabled
+        support_enabled
+        and isinstance(support_settings, SupportSettings)
         and support_settings.show_in_nav
     )
+    support_url = ""
+    if isinstance(support_settings, SupportSettings):
+        for method in support_settings.methods:
+            candidate = str(method.url or "").strip()
+            if candidate:
+                support_url = candidate
+                break
     donate_enabled = bool(app.config.get("DONATE_ENABLED", False))
+    context.setdefault("support_enabled", support_enabled)
+    context.setdefault("support_url", support_url)
     context.setdefault("support_nav_enabled", support_nav_enabled)
     context.setdefault("cfg", {"features": {"donate_enabled": donate_enabled}})
     context.setdefault("app_version", get_version())
@@ -265,11 +277,20 @@ def _render_stub_html(
     donate_enabled = (
         bool(features.get("donate_enabled")) if isinstance(features, Mapping) else False
     )
-    support_enabled = (
+    nav_support_enabled = (
         bool(context.get("support_nav_enabled"))
         if isinstance(context, Mapping)
         else False
     ) and donate_enabled
+    support_enabled = (
+        bool(context.get("support_enabled")) if isinstance(context, Mapping) else False
+    )
+    support_url = (
+        str(context.get("support_url") or "").strip()
+        if isinstance(context, Mapping)
+        else ""
+    )
+    donate_surfaces_enabled = support_enabled and bool(support_url)
     nav_links = [
         '<a href="/" class="nav-link">Cockpit</a>',
         '<a href="/archive" class="nav-link">Archive</a>',
@@ -277,7 +298,7 @@ def _render_stub_html(
         '<a href="/events" class="nav-link">Events</a>',
         '<a href="/doctor" class="nav-link">Doctor</a>',
     ]
-    if support_enabled:
+    if nav_support_enabled:
         nav_links.append('<a href="/support" class="nav-link">Support</a>')
     header = (
         f"<nav>{''.join(nav_links)}</nav>"
@@ -359,8 +380,21 @@ def _render_stub_html(
             if engineer_mode
             else ""
         )
+        donate_corner = ""
+        donate_bottom = ""
+        if donate_surfaces_enabled:
+            safe_support_url = html.escape(support_url)
+            donate_corner = (
+                '<a class="donate-corner" href="'
+                f'{safe_support_url}" target="_blank" rel="noopener noreferrer">Donate</a>'
+            )
+            donate_bottom = (
+                '<div class="donate-bottom-link">'
+                f'<a href="{safe_support_url}" target="_blank" rel="noopener noreferrer">Donate</a>'
+                "</div>"
+            )
         support_card = ""
-        if support_enabled:
+        if nav_support_enabled:
             support_preview = ""
             methods = (
                 context.get("support_methods") if isinstance(context, Mapping) else []
@@ -372,6 +406,16 @@ def _render_stub_html(
                         qr_uri
                     )
             support_card = f'<h2>Support Letterbot</h2><a href="/support">/support</a>{support_preview}'
+        footer_parts = ['<footer class="app-footer">']
+        if nav_support_enabled:
+            footer_parts.append('<a href="/support" class="footer-support-link">Support</a>')
+        if donate_surfaces_enabled:
+            footer_parts.append(
+                '<a href="'
+                f'{html.escape(support_url)}" class="footer-donate-link" target="_blank" rel="noopener noreferrer">Donate</a>'
+            )
+        footer_parts.append("</footer>")
+        footer = "".join(footer_parts)
         quality_summary = (
             context.get("quality_summary") if isinstance(context, Mapping) else {}
         )
@@ -394,8 +438,8 @@ def _render_stub_html(
                 "</div>"
             )
         return (
-            f"<html><body>{header}<h2>Today Digest</h2>{digest_today_block}<h2>Week Digest</h2>{digest_week_block}"
-            f"<h2>Recent Activity</h2>{lane_html}{quality_block}{engineer_block}{support_card}<table>{activity_body}</table></body></html>"
+            f"<html><body>{header}{donate_corner}<h2>Today Digest</h2>{digest_today_block}<h2>Week Digest</h2>{digest_week_block}"
+            f"<h2>Recent Activity</h2>{lane_html}{quality_block}{engineer_block}{support_card}<table>{activity_body}</table>{donate_bottom}{footer}</body></html>"
         )
 
     if template_name in {"health.html", "partials/health_overview.html"}:

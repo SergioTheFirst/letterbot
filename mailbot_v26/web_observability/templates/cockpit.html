@@ -15,6 +15,11 @@
     </div>
     <div class="status-strip-offline" id="status-strip-offline">offline</div>
   </div>
+  {% if support_enabled and support_url %}
+  <a class="donate-corner" href="{{ support_url }}" target="_blank" rel="noopener noreferrer" aria-label="Donate">
+    <img src="{{ url_for('static', filename='assets/support/boosty_donate.svg') }}" alt="Donate QR">
+  </a>
+  {% endif %}
 
 
 
@@ -299,7 +304,7 @@
         {% else %}
           <div class="hint">— нет данных —</div>
         {% endif %}
-        <div class="hint" style="margin-top:8px;"><b>🔇 Молчат давно</b></div>
+        <div class="hint mt-8"><b>🔇 Молчат давно</b></div>
         {% if lane == "all" and silent_contacts %}
           {% for item in silent_contacts %}
           <div>• {% if "@example.com" in (item.display_name or "") %}hidden{% else %}{{ item.display_name }}{% endif %} — {{ item.days_silent }} дн.</div>
@@ -307,7 +312,7 @@
         {% else %}
           <div class="hint">— нет данных —</div>
         {% endif %}
-        <div class="hint" style="margin-top:8px;"><b>🔁 Застрявшие диалоги</b></div>
+        <div class="hint mt-8"><b>🔁 Застрявшие диалоги</b></div>
         {% if lane == "all" and stalled_threads %}
           {% for item in stalled_threads %}
           <div>• {% if "example.com" in (item.from_email or "") %}hidden{% else %}{{ item.from_email }}{% endif %} — {{ item.subject or item.snippet }} ({{ item.days_ago }} дн. назад)</div>
@@ -332,6 +337,11 @@
       </div>
     </div>
   </div>
+  {% if support_enabled and support_url %}
+  <div class="donate-bottom-link">
+    <a href="{{ support_url }}" target="_blank" rel="noopener noreferrer">Donate</a>
+  </div>
+  {% endif %}
 
   <script>
     (function() {

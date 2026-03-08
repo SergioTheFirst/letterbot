@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ title or "Letterbot Web — Observability" }}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%235c8df6'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='white'>L</text></svg>">
 </head>
 <body>
   <div class="app-shell">
@@ -21,6 +22,11 @@
           <a href="{{ url_for('health') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">Health</a>
           <a href="{{ url_for('events') }}" class="nav-link {% if request.path == '/events' %}active{% endif %}">Events</a>
           <a href="{{ url_for('doctor') }}" class="nav-link {% if request.path.startswith('/doctor') %}active{% endif %}">Doctor</a>
+          <a href="{{ url_for('commitments') }}" class="nav-link {% if request.path.startswith('/commitments') %}active{% endif %}">Commitments</a>
+          <a href="{{ url_for('latency') }}" class="nav-link {% if request.path == '/latency' %}active{% endif %}">Latency</a>
+          <a href="{{ url_for('attention') }}" class="nav-link {% if request.path == '/attention' %}active{% endif %}">Attention</a>
+          <a href="{{ url_for('learning') }}" class="nav-link {% if request.path == '/learning' %}active{% endif %}">Learning</a>
+          <a href="{{ url_for('relationships') }}" class="nav-link {% if request.path.startswith('/relationships') %}active{% endif %}">Relationships</a>
           {% if cfg.features.donate_enabled and support_nav_enabled %}<a href="{{ url_for('support') }}" class="nav-link {% if request.path.startswith('/support') %}active{% endif %}">Support</a>{% endif %}
         </nav>
         {% set vars = dashboard_vars if dashboard_vars is defined and dashboard_vars else None %}
@@ -90,7 +96,13 @@
       {% block content %}{% endblock %}
     </main>
 
-    <footer class="app-footer"><span class="footer-brand">Letterbot v{{ app_version }} · Powered by Letterbot Premium</span>{% if support_nav_enabled %}<a href="/support" class="footer-support-link">Support</a>{% endif %}</footer>
+    <footer class="app-footer">
+      <span class="footer-brand">Letterbot v{{ app_version }}</span>
+      {% if support_nav_enabled %}<a href="/support" class="footer-support-link">Support</a>{% endif %}
+      {% if support_enabled and support_url %}
+      <a href="{{ support_url }}" class="footer-donate-link" target="_blank" rel="noopener noreferrer">Donate</a>
+      {% endif %}
+    </footer>
   </div>
   <script>
     document.addEventListener('DOMContentLoaded', function() {

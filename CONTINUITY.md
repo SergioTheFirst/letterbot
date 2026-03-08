@@ -17,6 +17,7 @@ State:
 - Events_v1 extended for behavioral signals.
 - Premium processor routing available behind feature flag.
 Done:
+- 2026-03-08: Completed web-observability UI hardening pass from audit prompt: fixed dark-surface consistency (`.topbar`, `.alert`, `.surface-panel`), added missing CSS/layout classes + old-template compatibility classes, expanded base navigation (Commitments/Latency/Attention/Learning/Relationships), added favicon and cleaned footer branding, removed cockpit inline style + added visible Boosty donate affordances, migrated `learning.html`/`relationships.html`/`relationships_contact.html` to `base.html`, and added regression suite `test_web_nav_links.py`; verification green (`python -m compileall mailbot_v26 -q`, full `python -m pytest -q --tb=short` => 1167 passed, targeted web tests all passed).
 - 2026-03-08: Completed 3 independent UX/config polish tasks with zero behavior regressions: `/help` now lists `/digest on|off` and `/autopriority on|off` as separate command lines (plus new inbound regression test), MailBot→Letterbot docstring branding updated in targeted modules only, and quality feature flags enabled in both settings template sources (`enable_anomaly_alerts=true`, `enable_quality_metrics=true`, `enable_preview_actions=true`); verification green (`python -m compileall mailbot_v26 -q`, `python -m pytest -q` x3 incremental passes, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1053 passed, targeted tests for inbound/config_bootstrap/startup_health all passed).
 - 2026-03-08: Full-auto stabilization pass completed for task runner contract: fixed backup base-dir DB path fallback, restored start-module compatibility exports (`_extract_body`/`_extract_attachments`/`_extract_attachment_text`), restored processor preview symbol compatibility (`send_preview_to_telegram` alias), aligned happy-path/event/tg-payload tests with current delivery metadata and fallback text, ran `ruff check . --fix`, installed Black, formatted repository (`black .`), and verified green (`ruff check .`, full `pytest -q`: 1162 passed, 5 warnings).
 - 2026-03-08: Recovery PR completed for fresh-install ingest: added deterministic first-run bootstrap (state cursor + DB history), bounded bootstrap window (`first_run_bootstrap_hours`/`first_run_bootstrap_max_messages`), one-shot bootstrap notice, structured startup ingest logs, and regression coverage (`test_imap_client.py`, `test_config_loader.py`); verification green (`compileall`, full `pytest`: 1052 passed, 3 warnings).
@@ -211,11 +212,11 @@ Done:
 - 2026-03-06: Telegram UX hotfix pass started: wired startup `config.storage.db_path` into processor module (`configure_processor_db_path`), ensured `start.py` creates DB parent directory before `Storage(...)`, switched user path keyboards to direct priority buttons (`initial_prio=True`), and updated auto-priority-gate defaults/examples (`enabled=true`, `min_samples=10`); runtime verification currently FAILED with broad pre-existing+regression suite failures (94 failed / 950 passed).
 - 2026-03-06: user-facing reliability hardening applied with minimal runtime patchset: outbound Telegram send/edit now normalizes mojibake text centrally, `/status` now includes AI + delivery mode and uses global startup health mode (fixed `StartupHealthChecker.evaluate_mode` global-state update), IMAP runtime health now classifies repeated handshake/connect timeouts and enters per-account 24h cooldown with cooldown metadata/log fields, default progressive pre-message disabled unless `MAILBOT_ENABLE_PROGRESSIVE_PREMESSAGE` is explicitly enabled, weekly digest defaults switched ON across templates/bootstrap/feature defaults, and inbound callback rerender now adds a single `РџСЂРёРѕСЂРёС‚РµС‚: ... РІСЂСѓС‡РЅСѓСЋ` marker when `priority_source=user_override`; runtime verification remains UNCONFIRMED here because no Python interpreter is available (`.venv` missing, `python/py` unavailable).
 Now:
-- Requested help/docstring/config improvements are implemented and fully verified; full suite remains green on active interpreter.
-- No runtime logic changes were made outside specified files; command routing and package/import naming remain unchanged.
+- Web-observability templates/styles are consolidated on shared base dark theme and validated by full test suite.
+- Runtime/backend routes and auth logic remain unchanged; only UI/template/CSS/test surface was touched.
 Next:
-- Prepare minimal PR with only targeted files for this 3-task bundle.
-- Manual operator follow-up (outside code): rename Telegram bot display name in BotFather if needed.
+- Prepare minimal PR with this web UI pass (templates/CSS/new nav regression test).
+- Optional manual browser smoke-check of `/`, `/learning`, `/relationships`, `/health`, `/commitments`.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Should callback snapshot-update miss (`email_id` absent) emit a dedicated contract event for dashboard alerting, or keep logger-only?
 Working set (files / tables / tests):
@@ -243,4 +244,11 @@ Working set (files / tables / tests):
 - mailbot_v26/tests/test_priority_keyboard.py
 - mailbot_v26/tests/test_telegram_delivery_pipeline.py
 - mailbot_v26/tests/test_telegram_inbound.py
+- mailbot_v26/web_observability/static/style.css
+- mailbot_v26/web_observability/templates/base.html
+- mailbot_v26/web_observability/templates/cockpit.html
+- mailbot_v26/web_observability/templates/learning.html
+- mailbot_v26/web_observability/templates/relationships.html
+- mailbot_v26/web_observability/templates/relationships_contact.html
+- mailbot_v26/tests/test_web_nav_links.py
 - CONTINUITY.md
