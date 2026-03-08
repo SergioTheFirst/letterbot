@@ -104,3 +104,28 @@ def test_segment_email_body_extracts_disclaimer_block():
     assert segmented["disclaimer_block"].startswith("External email:")
     assert segmented["forwarded_thread"] == ""
     assert segmented["signature"] == ""
+
+
+def test_segment_email_body_detects_reply_header_without_quotes():
+    body = (
+        "Please process invoice update.\n"
+        "On Tue, Mar 5, 2026 at 10:00 AM old@example.com wrote:\n"
+        "Total payable 999999 USD"
+    )
+
+    segmented = segment_email_body(body)
+
+    assert segmented["main_body"] == "Please process invoice update."
+    assert segmented["quoted_thread"].startswith("On Tue, Mar 5, 2026")
+
+
+def test_segmentation_does_not_strip_simple_short_email():
+    body = "Approved."
+
+    segmented = segment_email_body(body)
+
+    assert segmented["main_body"] == body
+    assert segmented["quoted_thread"] == ""
+    assert segmented["forwarded_thread"] == ""
+    assert segmented["signature"] == ""
+    assert segmented["disclaimer_block"] == ""

@@ -1450,6 +1450,78 @@ def test_main_body_numbers_still_detected() -> None:
     test_main_body_numbers_detected()
 
 
+def test_signature_numbers_not_used_for_amount_detection() -> None:
+    test_signature_numbers_not_used()
+
+
+def test_disclaimer_not_used_for_fact_extraction() -> None:
+    body = (
+        "Please review status update.\n"
+        "External email: treat links with caution\n"
+        "Total payable 555000 USD"
+    )
+    facts = _collect_message_facts(
+        subject="Status update",
+        body_text=body,
+        attachments=[],
+        mail_type="UNKNOWN",
+    )
+    assert facts["amount"] == ""
+
+
+def test_attachment_text_still_used_when_body_segmented() -> None:
+    attachment_text = "Invoice #9 total payable 4200 USD amount due 4200 USD"
+    body = (
+        "See attached invoice.\n"
+        "On Tue, Mar 5, 2026 at 10:00 AM finance@example.com wrote:\n"
+        "Total payable 999999 USD"
+    )
+    facts = _collect_message_facts(
+        subject="Invoice #9",
+        body_text=body,
+        attachments=[
+            {
+                "filename": "invoice_09.pdf",
+                "content_type": "application/pdf",
+                "text": attachment_text,
+            }
+        ],
+        mail_type="INVOICE",
+    )
+    facts = _validate_message_facts(
+        facts,
+        evidence_text=f"Invoice #9 attached {attachment_text}",
+    )
+    facts = _score_message_facts(
+        facts,
+        evidence_text=f"Invoice #9 attached {attachment_text}",
+        attachment_text=attachment_text,
+    )
+
+    assert facts["amount"].startswith("4200")
+
+
+def test_invoice_subject_and_main_body_survive_segmentation() -> None:
+    body = (
+        "Invoice #455 total payable 87500 USD.\n"
+        "On Mon, Mar 4, 2026 at 09:30 AM old@example.com wrote:\n"
+        "Total payable 999999 USD"
+    )
+    facts = _collect_message_facts(
+        subject="Invoice #455",
+        body_text=body,
+        attachments=[],
+        mail_type="INVOICE",
+    )
+    main_body = pipeline_processor._main_body_for_facts(body)
+    evidence = f"Invoice #455 {main_body}"
+    facts = _validate_message_facts(facts, evidence_text=evidence)
+    facts = _score_message_facts(facts, evidence_text=evidence, attachment_text="")
+
+    assert facts["doc_kind"] == "invoice"
+    assert facts["amount"].startswith("87500")
+
+
 def test_invoice_attachment_amount_detection() -> None:
     attachment_text = "Invoice #7 total payable 4200 USD amount due 4200 USD"
     attachments = [
