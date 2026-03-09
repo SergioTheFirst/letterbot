@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ def _insert_event(
     event_type: str,
     ts_utc: float,
     account_id: str = "primary@example.com",
+    email_id: int = 1,
     payload: dict[str, object] | None = None,
 ) -> None:
     conn.execute(
@@ -30,12 +32,76 @@ def _insert_event(
             datetime.fromtimestamp(ts_utc, tz=timezone.utc).isoformat(),
             account_id,
             "entity",
-            1,
+            email_id,
             json.dumps(payload or {}, ensure_ascii=False),
             json.dumps(payload or {}, ensure_ascii=False),
             1,
             f"{event_type}-{ts_utc}",
         ),
+    )
+
+
+def _insert_archive_interpretation(
+    conn: sqlite3.Connection,
+    *,
+    email_id: int,
+    ts_utc: float,
+    account_id: str = "primary@example.com",
+    sender_email: str = "sender@example.com",
+    issuer_label: str = "Vendor Ops",
+    subject: str = "Invoice",
+    doc_kind: str = "invoice",
+    amount: int | None = 87500,
+    due_date: str | None = "2026-04-15",
+    action: str = "Проверить",
+    priority: str = "yellow",
+    confidence: float = 0.91,
+    document_id: str = "INV-001",
+    body_summary: str = "",
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO emails (id, account_email, from_email, subject, body_summary, received_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            email_id,
+            account_id,
+            sender_email,
+            subject,
+            body_summary,
+            datetime.fromtimestamp(ts_utc, tz=timezone.utc).isoformat(),
+            datetime.fromtimestamp(ts_utc, tz=timezone.utc).isoformat(),
+        ),
+    )
+    _insert_event(
+        conn,
+        event_type="email_received",
+        ts_utc=ts_utc,
+        account_id=account_id,
+        email_id=email_id,
+        payload={"from_email": sender_email, "subject": subject},
+    )
+    _insert_event(
+        conn,
+        event_type="message_interpretation",
+        ts_utc=ts_utc,
+        account_id=account_id,
+        email_id=email_id,
+        payload={
+            "sender_email": sender_email,
+            "doc_kind": doc_kind,
+            "amount": amount,
+            "due_date": due_date,
+            "priority": priority,
+            "action": action,
+            "confidence": confidence,
+            "context": "NEW_MESSAGE",
+            "document_id": document_id,
+            "issuer_label": issuer_label,
+            "issuer_key": "domain:vendor.example",
+            "issuer_domain": "vendor.example",
+        },
     )
 
 
@@ -188,6 +254,9 @@ def test_dashboard_template_renders_events_block(tmp_path: Path) -> None:
     assert 'id="events-list"' in body
     assert 'id="business-payable"' in body
     assert 'id="top-issuers-list"' in body
+    assert 'id="card-ops-health"' in body
+    assert 'id="health-imap-status"' in body
+    assert 'id="health-pipeline-status"' in body
 
 
 def test_api_dashboard_limits_recent_events_to_20(tmp_path: Path) -> None:
@@ -371,3 +440,702 @@ def test_api_dashboard_returns_business_metrics_from_interpretation_events(
     assert data["business"]["overdue_due_count"] == 0
     assert data["top_issuers"][0]["issuer_key"] == "domain:vendor.example"
     assert data["top_issuers"][0]["total_documents"] == 2
+
+
+def test_health_panel_imap_status_ok(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-health-ok.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=now.timestamp(),
+            payload={"subtype": "success", "detail": "ok"},
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/health/imap")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["status"] == "ok"
+    assert data["dead_letter_count"] == 0
+
+
+def test_health_panel_imap_status_degraded_when_no_recent_success(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "dashboard-health-degraded.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=(now - timedelta(minutes=20)).timestamp(),
+            payload={"subtype": "success", "detail": "stale"},
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/health/imap")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "degraded"
+
+
+def test_health_panel_imap_status_down_when_no_success_over_threshold(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "dashboard-health-down.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=(now - timedelta(hours=2)).timestamp(),
+            payload={"subtype": "success", "detail": "old"},
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/health/imap")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "down"
+
+
+def test_health_panel_pipeline_last_processed_correct(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-pipeline-last-processed.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    last_processed_ts = (now - timedelta(minutes=3)).timestamp()
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="message_interpretation",
+            ts_utc=last_processed_ts,
+            payload={
+                "doc_kind": "invoice",
+                "amount": 1000,
+                "sender_email": "vendor@example.com",
+                "action": "Проверить",
+                "priority": "🟡",
+            },
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/health/pipeline")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["status"] == "ok"
+    assert data["last_processed_ts"] is not None
+
+
+def test_health_panel_dead_letter_count_correct(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-dead-letters.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=now.timestamp(),
+            payload={"subtype": "dead_letter", "detail": "parse failed"},
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/health/imap")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["dead_letter_count"] == 1
+
+
+def test_health_panel_pending_actions_count_from_canonical_events(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "dashboard-pending-actions.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="message_interpretation",
+            ts_utc=now.timestamp(),
+            payload={
+                "doc_kind": "contract",
+                "amount": None,
+                "sender_email": "legal@example.com",
+                "action": "Проверить договор",
+                "priority": "🟡",
+                "confidence": 0.88,
+            },
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/health/pipeline")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["pending_action_count"] == 1
+
+
+def test_archive_filter_by_priority_returns_correct_items(tmp_path: Path) -> None:
+    db_path = tmp_path / "archive-priority.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive_interpretation(
+            conn,
+            email_id=1,
+            ts_utc=now.timestamp(),
+            priority="red",
+            issuer_label="Vendor High",
+        )
+        _insert_archive_interpretation(
+            conn,
+            email_id=2,
+            ts_utc=(now - timedelta(minutes=1)).timestamp(),
+            priority="blue",
+            issuer_label="Vendor Low",
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/archive",
+            query_string={"account_emails": "primary@example.com", "priority": "high"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["total"] == 1
+    assert data["items"][0]["sender_display"] == "Vendor High"
+
+
+def test_archive_filter_by_doc_kind_returns_correct_items(tmp_path: Path) -> None:
+    db_path = tmp_path / "archive-doc-kind.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive_interpretation(
+            conn,
+            email_id=1,
+            ts_utc=now.timestamp(),
+            doc_kind="invoice",
+            issuer_label="Invoice Vendor",
+        )
+        _insert_archive_interpretation(
+            conn,
+            email_id=2,
+            ts_utc=(now - timedelta(minutes=1)).timestamp(),
+            doc_kind="contract",
+            issuer_label="Legal Vendor",
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/archive",
+            query_string={"account_emails": "primary@example.com", "doc_kind": "contract"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["doc_kind"] == "contract"
+
+
+def test_archive_filter_by_confidence_band(tmp_path: Path) -> None:
+    db_path = tmp_path / "archive-confidence.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive_interpretation(
+            conn,
+            email_id=1,
+            ts_utc=now.timestamp(),
+            confidence=0.92,
+            issuer_label="High Confidence",
+        )
+        _insert_archive_interpretation(
+            conn,
+            email_id=2,
+            ts_utc=(now - timedelta(minutes=1)).timestamp(),
+            confidence=0.41,
+            issuer_label="Low Confidence",
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/archive",
+            query_string={
+                "account_emails": "primary@example.com",
+                "confidence_band": "low",
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["confidence_text"] == "0.41"
+
+
+def test_archive_filters_combinable_without_error(tmp_path: Path) -> None:
+    db_path = tmp_path / "archive-combined.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive_interpretation(
+            conn,
+            email_id=1,
+            ts_utc=now.timestamp(),
+            sender_email="billing@vendor.example",
+            issuer_label="Vendor Ops",
+            doc_kind="invoice",
+            priority="red",
+            confidence=0.88,
+        )
+        _insert_archive_interpretation(
+            conn,
+            email_id=2,
+            ts_utc=(now - timedelta(minutes=1)).timestamp(),
+            sender_email="legal@vendor.example",
+            issuer_label="Legal Vendor",
+            doc_kind="contract",
+            priority="yellow",
+            confidence=0.76,
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/archive",
+            query_string={
+                "account_emails": "primary@example.com",
+                "sender": "vendor ops",
+                "priority": "high",
+                "doc_kind": "invoice",
+                "confidence_band": "high",
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["message_id"] == 1
+
+
+def test_archive_pagination_limits_to_25_per_page(tmp_path: Path) -> None:
+    db_path = tmp_path / "archive-pagination.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        for idx in range(30):
+            _insert_archive_interpretation(
+                conn,
+                email_id=idx + 1,
+                ts_utc=(now - timedelta(minutes=idx)).timestamp(),
+                issuer_label=f"Vendor {idx + 1}",
+                document_id=f"INV-{idx + 1}",
+            )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/archive",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert len(payload["items"]) == 25
+    assert payload["pages"] == 2
+
+
+def test_archive_detail_returns_interpretation_summary(tmp_path: Path) -> None:
+    db_path = tmp_path / "archive-detail-summary.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive_interpretation(conn, email_id=7, ts_utc=now.timestamp())
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/archive/7/detail",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert "Invoice" in payload["interpretation_summary"]
+
+
+def test_archive_detail_returns_why_classified(tmp_path: Path) -> None:
+    db_path = tmp_path / "archive-detail-why.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive_interpretation(conn, email_id=9, ts_utc=now.timestamp())
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/archive/9/detail",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert "Classified because detected" in payload["why_classified"]
+
+
+def test_archive_detail_no_raw_body_reparse(tmp_path: Path) -> None:
+    db_path = tmp_path / "archive-detail-canonical.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive_interpretation(
+            conn,
+            email_id=11,
+            ts_utc=now.timestamp(),
+            body_summary="RAW BODY GARBAGE SHOULD NOT APPEAR",
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/archive/11/detail",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    dumped = json.dumps(payload, ensure_ascii=False)
+    assert "RAW BODY GARBAGE" not in dumped
+
+
+def test_archive_sender_display_uses_issuer_identity_not_raw_email(tmp_path: Path) -> None:
+    db_path = tmp_path / "archive-sender-identity.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive_interpretation(
+            conn,
+            email_id=12,
+            ts_utc=now.timestamp(),
+            sender_email="raw-sender@example.com",
+            issuer_label="ООО Vendor",
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/archive",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["items"][0]["sender_display"] == "ООО Vendor"
+
+
+def test_archive_empty_filters_returns_all_items_paginated(tmp_path: Path) -> None:
+    db_path = tmp_path / "archive-empty-filters.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        for idx in range(3):
+            _insert_archive_interpretation(
+                conn,
+                email_id=idx + 1,
+                ts_utc=(now - timedelta(minutes=idx)).timestamp(),
+                issuer_label=f"Vendor {idx + 1}",
+            )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/archive",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["total"] == 3
+    assert len(payload["items"]) == 3
+
+
+def test_health_status_ok_when_recent_success(tmp_path: Path) -> None:
+    db_path = tmp_path / "health-status-ok.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=now.timestamp(),
+            payload={"subtype": "success", "detail": "ok"},
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    components = {row["name"]: row for row in resp.get_json()["components"]}
+    assert components["IMAP"]["status"] == "ok"
+    assert datetime.fromisoformat(str(components["IMAP"]["last_ok"]))
+
+
+def test_health_status_degraded_when_no_success_10_to_60_min(tmp_path: Path) -> None:
+    db_path = tmp_path / "health-status-degraded.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=(now - timedelta(minutes=20)).timestamp(),
+            payload={"subtype": "success", "detail": "stale"},
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    components = {row["name"]: row for row in resp.get_json()["components"]}
+    assert components["IMAP"]["status"] == "degraded"
+
+
+def test_health_status_down_when_no_success_over_60_min(tmp_path: Path) -> None:
+    db_path = tmp_path / "health-status-down.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=(now - timedelta(hours=2)).timestamp(),
+            payload={"subtype": "success", "detail": "old"},
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    components = {row["name"]: row for row in resp.get_json()["components"]}
+    assert components["IMAP"]["status"] == "down"
+
+
+def test_health_status_shows_human_readable_cause_not_traceback(tmp_path: Path) -> None:
+    db_path = tmp_path / "health-status-cause.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=(now - timedelta(minutes=20)).timestamp(),
+            payload={"subtype": "success", "detail": "stale"},
+        )
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=now.timestamp(),
+            payload={
+                "subtype": "processing_failure",
+                "detail": "Traceback: socket timeout during IMAP login",
+            },
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    components = {row["name"]: row for row in resp.get_json()["components"]}
+    assert "Traceback" not in (components["IMAP"]["detail"] or "")
+    assert "Ошибка" in (components["IMAP"]["detail"] or "")
+
+
+def test_health_cooldown_active_when_cooldown_event_present(tmp_path: Path) -> None:
+    db_path = tmp_path / "health-cooldown-active.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    resume_at = (now + timedelta(minutes=23)).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=now.timestamp(),
+            payload={
+                "subtype": "cooldown",
+                "detail": "cooldown active",
+                "cooldown_resume_at": resume_at,
+            },
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    payload = resp.get_json()
+    assert payload["cooldown_active"] is True
+    assert payload["cooldown_resume_at"] == resume_at
+
+
+def test_health_cooldown_resume_time_correct(tmp_path: Path) -> None:
+    db_path = tmp_path / "health-cooldown-resume.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    resume_at = (now + timedelta(minutes=23)).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=now.timestamp(),
+            payload={
+                "subtype": "cooldown",
+                "detail": "cooldown active",
+                "cooldown_resume_at": resume_at,
+            },
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    payload = resp.get_json()
+    assert payload["cooldown_resume_at"] == resume_at
+    assert payload["cooldown_resume_relative"]
+
+
+def test_health_all_configured_components_present(tmp_path: Path) -> None:
+    db_path = tmp_path / "health-components.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    names = {row["name"] for row in resp.get_json()["components"]}
+    assert names == {"IMAP", "Telegram", "DB", "LLM", "Scheduler / Digests"}
+
+
+def test_health_no_live_network_calls_on_load(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "health-no-network.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("network call attempted")
+
+    monkeypatch.setattr(socket, "create_connection", _fail)
+
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    assert resp.status_code == 200
+
+
+def test_health_traceback_hidden_by_default(tmp_path: Path) -> None:
+    db_path = tmp_path / "health-traceback-hidden.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=now.timestamp(),
+            payload={
+                "subtype": "processing_failure",
+                "detail": "Traceback: auth timeout",
+            },
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        page = client.get("/health?account_emails=primary@example.com")
+
+    body = page.get_data(as_text=True)
+    assert "Traceback: auth timeout" not in body
+    assert "data-testid=\"health-component-matrix\"" in body

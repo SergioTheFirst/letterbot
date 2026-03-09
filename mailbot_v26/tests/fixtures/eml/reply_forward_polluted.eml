@@ -1,0 +1,17 @@
+Subject: Re: Invoice POL-DRY-01 follow-up
+From: Follow-up <followup@generic-mail.test>
+To: receiver@example.com
+Date: Tue, 02 Jan 2024 10:00:00 +0000
+Message-ID: <reply_forward_polluted.eml@letterbot.test>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+MIME-Version: 1.0
+
+Invoice POL-DRY-01.
+Amount due 21750 USD.
+Payment due 2025-08-05.
+Please review the invoice details.
+
+Forwarded message
+From: payroll@example.com
+Расчетный листок: начислено 999999 RUB.

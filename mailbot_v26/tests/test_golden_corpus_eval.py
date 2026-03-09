@@ -101,7 +101,7 @@ def test_overall_pass_rate_not_below_baseline() -> None:
 
     summary = evaluate_golden_corpus(list(load_golden_corpus()))
 
-    assert summary.total_cases >= 120
+    assert summary.total_cases >= 138
     assert summary.failed_cases == 0
     assert summary.passed_cases == summary.total_cases
 
@@ -136,8 +136,9 @@ def test_eval_tool_reports_category_and_subset_summary_stably() -> None:
     summary = evaluate_golden_corpus(list(load_golden_corpus()))
     rendered = render_summary(summary)
 
-    assert summary.total_cases >= 120
+    assert summary.total_cases >= 138
     assert "Critical safety:" in rendered
+    assert "E2E dry-run:" in rendered
     assert "Categories:" in rendered
     assert "Subsets:" in rendered
     assert "- attachment_heavy:" in rendered
@@ -202,6 +203,7 @@ def test_report_output_contains_category_breakdown() -> None:
     rendered = render_report(summary, generated_at="2026-03-09T00:00:00+00:00")
 
     assert "CATEGORY BREAKDOWN:" in rendered
+    assert "E2E DRY-RUN CASES:" in rendered
     assert "PROMOTION SHADOW CASES:" in rendered
     assert "invoice" in rendered
 
@@ -232,3 +234,56 @@ def test_default_mode_unchanged_by_report_flag_addition(capsys) -> None:
 
     assert exit_code == 0
     assert captured.out.startswith("Golden corpus evaluator")
+
+
+def test_e2e_cases_all_pass() -> None:
+    load_golden_corpus.cache_clear()
+    e2e_cases = [case for case in load_golden_corpus() if case.dry_run_validated]
+
+    summary = evaluate_golden_corpus(e2e_cases)
+
+    assert summary.e2e_total >= 10
+    assert summary.e2e_failed == 0
+    assert summary.failed_cases == 0
+
+
+def test_e2e_render_mode_accuracy_100_percent() -> None:
+    load_golden_corpus.cache_clear()
+
+    summary = evaluate_golden_corpus(list(load_golden_corpus()))
+
+    assert summary.e2e_total >= 10
+    assert summary.e2e_render_mode_correct == summary.e2e_render_mode_total
+
+
+def test_e2e_no_dangerous_render_cross_class() -> None:
+    load_golden_corpus.cache_clear()
+    e2e_cases = [
+        case
+        for case in load_golden_corpus()
+        if case.dry_run_validated
+        and case.case_id
+        in {
+            "e2e-payroll-standard-01",
+            "e2e-reconciliation-01",
+            "e2e-generic-notification-01",
+            "e2e-sender-clear-content-weak-01",
+        }
+    ]
+
+    results = [evaluate_case(case) for case in e2e_cases]
+
+    assert e2e_cases
+    assert all(result.passed for result in results)
+    assert all(result.render_not_contains_ok for result in results)
+    assert all(result.actual_render_mode == "full" for result in results)
+
+
+def test_report_contains_e2e_section() -> None:
+    load_golden_corpus.cache_clear()
+    summary = evaluate_golden_corpus(list(load_golden_corpus()))
+
+    rendered = render_report(summary, generated_at="2026-03-09T00:00:00+00:00")
+
+    assert "E2E DRY-RUN CASES:" in rendered
+    assert "Dangerous render failures:" in rendered

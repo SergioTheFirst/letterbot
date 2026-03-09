@@ -101,6 +101,8 @@ LOG_PATH = CURRENT_DIR / "mailbot.log"
 _START_COMPAT_EXPORTS = (_extract_body, _extract_attachments, _extract_attachment_text)
 RUN_STARTED_AT_UTC = datetime.now(timezone.utc)
 REPO_ROOT = CURRENT_DIR.parent
+MAX_PIPELINE_STAGE_ATTEMPTS = 3
+MAX_TELEGRAM_STAGE_ATTEMPTS = 3
 
 
 def _configure_logging() -> None:
@@ -454,7 +456,7 @@ def _emit_contract_event(
     event_type: EventType,
     ts_utc: float,
     account_id: str,
-    email_id: int,
+    email_id: int | None,
     payload: dict[str, object],
     entity_id: str | None = None,
 ) -> None:
@@ -475,6 +477,37 @@ def _emit_contract_event(
             event_type=event_type.value,
             error=str(exc),
         )
+
+
+def _emit_imap_health_event(
+    *,
+    account_id: str,
+    subtype: str,
+    detail: str,
+    ts_utc: float | None = None,
+    email_id: int | None = None,
+    message_uid: int | None = None,
+    attempt_count: int | None = None,
+    extra_payload: dict[str, object] | None = None,
+) -> None:
+    payload: dict[str, object] = {
+        "subtype": str(subtype or "").strip() or "unknown",
+        "detail": str(detail or "").strip(),
+    }
+    if message_uid is not None:
+        payload["message_uid"] = int(message_uid)
+    if attempt_count is not None:
+        payload["attempt_count"] = int(attempt_count)
+    if extra_payload:
+        payload.update(extra_payload)
+    _emit_contract_event(
+        event_type=EventType.IMAP_HEALTH,
+        ts_utc=ts_utc or datetime.now(timezone.utc).timestamp(),
+        account_id=account_id,
+        email_id=email_id,
+        payload=payload,
+        entity_id=f"imap_health:{payload['subtype']}",
+    )
 
 
 def _persist_inbound_and_enqueue_parse(
@@ -552,7 +585,8 @@ def _process_queue(
     flags: FeatureFlags,
 ) -> None:
     _process_due_snoozes(storage=storage, config=config)
-    max_tg_attempts = 3
+    max_tg_attempts = MAX_TELEGRAM_STAGE_ATTEMPTS
+    max_pipeline_attempts = MAX_PIPELINE_STAGE_ATTEMPTS
     while True:
         item = storage.claim_next(["PARSE", "LLM", "TG"])
         if not item:
@@ -788,11 +822,49 @@ def _process_queue(
                         payload={"attempt": attempts, "backoff_seconds": backoff},
                     )
                 continue
+            account_id = ctx.account_email if ctx else ""
+            _emit_imap_health_event(
+                account_id=account_id or "unknown",
+                subtype="processing_failure",
+                detail=f"{stage} failed: {queue_exc}",
+                email_id=email_id,
+                message_uid=getattr(ctx, "uid", None),
+                attempt_count=attempts,
+                extra_payload={"stage": stage, "error": str(queue_exc)},
+            )
+            if attempts >= max_pipeline_attempts:
+                try:
+                    storage.set_email_error(email_id, str(queue_exc))
+                    storage.mark_done(queue_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to dead-letter queue_id %s for email %s",
+                        queue_id,
+                        email_id,
+                    )
+                _emit_imap_health_event(
+                    account_id=account_id or "unknown",
+                    subtype="dead_letter",
+                    detail=f"{stage} dead-lettered after {attempts} attempts",
+                    email_id=email_id,
+                    message_uid=getattr(ctx, "uid", None),
+                    attempt_count=attempts,
+                    extra_payload={"stage": stage, "error": str(queue_exc)},
+                )
+                _fail_open_process(config, processor, ctx)
+                _cleanup_pipeline_cache(email_id)
+                continue
             try:
                 storage.mark_error(queue_id, str(queue_exc), backoff)
             except Exception:
                 logger.exception("Failed to mark error for queue_id %s", queue_id)
-            _fail_open_process(config, processor, ctx)
+            logger.warning(
+                "pipeline_stage_retry_scheduled email_id=%s stage=%s attempts=%s backoff_seconds=%s",
+                email_id,
+                stage,
+                attempts,
+                backoff,
+            )
     _process_due_snoozes(storage=storage, config=config)
 
 
@@ -1114,6 +1186,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         print("[OK] Ready to work\n")
 
         bootstrap_notice_sent = False
+        imap_health_started_accounts: set[str] = set()
         cycle = 0
         try:
             while True:
@@ -1282,9 +1355,46 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 uidvalidity_changed=imap.last_uidvalidity_changed,
                                 resync_reason=imap.last_resync_reason,
                             )
+                            success_ts = datetime.now(timezone.utc)
                             runtime_health.on_success(
-                                account.account_id, datetime.now(timezone.utc)
+                                account.account_id, success_ts
                             )
+                            if state_snapshot.consecutive_failures > 0:
+                                _emit_imap_health_event(
+                                    account_id=login,
+                                    subtype="reconnect",
+                                    detail="IMAP polling recovered after backoff",
+                                    ts_utc=success_ts.timestamp(),
+                                    attempt_count=state_snapshot.consecutive_failures,
+                                )
+                                imap_health_started_accounts.add(account.account_id)
+                            elif account.account_id not in imap_health_started_accounts:
+                                _emit_imap_health_event(
+                                    account_id=login,
+                                    subtype="startup",
+                                    detail="Initial IMAP poll succeeded",
+                                    ts_utc=success_ts.timestamp(),
+                                )
+                                imap_health_started_accounts.add(account.account_id)
+                            _emit_imap_health_event(
+                                account_id=login,
+                                subtype="success",
+                                detail="IMAP poll succeeded",
+                                ts_utc=success_ts.timestamp(),
+                            )
+                            if imap.last_uidvalidity_changed:
+                                _emit_imap_health_event(
+                                    account_id=login,
+                                    subtype="uidvalidity_change",
+                                    detail="UIDVALIDITY changed; bounded resync applied",
+                                    ts_utc=success_ts.timestamp(),
+                                    extra_payload={
+                                        "resync_reason": imap.last_resync_reason,
+                                        "bootstrap_enabled": bool(
+                                            imap.last_bootstrap_active
+                                        ),
+                                    },
+                                )
                             digest_logger.info(
                                 "imap_account_success",
                                 account_id=account.account_id,

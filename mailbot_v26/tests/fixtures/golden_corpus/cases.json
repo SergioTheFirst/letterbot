@@ -2068,7 +2068,7 @@
     "category": "generic notification",
     "sender_email": "notify01@updates.vendor.test",
     "subject": "Service update NOTICE-01",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_01.txt",
@@ -2076,9 +2076,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2091,7 +2089,7 @@
     "category": "generic notification",
     "sender_email": "notify02@updates.vendor.test",
     "subject": "Service update NOTICE-02",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_02.txt",
@@ -2099,9 +2097,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2114,7 +2110,7 @@
     "category": "generic notification",
     "sender_email": "notify03@updates.vendor.test",
     "subject": "Service update NOTICE-03",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_03.txt",
@@ -2122,9 +2118,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2137,7 +2131,7 @@
     "category": "generic notification",
     "sender_email": "notify04@updates.vendor.test",
     "subject": "Service update NOTICE-04",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_04.txt",
@@ -2145,9 +2139,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2160,7 +2152,7 @@
     "category": "generic notification",
     "sender_email": "notify05@updates.vendor.test",
     "subject": "Service update NOTICE-05",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_05.txt",
@@ -2168,9 +2160,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2183,7 +2173,7 @@
     "category": "generic notification",
     "sender_email": "notify06@updates.vendor.test",
     "subject": "Service update NOTICE-06",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_06.txt",
@@ -2191,9 +2181,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2206,7 +2194,7 @@
     "category": "generic notification",
     "sender_email": "notify07@updates.vendor.test",
     "subject": "Service update NOTICE-07",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_07.txt",
@@ -2214,9 +2202,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2229,7 +2215,7 @@
     "category": "generic notification",
     "sender_email": "notify08@updates.vendor.test",
     "subject": "Service update NOTICE-08",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_08.txt",
@@ -2237,9 +2223,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2252,7 +2236,7 @@
     "category": "generic notification",
     "sender_email": "notify09@updates.vendor.test",
     "subject": "Service update NOTICE-09",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_09.txt",
@@ -2260,9 +2244,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2275,7 +2257,7 @@
     "category": "generic notification",
     "sender_email": "notify10@updates.vendor.test",
     "subject": "Service update NOTICE-10",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_10.txt",
@@ -2283,9 +2265,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2298,7 +2278,7 @@
     "category": "generic notification",
     "sender_email": "notify11@updates.vendor.test",
     "subject": "Service update NOTICE-11",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_11.txt",
@@ -2306,9 +2286,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -2321,7 +2299,7 @@
     "category": "generic notification",
     "sender_email": "notify12@updates.vendor.test",
     "subject": "Service update NOTICE-12",
-    "body_text": "Status update for the shared workspace. Meeting moved to next week. No invoice, contract, or payroll action is required.",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
     "attachments": [
       {
         "filename": "notice_12.txt",
@@ -2329,9 +2307,7 @@
       }
     ],
     "expected": {
-      "action": "Оплатить",
-      "doc_kind": "contract",
-      "template_id": "russian_invoice_common"
+      "action": "Проверить"
     },
     "critical": false,
     "mail_type": "",
@@ -3110,5 +3086,309 @@
       "weak_signal",
       "correction_sensitive"
     ]
+  },
+  {
+    "case_id": "e2e-invoice-simple-01",
+    "category": "invoice",
+    "sender_email": "billing@billing.vendor.test",
+    "subject": "Invoice INV-DRY-01 for support services",
+    "body_text": "Invoice INV-DRY-01.\nAmount due 12925 USD.\nTotal payable 12925 USD.\nPayment due 2025-06-06.\nPlease review the invoice details.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 12925
+    },
+    "critical": false,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "e2e_dry_run"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "invoice_simple.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "12925",
+      "billing",
+      "INV-DRY-01"
+    ],
+    "expected_render_not_contains": []
+  },
+  {
+    "case_id": "e2e-invoice-with-attachment-01",
+    "category": "invoice",
+    "sender_email": "ap@billing.vendor.test",
+    "subject": "Invoice packet INV-ATT-01",
+    "body_text": "Please review the attached invoice packet and payable total.",
+    "attachments": [
+      {
+        "filename": "invoice_table.csv",
+        "text": "Invoice INV-ATT-01\nItem,Qty,Price,Amount\nSupport plan,1,5000 USD,5000 USD\nIntegration work,1,1500 USD,1500 USD\nSubtotal,6500 USD\nTax,1300 USD\nTotal payable,7800 USD\nAmount due,7800 USD\nPayment due,2025-06-26\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 7800
+    },
+    "critical": false,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "e2e_dry_run",
+      "attachment_heavy"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "invoice_with_attachment.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "7800",
+      "invoice",
+      "INV-ATT-01"
+    ],
+    "expected_render_not_contains": []
+  },
+  {
+    "case_id": "e2e-payroll-standard-01",
+    "category": "payroll",
+    "sender_email": "hr@hr.vendor.test",
+    "subject": "Расчетный листок за май",
+    "body_text": "Во вложении расчетный листок за май. Пожалуйста, ознакомьтесь.",
+    "attachments": [
+      {
+        "filename": "payroll.txt",
+        "text": "Расчетный листок за май\nНачислено 93500 RUB\nУдержано 15500 RUB\nК выплате 78000 RUB\n"
+      }
+    ],
+    "expected": {
+      "action": "Ознакомиться",
+      "doc_kind": "payroll"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "e2e_dry_run",
+      "critical_safety"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "payroll_standard.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "Расчетный",
+      "май",
+      "HR"
+    ],
+    "expected_render_not_contains": [
+      "Оплатить"
+    ]
+  },
+  {
+    "case_id": "e2e-reconciliation-01",
+    "category": "reconciliation",
+    "sender_email": "rec@reconciliation.vendor.test",
+    "subject": "Акт сверки взаимных расчетов REC-DRY-01",
+    "body_text": "Во вложении акт сверки взаимных расчетов. Просьба проверить расхождения.",
+    "attachments": [
+      {
+        "filename": "reconciliation.txt",
+        "text": "Акт сверки взаимных расчетов REC-DRY-01\nНачальный остаток 0 RUB\nОбороты 19200 RUB\nКонечный остаток 0 RUB\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "reconciliation"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "e2e_dry_run",
+      "critical_safety"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "reconciliation.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "REC-DRY-01",
+      "сверки"
+    ],
+    "expected_render_not_contains": [
+      "Оплатить"
+    ]
+  },
+  {
+    "case_id": "e2e-contract-amendment-01",
+    "category": "contract/amendment",
+    "sender_email": "legal@legal.vendor.test",
+    "subject": "Допсоглашение к договору CTR-DRY-01",
+    "body_text": "Направляем договор и допсоглашение для проверки и согласования.",
+    "attachments": [
+      {
+        "filename": "contract_notes.txt",
+        "text": "Договор CTR-DRY-01\nСоглашение о продлении срока действия.\nПросим проверить правки и согласовать итоговую версию.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "e2e_dry_run"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "contract_amendment.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "договор",
+      "CTR-DRY-01"
+    ],
+    "expected_render_not_contains": []
+  },
+  {
+    "case_id": "e2e-generic-notification-01",
+    "category": "generic notification",
+    "sender_email": "notify@updates.vendor.test",
+    "subject": "Service update NOTICE-DRY-01",
+    "body_text": "Status update for the shared workspace.\nMeeting moved to next week.\nPlease note the new calendar details and updated meeting window.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "e2e_dry_run",
+      "critical_safety"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "generic_notification.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "NOTICE-DRY-01",
+      "workspace"
+    ],
+    "expected_render_not_contains": [
+      "Оплатить"
+    ]
+  },
+  {
+    "case_id": "e2e-reply-forward-polluted-01",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup@generic-mail.test",
+    "subject": "Re: Invoice POL-DRY-01 follow-up",
+    "body_text": "Invoice POL-DRY-01.\nAmount due 21750 USD.\nPayment due 2025-08-05.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\nРасчетный листок: начислено 999999 RUB.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 21750
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "e2e_dry_run",
+      "critical_safety",
+      "weak_signal"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "reply_forward_polluted.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "21750",
+      "POL-DRY-01"
+    ],
+    "expected_render_not_contains": [
+      "999999"
+    ]
+  },
+  {
+    "case_id": "e2e-sender-ambiguous-content-clear-01",
+    "category": "sender ambiguous but content clear",
+    "sender_email": "contact@generic-mail.test",
+    "subject": "Invoice GEN-DRY-01 for review",
+    "body_text": "Invoice GEN-DRY-01.\nAmount due 23500 USD.\nPayment due 2025-08-25.\nPlease review according to the payment terms.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 23500
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "e2e_dry_run",
+      "weak_signal"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "sender_ambiguous_content_clear.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "23500",
+      "GEN-DRY-01"
+    ],
+    "expected_render_not_contains": []
+  },
+  {
+    "case_id": "e2e-sender-clear-content-weak-01",
+    "category": "sender clear but content weak",
+    "sender_email": "weak@legal.vendor.test",
+    "subject": "Document packet WK-DRY-01",
+    "body_text": "Please review the packet when convenient. Reference materials only.",
+    "attachments": [
+      {
+        "filename": "packet_notes.txt",
+        "text": "Reference packet with meeting notes and generic background materials."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "e2e_dry_run",
+      "critical_safety",
+      "weak_signal"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "sender_clear_content_weak.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "WK-DRY-01",
+      "packet"
+    ],
+    "expected_render_not_contains": []
+  },
+  {
+    "case_id": "e2e-table-heavy-attachment-01",
+    "category": "table-heavy attachment",
+    "sender_email": "tables@billing.vendor.test",
+    "subject": "Invoice table INV-TBL-DRY-01",
+    "body_text": "See attached invoice table with payable total.",
+    "attachments": [
+      {
+        "filename": "invoice_table_heavy.csv",
+        "text": "Invoice INV-TBL-DRY-01\nItem | Qty | Price | Amount\nSupport plan | 1 | 5000 USD | 5000 USD\nIntegration work | 1 | 1500 USD | 1500 USD\nSubtotal 6500 USD\nTax 1300 USD\nTotal payable 7800 USD\nAmount due 7800 USD\nPayment due 2025-06-26\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 7800
+    },
+    "critical": false,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "e2e_dry_run",
+      "attachment_heavy"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "table_heavy_attachment.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "7800",
+      "INV-TBL-DRY-01"
+    ],
+    "expected_render_not_contains": []
   }
 ]

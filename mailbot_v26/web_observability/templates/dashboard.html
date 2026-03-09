@@ -25,6 +25,17 @@
       {% endif %}
     </section>
 
+    <section class="card live-card" id="card-ops-health">
+      <h2>System status</h2>
+      <div class="metric"><span>IMAP</span><strong id="health-imap-status">● down</strong></div>
+      <div class="hint" id="health-imap-meta">last success: --</div>
+      <div class="metric"><span>Pipeline</span><strong id="health-pipeline-status">● degraded</strong></div>
+      <div class="hint" id="health-pipeline-meta">last processed: --</div>
+      <div class="metric"><span>Dead letters</span><strong id="health-dead-letters">0</strong></div>
+      <div class="metric"><span>24h reconnects</span><strong id="health-reconnects">0</strong></div>
+      <div class="metric"><span>Pending actions</span><strong id="health-pending-actions">0</strong></div>
+    </section>
+
     <section class="card live-card" id="card-emails">
       <h2>Emails</h2>
       <div class="metric"><span>Today</span><strong id="emails-today">0</strong></div>
@@ -88,6 +99,21 @@
       const eventsList = document.getElementById('events-list');
       const topContactsList = document.getElementById('top-contacts-list');
       const topIssuersList = document.getElementById('top-issuers-list');
+      const statusLabel = (status) => {
+        if (status === 'ok') return '● running';
+        if (status === 'degraded') return '● degraded';
+        return '● down';
+      };
+      const minutesAgo = (ts) => {
+        if (!ts) return '--';
+        const parsed = new Date(ts);
+        if (Number.isNaN(parsed.getTime())) return '--';
+        const deltaMs = Math.max(Date.now() - parsed.getTime(), 0);
+        const minutes = Math.floor(deltaMs / 60000);
+        if (minutes <= 0) return '<1 min ago';
+        if (minutes === 1) return '1 min ago';
+        return `${minutes} min ago`;
+      };
       const setText = (id, value) => {
         const node = document.getElementById(id);
         if (node) node.textContent = String(value);
@@ -160,6 +186,29 @@
           .catch(() => {});
       };
 
+      const updateHealth = () => {
+        Promise.all([
+          fetch('/api/health/imap', { credentials: 'same-origin' }).then((resp) => {
+            if (!resp.ok) throw new Error('imap-health');
+            return resp.json();
+          }),
+          fetch('/api/health/pipeline', { credentials: 'same-origin' }).then((resp) => {
+            if (!resp.ok) throw new Error('pipeline-health');
+            return resp.json();
+          }),
+        ])
+          .then(([imap, pipeline]) => {
+            setText('health-imap-status', statusLabel(imap.status));
+            setText('health-imap-meta', `last success: ${minutesAgo(imap.last_success_ts)}`);
+            setText('health-pipeline-status', statusLabel(pipeline.status));
+            setText('health-pipeline-meta', `last processed: ${minutesAgo(pipeline.last_processed_ts)}`);
+            setText('health-dead-letters', imap.dead_letter_count ?? 0);
+            setText('health-reconnects', imap.reconnect_count_24h ?? 0);
+            setText('health-pending-actions', pipeline.pending_action_count ?? 0);
+          })
+          .catch(() => {});
+      };
+
       const refreshStatus = () => {
         fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' })
           .then((resp) => {
@@ -177,8 +226,10 @@
 
       refreshStatus();
       updateDashboard();
+      updateHealth();
       setInterval(refreshStatus, {{ status_refresh_ms }});
       setInterval(updateDashboard, 5000);
+      setInterval(updateHealth, 30000);
     })();
   </script>
 {% endblock %}

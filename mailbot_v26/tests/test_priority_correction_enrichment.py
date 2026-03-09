@@ -85,3 +85,11 @@ def test_priority_correction_event_enriched_without_pii(tmp_path: Path) -> None:
     assert payload["evidence"] == {"matched": 1, "total": 2}
     assert payload["signals_evaluated_count"] == 2
     assert payload["signals_fired_count"] == 1
+    assert payload["original_decision"] == ""
+    assert payload["corrected_decision"] == payload["new_priority"]
+    assert payload["confidence"] == 1.0
+    assert payload["issuer_fingerprint"].startswith("issuer:")
+    assert payload["issuer_identity_confidence"] == "medium"
+    timestamp_iso = payload["timestamp_iso"]
+    parsed_ts = datetime.fromisoformat(timestamp_iso)
+    assert parsed_ts.tzinfo is not None

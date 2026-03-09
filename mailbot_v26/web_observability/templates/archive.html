@@ -9,7 +9,7 @@
   <div class="card filters surface-panel archive-filters">
     <div class="section-title compact">
       <h2>Archive</h2>
-      <div class="hint">Review recent email outcomes with stable filters.</div>
+      <div class="hint">Find interpreted emails without reopening the original thread.</div>
     </div>
     <form method="get" action="{{ url_for('archive') }}" class="filters-form">
       <div class="filter-group">
@@ -23,82 +23,92 @@
         </select>
       </div>
       <div class="filter-group">
-        <label for="status">Status</label>
-        <select id="status" name="status">
-          {% for option in ['any', 'ok', 'warn', 'fail'] %}
-          <option value="{{ option }}" {% if option == status %}selected{% endif %}>{{ option }}</option>
-          {% endfor %}
+        <label for="sender">Sender / contact</label>
+        <input id="sender" name="sender" type="text" value="{{ sender_filter }}" placeholder="issuer or email">
+      </div>
+      <div class="filter-group">
+        <label for="priority">Priority</label>
+        <select id="priority" name="priority">
+          <option value="" {% if not priority_filter %}selected{% endif %}>all</option>
+          <option value="high" {% if priority_filter == 'high' %}selected{% endif %}>high</option>
+          <option value="medium" {% if priority_filter == 'medium' %}selected{% endif %}>medium</option>
+          <option value="low" {% if priority_filter == 'low' %}selected{% endif %}>low</option>
+          <option value="suppressed" {% if priority_filter == 'suppressed' %}selected{% endif %}>suppressed</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="doc_kind">Doc kind</label>
+        <select id="doc_kind" name="doc_kind">
+          <option value="" {% if not doc_kind_filter %}selected{% endif %}>all</option>
+          <option value="invoice" {% if doc_kind_filter == 'invoice' %}selected{% endif %}>invoice</option>
+          <option value="payroll" {% if doc_kind_filter == 'payroll' %}selected{% endif %}>payroll</option>
+          <option value="reconciliation" {% if doc_kind_filter == 'reconciliation' %}selected{% endif %}>reconciliation</option>
+          <option value="contract" {% if doc_kind_filter == 'contract' %}selected{% endif %}>contract</option>
+          <option value="generic" {% if doc_kind_filter == 'generic' %}selected{% endif %}>generic</option>
+          <option value="other" {% if doc_kind_filter == 'other' %}selected{% endif %}>other</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="confidence_band">Confidence</label>
+        <select id="confidence_band" name="confidence_band">
+          <option value="" {% if not confidence_band %}selected{% endif %}>all</option>
+          <option value="high" {% if confidence_band == 'high' %}selected{% endif %}>high (≥0.8)</option>
+          <option value="medium" {% if confidence_band == 'medium' %}selected{% endif %}>medium (0.5–0.8)</option>
+          <option value="low" {% if confidence_band == 'low' %}selected{% endif %}>low (&lt;0.5)</option>
         </select>
       </div>
       {% if pii_enabled %}
       <input type="hidden" name="pii" value="1">
       {% endif %}
-      {% if lane is defined %}
-      <input type="hidden" name="lane" value="{{ lane }}">
-      {% endif %}
       {% if cockpit_mode %}<input type="hidden" name="mode" value="{{ cockpit_mode }}">{% endif %}
       <div class="filter-actions">
         <button type="submit">Apply</button>
+        <a class="btn ghost" href="{{ url_for('archive', account_emails=account_emails|join(','), window_days=window_days, mode=cockpit_mode, pii='1' if pii_enabled else None) }}">Reset</a>
       </div>
     </form>
     <div class="filter-meta">
       <span class="badge">{{ total_count }} emails</span>
       <span class="muted">Page {{ page }} of {{ total_pages }}</span>
     </div>
+    {% if active_filters %}
+    <div class="filter-meta">
+      {% for label in active_filters %}
+      <span class="badge muted">{{ label }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
-
-  {% if lane_pills %}
-  <div class="lane-pills" aria-label="Lane filters">
-    {% for lane in lane_pills %}
-    <a class="lane-pill {% if lane.active %}active{% endif %}" href="{{ lane.url }}">
-      <span class="lane-label">{{ lane.label }}</span>
-      <span class="lane-count">{{ lane.count }}</span>
-    </a>
-    {% endfor %}
-  </div>
-  {% endif %}
 
   {% if archive_rows %}
   <div class="table-scroll archive-table">
     <table class="table compact fixed">
       <thead>
         <tr>
-          <th class="col-time">Time (UTC)</th>
-          <th class="col-from">From</th>
-          <th class="col-account">Account</th>
-          <th class="col-preview">Preview</th>
-          <th class="col-status">TG status</th>
-          <th class="col-latency">E2E latency</th>
-          {% if engineer_mode %}
-          <th class="col-mode">Delivery mode</th>
-          <th class="col-failure">Failure reason</th>
-          <th class="col-stage">Pipeline stages</th>
-          {% endif %}
+          <th>Priority</th>
+          <th>Sender</th>
+          <th>Subject</th>
+          <th>Doc kind</th>
+          <th>Amount</th>
+          <th>Due date</th>
+          <th>Action</th>
+          <th>Confidence</th>
+          <th>Received</th>
         </tr>
       </thead>
       <tbody>
         {% for row in archive_rows %}
-        {% set status_label = row.status|lower %}
-        {% set status_class = 'muted' %}
-        {% if status_label == 'delivered' %}
-          {% set status_class = 'success' %}
-        {% elif status_label == 'failed' %}
-          {% set status_class = 'danger' %}
-        {% elif status_label == 'in-flight' %}
-          {% set status_class = 'warn' %}
-        {% endif %}
-        <tr class="clickable-row" data-row-link="{{ url_for('email_details', email_id=row.email_id, **detail_params) }}" data-email-id="{{ row.email_id }}">
-          <td class="col-time">{{ row.received }}</td>
-          <td class="col-from"><span class="truncate">{{ row.from_label }}</span></td>
-          <td class="col-account"><span class="truncate">{{ row.account_label }}</span></td>
-          <td class="col-preview"><span class="truncate">{{ row.preview }}</span></td>
-          <td class="col-status"><span class="badge {{ status_class }}">{{ row.status }}</span></td>
-          <td class="col-latency">{{ row.e2e_ms }}</td>
-          {% if engineer_mode %}
-          <td class="col-mode"><span class="badge muted">{{ row.delivery_mode }}</span></td>
-          <td class="col-failure"><span class="truncate">{{ row.failure_reason }}</span></td>
-          <td class="col-stage"><span class="truncate">{{ row.stage_hint }}</span></td>
-          {% endif %}
+        <tr class="clickable-row" data-row-link="{{ row.detail_url }}" data-email-id="{{ row.message_id }}">
+          <td>
+            <span class="badge {{ row.priority_class }}" aria-label="{{ row.priority_label }}">●</span>
+          </td>
+          <td><span class="truncate">{{ row.sender_display }}</span></td>
+          <td><span class="truncate" title="{{ row.subject_full }}">{{ row.subject }}</span></td>
+          <td><span class="badge muted">{{ row.doc_kind_label }}</span></td>
+          <td>{{ row.amount_display }}</td>
+          <td>{{ row.due_date }}</td>
+          <td>{{ row.action_label }}</td>
+          <td>{{ row.confidence_text }}</td>
+          <td title="{{ row.received_at }}">{{ row.received_relative }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -107,7 +117,32 @@
   {% else %}
   <div class="empty-state card">
     <strong>No archive entries found.</strong>
-    <div class="hint">Try a wider window or remove account/status filters.</div>
+    <div class="hint">Try a wider window or clear one of the archive filters.</div>
+  </div>
+  {% endif %}
+
+  {% if selected_detail %}
+  <div class="card surface-panel" data-testid="archive-detail">
+    <div class="section-title compact">
+      <h2>Interpretation detail</h2>
+      <div class="hint">{{ selected_detail.issuer_display }}</div>
+    </div>
+    <div class="stack">
+      <div><strong>Summary:</strong> {{ selected_detail.interpretation_summary }}</div>
+      <div><strong>Why classified:</strong> {{ selected_detail.why_classified }}</div>
+      <div><strong>Key facts:</strong>
+        {% set facts = [] %}
+        {% if selected_detail.key_facts.amount %}{% set _ = facts.append('amount ' ~ selected_detail.key_facts.amount) %}{% endif %}
+        {% if selected_detail.key_facts.due_date %}{% set _ = facts.append('due ' ~ selected_detail.key_facts.due_date) %}{% endif %}
+        {% if selected_detail.key_facts.counterparty %}{% set _ = facts.append('counterparty ' ~ selected_detail.key_facts.counterparty) %}{% endif %}
+        {% if selected_detail.key_facts.reference %}{% set _ = facts.append('reference ' ~ selected_detail.key_facts.reference) %}{% endif %}
+        {{ facts|join(', ') if facts else '—' }}
+      </div>
+      <div><strong>Confidence:</strong> {{ '%.2f'|format(selected_detail.confidence) }}</div>
+      {% if selected_detail.low_confidence_warning %}
+      <div class="hint">Low confidence: review the classification before acting.</div>
+      {% endif %}
+    </div>
   </div>
   {% endif %}
 

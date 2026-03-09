@@ -1,0 +1,13 @@
+Subject: Invoice GEN-DRY-01 for review
+From: Contact <contact@generic-mail.test>
+To: receiver@example.com
+Date: Tue, 02 Jan 2024 10:00:00 +0000
+Message-ID: <sender_ambiguous_content_clear.eml@letterbot.test>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Invoice GEN-DRY-01.
+Amount due 23500 USD.
+Payment due 2025-08-25.
+Please review according to the payment terms.

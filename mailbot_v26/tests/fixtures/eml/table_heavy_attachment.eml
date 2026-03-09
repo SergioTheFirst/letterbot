@@ -1,0 +1,27 @@
+Subject: Invoice table INV-TBL-DRY-01
+From: Billing Attachments <tables@billing.vendor.test>
+To: receiver@example.com
+Date: Tue, 02 Jan 2024 10:00:00 +0000
+Message-ID: <table_heavy_attachment.eml@letterbot.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============2385974896979797971=="
+
+--===============2385974896979797971==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+See attached invoice table with payable total.
+
+--===============2385974896979797971==
+Content-Type: text/csv
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="invoice_table_heavy.csv"
+MIME-Version: 1.0
+
+SW52b2ljZSBJTlYtVEJMLURSWS0wMQpJdGVtIHwgUXR5IHwgUHJpY2UgfCBBbW91bnQKU3VwcG9y
+dCBwbGFuIHwgMSB8IDUwMDAgVVNEIHwgNTAwMCBVU0QKSW50ZWdyYXRpb24gd29yayB8IDEgfCAx
+NTAwIFVTRCB8IDE1MDAgVVNEClN1YnRvdGFsIDY1MDAgVVNEClRheCAxMzAwIFVTRApUb3RhbCBw
+YXlhYmxlIDc4MDAgVVNECkFtb3VudCBkdWUgNzgwMCBVU0QKUGF5bWVudCBkdWUgMjAyNS0wNi0y
+Ngo=
+
+--===============2385974896979797971==--

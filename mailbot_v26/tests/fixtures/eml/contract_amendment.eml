@@ -1,0 +1,29 @@
+Subject: =?utf-8?b?0JTQvtC/0YHQvtCz0LvQsNGI0LXQvdC40LUg0Log0LTQvtCz0L7QstC+?=
+ =?utf-8?q?=D1=80=D1=83?= CTR-DRY-01
+From: Legal Ops <legal@legal.vendor.test>
+To: receiver@example.com
+Date: Tue, 02 Jan 2024 10:00:00 +0000
+Message-ID: <contract_amendment.eml@letterbot.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============0238097292182081590=="
+
+--===============0238097292182081590==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+0J3QsNC/0YDQsNCy0LvRj9C10Lwg0LTQvtCz0L7QstC+0YAg0Lgg0LTQvtC/0YHQvtCz0LvQsNGI
+0LXQvdC40LUg0LTQu9GPINC/0YDQvtCy0LXRgNC60Lgg0Lgg0YHQvtCz0LvQsNGB0L7QstCw0L3Q
+uNGPLgo=
+
+--===============0238097292182081590==
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="contract_notes.txt"
+MIME-Version: 1.0
+
+0JTQvtCz0L7QstC+0YAgQ1RSLURSWS0wMQrQodC+0LPQu9Cw0YjQtdC90LjQtSDQviDQv9GA0L7Q
+tNC70LXQvdC40Lgg0YHRgNC+0LrQsCDQtNC10LnRgdGC0LLQuNGPLgrQn9GA0L7RgdC40Lwg0L/R
+gNC+0LLQtdGA0LjRgtGMINC/0YDQsNCy0LrQuCDQuCDRgdC+0LPQu9Cw0YHQvtCy0LDRgtGMINC4
+0YLQvtCz0L7QstGD0Y4g0LLQtdGA0YHQuNGOLgo=
+
+--===============0238097292182081590==--

@@ -37,6 +37,54 @@ def _insert_email(
         )
 
 
+def _insert_archive_interpretation(
+    db_path: Path,
+    *,
+    email_id: int,
+    account_email: str,
+    from_email: str,
+    subject: str,
+    received_at: datetime,
+    issuer_label: str | None = None,
+    doc_kind: str = "invoice",
+    amount: int | None = 12500,
+    due_date: str | None = "2026-04-15",
+    action: str = "Проверить",
+    priority: str = "yellow",
+    confidence: float = 0.86,
+    document_id: str = "INV-001",
+) -> None:
+    _insert_event(
+        db_path,
+        event_type=EventType.EMAIL_RECEIVED,
+        ts_utc=received_at.timestamp(),
+        account_id=account_email,
+        email_id=email_id,
+        payload={"from_email": from_email, "subject": subject},
+    )
+    _insert_event(
+        db_path,
+        event_type=EventType.MESSAGE_INTERPRETATION,
+        ts_utc=received_at.timestamp(),
+        account_id=account_email,
+        email_id=email_id,
+        payload={
+            "sender_email": from_email,
+            "doc_kind": doc_kind,
+            "amount": amount,
+            "due_date": due_date,
+            "priority": priority,
+            "action": action,
+            "confidence": confidence,
+            "context": "NEW_MESSAGE",
+            "document_id": document_id,
+            "issuer_label": issuer_label or "Vendor Ops",
+            "issuer_key": "domain:example.com",
+            "issuer_domain": "example.com",
+        },
+    )
+
+
 def _insert_event(
     db_path: Path,
     *,
@@ -133,6 +181,15 @@ def test_archive_auth_required_and_headers(tmp_path: Path) -> None:
         action_line="Follow up",
         body_summary="Check status",
     )
+    _insert_archive_interpretation(
+        db_path,
+        email_id=1,
+        account_email="acct@example.com",
+        from_email="sender@example.com",
+        subject="Invoice 1",
+        received_at=now,
+        issuer_label="Vendor Ops",
+    )
 
     with app.test_client() as client:
         response = client.get("/archive")
@@ -143,9 +200,9 @@ def test_archive_auth_required_and_headers(tmp_path: Path) -> None:
         page = client.get("/archive")
         body = page.get_data(as_text=True)
         assert page.status_code == 200
-        assert "Time (UTC)" in body
-        assert "TG status" in body
-        assert "E2E latency" in body
+        assert "Priority" in body
+        assert "Doc kind" in body
+        assert "Confidence" in body
 
 
 def test_archive_pagination_order_deterministic(tmp_path: Path) -> None:
@@ -159,14 +216,16 @@ def test_archive_pagination_order_deterministic(tmp_path: Path) -> None:
             from_email=f"sender{email_id}@example.com",
             received_at=now,
         )
-    _insert_event(
-        db_path,
-        event_type=EventType.TELEGRAM_DELIVERED,
-        ts_utc=now.timestamp(),
-        account_id="acct@example.com",
-        email_id=3,
-        payload={"occurred_at_utc": now.timestamp()},
-    )
+        _insert_archive_interpretation(
+            db_path,
+            email_id=email_id,
+            account_email="acct@example.com",
+            from_email=f"sender{email_id}@example.com",
+            subject=f"Invoice {email_id}",
+            received_at=now.replace(microsecond=email_id),
+            issuer_label=f"Vendor {email_id}",
+            document_id=f"INV-{email_id}",
+        )
 
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
@@ -294,6 +353,15 @@ def test_archive_page_shows_rows_for_existing_db_emails(tmp_path: Path) -> None:
         action_line="Проверить",
         body_summary="Короткий текст",
     )
+    _insert_archive_interpretation(
+        db_path,
+        email_id=11,
+        account_email="acct@example.com",
+        from_email="sender@example.com",
+        subject="Invoice 11",
+        received_at=now,
+        issuer_label="Vendor Ops",
+    )
 
     with app.test_client() as client:
         login_with_csrf(client, "pw")
@@ -316,4 +384,4 @@ def test_archive_empty_state_human_readable(tmp_path: Path) -> None:
         body = page.get_data(as_text=True)
         assert page.status_code == 200
         assert "No archive entries found." in body
-        assert "Try a wider window or remove account/status filters." in body
+        assert "Try a wider window or clear one of the archive filters." in body

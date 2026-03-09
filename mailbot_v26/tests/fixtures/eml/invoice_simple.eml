@@ -1,0 +1,14 @@
+Subject: Invoice INV-DRY-01 for support services
+From: Billing Team <billing@billing.vendor.test>
+To: receiver@example.com
+Date: Tue, 02 Jan 2024 10:00:00 +0000
+Message-ID: <invoice_simple.eml@letterbot.test>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Invoice INV-DRY-01.
+Amount due 12925 USD.
+Total payable 12925 USD.
+Payment due 2025-06-06.
+Please review the invoice details.

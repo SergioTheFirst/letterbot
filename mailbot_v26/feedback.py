@@ -3,6 +3,10 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
+from mailbot_v26.domain.issuer_identity import (
+    build_issuer_fingerprint,
+    normalize_sender_identity,
+)
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
@@ -13,6 +17,17 @@ from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.system_health import OperationalMode
 
 logger = get_logger("mailbot")
+
+
+def _priority_correction_identity_payload(sender_email: str | None) -> dict[str, object]:
+    normalized_sender = str(sender_email or "").strip().lower()
+    if not normalized_sender:
+        return {}
+    identity = normalize_sender_identity(normalized_sender)
+    return {
+        "issuer_fingerprint": build_issuer_fingerprint(identity),
+        "issuer_identity_confidence": str(identity.get("confidence") or "weak"),
+    }
 
 
 def _priority_feedback_anchor_ts(
@@ -158,9 +173,16 @@ def record_priority_correction(
                 payload={
                     "old_priority": old_priority or "",
                     "new_priority": correction,
+                    "original_decision": old_priority or "",
+                    "corrected_decision": correction,
                     "engine": engine or "unknown",
                     "source": source or "unknown",
                     "system_mode": system_mode.value,
+                    "confidence": 1.0,
+                    "timestamp_iso": datetime.fromtimestamp(
+                        event_ts, tz=timezone.utc
+                    ).isoformat(),
+                    **_priority_correction_identity_payload(sender_email),
                     **trace_payload,
                 },
             )
