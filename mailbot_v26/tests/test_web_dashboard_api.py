@@ -159,7 +159,18 @@ def test_api_dashboard_survives_empty_db(tmp_path: Path) -> None:
         "surprise_rate": 0.0,
         "recent_events": [],
         "top_contacts": [],
+        "top_issuers": [],
         "interpretation": {"invoice_count": 0, "contract_count": 0, "invoice_total": 0},
+        "business": {
+            "payable_amount_total": 0,
+            "payable_invoice_count": 0,
+            "documents_waiting_attention_count": 0,
+            "contract_review_count": 0,
+            "reconciliation_attention_count": 0,
+            "silence_risk_count": 0,
+            "overdue_due_count": 0,
+            "due_soon_count": 0,
+        },
     }
 
 
@@ -175,6 +186,8 @@ def test_dashboard_template_renders_events_block(tmp_path: Path) -> None:
     assert 'data-testid="live-dashboard"' in body
     assert ">Recent events<" in body
     assert 'id="events-list"' in body
+    assert 'id="business-payable"' in body
+    assert 'id="top-issuers-list"' in body
 
 
 def test_api_dashboard_limits_recent_events_to_20(tmp_path: Path) -> None:
@@ -298,3 +311,63 @@ def test_dashboard_uses_interpretation_events(tmp_path: Path) -> None:
     assert data["interpretation"]["invoice_count"] == 1
     assert data["interpretation"]["contract_count"] == 1
     assert data["interpretation"]["invoice_total"] == 87500
+
+
+def test_api_dashboard_returns_business_metrics_from_interpretation_events(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "dashboard-business.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="message_interpretation",
+            ts_utc=now.timestamp(),
+            payload={
+                "doc_kind": "invoice",
+                "amount": 87500,
+                "sender_email": "billing@vendor.example",
+                "issuer_key": "domain:vendor.example",
+                "issuer_label": "vendor.example",
+                "issuer_domain": "vendor.example",
+                "due_date": (now + timedelta(days=3)).strftime("%d.%m.%Y"),
+                "confidence": 0.91,
+                "action": "Проверить",
+                "priority": "🟡",
+            },
+        )
+        _insert_event(
+            conn,
+            event_type="message_interpretation",
+            ts_utc=(now + timedelta(seconds=1)).timestamp(),
+            payload={
+                "doc_kind": "contract",
+                "amount": None,
+                "sender_email": "legal@vendor.example",
+                "issuer_key": "domain:vendor.example",
+                "issuer_label": "vendor.example",
+                "issuer_domain": "vendor.example",
+                "due_date": None,
+                "confidence": 0.88,
+                "action": "Проверить договор",
+                "priority": "🟡",
+            },
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/dashboard")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["business"]["payable_amount_total"] == 87500
+    assert data["business"]["payable_invoice_count"] == 1
+    assert data["business"]["documents_waiting_attention_count"] == 2
+    assert data["business"]["contract_review_count"] == 1
+    assert data["business"]["due_soon_count"] == 1
+    assert data["business"]["overdue_due_count"] == 0
+    assert data["top_issuers"][0]["issuer_key"] == "domain:vendor.example"
+    assert data["top_issuers"][0]["total_documents"] == 2
