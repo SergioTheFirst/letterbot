@@ -1,0 +1,28 @@
+Subject: =?utf-8?b?0JDQutGCINGB0LLQtdGA0LrQuCDQstC30LDQuNC80L3Ri9GFINGA0LA=?=
+ =?utf-8?b?0YHRh9C10YLQvtCy?= REC-DRY-01
+From: Reconciliation Desk <rec@reconciliation.vendor.test>
+To: receiver@example.com
+Date: Tue, 02 Jan 2024 10:00:00 +0000
+Message-ID: <reconciliation.eml@letterbot.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============6318232147923172864=="
+
+--===============6318232147923172864==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+0JLQviDQstC70L7QttC10L3QuNC4INCw0LrRgiDRgdCy0LXRgNC60Lgg0LLQt9Cw0LjQvNC90YvR
+hSDRgNCw0YHRh9C10YLQvtCyLiDQn9GA0L7RgdGM0LHQsCDQv9GA0L7QstC10YDQuNGC0Ywg0YDQ
+sNGB0YXQvtC20LTQtdC90LjRjy4K
+
+--===============6318232147923172864==
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="reconciliation.txt"
+MIME-Version: 1.0
+
+0JDQutGCINGB0LLQtdGA0LrQuCDQstC30LDQuNC80L3Ri9GFINGA0LDRgdGH0LXRgtC+0LIgUkVD
+LURSWS0wMQrQndCw0YfQsNC70YzQvdGL0Lkg0L7RgdGC0LDRgtC+0LogMCBSVUIK0J7QsdC+0YDQ
+vtGC0YsgMTkyMDAgUlVCCtCa0L7QvdC10YfQvdGL0Lkg0L7RgdGC0LDRgtC+0LogMCBSVUIK
+
+--===============6318232147923172864==--

@@ -1,0 +1,28 @@
+Subject: =?utf-8?b?0KDQsNGB0YfQtdGC0L3Ri9C5INC70LjRgdGC0L7QuiDQt9CwINC80LA=?=
+ =?utf-8?q?=D0=B9?=
+From: HR Robot <hr@hr.vendor.test>
+To: receiver@example.com
+Date: Tue, 02 Jan 2024 10:00:00 +0000
+Message-ID: <payroll_standard.eml@letterbot.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============0067083787572937514=="
+
+--===============0067083787572937514==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+0JLQviDQstC70L7QttC10L3QuNC4INGA0LDRgdGH0LXRgtC90YvQuSDQu9C40YHRgtC+0Log0LfQ
+sCDQvNCw0LkuINCf0L7QttCw0LvRg9C50YHRgtCwLCDQvtC30L3QsNC60L7QvNGM0YLQtdGB0Ywu
+Cg==
+
+--===============0067083787572937514==
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="payroll.txt"
+MIME-Version: 1.0
+
+0KDQsNGB0YfQtdGC0L3Ri9C5INC70LjRgdGC0L7QuiDQt9CwINC80LDQuQrQndCw0YfQuNGB0LvQ
+tdC90L4gOTM1MDAgUlVCCtCj0LTQtdGA0LbQsNC90L4gMTU1MDAgUlVCCtCaINCy0YvQv9C70LDR
+gtC1IDc4MDAwIFJVQgo=
+
+--===============0067083787572937514==--

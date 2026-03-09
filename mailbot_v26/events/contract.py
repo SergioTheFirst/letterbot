@@ -12,6 +12,7 @@ class EventType(str, Enum):
     ATTACHMENT_EXTRACTED = "attachment_extracted"
     TELEGRAM_DELIVERED = "telegram_delivered"
     TELEGRAM_FAILED = "telegram_failed"
+    IMAP_HEALTH = "imap_health_v1"
     PRIORITY_CORRECTION_RECORDED = "priority_correction_recorded"
     PRIORITY_DECISION_RECORDED = "priority_decision_recorded"
     # Payload (v1):

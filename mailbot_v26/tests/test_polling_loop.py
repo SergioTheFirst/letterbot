@@ -56,6 +56,9 @@ class DummyStorage:
     def claim_next(self, stages):
         return None
 
+    def list_due_snoozes(self, now_iso, limit):
+        return []
+
     def mark_done(self, queue_id):
         return None
 
@@ -366,5 +369,9 @@ def test_first_run_notice_sent_once(monkeypatch, tmp_path):
 
     start_module.main(max_cycles=2)
 
-    assert len(sent_payloads) == 1
-    assert "First run: showing messages from last" in sent_payloads[0].html_text
+    bootstrap_notices = [
+        payload
+        for payload in sent_payloads
+        if "First run: showing messages from last" in payload.html_text
+    ]
+    assert len(bootstrap_notices) == 1

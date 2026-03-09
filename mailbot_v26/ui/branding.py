@@ -6,6 +6,8 @@ PRODUCT_LABEL = "Letterbot Premium"
 WATERMARK_LINE = "🔹 Powered by LetterBot.ru"
 WATERMARK_HTML_LINE = "<i>🔹 Powered by LetterBot.ru</i>"
 _LEGACY_WATERMARK_LINE = "🔹 Powered by Letterbot Premium"
+_PLAIN_WATERMARK_LINE = "Powered by LetterBot.ru"
+_PLAIN_WATERMARK_HTML_LINE = "<i>Powered by LetterBot.ru</i>"
 
 
 @lru_cache(maxsize=1)
@@ -25,6 +27,8 @@ def append_watermark(text: str, *, html: bool = False) -> str:
         WATERMARK_LINE in text
         or WATERMARK_HTML_LINE in text
         or _LEGACY_WATERMARK_LINE in text
+        or _PLAIN_WATERMARK_LINE in text
+        or _PLAIN_WATERMARK_HTML_LINE in text
     ):
         return text
     if not text:

@@ -1,0 +1,12 @@
+Subject: Service update NOTICE-DRY-01
+From: Workspace Updates <notify@updates.vendor.test>
+To: receiver@example.com
+Date: Tue, 02 Jan 2024 10:00:00 +0000
+Message-ID: <generic_notification.eml@letterbot.test>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Status update for the shared workspace.
+Meeting moved to next week.
+Please note the new calendar details and updated meeting window.

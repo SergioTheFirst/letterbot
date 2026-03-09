@@ -20,7 +20,7 @@ import sys
 import time
 from collections import Counter, deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
@@ -74,6 +74,7 @@ from mailbot_v26.observability.decision_trace_v1 import (
     get_default_decision_trace_emitter,
 )
 from mailbot_v26.observability.decision_trace_view import summaries_as_payload
+from mailbot_v26.events.contract import EventType
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.version import get_version
 from mailbot_v26.web_observability.doctor_export import build_diagnostics_zip
@@ -83,9 +84,19 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_WINDOWS = {7, 30, 90}
 ALLOWED_ARCHIVE_WINDOWS = {1, 7, 30, 90}
-ARCHIVE_PAGE_SIZE = 50
+ARCHIVE_PAGE_SIZE = 25
 COMMITMENTS_PAGE_SIZE = 50
 ARCHIVE_STATUSES = {"any", "ok", "warn", "fail"}
+ARCHIVE_PRIORITY_FILTERS = {"", "high", "medium", "low", "suppressed"}
+ARCHIVE_CONFIDENCE_FILTERS = {"", "high", "medium", "low"}
+ARCHIVE_DOC_KINDS = (
+    "invoice",
+    "payroll",
+    "reconciliation",
+    "contract",
+    "generic",
+    "other",
+)
 COMMITMENT_STATUSES = {"open", "closed", "all"}
 EVENTS_GROUP_PAGE_SIZE = 20
 EVENT_FILTERS = {"all", "processing", "delivery", "health", "learning"}
@@ -447,6 +458,24 @@ def _render_stub_html(
             context.get("component_matrix") if isinstance(context, Mapping) else []
         )
         incidents = context.get("incidents") if isinstance(context, Mapping) else []
+        cooldown_active = (
+            bool(context.get("cooldown_active")) if isinstance(context, Mapping) else False
+        )
+        cooldown_resume_at = (
+            str(context.get("cooldown_resume_at") or "")
+            if isinstance(context, Mapping)
+            else ""
+        )
+        cooldown_resume_relative = (
+            str(context.get("cooldown_resume_relative") or "")
+            if isinstance(context, Mapping)
+            else ""
+        )
+        cooldown_reason = (
+            str(context.get("cooldown_reason") or "")
+            if isinstance(context, Mapping)
+            else ""
+        )
         engineer_mode = (
             bool(context.get("engineer_mode"))
             if isinstance(context, Mapping)
@@ -461,10 +490,12 @@ def _render_stub_html(
               <td>{component}</td><td>{status}</td><td>{last_check}</td><td>{last_issue}</td>
             </tr>
             """.format(
-                component=html.escape(str(row.get("component") or "")),
+                component=html.escape(str(row.get("name") or row.get("component") or "")),
                 status=html.escape(str(row.get("status") or "")),
-                last_check=html.escape(str(row.get("last_check") or "")),
-                last_issue=html.escape(str(row.get("last_issue") or "")),
+                last_check=html.escape(
+                    str(row.get("last_ok_relative") or row.get("last_check") or "")
+                ),
+                last_issue=html.escape(str(row.get("detail") or row.get("last_issue") or "")),
             )
             for row in (component_matrix or [])
         )
@@ -499,8 +530,15 @@ def _render_stub_html(
         engineer_block = (
             '<div data-testid="health-engineer-block"></div>' if engineer_mode else ""
         )
+        cooldown_block = ""
+        if cooldown_active:
+            cooldown_block = (
+                '<div data-testid="health-cooldown-block">'
+                f"{html.escape(cooldown_reason)} {html.escape(cooldown_resume_at)} {html.escape(cooldown_resume_relative)}"
+                "</div>"
+            )
         html_body = (
-            f'{header}<div data-testid="health-component-matrix">Component matrix</div>'
+            f'{header}{cooldown_block}<div data-testid="health-component-matrix">Component matrix</div>'
             f"<table>{component_rows}</table><table>{incident_rows}</table>"
             f"<table>{trend_rows}</table>{engineer_block}"
         )
@@ -512,42 +550,43 @@ def _render_stub_html(
         archive_rows = (
             context.get("archive_rows") if isinstance(context, Mapping) else []
         )
-        engineer_mode = (
-            bool(context.get("engineer_mode"))
-            if isinstance(context, Mapping)
-            else False
+        selected_detail = (
+            context.get("selected_detail") if isinstance(context, Mapping) else None
         )
         rows = []
         for row in archive_rows or []:
-            extra_cols = ""
-            if engineer_mode:
-                extra_cols = (
-                    f"<td>{html.escape(str(row.get('delivery_mode') or ''))}</td>"
-                    f"<td>{html.escape(str(row.get('failure_reason') or ''))}</td>"
-                    f"<td>{html.escape(str(row.get('stage_hint') or ''))}</td>"
-                )
             rows.append(
                 """
                 <tr data-email-id="{email_id}">
-                  <td>{received}</td><td>{from_label}</td><td>{account_label}</td>
-                  <td>{preview}</td><td>{status}</td><td>{latency}</td>{extra_cols}
+                  <td>{priority}</td><td>{sender}</td><td>{subject}</td><td>{doc_kind}</td>
+                  <td>{amount}</td><td>{due_date}</td><td>{action}</td><td>{confidence}</td><td>{received}</td>
                 </tr>
                 """.format(
-                    email_id=html.escape(str(row.get("email_id") or "")),
-                    received=html.escape(str(row.get("received") or "")),
-                    from_label=html.escape(str(row.get("from_label") or "")),
-                    account_label=html.escape(str(row.get("account_label") or "")),
-                    preview=html.escape(str(row.get("preview") or "")),
-                    status=html.escape(str(row.get("status") or "")),
-                    latency=html.escape(str(row.get("e2e_ms") or "")),
-                    extra_cols=extra_cols,
+                    email_id=html.escape(str(row.get("message_id") or row.get("email_id") or "")),
+                    priority=html.escape(str(row.get("priority_label") or "")),
+                    sender=html.escape(str(row.get("sender_display") or "")),
+                    subject=html.escape(str(row.get("subject") or "")),
+                    doc_kind=html.escape(str(row.get("doc_kind_label") or "")),
+                    amount=html.escape(str(row.get("amount_display") or "")),
+                    due_date=html.escape(str(row.get("due_date") or "")),
+                    action=html.escape(str(row.get("action_label") or "")),
+                    confidence=html.escape(str(row.get("confidence_text") or "")),
+                    received=html.escape(str(row.get("received_relative") or "")),
                 )
             )
         header_row = (
-            "<tr><th>Time (UTC)</th><th>From</th><th>Account</th>"
-            "<th>Preview</th><th>TG status</th><th>E2E latency</th></tr>"
+            "<tr><th>Priority</th><th>Sender</th><th>Subject</th><th>Doc kind</th>"
+            "<th>Amount</th><th>Due date</th><th>Action</th><th>Confidence</th><th>Received</th></tr>"
         )
-        return f"<html><body>{header}<table>{header_row}{''.join(rows)}</table></body></html>"
+        detail_block = ""
+        if isinstance(selected_detail, Mapping):
+            detail_block = (
+                '<div data-testid="archive-detail">'
+                f"{html.escape(str(selected_detail.get('interpretation_summary') or ''))}"
+                f"{html.escape(str(selected_detail.get('why_classified') or ''))}"
+                "</div>"
+            )
+        return f"<html><body>{header}<table>{header_row}{''.join(rows)}</table>{detail_block}</body></html>"
 
     if template_name == "commitments.html":
         commitments_rows = (
@@ -829,6 +868,238 @@ def _format_ts_utc(value: object) -> str:
     except (OverflowError, OSError, ValueError):
         return "–"
     return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _parse_datetime_value(value: object) -> datetime | None:
+    if value in (None, ""):
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        text = str(value).strip()
+        if not text:
+            return None
+        normalized = text.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    try:
+        return datetime.fromtimestamp(numeric, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _format_relative_time(value: object, *, now: datetime | None = None) -> str:
+    dt = _parse_datetime_value(value)
+    if dt is None:
+        return "never"
+    anchor = now or datetime.now(timezone.utc)
+    delta_seconds = int((anchor - dt).total_seconds())
+    if delta_seconds < 0:
+        delta_seconds = abs(delta_seconds)
+        if delta_seconds < 60:
+            return f"in {delta_seconds}s"
+        if delta_seconds < 3600:
+            return f"in {max(1, delta_seconds // 60)}m"
+        if delta_seconds < 86_400:
+            return f"in {max(1, delta_seconds // 3600)}h"
+        return f"in {max(1, delta_seconds // 86_400)}d"
+    if delta_seconds < 60:
+        return f"{delta_seconds}s ago"
+    if delta_seconds < 3600:
+        return f"{max(1, delta_seconds // 60)}m ago"
+    if delta_seconds < 86_400:
+        return f"{max(1, delta_seconds // 3600)}h ago"
+    return f"{max(1, delta_seconds // 86_400)}d ago"
+
+
+def _format_remaining_time(value: object, *, now: datetime | None = None) -> str:
+    dt = _parse_datetime_value(value)
+    if dt is None:
+        return "unknown"
+    anchor = now or datetime.now(timezone.utc)
+    remaining = max(dt - anchor, timedelta())
+    total_minutes = int(remaining.total_seconds() // 60)
+    hours, minutes = divmod(total_minutes, 60)
+    parts: list[str] = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if not parts:
+        parts.append("0m")
+    return " ".join(parts)
+
+
+def _format_decimal_amount(value: object) -> str:
+    numeric = _safe_float(value)
+    if numeric is None:
+        return ""
+    sign = "-" if numeric < 0 else ""
+    abs_value = abs(numeric)
+    if abs_value.is_integer():
+        return f"{sign}{int(abs_value):,}".replace(",", " ")
+    return f"{sign}{abs_value:,.2f}".replace(",", " ")
+
+
+def _archive_priority_bucket(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"🔴", "red", "high"}:
+        return "high"
+    if normalized in {"🟡", "yellow", "medium"}:
+        return "medium"
+    if normalized in {"🔵", "blue", "low"}:
+        return "low"
+    if normalized in {"suppressed", "muted", "gray", "grey", "deferred"}:
+        return "suppressed"
+    return "low" if normalized else ""
+
+
+def _archive_priority_label(bucket: str) -> str:
+    return {
+        "high": "High priority",
+        "medium": "Medium priority",
+        "low": "Low priority",
+        "suppressed": "Suppressed",
+    }.get(bucket, "Unknown priority")
+
+
+def _archive_priority_class(bucket: str) -> str:
+    return {
+        "high": "danger",
+        "medium": "warn",
+        "low": "success",
+        "suppressed": "muted",
+    }.get(bucket, "muted")
+
+
+def _archive_doc_kind(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"invoice", "payroll", "reconciliation", "contract", "generic"}:
+        return normalized
+    return "other"
+
+
+def _archive_confidence_band(value: object) -> str:
+    confidence = _safe_float(value) or 0.0
+    if confidence >= 0.8:
+        return "high"
+    if confidence >= 0.5:
+        return "medium"
+    return "low"
+
+
+def _archive_action_label(action: object, *, doc_kind: str) -> str:
+    normalized = str(action or "").strip().lower()
+    if doc_kind == "invoice" or any(token in normalized for token in ("pay", "оплат", "к оплат")):
+        return "Pay"
+    if doc_kind in {"contract", "reconciliation"} or any(
+        token in normalized
+        for token in ("review", "check", "провер", "договор", "сверк", "sign")
+    ):
+        return "Review"
+    if normalized:
+        return "Note"
+    return "—"
+
+
+def _archive_doc_kind_label(doc_kind: str) -> str:
+    return {
+        "invoice": "invoice",
+        "payroll": "payroll",
+        "reconciliation": "reconciliation",
+        "contract": "contract",
+        "generic": "generic",
+        "other": "other",
+    }.get(doc_kind, "other")
+
+
+def _archive_interpretation_summary(item: Mapping[str, object]) -> str:
+    doc_kind = _archive_doc_kind_label(str(item.get("doc_kind") or "other"))
+    issuer = str(item.get("issuer_display") or "").strip()
+    amount = str(item.get("amount_display") or "").strip()
+    due_date = str(item.get("due_date") or "").strip()
+    action = str(item.get("action_label") or "").strip()
+    parts = [doc_kind.capitalize()]
+    if issuer:
+        parts.append(f"from {issuer}")
+    if amount:
+        parts.append(f"for {amount}")
+    if due_date:
+        parts.append(f"due {due_date}")
+    summary = " ".join(parts).strip()
+    if not summary:
+        summary = "Interpretation available"
+    if action and action != "—":
+        return f"{summary}. Action: {action}."
+    return f"{summary}."
+
+
+def _archive_why_classified(item: Mapping[str, object]) -> str:
+    facts: list[str] = []
+    doc_kind = _archive_doc_kind_label(str(item.get("doc_kind") or "other"))
+    facts.append(doc_kind)
+    issuer = str(item.get("issuer_display") or "").strip()
+    if issuer:
+        facts.append(f"issuer {issuer}")
+    amount = str(item.get("amount_display") or "").strip()
+    if amount:
+        facts.append(f"amount {amount}")
+    due_date = str(item.get("due_date") or "").strip()
+    if due_date:
+        facts.append(f"due {due_date}")
+    reference = str(item.get("reference") or "").strip()
+    if reference:
+        facts.append(f"reference {reference}")
+    action = str(item.get("action_label") or "").strip()
+    if action and action != "—":
+        facts.append(f"action {action}")
+    return "Classified because detected: " + ", ".join(facts[:6]) + "."
+
+
+def _humanize_health_detail(
+    component: str,
+    *,
+    subtype: str = "",
+    detail: str = "",
+    status: str = "",
+) -> str:
+    lowered = f"{subtype} {detail}".lower()
+    if component == "IMAP":
+        if "auth" in lowered or "login" in lowered or "password" in lowered:
+            return "Ошибка авторизации — проверьте пароль IMAP в настройках"
+        if subtype == "cooldown" or "cooldown" in lowered:
+            return "Активен cooldown — повторная попытка будет позже"
+        if "timeout" in lowered or "timed out" in lowered or "connect" in lowered:
+            return "Сервер IMAP недоступен — последний контакт завершился ошибкой"
+        if subtype == "dead_letter":
+            return "Есть письма в dead-letter — проверьте сбойные сообщения"
+        if subtype == "processing_failure":
+            return "Ошибка обработки письма — проверьте последние сбои"
+        if status == "down":
+            return "Нет свежего успешного контакта с IMAP"
+    if component == "Telegram":
+        if "token" in lowered or "auth" in lowered:
+            return "Ошибка Telegram — проверьте токен и доступность API"
+        if status != "ok":
+            return "Доставка в Telegram деградировала — проверьте последние ошибки"
+    if component == "LLM":
+        if status != "ok":
+            return "Активен fallback режим — LLM недоступен, работает только template"
+    if component == "DB":
+        if status != "ok":
+            return "База данных недоступна или перегружена — проверьте файл и блокировки"
+    if component == "Scheduler / Digests":
+        if status != "ok":
+            return "Планировщик дайджестов давно не подтверждал успешный цикл"
+    sanitized = " ".join(str(detail or "").split())
+    if "traceback" in sanitized.lower():
+        return "Подробности скрыты — откройте Details для диагностики"
+    return sanitized
 
 
 def _format_due_signal(*, created_ts: float | None, deadline_iso: str | None) -> str:
@@ -3054,102 +3325,64 @@ def create_app(
         window_days, window_error = _parse_window_days(
             window_raw, default=7, allowed=ALLOWED_ARCHIVE_WINDOWS
         )
-        lane = _parse_lane(request.args.get("lane"))
-        status, status_error = _parse_archive_status(request.args.get("status"))
-        try:
-            page = int(request.args.get("page") or 1)
-        except (TypeError, ValueError):
-            page = 1
-        if page < 1:
-            page = 1
-
+        sender_filter = (request.args.get("sender") or "").strip()
+        priority_filter = str(request.args.get("priority") or "").strip().lower()
+        if priority_filter not in ARCHIVE_PRIORITY_FILTERS:
+            priority_filter = ""
+        doc_kind_filter = str(request.args.get("doc_kind") or "").strip().lower()
+        if doc_kind_filter not in ARCHIVE_DOC_KINDS:
+            doc_kind_filter = ""
+        confidence_band = str(request.args.get("confidence_band") or "").strip().lower()
+        if confidence_band not in ARCHIVE_CONFIDENCE_FILTERS:
+            confidence_band = ""
+        page = _parse_page(request.args.get("page"), default=1)
+        raw_message_id = (request.args.get("message_id") or "").strip()
+        selected_message_id = int(raw_message_id) if raw_message_id.isdigit() else None
         reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
             dashboard_vars.pii
         )
         mode = _resolve_cockpit_mode(request, session)
-        include_engineer = mode == "engineer"
-
-        error_message = window_error or status_error
-        rows: list[dict[str, object]] = []
-        total_count = 0
-        lane_counts: dict[str, int] = {key: 0 for key in LANE_KEYS}
+        error_message = window_error
+        archive_payload: dict[str, object] = {"items": [], "total": 0, "page": 1, "pages": 1}
         if account_emails and window_days:
-            analytics = _analytics()
-            if hasattr(analytics, "lane_counts"):
-                lane_cache_key = (
-                    "lane_counts",
-                    str(app.config["DB_PATH"]),
-                    tuple(account_emails),
-                    window_days,
-                )
-                cached_counts = _COCKPIT_CACHE.get(lane_cache_key)
-                if isinstance(cached_counts, Mapping):
-                    lane_counts = {
-                        key: int(cached_counts.get(key) or 0) for key in LANE_KEYS
-                    }
-                else:
-                    lane_counts = analytics.lane_counts(
-                        account_email=account_emails[0],
-                        account_emails=account_emails,
-                        window_days=window_days,
-                    )
-                    _COCKPIT_CACHE.set(lane_cache_key, lane_counts)
-            archive_cache_key = (
-                "archive_lane",
+            cache_key = (
+                "archive_interpretation",
                 str(app.config["DB_PATH"]),
                 tuple(account_emails),
                 window_days,
-                status,
-                lane,
+                sender_filter.lower(),
+                priority_filter,
+                doc_kind_filter,
+                confidence_band,
                 page,
                 bool(reveal_pii),
                 int(time.time()) // 15,
             )
-            cached_payload = _COCKPIT_CACHE.get(archive_cache_key)
+            cached_payload = _COCKPIT_CACHE.get(cache_key)
             if isinstance(cached_payload, Mapping):
-                payload = dict(cached_payload)
+                archive_payload = dict(cached_payload)
             else:
-                if hasattr(analytics, "lane_archive_rows"):
-                    payload = analytics.lane_archive_rows(
-                        account_email=account_emails[0],
-                        account_emails=account_emails,
-                        window_days=window_days,
-                        page=page,
-                        page_size=ARCHIVE_PAGE_SIZE,
-                        status=status,
-                        lane=lane,
-                        reveal_pii=reveal_pii,
-                    )
-                else:
-                    payload = analytics.email_archive_page(
-                        account_email=account_emails[0],
-                        account_emails=account_emails,
-                        window_days=window_days,
-                        page=page,
-                        page_size=ARCHIVE_PAGE_SIZE,
-                        status=status,
-                        reveal_pii=reveal_pii,
-                    )
-                _COCKPIT_CACHE.set(archive_cache_key, payload)
-            payload = payload if isinstance(payload, Mapping) else {}
-            rows = payload.get("rows") if isinstance(payload, Mapping) else []
-            if not isinstance(rows, list):
-                rows = []
-            total_count = (
-                int(payload.get("total_count") or 0)
-                if isinstance(payload, Mapping)
-                else 0
-            )
+                archive_payload = _archive_api_payload(
+                    account_emails=account_emails,
+                    window_days=window_days,
+                    sender_filter=sender_filter,
+                    priority_filter=priority_filter,
+                    doc_kind_filter=doc_kind_filter,
+                    confidence_band=confidence_band,
+                    page=page,
+                    per_page=ARCHIVE_PAGE_SIZE,
+                    reveal_pii=reveal_pii,
+                )
+                _COCKPIT_CACHE.set(cache_key, archive_payload)
         else:
             error_message = error_message or "Select an account to view the archive."
 
-        total_pages = (
-            max(1, int(math.ceil(total_count / ARCHIVE_PAGE_SIZE)))
-            if total_count
-            else 1
-        )
-        if page > total_pages:
-            page = total_pages
+        rows = archive_payload.get("items") if isinstance(archive_payload, Mapping) else []
+        if not isinstance(rows, list):
+            rows = []
+        total_count = int(archive_payload.get("total") or 0) if isinstance(archive_payload, Mapping) else 0
+        page = int(archive_payload.get("page") or page) if isinstance(archive_payload, Mapping) else page
+        total_pages = int(archive_payload.get("pages") or 1) if isinstance(archive_payload, Mapping) else 1
 
         def _base_params() -> dict[str, str]:
             params: dict[str, str] = {}
@@ -3157,10 +3390,14 @@ def create_app(
                 params["account_emails"] = ",".join(account_emails)
             if window_days:
                 params["window_days"] = str(window_days)
-            if lane:
-                params["lane"] = lane
-            if status and status != "any":
-                params["status"] = status
+            if sender_filter:
+                params["sender"] = sender_filter
+            if priority_filter:
+                params["priority"] = priority_filter
+            if doc_kind_filter:
+                params["doc_kind"] = doc_kind_filter
+            if confidence_band:
+                params["confidence_band"] = confidence_band
             if reveal_pii:
                 params["pii"] = "1"
             if mode:
@@ -3168,8 +3405,6 @@ def create_app(
             return params
 
         base_params = _base_params()
-        detail_params = dict(base_params)
-        detail_params["page"] = str(page)
 
         def _mode_link(target: str) -> str:
             params = dict(base_params)
@@ -3189,30 +3424,32 @@ def create_app(
 
         formatted_rows = []
         for row in rows:
-            sanitized_row = _sanitize_archive_row(
-                row if isinstance(row, Mapping) else {}
+            if not isinstance(row, Mapping):
+                continue
+            detail_params = dict(base_params)
+            detail_params["page"] = str(page)
+            detail_params["message_id"] = str(int(row.get("message_id") or 0))
+            formatted_rows.append({**row, "detail_url": url_for("archive", **detail_params)})
+
+        active_filters: list[str] = []
+        if sender_filter:
+            active_filters.append(f"Sender: {sender_filter}")
+        if priority_filter:
+            active_filters.append(f"Priority: {priority_filter}")
+        if doc_kind_filter:
+            active_filters.append(f"Doc kind: {doc_kind_filter}")
+        if confidence_band:
+            active_filters.append(f"Confidence: {confidence_band}")
+
+        selected_detail = None
+        if selected_message_id:
+            selected_detail = _archive_detail_payload(
+                account_emails=account_emails,
+                message_id=selected_message_id,
+                reveal_pii=reveal_pii,
             )
-            e2e_ms = None
-            e2e_seconds = sanitized_row.get("e2e_seconds")
-            if e2e_seconds is not None:
-                try:
-                    e2e_ms = float(e2e_seconds) * 1000.0
-                except (TypeError, ValueError):
-                    e2e_ms = None
-            formatted_rows.append(
-                {
-                    "email_id": sanitized_row.get("email_id"),
-                    "received": _format_ts_utc(sanitized_row.get("received_ts_utc")),
-                    "from_label": sanitized_row.get("from_label") or "",
-                    "account_label": sanitized_row.get("account_label") or "",
-                    "preview": sanitized_row.get("preview") or "",
-                    "status": sanitized_row.get("status") or "",
-                    "e2e_ms": _format_duration_ms(e2e_ms),
-                    "delivery_mode": sanitized_row.get("delivery_mode") or "",
-                    "failure_reason": sanitized_row.get("failure_reason") or "",
-                    "stage_hint": sanitized_row.get("stage_hint") or "",
-                }
-            )
+            if selected_detail is None:
+                error_message = error_message or "Interpretation not found for this message."
 
         return _render_template(
             app,
@@ -3220,34 +3457,31 @@ def create_app(
             title=app.config["APP_TITLE"],
             page_title="Email Archive",
             dashboard_vars=dashboard_vars,
-            lane=lane,
-            lane_pills=_build_lane_pills(
-                selected_lane=lane,
-                counts=lane_counts,
-                base_params=base_params,
-                endpoint="archive",
-            ),
             account_emails=account_emails,
             window_days=window_days or 7,
-            status=status,
+            sender_filter=sender_filter,
+            priority_filter=priority_filter,
+            doc_kind_filter=doc_kind_filter,
+            confidence_band=confidence_band,
             page=page,
             total_pages=total_pages,
             total_count=total_count,
             page_size=ARCHIVE_PAGE_SIZE,
             archive_rows=formatted_rows,
-            detail_params=detail_params,
+            selected_detail=selected_detail,
             prev_url=prev_url,
             next_url=next_url,
+            active_filters=active_filters,
             window_options=_build_archive_window_options(window_days or 7),
             pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
             pii_enabled=reveal_pii,
             cockpit_mode=mode,
             mode_basic_url=_mode_link("basic"),
             mode_engineer_url=_mode_link("engineer"),
-            engineer_mode=include_engineer,
+            engineer_mode=False,
             error=error_message,
             hide_limit=True,
-            share_url=url_for("archive", **detail_params),
+            share_url=url_for("archive", **base_params),
         )
 
     @app.route("/commitments")
@@ -3975,6 +4209,634 @@ def create_app(
             logger.warning("dashboard_payload_failed", extra={"error": str(exc)})
         return payload
 
+    def _imap_health_payload(account_emails: list[str]) -> dict[str, object]:
+        now_ts = datetime.now(timezone.utc).timestamp()
+        since_24h = now_ts - 86_400
+        payload: dict[str, object] = {
+            "status": "down",
+            "last_success_ts": None,
+            "reconnect_count_24h": 0,
+            "dead_letter_count": 0,
+        }
+        account_clause = ""
+        account_params: list[object] = []
+        if account_emails:
+            placeholders = ", ".join(["?"] * len(account_emails))
+            account_clause = f" AND account_id IN ({placeholders})"
+            account_params.extend(account_emails)
+        try:
+            with _open_readonly_connection(app.config["DB_PATH"]) as conn:
+                conn.row_factory = sqlite3.Row
+                success_row = conn.execute(
+                    (
+                        "SELECT ts, ts_utc "
+                        "FROM events_v1 "
+                        "WHERE event_type = ? "
+                        "AND json_extract(payload, '$.subtype') IN ('success', 'startup', 'reconnect', 'uidvalidity_change')"
+                        f"{account_clause} "
+                        "ORDER BY ts_utc DESC LIMIT 1"
+                    ),
+                    (EventType.IMAP_HEALTH.value, *account_params),
+                ).fetchone()
+                reconnect_row = conn.execute(
+                    (
+                        "SELECT COUNT(*) AS reconnects "
+                        "FROM events_v1 "
+                        "WHERE event_type = ? "
+                        "AND ts_utc >= ? "
+                        "AND json_extract(payload, '$.subtype') = 'reconnect'"
+                        f"{account_clause}"
+                    ),
+                    (EventType.IMAP_HEALTH.value, since_24h, *account_params),
+                ).fetchone()
+                dead_letter_row = conn.execute(
+                    (
+                        "SELECT COUNT(*) AS dead_letters "
+                        "FROM events_v1 "
+                        "WHERE event_type = ? "
+                        "AND json_extract(payload, '$.subtype') = 'dead_letter'"
+                        f"{account_clause}"
+                    ),
+                    (EventType.IMAP_HEALTH.value, *account_params),
+                ).fetchone()
+        except sqlite3.Error:
+            return payload
+
+        last_success_ts = ""
+        last_success_utc = 0.0
+        if success_row:
+            last_success_ts = str(success_row["ts"] or "")
+            last_success_utc = float(success_row["ts_utc"] or 0.0)
+            if not last_success_ts and last_success_utc > 0:
+                last_success_ts = datetime.fromtimestamp(
+                    last_success_utc, tz=timezone.utc
+                ).isoformat()
+        reconnect_count = int(reconnect_row["reconnects"] or 0) if reconnect_row else 0
+        dead_letter_count = (
+            int(dead_letter_row["dead_letters"] or 0) if dead_letter_row else 0
+        )
+        payload["last_success_ts"] = last_success_ts or None
+        payload["reconnect_count_24h"] = reconnect_count
+        payload["dead_letter_count"] = dead_letter_count
+
+        if last_success_utc <= 0:
+            payload["status"] = "down"
+            return payload
+        age_seconds = max(now_ts - last_success_utc, 0.0)
+        if age_seconds > 3_600:
+            payload["status"] = "down"
+        elif age_seconds > 900 or dead_letter_count > 0:
+            payload["status"] = "degraded"
+        else:
+            payload["status"] = "ok"
+        return payload
+
+    def _pipeline_health_payload(account_emails: list[str]) -> dict[str, object]:
+        now_ts = datetime.now(timezone.utc).timestamp()
+        since_24h = now_ts - 86_400
+        payload: dict[str, object] = {
+            "status": "degraded",
+            "last_processed_ts": None,
+            "processing_failure_count_24h": 0,
+            "pending_action_count": 0,
+        }
+        account_clause = ""
+        account_params: list[object] = []
+        if account_emails:
+            placeholders = ", ".join(["?"] * len(account_emails))
+            account_clause = f" AND account_id IN ({placeholders})"
+            account_params.extend(account_emails)
+        try:
+            with _open_readonly_connection(app.config["DB_PATH"]) as conn:
+                conn.row_factory = sqlite3.Row
+                processed_row = conn.execute(
+                    (
+                        "SELECT ts, ts_utc "
+                        "FROM events_v1 "
+                        "WHERE event_type = ?"
+                        f"{account_clause} "
+                        "ORDER BY ts_utc DESC LIMIT 1"
+                    ),
+                    (EventType.MESSAGE_INTERPRETATION.value, *account_params),
+                ).fetchone()
+                failure_row = conn.execute(
+                    (
+                        "SELECT COUNT(*) AS failures "
+                        "FROM events_v1 "
+                        "WHERE event_type = ? "
+                        "AND ts_utc >= ? "
+                        "AND json_extract(payload, '$.subtype') = 'processing_failure'"
+                        f"{account_clause}"
+                    ),
+                    (EventType.IMAP_HEALTH.value, since_24h, *account_params),
+                ).fetchone()
+        except sqlite3.Error:
+            return payload
+
+        last_processed_ts = ""
+        last_processed_utc = 0.0
+        if processed_row:
+            last_processed_ts = str(processed_row["ts"] or "")
+            last_processed_utc = float(processed_row["ts_utc"] or 0.0)
+            if not last_processed_ts and last_processed_utc > 0:
+                last_processed_ts = datetime.fromtimestamp(
+                    last_processed_utc, tz=timezone.utc
+                ).isoformat()
+        processing_failures = int(failure_row["failures"] or 0) if failure_row else 0
+        payload["last_processed_ts"] = last_processed_ts or None
+        payload["processing_failure_count_24h"] = processing_failures
+
+        try:
+            analytics = _analytics()
+            primary = account_emails[0] if account_emails else ""
+            if primary:
+                business_summary = analytics.business_summary(
+                    account_email=primary,
+                    account_emails=account_emails,
+                    window_days=30,
+                    top_issuer_limit=5,
+                )
+                payload["pending_action_count"] = int(
+                    business_summary.get("documents_waiting_attention_count") or 0
+                )
+        except Exception:
+            payload["pending_action_count"] = 0
+
+        if last_processed_utc <= 0:
+            payload["status"] = "degraded"
+            return payload
+        age_seconds = max(now_ts - last_processed_utc, 0.0)
+        payload["status"] = (
+            "degraded"
+            if age_seconds > 900 or processing_failures > 0
+            else "ok"
+        )
+        return payload
+
+    def _scoped_event_rows(
+        *,
+        account_emails: list[str],
+        event_type: str,
+        since_ts: float | None = None,
+        email_id: int | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, object]]:
+        query = (
+            "SELECT ts, ts_utc, account_id, email_id, payload_json "
+            "FROM events_v1 WHERE event_type = ?"
+        )
+        params: list[object] = [event_type]
+        if since_ts is not None:
+            query += " AND ts_utc >= ?"
+            params.append(float(since_ts))
+        if email_id is not None:
+            query += " AND email_id = ?"
+            params.append(int(email_id))
+        if account_emails:
+            placeholders = ", ".join(["?"] * len(account_emails))
+            query += f" AND account_id IN ({placeholders})"
+            params.extend(account_emails)
+        query += " ORDER BY ts_utc DESC, email_id DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(max(1, int(limit)))
+        try:
+            with _open_readonly_connection(app.config["DB_PATH"]) as conn:
+                conn.row_factory = sqlite3.Row
+                return [dict(row) for row in conn.execute(query, params).fetchall()]
+        except sqlite3.Error:
+            return []
+
+    def _archive_item_from_events(
+        interpretation_row: Mapping[str, object],
+        received_row: Mapping[str, object] | None,
+        *,
+        reveal_pii: bool,
+    ) -> dict[str, object]:
+        interpretation_payload = (
+            json.loads(str(interpretation_row.get("payload_json") or "{}"))
+            if interpretation_row.get("payload_json")
+            else {}
+        )
+        if not isinstance(interpretation_payload, dict):
+            interpretation_payload = {}
+        received_payload: dict[str, object] = {}
+        if received_row and received_row.get("payload_json"):
+            try:
+                loaded = json.loads(str(received_row.get("payload_json") or "{}"))
+                if isinstance(loaded, dict):
+                    received_payload = loaded
+            except (TypeError, ValueError):
+                received_payload = {}
+        message_id = int(interpretation_row.get("email_id") or 0)
+        sender_email = str(
+            interpretation_payload.get("sender_email")
+            or received_payload.get("from_email")
+            or ""
+        ).strip()
+        issuer_display = str(interpretation_payload.get("issuer_label") or "").strip()
+        sender_display = issuer_display or sender_email
+        if not reveal_pii and sender_display == sender_email:
+            sender_display = _sanitize_sender_label(sender_email)
+        doc_kind = _archive_doc_kind(interpretation_payload.get("doc_kind"))
+        priority_bucket = _archive_priority_bucket(interpretation_payload.get("priority"))
+        confidence = _safe_float(interpretation_payload.get("confidence")) or 0.0
+        received_ts = (
+            received_row.get("ts_utc")
+            if received_row is not None and received_row.get("ts_utc") is not None
+            else interpretation_row.get("ts_utc")
+        )
+        received_dt = _parse_datetime_value(received_ts)
+        subject_full = str(received_payload.get("subject") or "").strip()
+        if not subject_full:
+            subject_full = "—"
+        action_label = _archive_action_label(
+            interpretation_payload.get("action"), doc_kind=doc_kind
+        )
+        amount_display = _format_decimal_amount(interpretation_payload.get("amount"))
+        reference = str(interpretation_payload.get("document_id") or "").strip()
+        item = {
+            "message_id": message_id,
+            "email_id": message_id,
+            "sender_email": sender_email,
+            "sender_display": sender_display or "Sender hidden",
+            "issuer_display": issuer_display or sender_display or sender_email,
+            "subject": _clamp_text(subject_full, 80),
+            "subject_full": subject_full,
+            "doc_kind": doc_kind,
+            "doc_kind_label": _archive_doc_kind_label(doc_kind),
+            "amount": interpretation_payload.get("amount"),
+            "amount_display": amount_display,
+            "due_date": str(interpretation_payload.get("due_date") or "").strip(),
+            "action": str(interpretation_payload.get("action") or "").strip(),
+            "action_label": action_label,
+            "confidence": round(confidence, 4),
+            "confidence_text": f"{confidence:.2f}",
+            "priority": priority_bucket,
+            "priority_label": _archive_priority_label(priority_bucket),
+            "priority_class": _archive_priority_class(priority_bucket),
+            "received_ts": _safe_float(received_ts) or 0.0,
+            "received_at": _format_ts_utc(received_ts),
+            "received_relative": _format_relative_time(received_ts),
+            "reference": reference,
+            "context": str(interpretation_payload.get("context") or "").strip(),
+            "template_id": str(interpretation_payload.get("template_id") or "").strip(),
+        }
+        item["interpretation_summary"] = _archive_interpretation_summary(item)
+        item["why_classified"] = _archive_why_classified(item)
+        item["low_confidence_warning"] = confidence < 0.5
+        item["received_title"] = (
+            received_dt.isoformat().replace("+00:00", "Z")
+            if received_dt is not None
+            else None
+        )
+        return item
+
+    def _archive_api_payload(
+        *,
+        account_emails: list[str],
+        window_days: int,
+        sender_filter: str,
+        priority_filter: str,
+        doc_kind_filter: str,
+        confidence_band: str,
+        page: int,
+        per_page: int,
+        reveal_pii: bool,
+    ) -> dict[str, object]:
+        if not account_emails or window_days <= 0:
+            return {"items": [], "total": 0, "page": 1, "pages": 1}
+        since_ts = datetime.now(timezone.utc).timestamp() - (window_days * 86_400)
+        interpretation_rows = _scoped_event_rows(
+            account_emails=account_emails,
+            event_type=EventType.MESSAGE_INTERPRETATION.value,
+            since_ts=since_ts,
+        )
+        latest_interpretations: dict[int, dict[str, object]] = {}
+        for row in interpretation_rows:
+            email_id = int(row.get("email_id") or 0)
+            if email_id and email_id not in latest_interpretations:
+                latest_interpretations[email_id] = row
+        received_rows = _scoped_event_rows(
+            account_emails=account_emails,
+            event_type=EventType.EMAIL_RECEIVED.value,
+            since_ts=since_ts,
+        )
+        latest_received: dict[int, dict[str, object]] = {}
+        for row in received_rows:
+            email_id = int(row.get("email_id") or 0)
+            if email_id and email_id not in latest_received:
+                latest_received[email_id] = row
+        items = [
+            _archive_item_from_events(
+                interpretation_row=row,
+                received_row=latest_received.get(email_id),
+                reveal_pii=reveal_pii,
+            )
+            for email_id, row in latest_interpretations.items()
+        ]
+        sender_search = sender_filter.strip().lower()
+        filtered: list[dict[str, object]] = []
+        for item in items:
+            if sender_search:
+                haystack = " ".join(
+                    [
+                        str(item.get("sender_display") or ""),
+                        str(item.get("sender_email") or ""),
+                        str(item.get("issuer_display") or ""),
+                    ]
+                ).lower()
+                if sender_search not in haystack:
+                    continue
+            if priority_filter and item.get("priority") != priority_filter:
+                continue
+            if doc_kind_filter and item.get("doc_kind") != doc_kind_filter:
+                continue
+            if confidence_band and _archive_confidence_band(item.get("confidence")) != confidence_band:
+                continue
+            filtered.append(item)
+        filtered.sort(
+            key=lambda item: (
+                -float(item.get("received_ts") or 0.0),
+                -int(item.get("message_id") or 0),
+            )
+        )
+        resolved_page = max(1, int(page))
+        resolved_per_page = max(1, min(int(per_page or ARCHIVE_PAGE_SIZE), 100))
+        total = len(filtered)
+        pages = max(1, int(math.ceil(total / resolved_per_page))) if total else 1
+        if resolved_page > pages:
+            resolved_page = pages
+        start = (resolved_page - 1) * resolved_per_page
+        end = start + resolved_per_page
+        page_items = filtered[start:end]
+        return {
+            "items": page_items,
+            "total": total,
+            "page": resolved_page,
+            "pages": pages,
+            "per_page": resolved_per_page,
+        }
+
+    def _archive_detail_payload(
+        *,
+        account_emails: list[str],
+        message_id: int,
+        reveal_pii: bool,
+    ) -> dict[str, object] | None:
+        interpretation_rows = _scoped_event_rows(
+            account_emails=account_emails,
+            event_type=EventType.MESSAGE_INTERPRETATION.value,
+            email_id=message_id,
+            limit=1,
+        )
+        if not interpretation_rows:
+            return None
+        received_rows = _scoped_event_rows(
+            account_emails=account_emails,
+            event_type=EventType.EMAIL_RECEIVED.value,
+            email_id=message_id,
+            limit=1,
+        )
+        item = _archive_item_from_events(
+            interpretation_row=interpretation_rows[0],
+            received_row=received_rows[0] if received_rows else None,
+            reveal_pii=reveal_pii,
+        )
+        return {
+            "message_id": item["message_id"],
+            "interpretation_summary": item["interpretation_summary"],
+            "why_classified": item["why_classified"],
+            "key_facts": {
+                "amount": item["amount_display"] or None,
+                "due_date": item["due_date"] or None,
+                "counterparty": item["issuer_display"] or None,
+                "reference": item["reference"] or None,
+            },
+            "confidence": item["confidence"],
+            "issuer_display": item["issuer_display"],
+            "low_confidence_warning": item["low_confidence_warning"],
+        }
+
+    def _health_status_payload(
+        account_emails: list[str],
+        *,
+        window_days: int,
+        now: datetime | None = None,
+    ) -> dict[str, object]:
+        now_dt = now or datetime.now(timezone.utc)
+        now_ts = now_dt.timestamp()
+
+        def _component_status(last_ok: object, *, hard_down: bool = False, degraded: bool = False) -> str:
+            parsed = _parse_datetime_value(last_ok)
+            if hard_down or parsed is None:
+                return "down"
+            age_seconds = max(now_ts - parsed.timestamp(), 0.0)
+            if age_seconds > 3600:
+                return "down"
+            if degraded or age_seconds > 600:
+                return "degraded"
+            return "ok"
+
+        account_clause = ""
+        account_params: list[object] = []
+        if account_emails:
+            placeholders = ", ".join(["?"] * len(account_emails))
+            account_clause = f" AND account_id IN ({placeholders})"
+            account_params.extend(account_emails)
+
+        latest_imap_event: dict[str, object] | None = None
+        try:
+            with _open_readonly_connection(app.config["DB_PATH"]) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    (
+                        "SELECT ts, ts_utc, payload_json FROM events_v1 "
+                        "WHERE event_type = ?"
+                        f"{account_clause} "
+                        "ORDER BY ts_utc DESC LIMIT 1"
+                    ),
+                    (EventType.IMAP_HEALTH.value, *account_params),
+                ).fetchone()
+                latest_imap_event = dict(row) if row is not None else None
+                cooldown_row = conn.execute(
+                    (
+                        "SELECT ts, ts_utc, payload_json FROM events_v1 "
+                        "WHERE event_type = ? "
+                        "AND json_extract(payload_json, '$.subtype') = 'cooldown'"
+                        f"{account_clause} "
+                        "ORDER BY ts_utc DESC LIMIT 1"
+                    ),
+                    (EventType.IMAP_HEALTH.value, *account_params),
+                ).fetchone()
+        except sqlite3.Error:
+            cooldown_row = None
+
+        imap_payload = _imap_health_payload(account_emails)
+        pipeline_payload = _pipeline_health_payload(account_emails)
+        summary = _health_summary_payload(
+            account_emails=account_emails,
+            window_days=max(1, window_days),
+            reveal_pii=False,
+            mode="basic",
+        )
+        current = summary.get("current") if isinstance(summary, Mapping) else None
+        status_strip = summary.get("status_strip") if isinstance(summary, Mapping) else None
+        incidents = _health_incidents_payload(
+            account_emails=account_emails,
+            window_days=max(1, window_days),
+            reveal_pii=False,
+            mode="basic",
+        )
+        incident_by_component: dict[str, dict[str, object]] = {}
+        for incident in incidents:
+            name = str(incident.get("component") or "").strip()
+            if name and name not in incident_by_component:
+                incident_by_component[name] = incident
+
+        last_snapshot_ts = (
+            current.get("ts_end_utc")
+            if isinstance(current, Mapping)
+            else None
+        )
+        latest_imap_payload: dict[str, object] = {}
+        if latest_imap_event and latest_imap_event.get("payload_json"):
+            try:
+                loaded = json.loads(str(latest_imap_event.get("payload_json") or "{}"))
+                if isinstance(loaded, dict):
+                    latest_imap_payload = loaded
+            except (TypeError, ValueError):
+                latest_imap_payload = {}
+        imap_status = _component_status(
+            imap_payload.get("last_success_ts"),
+            hard_down=imap_payload.get("status") == "down",
+            degraded=imap_payload.get("status") == "degraded",
+        )
+        components: list[dict[str, object]] = []
+        imap_last_ok = _parse_datetime_value(imap_payload.get("last_success_ts"))
+        components.append(
+            {
+                "name": "IMAP",
+                "status": imap_status,
+                "status_class": _status_class_for_label(imap_status),
+                "last_ok": imap_last_ok.isoformat() if imap_last_ok else None,
+                "last_ok_relative": _format_relative_time(imap_payload.get("last_success_ts")),
+                "detail": None
+                if imap_status == "ok"
+                else _humanize_health_detail(
+                    "IMAP",
+                    subtype=str(latest_imap_payload.get("subtype") or ""),
+                    detail=str(latest_imap_payload.get("detail") or ""),
+                    status=imap_status,
+                ),
+            }
+        )
+
+        strip_entries = status_strip if isinstance(status_strip, Mapping) else {}
+        for component_name, strip_key in (
+            ("Telegram", "telegram"),
+            ("DB", "db"),
+            ("LLM", "llm"),
+        ):
+            strip_status = (
+                strip_entries.get(strip_key)
+                if isinstance(strip_entries, Mapping)
+                else None
+            )
+            status_text = (
+                str(strip_status.get("text") or "")
+                if isinstance(strip_status, Mapping)
+                else ""
+            )
+            status = _component_status(
+                last_snapshot_ts,
+                hard_down=status_text == "down",
+                degraded=status_text in {"warn", "degraded"},
+            )
+            incident = incident_by_component.get(component_name, {})
+            raw_detail = str(incident.get("symptom") or "").strip()
+            component_last_ok = _parse_datetime_value(last_snapshot_ts)
+            components.append(
+                {
+                    "name": component_name,
+                    "status": status,
+                    "status_class": _status_class_for_label(status),
+                    "last_ok": (
+                        component_last_ok.isoformat() if component_last_ok else None
+                    ),
+                    "last_ok_relative": _format_relative_time(last_snapshot_ts),
+                    "detail": None
+                    if status == "ok"
+                    else _humanize_health_detail(
+                        component_name,
+                        detail=raw_detail,
+                        status=status,
+                    ),
+                }
+            )
+
+        scheduler_status = _component_status(
+            pipeline_payload.get("last_processed_ts"),
+            hard_down=pipeline_payload.get("status") == "down",
+            degraded=pipeline_payload.get("status") == "degraded",
+        )
+        scheduler_last_ok = _parse_datetime_value(pipeline_payload.get("last_processed_ts"))
+        components.append(
+            {
+                "name": "Scheduler / Digests",
+                "status": scheduler_status,
+                "status_class": _status_class_for_label(scheduler_status),
+                "last_ok": (
+                    scheduler_last_ok.isoformat() if scheduler_last_ok else None
+                ),
+                "last_ok_relative": _format_relative_time(
+                    pipeline_payload.get("last_processed_ts")
+                ),
+                "detail": None
+                if scheduler_status == "ok"
+                else _humanize_health_detail(
+                    "Scheduler / Digests",
+                    status=scheduler_status,
+                ),
+            }
+        )
+
+        cooldown_active = False
+        cooldown_resume_at = None
+        cooldown_reason = None
+        if cooldown_row is not None:
+            try:
+                cooldown_payload = json.loads(str(cooldown_row["payload_json"] or "{}"))
+            except (TypeError, ValueError):
+                cooldown_payload = {}
+            if isinstance(cooldown_payload, dict):
+                cooldown_resume_at = (
+                    str(cooldown_payload.get("cooldown_resume_at") or "").strip()
+                    or str(cooldown_payload.get("resume_at") or "").strip()
+                    or str(cooldown_payload.get("next_retry_at") or "").strip()
+                    or None
+                )
+                cooldown_reason = _humanize_health_detail(
+                    "IMAP",
+                    subtype="cooldown",
+                    detail=str(cooldown_payload.get("detail") or ""),
+                    status="degraded",
+                )
+                if cooldown_resume_at is not None:
+                    resume_dt = _parse_datetime_value(cooldown_resume_at)
+                    cooldown_active = bool(resume_dt and resume_dt > now_dt)
+        return {
+            "components": components,
+            "cooldown_active": cooldown_active,
+            "cooldown_resume_at": cooldown_resume_at,
+            "cooldown_resume_relative": (
+                _format_remaining_time(cooldown_resume_at, now=now_dt)
+                if cooldown_active and cooldown_resume_at
+                else None
+            ),
+            "cooldown_reason": cooldown_reason,
+        }
+
     def _attention_payload(
         *,
         account_emails: list[str],
@@ -4382,6 +5244,79 @@ def create_app(
     @app.route("/api/dashboard", methods=["GET"])
     def api_dashboard():
         return jsonify(_dashboard_payload())
+
+    @app.route("/api/archive", methods=["GET"])
+    def api_archive():
+        dashboard_vars = _dashboard_vars()
+        account_emails = _resolve_account_scope(dashboard_vars)
+        window_raw = request.args.get("window_days")
+        if window_raw is None and dashboard_vars.window_days:
+            window_raw = str(dashboard_vars.window_days)
+        window_days, _ = _parse_window_days(
+            window_raw, default=7, allowed=ALLOWED_ARCHIVE_WINDOWS
+        )
+        sender_filter = (request.args.get("sender") or "").strip()
+        priority_filter = str(request.args.get("priority") or "").strip().lower()
+        if priority_filter not in ARCHIVE_PRIORITY_FILTERS:
+            priority_filter = ""
+        doc_kind_filter = str(request.args.get("doc_kind") or "").strip().lower()
+        if doc_kind_filter not in ARCHIVE_DOC_KINDS:
+            doc_kind_filter = ""
+        confidence_band = str(request.args.get("confidence_band") or "").strip().lower()
+        if confidence_band not in ARCHIVE_CONFIDENCE_FILTERS:
+            confidence_band = ""
+        per_page = max(1, min(int(request.args.get("per_page") or ARCHIVE_PAGE_SIZE), 100))
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
+        )
+        return jsonify(
+            _archive_api_payload(
+                account_emails=account_emails,
+                window_days=window_days or 7,
+                sender_filter=sender_filter,
+                priority_filter=priority_filter,
+                doc_kind_filter=doc_kind_filter,
+                confidence_band=confidence_band,
+                page=_parse_page(request.args.get("page"), default=1),
+                per_page=per_page,
+                reveal_pii=reveal_pii,
+            )
+        )
+
+    @app.route("/api/archive/<int:message_id>/detail", methods=["GET"])
+    def api_archive_detail(message_id: int):
+        dashboard_vars = _dashboard_vars()
+        account_emails = _resolve_account_scope(dashboard_vars)
+        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
+            dashboard_vars.pii
+        )
+        payload = _archive_detail_payload(
+            account_emails=account_emails,
+            message_id=message_id,
+            reveal_pii=reveal_pii,
+        )
+        if payload is None:
+            return jsonify({"error": "message_not_found"}), 404
+        return jsonify(payload)
+
+    @app.route("/api/health/imap", methods=["GET"])
+    def api_health_imap():
+        account_scope = _resolve_account_scope(_dashboard_vars())
+        return jsonify(_imap_health_payload(account_scope))
+
+    @app.route("/api/health/pipeline", methods=["GET"])
+    def api_health_pipeline():
+        account_scope = _resolve_account_scope(_dashboard_vars())
+        return jsonify(_pipeline_health_payload(account_scope))
+
+    @app.route("/api/health/status", methods=["GET"])
+    def api_health_status():
+        dashboard_vars = _dashboard_vars()
+        account_scope = _resolve_account_scope(dashboard_vars)
+        window_days = dashboard_vars.window_days or 7
+        return jsonify(
+            _health_status_payload(account_scope, window_days=max(1, window_days))
+        )
 
     @app.route("/api/v1/observability/health_timeline", methods=["GET"])
     def api_health_timeline():
@@ -5004,14 +5939,9 @@ def create_app(
             reveal_pii=reveal_pii,
             mode=mode,
         )
-        components = _health_component_payload(
-            current=current if isinstance(current, Mapping) else None,
-            status_strip=status_strip if isinstance(status_strip, Mapping) else None,
-            incidents=incidents,
+        health_status = _health_status_payload(
             account_emails=account_emails,
             window_days=window_days,
-            reveal_pii=reveal_pii,
-            mode=mode,
         )
 
         if isinstance(current, Mapping):
@@ -5088,8 +6018,12 @@ def create_app(
             health_signals=health_signals,
             health_trend=trend_rows,
             engineer_timeline=engineer_timeline_rows,
-            component_matrix=components,
+            component_matrix=health_status.get("components") or [],
             incidents=incidents,
+            cooldown_active=bool(health_status.get("cooldown_active")),
+            cooldown_resume_at=health_status.get("cooldown_resume_at"),
+            cooldown_resume_relative=health_status.get("cooldown_resume_relative"),
+            cooldown_reason=health_status.get("cooldown_reason"),
             status_refresh_ms=STATUS_STRIP_REFRESH_MS,
             health_refresh_ms=HEALTH_REFRESH_MS,
             error=error_message,
@@ -5134,20 +6068,19 @@ def create_app(
             reveal_pii=reveal_pii,
             mode=mode,
         )
-        components = _health_component_payload(
-            current=current if isinstance(current, Mapping) else None,
-            status_strip=status_strip if isinstance(status_strip, Mapping) else None,
-            incidents=incidents,
+        health_status = _health_status_payload(
             account_emails=account_emails,
             window_days=window_days,
-            reveal_pii=reveal_pii,
-            mode=mode,
         )
         return _render_template(
             app,
             "partials/health_overview.html",
-            component_matrix=components,
+            component_matrix=health_status.get("components") or [],
             incidents=incidents,
+            cooldown_active=bool(health_status.get("cooldown_active")),
+            cooldown_resume_at=health_status.get("cooldown_resume_at"),
+            cooldown_resume_relative=health_status.get("cooldown_resume_relative"),
+            cooldown_reason=health_status.get("cooldown_reason"),
         )
 
     @app.route("/events", methods=["GET"])

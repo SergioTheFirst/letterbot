@@ -1,0 +1,24 @@
+Subject: Document packet WK-DRY-01
+From: Legal Team <weak@legal.vendor.test>
+To: receiver@example.com
+Date: Tue, 02 Jan 2024 10:00:00 +0000
+Message-ID: <sender_clear_content_weak.eml@letterbot.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============4356373674027544268=="
+
+--===============4356373674027544268==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please review the packet when convenient. Reference materials only.
+
+--===============4356373674027544268==
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="packet_notes.txt"
+MIME-Version: 1.0
+
+UmVmZXJlbmNlIHBhY2tldCB3aXRoIG1lZXRpbmcgbm90ZXMgYW5kIGdlbmVyaWMgYmFja2dyb3Vu
+ZCBtYXRlcmlhbHMu
+
+--===============4356373674027544268==--
