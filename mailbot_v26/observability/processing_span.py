@@ -230,7 +230,9 @@ class ProcessingSpanRecorder:
         edit_applied: bool = False,
     ) -> None:
         ts_end_utc = time.time()
-        total_duration_ms = int((time.perf_counter() - span.start_monotonic) * 1000)
+        total_duration_ms = max(
+            1, int((time.perf_counter() - span.start_monotonic) * 1000)
+        )
         scrubbed_stage_keys = 0
         stage_durations = {}
         for key, value in span.stage_durations_ms.items():

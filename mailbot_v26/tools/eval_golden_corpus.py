@@ -1,9 +1,12 @@
+"""Deterministic offline evaluator for the canonical golden corpus."""
+
 from __future__ import annotations
 
 import argparse
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -48,6 +51,21 @@ class GoldenCase:
     expected: GoldenExpected
     critical: bool = False
     mail_type: str = ""
+    subsets: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class GoldenBucketSummary:
+    name: str
+    total: int
+    passed: int
+    failed: int
+
+
+@dataclass(frozen=True, slots=True)
+class GoldenFailureSummary:
+    name: str
+    count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +105,11 @@ class GoldenEvaluationSummary:
     due_date_total: int
     action_correct: int
     action_total: int
+    critical_total: int
+    critical_passed: int
+    category_summaries: tuple[GoldenBucketSummary, ...]
+    subset_summaries: tuple[GoldenBucketSummary, ...]
+    failure_summaries: tuple[GoldenFailureSummary, ...]
     case_results: tuple[GoldenCaseResult, ...]
 
 
@@ -332,6 +355,25 @@ def evaluate_golden_corpus(cases: list[GoldenCase]) -> GoldenEvaluationSummary:
     total_cases = len(results)
     passed_cases = sum(1 for item in results if item.passed)
     failed_cases = total_cases - passed_cases
+    critical_total = sum(1 for item in results if item.case.critical)
+    critical_passed = sum(
+        1 for item in results if item.case.critical and item.passed
+    )
+
+    category_stats: dict[str, list[int]] = {}
+    subset_stats: dict[str, list[int]] = {}
+    failure_type_totals: dict[str, int] = {}
+    for item in results:
+        category_entry = category_stats.setdefault(item.case.category, [0, 0])
+        category_entry[0] += 1
+        category_entry[1] += 1 if item.passed else 0
+        for subset in item.case.subsets:
+            subset_entry = subset_stats.setdefault(str(subset), [0, 0])
+            subset_entry[0] += 1
+            subset_entry[1] += 1 if item.passed else 0
+        for failure in item.failures:
+            failure_type_totals[str(failure)] = failure_type_totals.get(str(failure), 0) + 1
+
     return GoldenEvaluationSummary(
         total_cases=total_cases,
         passed_cases=passed_cases,
@@ -345,6 +387,33 @@ def evaluate_golden_corpus(cases: list[GoldenCase]) -> GoldenEvaluationSummary:
         due_date_total=total_cases,
         action_correct=sum(1 for item in results if item.action_ok),
         action_total=total_cases,
+        critical_total=critical_total,
+        critical_passed=critical_passed,
+        category_summaries=tuple(
+            GoldenBucketSummary(
+                name=name,
+                total=stats[0],
+                passed=stats[1],
+                failed=stats[0] - stats[1],
+            )
+            for name, stats in sorted(category_stats.items())
+        ),
+        subset_summaries=tuple(
+            GoldenBucketSummary(
+                name=name,
+                total=stats[0],
+                passed=stats[1],
+                failed=stats[0] - stats[1],
+            )
+            for name, stats in sorted(subset_stats.items())
+        ),
+        failure_summaries=tuple(
+            GoldenFailureSummary(name=name, count=count)
+            for name, count in sorted(
+                failure_type_totals.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ),
         case_results=results,
     )
 
@@ -355,19 +424,114 @@ def render_summary(summary: GoldenEvaluationSummary) -> str:
         f"Total cases: {summary.total_cases}",
         f"Passed: {summary.passed_cases}",
         f"Failed: {summary.failed_cases}",
+        f"Critical safety: {summary.critical_passed}/{summary.critical_total}",
         f"Doc kind accuracy: {summary.doc_kind_correct}/{summary.doc_kind_total}",
         f"Amount exact match: {summary.amount_exact_correct}/{summary.amount_total}",
         f"Amount tolerant match: {summary.amount_tolerant_correct}/{summary.amount_total}",
         f"Due date accuracy: {summary.due_date_correct}/{summary.due_date_total}",
         f"Action accuracy: {summary.action_correct}/{summary.action_total}",
-        "Failures by case_id:",
+        "Categories:",
     ]
+    if not summary.category_summaries:
+        lines.append("- none")
+    else:
+        for item in summary.category_summaries:
+            lines.append(
+                f"- {item.name}: {item.passed}/{item.total} passed ({item.failed} failed)"
+            )
+    lines.append("Subsets:")
+    if not summary.subset_summaries:
+        lines.append("- none")
+    else:
+        for item in summary.subset_summaries:
+            lines.append(
+                f"- {item.name}: {item.passed}/{item.total} passed ({item.failed} failed)"
+            )
+    lines.extend(
+        [
+            "Failure types:",
+        ]
+    )
+    if not summary.failure_summaries:
+        lines.append("- none")
+    else:
+        for item in summary.failure_summaries:
+            lines.append(f"- {item.name}: {item.count}")
+    lines.extend(
+        [
+        "Failures by case_id:",
+        ]
+    )
     failed = [item for item in summary.case_results if not item.passed]
     if not failed:
         lines.append("- none")
     else:
         for item in failed:
             lines.append(f"- {item.case.case_id}: {', '.join(item.failures)}")
+    return "\n".join(lines)
+
+
+def render_report(
+    summary: GoldenEvaluationSummary,
+    *,
+    generated_at: str,
+) -> str:
+    total = max(1, int(summary.total_cases))
+    pass_rate = (float(summary.passed_cases) / float(total)) * 100.0
+    critical_failed = [
+        item for item in summary.case_results if item.case.critical and not item.passed
+    ]
+    weak_categories = [
+        item for item in summary.category_summaries if item.failed > 0
+    ]
+    promotion_cases = [
+        item for item in summary.case_results if "correction_sensitive" in item.case.subsets
+    ]
+    would_promote = sum(
+        1
+        for item in promotion_cases
+        if item.passed and str(item.actual_template_id or "").strip()
+    )
+    blocked = max(0, len(promotion_cases) - would_promote)
+    lines = [
+        "=== LETTERBOT GOLDEN CORPUS REPORT ===",
+        f"Date: {generated_at}",
+        (
+            f"Total cases: {summary.total_cases}  |  Passed: {summary.passed_cases}  |  "
+            f"Failed: {summary.failed_cases}  |  Pass rate: {pass_rate:.1f}%"
+        ),
+        "",
+        f"CRITICAL CASES: {summary.critical_passed}/{summary.critical_total} passed",
+        "DANGEROUS FAILURES:",
+    ]
+    if not critical_failed:
+        lines.append("none")
+    else:
+        for item in critical_failed:
+            lines.append(f"- {item.case.case_id}: {', '.join(item.failures)}")
+    lines.extend(["", "CATEGORY BREAKDOWN:"])
+    for bucket in summary.category_summaries:
+        pct = (float(bucket.passed) / float(max(1, bucket.total))) * 100.0
+        lines.append(f"{bucket.name:<32}: {bucket.passed}/{bucket.total}  ({pct:.0f}%)")
+    lines.extend(["", "WEAK CATEGORIES (< 100%):"])
+    if not weak_categories:
+        lines.append("none")
+    else:
+        for bucket in weak_categories:
+            lines.append(f"{bucket.name}: {bucket.failed} failed")
+            for item in summary.case_results:
+                if item.case.category != bucket.name or item.passed:
+                    continue
+                lines.append(
+                    f"  - {item.case.case_id}: expected {item.case.expected.action}, got {item.actual_action}"
+                )
+    lines.extend(
+        [
+            "",
+            "PROMOTION SHADOW CASES:",
+            f"Candidates: {len(promotion_cases)}  |  Would-promote: {would_promote}  |  Blocked: {blocked}",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -410,12 +574,25 @@ def load_golden_corpus(path_str: str | None = None) -> tuple[GoldenCase, ...]:
                 expected=expected,
                 critical=bool(raw_case.get("critical")),
                 mail_type=str(raw_case.get("mail_type") or ""),
+                subsets=tuple(
+                    str(item)
+                    for item in (raw_case.get("subsets") or [])
+                    if str(item).strip()
+                ),
             )
         )
     return tuple(cases)
 
 
-def main() -> int:
+def _report_timestamp(path: Path) -> str:
+    try:
+        ts = float(path.stat().st_mtime)
+    except OSError:
+        ts = 0.0
+    return datetime.fromtimestamp(ts, tz=timezone.utc).replace(microsecond=0).isoformat()
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run deterministic golden-corpus evaluation for the canonical Letterbot pipeline."
     )
@@ -424,12 +601,36 @@ def main() -> int:
         default=str(DEFAULT_CORPUS_PATH),
         help="Path to the golden corpus JSON fixture.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Print a developer-facing quality report instead of the default summary.",
+    )
+    args = parser.parse_args(argv)
     cases = list(load_golden_corpus(args.path))
     summary = evaluate_golden_corpus(cases)
-    print(render_summary(summary))
+    if args.report:
+        print(render_report(summary, generated_at=_report_timestamp(Path(args.path))))
+    else:
+        print(render_summary(summary))
     return 0 if summary.failed_cases == 0 else 1
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+__all__ = [
+    "DEFAULT_CORPUS_PATH",
+    "GoldenAttachment",
+    "GoldenCase",
+    "GoldenCaseResult",
+    "GoldenEvaluationSummary",
+    "GoldenExpected",
+    "GoldenBucketSummary",
+    "GoldenFailureSummary",
+    "evaluate_case",
+    "evaluate_golden_corpus",
+    "load_golden_corpus",
+    "render_summary",
+]

@@ -31,6 +31,10 @@ from mailbot_v26.domain.document_templates import (
     DocumentTemplate,
     select_document_template,
 )
+from mailbot_v26.domain.template_promotion import clear_runtime_template_promotion_cache
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter
+from mailbot_v26.config.learning import configure_learning_config, reset_learning_config
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
@@ -43,6 +47,61 @@ class DummyState:
 def _processor() -> MessageProcessor:
     cfg = SimpleNamespace(llm_call=None)
     return MessageProcessor(cfg, DummyState())
+
+
+def _emit_runtime_promotion_history(
+    *,
+    db_path,
+    account_id: str,
+    sender_email: str,
+    doc_kind: str,
+    priorities: list[str],
+) -> None:
+    emitter = EventEmitter(db_path)
+    for offset, priority in enumerate(priorities, start=1):
+        email_id = 9000 + offset
+        emitter.emit(
+            EventV1(
+                event_type=EventType.MESSAGE_INTERPRETATION,
+                ts_utc=float(email_id),
+                account_id=account_id,
+                entity_id=None,
+                email_id=email_id,
+                payload={
+                    "sender_email": sender_email,
+                    "doc_kind": doc_kind,
+                    "amount": 87500.0,
+                    "due_date": "15.04.2026",
+                    "priority": "рџџЎ",
+                    "action": "Проверить",
+                    "confidence": 0.9,
+                    "context": "NEW_MESSAGE",
+                    "document_id": f"doc-{email_id}",
+                },
+            )
+        )
+        emitter.emit(
+            EventV1(
+                event_type=EventType.PRIORITY_CORRECTION_RECORDED,
+                ts_utc=float(email_id) + 0.1,
+                account_id=account_id,
+                entity_id=None,
+                email_id=email_id,
+                payload={
+                    "new_priority": priority,
+                    "old_priority": "рџџЎ",
+                    "engine": "priority_v2_auto",
+                    "source": "telegram_inbound",
+                },
+            )
+        )
+
+
+def _with_processor_db(db_path):
+    original_db_path = pipeline_processor.DB_PATH
+    pipeline_processor.configure_processor_db_path(db_path)
+    clear_runtime_template_promotion_cache()
+    return original_db_path
 
 
 def _scored_facts_from_attachment(
@@ -2657,6 +2716,226 @@ def test_template_layer_updates_interpretation_not_parallel_semantics() -> None:
     assert decision.facts.get("template_id") == "russian_payroll_common"
     assert interpretation.doc_kind == "payroll"
     assert interpretation.action == decision.action
+
+
+def test_runtime_safe_promotion_applies_to_canonical_interpretation(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "runtime_promotion.sqlite"
+    KnowledgeDB(db_path)
+    account_id = "account@example.com"
+    sender_email = "billing@billing.vendor.test"
+    _emit_runtime_promotion_history(
+        db_path=db_path,
+        account_id=account_id,
+        sender_email=sender_email,
+        doc_kind="invoice",
+        priorities=["рџ”ґ", "рџ”ґ", "рџ”ґ", "рџ”ґ", "рџ”ґ"],
+    )
+    original_db_path = _with_processor_db(db_path)
+    try:
+        configure_learning_config(template_promotion_runtime=True)
+        facts = {
+            "amount": "87 500 USD",
+            "due_date": "15.04.2026",
+            "doc_number": "INV-900",
+            "doc_kind": "invoice",
+            "invoice_signal": True,
+            "payroll_signal": False,
+            "contract_signal": False,
+            "incident_signal": False,
+            "amount_context_missing": False,
+            "amount_window_hit": True,
+            "due_date_window_hit": True,
+            "doc_number_window_hit": True,
+        }
+        baseline = _build_message_decision(
+            priority="\U0001f7e1",
+            action_line="Проверить",
+            summary="",
+            message_facts=dict(facts),
+            sender_email=sender_email,
+            subject="Monthly packet",
+            body_text="Please review the packet.",
+            attachments=[],
+            context="NEW_MESSAGE",
+        )
+        promoted = _build_message_decision(
+            priority="\U0001f7e1",
+            action_line="Проверить",
+            summary="",
+            message_facts=dict(facts),
+            account_id=account_id,
+            sender_email=sender_email,
+            subject="Monthly packet",
+            body_text="Please review the packet.",
+            attachments=[],
+            context="NEW_MESSAGE",
+        )
+        interpretation = _build_message_interpretation(
+            email_id=900,
+            sender_email=sender_email,
+            message_facts=promoted.facts,
+            decision=promoted,
+            document_id="doc-900",
+        )
+    finally:
+        reset_learning_config()
+        pipeline_processor.configure_processor_db_path(original_db_path)
+        clear_runtime_template_promotion_cache()
+
+    assert baseline.facts.get("template_id") in ("", None)
+    assert promoted.facts.get("template_promotion_applied") is True
+    assert promoted.facts.get("template_id") == "russian_invoice_common"
+    assert promoted.confidence > baseline.confidence
+    assert interpretation.template_id == "russian_invoice_common"
+
+
+def test_runtime_safe_promotion_sender_only_does_not_create_payment_action(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "runtime_promotion_sender_only.sqlite"
+    KnowledgeDB(db_path)
+    account_id = "account@example.com"
+    sender_email = "billing@billing.vendor.test"
+    _emit_runtime_promotion_history(
+        db_path=db_path,
+        account_id=account_id,
+        sender_email=sender_email,
+        doc_kind="invoice",
+        priorities=["рџ”ґ", "рџ”ґ", "рџ”ґ", "рџ”ґ", "рџ”ґ"],
+    )
+    original_db_path = _with_processor_db(db_path)
+    try:
+        configure_learning_config(template_promotion_runtime=True)
+        decision = _build_message_decision(
+            priority="\U0001f535",
+            action_line="Ознакомиться",
+            summary="",
+            message_facts={
+                "amount": "",
+                "due_date": "",
+                "doc_number": "",
+                "doc_kind": "",
+                "invoice_signal": False,
+                "payroll_signal": False,
+                "contract_signal": False,
+                "incident_signal": False,
+                "amount_context_missing": False,
+            },
+            account_id=account_id,
+            sender_email=sender_email,
+            subject="Weekly status sync",
+            body_text="Internal status update only.",
+            attachments=[],
+            context="NEW_MESSAGE",
+        )
+    finally:
+        reset_learning_config()
+        pipeline_processor.configure_processor_db_path(original_db_path)
+        clear_runtime_template_promotion_cache()
+
+    assert decision.facts.get("template_promotion_applied") in (None, False)
+    assert decision.facts.get("template_promotion_scope_kind") in ("", None)
+    assert decision.facts.get("template_promotion_scope_value") in ("", None)
+    assert "оплат" not in decision.action.lower()
+
+
+def test_runtime_safe_promotion_contradictions_block_application(tmp_path) -> None:
+    db_path = tmp_path / "runtime_promotion_contradictions.sqlite"
+    KnowledgeDB(db_path)
+    account_id = "account@example.com"
+    sender_email = "billing@billing.vendor.test"
+    _emit_runtime_promotion_history(
+        db_path=db_path,
+        account_id=account_id,
+        sender_email=sender_email,
+        doc_kind="invoice",
+        priorities=["рџ”ґ", "рџ”ґ", "рџ”ґ", "рџ”ґ", "рџ”ґ"],
+    )
+    original_db_path = _with_processor_db(db_path)
+    try:
+        configure_learning_config(template_promotion_runtime=True)
+        decision = _build_message_decision(
+            priority="\U0001f7e1",
+            action_line="Оплатить",
+            summary="",
+            message_facts={
+                "amount": "105 000 руб",
+                "due_date": "",
+                "doc_number": "INV-901",
+                "doc_kind": "invoice",
+                "invoice_signal": True,
+                "payroll_signal": True,
+                "contract_signal": False,
+                "incident_signal": False,
+                "amount_context_missing": False,
+                "consistency_issues": ["payroll_overrides_invoice"],
+            },
+            account_id=account_id,
+            sender_email=sender_email,
+            subject="Payroll packet",
+            body_text="Начислено 120 000 руб, удержано 15 000 руб, к выплате 105 000 руб",
+            attachments=[],
+            context="NEW_MESSAGE",
+        )
+    finally:
+        reset_learning_config()
+        pipeline_processor.configure_processor_db_path(original_db_path)
+        clear_runtime_template_promotion_cache()
+
+    assert decision.facts.get("template_promotion_applied") in (None, False)
+    assert decision.facts.get("template_promotion_scope_kind") in ("", None)
+    assert decision.facts.get("template_promotion_scope_value") in ("", None)
+
+
+def test_runtime_safe_promotion_never_turns_payroll_into_payment_action(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "runtime_promotion_payroll.sqlite"
+    KnowledgeDB(db_path)
+    account_id = "account@example.com"
+    sender_email = "hr@hr.vendor.test"
+    _emit_runtime_promotion_history(
+        db_path=db_path,
+        account_id=account_id,
+        sender_email=sender_email,
+        doc_kind="payroll",
+        priorities=["рџџЎ", "рџџЎ", "рџџЎ", "рџџЎ"],
+    )
+    original_db_path = _with_processor_db(db_path)
+    try:
+        configure_learning_config(template_promotion_runtime=True)
+        decision = _build_message_decision(
+            priority="\U0001f7e1",
+            action_line="Оплатить",
+            summary="",
+            message_facts={
+                "amount": "105 000 руб",
+                "due_date": "",
+                "doc_number": "",
+                "doc_kind": "payroll",
+                "invoice_signal": False,
+                "payroll_signal": True,
+                "contract_signal": False,
+                "incident_signal": False,
+                "amount_context_missing": False,
+            },
+            account_id=account_id,
+            sender_email=sender_email,
+            subject="Расчетный листок за март",
+            body_text="Начислено 120 000 руб, удержано 15 000 руб, к выплате 105 000 руб",
+            attachments=[],
+            context="NEW_MESSAGE",
+        )
+    finally:
+        reset_learning_config()
+        pipeline_processor.configure_processor_db_path(original_db_path)
+        clear_runtime_template_promotion_cache()
+
+    assert decision.facts.get("template_promotion_applied") is True
+    assert decision.facts.get("template_id") == "russian_payroll_common"
+    assert "оплат" not in decision.action.lower()
 
 
 def test_template_priority_prefers_more_specific_match() -> None:

@@ -93,6 +93,7 @@ class WeeklyDigestData:
     silence_risk: dict[str, object] | None = None
     relationship_top_senders: Sequence[dict[str, object]] = ()
     relationship_trend: str | None = None
+    business_summary: dict[str, object] | None = None
 
 
 def _parse_weekday(value: str | None) -> int:
@@ -627,6 +628,18 @@ def _collect_weekly_data(
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("weekly_relationship_digest_failed", error=str(exc))
 
+    try:
+        business_summary = analytics.business_summary(
+            account_email=account_email,
+            account_emails=account_emails,
+            window_days=7,
+            now=now,
+            top_issuer_limit=3,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("weekly_business_summary_failed", error=str(exc))
+        business_summary = None
+
     return WeeklyDigestData(
         week_key=week_key,
         total_emails=int(volume.get("total") or 0),
@@ -649,43 +662,105 @@ def _collect_weekly_data(
         silence_risk=silence_risk,
         relationship_top_senders=relationship_top_senders,
         relationship_trend=relationship_trend,
+        business_summary=business_summary,
     )
 
 
 def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
-    lines = [f"За неделю {data.total_emails} писем. Главное:"]
+    lines = [
+        f"За неделю {data.total_emails} писем. Главное:"
+    ]
     highlights: list[str] = []
-    if data.invoice_count > 0:
-        if data.invoice_total_rub is not None and data.invoice_total_rub > 0:
-            total = f"{data.invoice_total_rub:,}".replace(",", " ")
+    business_summary = data.business_summary or {}
+    payable_count = int(
+        business_summary.get("payable_invoice_count") or data.invoice_count or 0
+    )
+    payable_total = int(
+        business_summary.get("payable_amount_total") or data.invoice_total_rub or 0
+    )
+    if payable_count > 0:
+        if payable_total > 0:
+            total = f"{payable_total:,}".replace(",", " ")
             highlights.append(
-                f"• {data.invoice_count} счёта на оплату (общая сумма {total} ₽)"
+                f"• К оплате сейчас: {payable_count} документов на {total} ₽"
             )
         else:
-            highlights.append(f"• {data.invoice_count} счёта на оплату")
-    if data.contract_count > 0:
-        highlights.append(f"• {data.contract_count} договора ждут подписи")
+            highlights.append(
+                f"• К оплате сейчас: {payable_count} документов"
+            )
+    attention_parts: list[str] = []
+    contract_review_count = int(
+        business_summary.get("contract_review_count") or data.contract_count or 0
+    )
+    reconciliation_attention_count = int(
+        business_summary.get("reconciliation_attention_count") or 0
+    )
+    if contract_review_count > 0:
+        attention_parts.append(
+            f"{contract_review_count} договоров"
+        )
+    if reconciliation_attention_count > 0:
+        attention_parts.append(
+            f"{reconciliation_attention_count} актов сверки"
+        )
+    documents_waiting = int(
+        business_summary.get("documents_waiting_attention_count") or 0
+    )
+    if attention_parts:
+        highlights.append(
+            f"• Ждут внимания: {', '.join(attention_parts)}"
+        )
+    elif documents_waiting > 0:
+        highlights.append(
+            f"• Ждут внимания: {documents_waiting} документов"
+        )
     overdue_count = int(data.commitment_counts.get("overdue") or 0)
     if overdue_count > 0:
-        highlights.append(f"• {overdue_count} обязательства просрочены")
+        highlights.append(
+            f"• {overdue_count} обязательства просрочены"
+        )
     if data.silence_risk:
         contact = _safe_text(
-            str(data.silence_risk.get("contact") or "контакт"), max_len=40
+            str(data.silence_risk.get("contact") or "контакт"),
+            max_len=40,
         )
         days = int(data.silence_risk.get("days_silent") or 0)
         if days > 0:
-            highlights.append(f"• От {contact} — молчание {days} дней (риск)")
-    if data.total_emails >= 3 and data.relationship_top_senders:
+            highlights.append(
+                f"• От {contact} — молчание {days} дней (риск)"
+            )
+    top_issuers = business_summary.get("top_issuers") or []
+    if data.total_emails >= 3 and top_issuers:
+        labels = [
+            _safe_text(
+                str(item.get("issuer_label") or "контрагент"),
+                max_len=28,
+            )
+            for item in top_issuers[:2]
+        ]
+        highlights.append(
+            f"• Самые активные контрагенты: {', '.join(labels)}"
+        )
+    elif data.total_emails >= 3 and data.relationship_top_senders:
         top = data.relationship_top_senders[0]
-        top_sender = _safe_text(str(top.get("sender_email") or "контакт"), max_len=40)
+        top_sender = _safe_text(
+            str(top.get("sender_email") or "контакт"),
+            max_len=40,
+        )
         top_count = int(top.get("emails_count") or 0)
         if top_count > 0:
-            highlights.append(f"• Топ контакт: {top_sender} ({top_count} писем)")
+            highlights.append(
+                f"• Топ контакт: {top_sender} ({top_count} писем)"
+            )
     if data.total_emails >= 3 and data.relationship_trend:
-        highlights.append(f"• Тренд отношений: {data.relationship_trend}")
+        highlights.append(
+            f"• Тренд отношений: {data.relationship_trend}"
+        )
 
     if not highlights:
-        highlights.append("• Спокойная неделя: критичных сигналов не было.")
+        highlights.append(
+            "• Спокойная неделя: критичных сигналов не было."
+        )
     lines.extend(highlights[:4])
 
     progress_line = _format_weekly_accuracy_progress(data.weekly_accuracy_progress)
@@ -697,7 +772,6 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         lines.append("")
         lines.extend(format_attention_block(data.attention_economics))
     return "\n".join(lines)
-
 
 def _format_share_accuracy(progress: WeeklyAccuracyProgress | None) -> str:
     if progress is None:

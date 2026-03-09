@@ -1,22 +1,27 @@
 Goal (incl. success criteria):
-- Enforce one-message rule reliability: no duplicate Telegram notifications for the same email (same email_id / same (account_id, imap_uid)) under retries, restarts, or duplicate IMAP ingestion.
+- Complete the reliability + quality sprint with canonical deterministic extraction/decision, safe correction-driven template promotion, issuer/business projections, replayable evaluator gates, and full green verification (`python -m compileall mailbot_v26 -q`, full `python -m pytest -q --tb=short`, `python -m pytest mailbot_v26/tests/ -q --tb=short`, `python -m mailbot_v26.tools.eval_golden_corpus`).
 Constraints / Assumptions:
-- Pipeline order unchanged (PARSE в†’ LLM в†’ TG; digests as-is).
+- Pipeline order unchanged (PARSE -> LLM -> TG; digests as-is).
 - Telegram payload schema for outbound notifications unchanged.
 - Fast First preserved for critical deliveries.
 - Events_v1 remains the source of truth.
 - RU-first user-facing responses.
 - No new paid services.
 - No stable thread key (thread_id/conversation_id or reliable in_reply_to mapping) available for shadow detectors.
+- No new Python dependencies or deep storage/schema rewrites.
 Key decisions:
 - Delivery decisions are deterministic and logged in events_v1 (DELIVERY_POLICY_APPLIED).
 - Quiet hours use local machine time; no Telegram DND detection.
 State:
-- Behavior/Attention Engine integrated with TG delivery and daily digest.
-- Delivery policy config and feature flags added.
-- Events_v1 extended for behavioral signals.
-- Premium processor routing available behind feature flag.
+- Canonical flow remains `facts -> validation -> scoring -> consistency -> template layer -> decision -> interpretation -> events -> projections`.
+- Template promotion now has explicit learning modes: shadow recommendations stay on by default, while guarded runtime application is opt-in via `mailbot_v26.config.learning`.
+- Issuer profiles and weekly/cockpit business summaries are derived from interpretation events only.
+- Golden corpus remains at 128 synthetic cases with deterministic category/subset/failure summaries, plus a developer-facing `--report` view and projection-discipline guard coverage; full suite, targeted suites, and evaluator are green in both default mode and explicit runtime-promotion mode.
 Done:
+- 2026-03-09: Completed final Stage 6-7 verification sweep for the mega-pass with no new regressions: cleaned runtime log artifacts from the working diff, re-ran `python -m compileall mailbot_v26 -q`, `python -m pytest -q --tb=short` (1280 passed, 5 warnings), `python -m pytest mailbot_v26/tests/ -q --tb=short` (1170 passed, 3 warnings), `python -m mailbot_v26.tools.eval_golden_corpus` (128/128 passed, 56/56 critical), `python -m mailbot_v26.tools.eval_golden_corpus --report` (clean deterministic output), explicitly re-ran evaluator with `template_promotion_runtime=True` (128/128 passed), and re-verified targeted processor/imap/polling/source-bundle/weekly/dashboard/corpus/promotion/issuer/projection suites; current PR diff is code/tests/docs only.
+- 2026-03-09: Completed the autonomous Stage 1-5 hardening pass: added deterministic sender identity helpers and issuer fingerprints (`mailbot_v26/domain/issuer_identity.py`), rewired correction scoping and sender relationship grouping to use those keys, introduced explicit learning-mode config with shadow default/runtime opt-in (`mailbot_v26/config/learning.py`), propagated manual-override protection into runtime promotion, added issuer identity + guarded promotion regressions (`test_issuer_identity.py`, expanded `test_template_promotion.py`, updated runtime promotion processor tests), confirmed projection discipline through read-only guard tests (`test_rebuild_projections.py`), and extended the golden evaluator with a deterministic `--report` mode plus expanded corpus/report regressions (`test_golden_corpus_eval.py`); verification green (`python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1170 passed, `python -m mailbot_v26.tools.eval_golden_corpus` => 128/128 passed, `python -m mailbot_v26.tools.eval_golden_corpus --report` clean, targeted processor/template/issuer/rebuild/week/dashboard/imap/source-bundle suites passed).
+- 2026-03-09: Completed the mega reliability + quality sprint: expanded golden corpus from 80 to 128 synthetic cases with critical/category/subset/failure summaries, activated safe runtime template promotion with per-doc-kind thresholds and canonical `template_id` propagation, added deterministic issuer-profile enrichment plus business projections for weekly digest and dashboard from `message_interpretation` events only, added issuer/business regression suites (`test_template_promotion.py`, `test_issuer_profile.py`, `test_web_dashboard_api.py`, `test_weekly_digest*.py`), and hardened processing spans with a 1ms duration floor for deterministic observability tests; verification green (`python -m pytest -q --tb=short` => 1243 passed, `python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1133 passed, `python -m mailbot_v26.tools.eval_golden_corpus` => 128/128 passed, targeted processor/promotion/issuer/weekly/dashboard/imap/tg suites all passed).
+- 2026-03-09: Completed evaluation-and-learning groundwork without runtime behavior changes: added synthetic golden corpus fixture set (`mailbot_v26/tests/fixtures/golden_corpus/cases.json`, 80 cases across invoice/payroll/reconciliation/contract/notification/attachment/reply-pollution/sender-signal categories), exposed deterministic offline evaluator module/tool (`mailbot_v26/tools/eval_golden_corpus.py`), added report-only canonical correction analysis helper (`mailbot_v26/domain/template_promotion.py`) that reads `events_v1` priority-correction + message-interpretation events, documented corpus usage in fixture README, and added regression suites for corpus-critical cases/evaluator reporting/promotion-helper scoping; verification green (`python -m pytest -q --tb=short` => 1229 passed, `python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1119 passed, `python -m mailbot_v26.tools.eval_golden_corpus` => 80/80 passed).
 - 2026-03-09: Completed attachment-intelligence accuracy pass in canonical extraction flow: added deterministic attachment page-artifact cleanup (`_clean_attachment_page_artifacts`) and lightweight table profiling/reconciliation in `mailbot_v26/pipeline/processor.py`, routed cleaned attachment text through fact collection/priority summaries/consistency scoring, and expanded `test_pipeline_processor.py` with regressions for repeated PDF headers/page counters, attachment table totals vs line items, subtotal+tax validation, payroll/reconciliation suppression, single-page cleanup safety, conflict-driven confidence drop, and interpretation propagation; verification green (`python -m pytest -q --tb=short` => 1221 passed, `python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1111 passed, targeted processor/render/downstream sets all passed).
 - 2026-03-08: Completed deterministic template-layer pass in canonical extraction flow: added code-defined sender/document template registry (`mailbot_v26/domain/document_templates.py`), applied template matching after consistency and before final decision normalization in processor (`_apply_document_template_layer` within `_build_message_decision` with sender/domain+subject+attachment signals, template confidence boost, and suppression guard), and added targeted regressions in `test_pipeline_processor.py` for invoice/payroll/reconciliation/contract templates, sender-only guard, forbidden anchors, template priority tie-break, and interpretation propagation; verification green (`python -m pytest -q --tb=short` => 1211 passed, `python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1101 passed, targeted processor/render/downstream sets all passed).
 - 2026-03-08: Completed architecture-correctness pass for canonical interpretation downstream semantics: replaced sender relationship `invoice_count/contract_count` derivation from `emails.subject/body_summary` regex parsing with `events_v1` `message_interpretation` payload parsing (`doc_kind` scoped by `sender_email`), added canonical-source regression aliases for Telegram/weekly/dashboard/manual-priority paths, and added explicit no-duplicate-semantic-parsing guard when interpretation is present; verification green (`python -m pytest -q --tb=short` => 1203 passed, `python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1093 passed).
@@ -219,53 +224,31 @@ Done:
 - 2026-03-06: Telegram UX hotfix pass started: wired startup `config.storage.db_path` into processor module (`configure_processor_db_path`), ensured `start.py` creates DB parent directory before `Storage(...)`, switched user path keyboards to direct priority buttons (`initial_prio=True`), and updated auto-priority-gate defaults/examples (`enabled=true`, `min_samples=10`); runtime verification currently FAILED with broad pre-existing+regression suite failures (94 failed / 950 passed).
 - 2026-03-06: user-facing reliability hardening applied with minimal runtime patchset: outbound Telegram send/edit now normalizes mojibake text centrally, `/status` now includes AI + delivery mode and uses global startup health mode (fixed `StartupHealthChecker.evaluate_mode` global-state update), IMAP runtime health now classifies repeated handshake/connect timeouts and enters per-account 24h cooldown with cooldown metadata/log fields, default progressive pre-message disabled unless `MAILBOT_ENABLE_PROGRESSIVE_PREMESSAGE` is explicitly enabled, weekly digest defaults switched ON across templates/bootstrap/feature defaults, and inbound callback rerender now adds a single `РџСЂРёРѕСЂРёС‚РµС‚: ... РІСЂСѓС‡РЅСѓСЋ` marker when `priority_source=user_override`; runtime verification remains UNCONFIRMED here because no Python interpreter is available (`.venv` missing, `python/py` unavailable).
 Now:
-- Attachment-heavy PDF/XLS evidence now enters canonical fact collection with page-artifact cleanup and table-aware consistency checks.
-- Full suite and targeted attachment/render/downstream regressions are green on current tree.
+- Mega-sprint implementation is complete and verified; working tree retains only code/test/projection changes plus `CONTINUITY.md`.
+- Runtime artifacts from local verification are restored to `HEAD` and excluded from the PR diff.
 Next:
-- Monitor attachment extraction quality for new recurring header/footer/table patterns without introducing a parallel semantic path.
-- Keep runtime log artifacts out of PR diffs; preserve unexpected log changes via stash before continuing code work.
+- Future follow-up only: tune promotion thresholds from real correction loops, expand issuer knowledge carefully, and add richer business summaries without breaking canonical-event discipline.
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: Should callback snapshot-update miss (`email_id` absent) emit a dedicated contract event for dashboard alerting, or keep logger-only?
+- UNCONFIRMED: What operator-visible flag or review workflow should gate any future promotion beyond the current safe internal thresholds?
 Working set (files / tables / tests):
+- mailbot_v26/config/learning.py
+- mailbot_v26/domain/issuer_identity.py
+- mailbot_v26/domain/issuer_profile.py
+- mailbot_v26/domain/template_promotion.py
+- mailbot_v26/observability/processing_span.py
+- mailbot_v26/tools/eval_golden_corpus.py
+- mailbot_v26/tests/fixtures/golden_corpus/cases.json
+- mailbot_v26/tests/fixtures/golden_corpus/README.md
+- mailbot_v26/tests/test_golden_corpus_eval.py
+- mailbot_v26/tests/test_issuer_profile.py
+- mailbot_v26/tests/test_template_promotion.py
 - mailbot_v26/pipeline/processor.py
-- mailbot_v26/telegram/inbound.py
-- mailbot_v26/start.py
-- mailbot_v26/imap_client.py
-- mailbot_v26/bot_core/pipeline.py
-- mailbot_v26/config/auto_priority_gate.py
-- mailbot_v26/config/config.ini.example
-- mailbot_v26/config/settings.ini.example
-- mailbot_v26/tools/config_bootstrap.py
-- mailbot_v26/version.py
-- mailbot_v26/health_monitor.py
-- mailbot_v26/state_manager.py
-- mailbot_v26/features/flags.py
-- mailbot_v26/bot_core/extractors/pdf.py
-- mailbot_v26/tasks/__init__.py
-- mailbot_v26/system/__init__.py
-- mailbot_v26/llm/__init__.py
-- mailbot_v26/storage/__init__.py
-- mailbot_v26/maintenance/__init__.py
-- mailbot_v26/tests/test_startup_health.py
-- mailbot_v26/tests/test_runtime_health.py
-- mailbot_v26/tests/test_source_mojibake_scan.py
-- mailbot_v26/tests/test_imap_client.py
-- mailbot_v26/tests/test_polling_loop.py
-- mailbot_v26/tests/test_state_manager.py
-- mailbot_v26/tests/test_auto_priority_gate_loader.py
-- mailbot_v26/tests/test_feature_flags.py
-- mailbot_v26/tests/test_priority_keyboard.py
-- mailbot_v26/tests/test_telegram_delivery_pipeline.py
-- mailbot_v26/tests/test_telegram_inbound.py
-- mailbot_v26/web_observability/static/style.css
-- mailbot_v26/web_observability/templates/base.html
-- mailbot_v26/web_observability/templates/cockpit.html
-- mailbot_v26/web_observability/templates/learning.html
-- mailbot_v26/web_observability/templates/relationships.html
-- mailbot_v26/web_observability/templates/relationships_contact.html
-- mailbot_v26/tests/test_web_nav_links.py
 - mailbot_v26/storage/analytics.py
+- mailbot_v26/pipeline/weekly_digest.py
+- mailbot_v26/web_observability/app.py
+- mailbot_v26/web_observability/templates/dashboard.html
 - mailbot_v26/tests/test_pipeline_processor.py
 - mailbot_v26/tests/test_weekly_digest.py
+- mailbot_v26/tests/test_weekly_digest_calibration_render.py
 - mailbot_v26/tests/test_web_dashboard_api.py
 - CONTINUITY.md

@@ -45,7 +45,7 @@ def test_weekly_digest_renders_invoice_highlight_with_amount() -> None:
         }
     )
     text = weekly_digest._build_weekly_digest_text(data)
-    assert "• 3 счёта на оплату (общая сумма 387 000 ₽)" in text
+    assert "• К оплате сейчас: 3 документов на 387 000 ₽" in text
 
 
 def test_weekly_digest_renders_contract_highlight() -> None:
@@ -56,7 +56,7 @@ def test_weekly_digest_renders_contract_highlight() -> None:
         }
     )
     text = weekly_digest._build_weekly_digest_text(data)
-    assert "• 2 договора ждут подписи" in text
+    assert "• Ждут внимания: 2 договоров" in text
 
 
 def test_weekly_digest_renders_silence_risk_highlight() -> None:

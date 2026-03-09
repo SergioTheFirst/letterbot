@@ -1,5 +1,5 @@
-{% extends "base.html" %}
-{% block title %}Live Dashboard — {{ title }}{% endblock %}
+﻿{% extends "base.html" %}
+{% block title %}Live Dashboard вЂ” {{ title }}{% endblock %}
 
 {% block content %}
   <div class="status-strip" id="status-strip">
@@ -46,7 +46,7 @@
 
     <section class="card live-card" id="card-learning" data-testid="quality-summary">
       <h2>Learning</h2>
-      <div class="hint">Качество автоматизации</div>
+      <div class="hint">РљР°С‡РµСЃС‚РІРѕ Р°РІС‚РѕРјР°С‚РёР·Р°С†РёРё</div>
       {% if quality_summary.available %}
       <div class="quality-metric"><span class="label">Corrections</span><span class="value" id="corrections-week">{{ quality_summary.corrections }}</span></div>
       <div class="quality-metric"><span class="label">Surprise rate</span><span class="value" id="surprise-rate">{{ quality_summary.surprise_rate }}</span></div>
@@ -58,14 +58,26 @@
       {% endif %}
     </section>
 
+    <section class="card live-card" id="card-business">
+      <h2>Business</h2>
+      <div class="metric"><span>Payable now</span><strong id="business-payable">0</strong></div>
+      <div class="metric"><span>Waiting attention</span><strong id="business-waiting">0</strong></div>
+      <div class="metric"><span>Silence risk</span><strong id="business-silence">0</strong></div>
+      <div class="metric"><span>Due soon / overdue</span><strong id="business-due">0 / 0</strong></div>
+    </section>
+
     <section class="card live-card live-events" id="card-events">
       <h2>Recent events</h2>
-      <ul id="events-list" class="events-list"><li class="hint">Waiting for live events…</li></ul>
+      <ul id="events-list" class="events-list"><li class="hint">Waiting for live eventsвЂ¦</li></ul>
     </section>
 
     <section class="card live-card" id="card-top-contacts">
       <h2>Top contacts</h2>
-      <ul id="top-contacts-list" class="events-list"><li class="hint">Waiting for profile data…</li></ul>
+      <ul id="top-contacts-list" class="events-list"><li class="hint">Waiting for profile dataвЂ¦</li></ul>
+    </section>
+    <section class="card live-card" id="card-top-issuers">
+      <h2>Top issuers</h2>
+      <ul id="top-issuers-list" class="events-list"><li class="hint">Waiting for issuer data?</li></ul>
     </section>
   </div>
 
@@ -75,6 +87,7 @@
       const offline = document.getElementById('status-strip-offline');
       const eventsList = document.getElementById('events-list');
       const topContactsList = document.getElementById('top-contacts-list');
+      const topIssuersList = document.getElementById('top-issuers-list');
       const setText = (id, value) => {
         const node = document.getElementById(id);
         if (node) node.textContent = String(value);
@@ -101,17 +114,21 @@
             setText('priority-blue', data.priority?.blue ?? 0);
             setText('corrections-week', data.corrections_week ?? 0);
             setText('surprise-rate', `${Math.round((data.surprise_rate ?? 0) * 100)}%`);
+            setText('business-payable', data.business?.payable_amount_total ?? 0);
+            setText('business-waiting', data.business?.documents_waiting_attention_count ?? 0);
+            setText('business-silence', data.business?.silence_risk_count ?? 0);
+            setText('business-due', `${data.business?.due_soon_count ?? 0} / ${data.business?.overdue_due_count ?? 0}`);
             if (eventsList) {
               const items = Array.isArray(data.recent_events) ? data.recent_events : [];
               if (!items.length) {
                 eventsList.innerHTML = '<li class="hint">No recent events yet.</li>';
-                return;
+              } else {
+                eventsList.innerHTML = items.map((item) => {
+                  const ts = formatEventTime(item.ts || '');
+                  const text = item.text || item.type || 'event';
+                  return `<li><span class="mono">${ts}</span> ${text}</li>`;
+                }).join('');
               }
-              eventsList.innerHTML = items.map((item) => {
-                const ts = formatEventTime(item.ts || '');
-                const text = item.text || item.type || 'event';
-                return `<li><span class="mono">${ts}</span> ${text}</li>`;
-              }).join('');
             }
             if (topContactsList) {
               const topContacts = Array.isArray(data.top_contacts) ? data.top_contacts : [];
@@ -122,7 +139,20 @@
                   const sender = item.sender_email || 'contact';
                   const emails = item.emails_count ?? 0;
                   const overdue = item.overdue_count ?? 0;
-                  return `<li>${sender} — ${emails} emails, overdue ${overdue}</li>`;
+                  return `<li>${sender} вЂ” ${emails} emails, overdue ${overdue}</li>`;
+                }).join('');
+              }
+            }
+            if (topIssuersList) {
+              const topIssuers = Array.isArray(data.top_issuers) ? data.top_issuers : [];
+              if (!topIssuers.length) {
+                topIssuersList.innerHTML = '<li class="hint">No issuers yet.</li>';
+              } else {
+                topIssuersList.innerHTML = topIssuers.map((item) => {
+                  const issuer = item.issuer_label || item.issuer_key || 'issuer';
+                  const payable = item.payable_amount_total ?? 0;
+                  const waiting = item.documents_waiting_attention_count ?? 0;
+                  return `<li>${issuer} - payable ${payable}, waiting ${waiting}</li>`;
                 }).join('');
               }
             }
@@ -152,3 +182,4 @@
     })();
   </script>
 {% endblock %}
+

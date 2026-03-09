@@ -3737,10 +3737,21 @@ def create_app(
             "surprise_rate": 0.0,
             "recent_events": [],
             "top_contacts": [],
+            "top_issuers": [],
             "interpretation": {
                 "invoice_count": 0,
                 "contract_count": 0,
                 "invoice_total": 0,
+            },
+            "business": {
+                "payable_amount_total": 0,
+                "payable_invoice_count": 0,
+                "documents_waiting_attention_count": 0,
+                "contract_review_count": 0,
+                "reconciliation_attention_count": 0,
+                "silence_risk_count": 0,
+                "overdue_due_count": 0,
+                "due_soon_count": 0,
             },
         }
         try:
@@ -3931,6 +3942,20 @@ def create_app(
                     analytics = _analytics()
                     account_email = account_scope[0] if account_scope else ""
                     if account_email:
+                        business_summary = analytics.business_summary(
+                            account_email=account_email,
+                            account_emails=account_scope,
+                            window_days=7,
+                            top_issuer_limit=5,
+                        )
+                        payload["business"] = {
+                            key: value
+                            for key, value in business_summary.items()
+                            if key != "top_issuers"
+                        }
+                        payload["top_issuers"] = list(
+                            business_summary.get("top_issuers") or []
+                        )
                         payload["top_contacts"] = (
                             analytics.top_sender_relationship_profiles(
                                 account_email=account_email,

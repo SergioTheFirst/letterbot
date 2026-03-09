@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from mailbot_v26.budgets.contract import BudgetPeriod, BudgetType, ResourceBudget
+from mailbot_v26.domain.issuer_identity import (
+    normalize_sender_identity,
+    resolve_sender_profile_key,
+)
+from mailbot_v26.domain.issuer_profile import issuer_profile_from_interpretation_payload
 from mailbot_v26.events.contract import EventType
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 
@@ -322,6 +327,53 @@ class KnowledgeAnalytics:
         if len(cleaned) <= limit:
             return cleaned
         return cleaned[: max(0, limit - 1)] + "…"
+
+    @staticmethod
+    def _sender_identity(
+        sender_email: str,
+        *,
+        display_name: str = "",
+        subject_hint: str = "",
+        doc_marker: str = "",
+    ) -> dict[str, str]:
+        return normalize_sender_identity(
+            sender_email,
+            display_name=display_name,
+            subject_hint=subject_hint,
+            doc_marker=doc_marker,
+        )
+
+    @classmethod
+    def _sender_profile_key(
+        cls,
+        sender_email: str,
+        *,
+        display_name: str = "",
+        subject_hint: str = "",
+        doc_marker: str = "",
+    ) -> str:
+        return resolve_sender_profile_key(
+            sender_email,
+            display_name=display_name,
+            subject_hint=subject_hint,
+            doc_marker=doc_marker,
+        )
+
+    @classmethod
+    def _sender_profile_key_from_payload(cls, payload: Mapping[str, object]) -> str:
+        return cls._sender_profile_key(
+            str(payload.get("sender_email") or payload.get("from_email") or ""),
+            display_name=str(
+                payload.get("issuer_label")
+                or payload.get("display_name")
+                or payload.get("sender_name")
+                or ""
+            ),
+            subject_hint=str(
+                payload.get("subject_normalized") or payload.get("subject") or ""
+            ),
+            doc_marker=str(payload.get("issuer_tax_id") or ""),
+        )
 
     @staticmethod
     def _parse_json_dict(raw: object) -> dict[str, object]:
@@ -4435,20 +4487,34 @@ class KnowledgeAnalytics:
         account_ids: Sequence[str],
         sender_email: str,
         now_ts: float,
+        sender_emails: Sequence[str] | None = None,
+        sender_profile_key: str | None = None,
     ) -> dict[str, object] | None:
         normalized_sender = str(sender_email or "").strip().lower()
-        if not normalized_sender or not account_ids:
+        normalized_senders = sorted(
+            {
+                str(item or "").strip().lower()
+                for item in (sender_emails or (normalized_sender,))
+                if str(item or "").strip()
+            }
+        )
+        if not normalized_sender or not normalized_senders or not account_ids:
             return None
+        identity = self._sender_identity(normalized_sender)
+        resolved_profile_key = sender_profile_key or self._sender_profile_key(
+            normalized_sender
+        )
         email_clause, email_params = self._account_scope_clause(account_ids)
         if email_clause:
             email_clause = email_clause.replace("account_id", "account_email")
-        sender_params: list[object] = [normalized_sender]
+        sender_placeholders = ", ".join(["?"] * len(normalized_senders))
+        sender_params: list[object] = [*normalized_senders]
         sender_params.extend(email_params)
         email_rows = self._execute_select(
             (
                 "SELECT subject, body_summary, received_at, created_at "
                 "FROM emails "
-                "WHERE LOWER(COALESCE(from_email, '')) = ?"
+                f"WHERE LOWER(COALESCE(from_email, '')) IN ({sender_placeholders})"
                 f"{email_clause}"
             ),
             sender_params,
@@ -4478,10 +4544,7 @@ class KnowledgeAnalytics:
         )
         for row in interpretation_rows:
             payload = self._event_payload(row)
-            event_sender = str(
-                payload.get("sender_email") or payload.get("from_email") or ""
-            ).strip().lower()
-            if event_sender != normalized_sender:
+            if self._sender_profile_key_from_payload(payload) != resolved_profile_key:
                 continue
             doc_kind = str(payload.get("doc_kind") or "").strip().lower()
             if doc_kind == "invoice":
@@ -4489,17 +4552,27 @@ class KnowledgeAnalytics:
             elif doc_kind == "contract":
                 contract_count += 1
 
-        sender_like = f'%"sender_email": "{normalized_sender}"%'
-        sender_like_alt = f'%"from_email": "{normalized_sender}"%'
+        sender_like_clauses: list[str] = []
+        sender_like_params: list[object] = []
+        for item in normalized_senders:
+            sender_like_clauses.append(
+                "LOWER(COALESCE(payload_json, payload, '')) LIKE ?"
+            )
+            sender_like_params.append(f'%\"sender_email\": \"{item}\"%')
+            sender_like_clauses.append(
+                "LOWER(COALESCE(payload_json, payload, '')) LIKE ?"
+            )
+            sender_like_params.append(f'%\"from_email\": \"{item}\"%')
         event_rows = self._execute_select(
             (
                 "SELECT event_type, payload_json, payload "
                 "FROM events_v1 "
-                "WHERE (LOWER(COALESCE(payload_json, payload, '')) LIKE ? "
-                "OR LOWER(COALESCE(payload_json, payload, '')) LIKE ? )"
+                "WHERE ("
+                + " OR ".join(sender_like_clauses)
+                + ")"
                 f"{event_clause}"
             ),
-            [sender_like, sender_like_alt, *event_params],
+            [*sender_like_params, *event_params],
         )
         overdue_count = 0
         trust_score = 0
@@ -4527,6 +4600,10 @@ class KnowledgeAnalytics:
             last_contact_days = max(0, int(delta_days))
         return {
             "sender_email": normalized_sender,
+            "sender_emails": normalized_senders,
+            "sender_identity_key": str(identity.get("key") or ""),
+            "sender_identity_confidence": str(identity.get("confidence") or ""),
+            "sender_profile_key": resolved_profile_key,
             "emails_count": emails_count,
             "invoice_count": invoice_count,
             "contract_count": contract_count,
@@ -4581,19 +4658,235 @@ class KnowledgeAnalytics:
             [since_dt.timestamp(), *email_params, limit],
         )
         now_ts = (now or datetime.now(timezone.utc)).timestamp()
-        profiles: list[dict[str, object]] = []
+        grouped_senders: dict[str, dict[str, object]] = {}
         for row in sender_rows:
             sender = str(row.get("sender_email") or "").strip().lower()
             if not sender:
                 continue
+            profile_key = self._sender_profile_key(sender)
+            entry = grouped_senders.setdefault(
+                profile_key,
+                {
+                    "sender_emails": set(),
+                    "emails_count": 0,
+                    "representative_sender": sender,
+                },
+            )
+            sender_set = entry["sender_emails"]
+            if isinstance(sender_set, set):
+                sender_set.add(sender)
+            entry["emails_count"] = int(entry.get("emails_count") or 0) + int(
+                row.get("emails_count") or 0
+            )
+            representative = str(entry.get("representative_sender") or "").strip().lower()
+            if not representative or sender < representative:
+                entry["representative_sender"] = sender
+
+        profiles: list[dict[str, object]] = []
+        ordered_groups = sorted(
+            grouped_senders.items(),
+            key=lambda item: (
+                -int(item[1].get("emails_count") or 0),
+                str(item[1].get("representative_sender") or ""),
+            ),
+        )[:limit]
+        for profile_key, group in ordered_groups:
+            sender = str(group.get("representative_sender") or "").strip().lower()
             profile = self._build_sender_relationship_profile(
                 account_ids=account_ids,
                 sender_email=sender,
                 now_ts=now_ts,
+                sender_emails=sorted(group.get("sender_emails") or []),
+                sender_profile_key=profile_key,
             )
             if profile is not None:
                 profiles.append(profile)
         return profiles
+
+    def _business_projection_from_interpretations(
+        self,
+        *,
+        account_ids: Sequence[str],
+        since_ts: float,
+        now_dt: datetime,
+    ) -> tuple[dict[str, int], list[dict[str, object]]]:
+        summary = {
+            "payable_amount_total": 0,
+            "payable_invoice_count": 0,
+            "documents_waiting_attention_count": 0,
+            "contract_review_count": 0,
+            "reconciliation_attention_count": 0,
+            "overdue_due_count": 0,
+            "due_soon_count": 0,
+        }
+        if not account_ids:
+            return summary, []
+        rows = self._event_rows_scoped(
+            account_ids=account_ids,
+            event_type=EventType.MESSAGE_INTERPRETATION.value,
+            since_ts=since_ts,
+        )
+        issuer_profiles: dict[str, dict[str, object]] = {}
+        for row in rows:
+            payload = self._event_payload(row)
+            doc_kind = str(payload.get("doc_kind") or "").strip().lower()
+            action = str(payload.get("action") or "").strip().lower()
+            priority = str(payload.get("priority") or "").strip().lower()
+            confidence = float(payload.get("confidence") or 0.0)
+            amount_raw = payload.get("amount")
+            amount_value: float | None = None
+            if amount_raw not in (None, ""):
+                try:
+                    amount_value = float(amount_raw)
+                except (TypeError, ValueError):
+                    amount_value = None
+            waiting_attention = doc_kind in {"invoice", "contract", "reconciliation"} or (
+                priority in {"рџ”ґ", "рџџЎ", "red", "yellow"} and bool(action)
+            )
+            if waiting_attention:
+                summary["documents_waiting_attention_count"] += 1
+            if doc_kind == "invoice":
+                summary["payable_invoice_count"] += 1
+                if amount_value is not None:
+                    summary["payable_amount_total"] += int(round(amount_value))
+            elif doc_kind == "contract":
+                summary["contract_review_count"] += 1
+            elif doc_kind == "reconciliation":
+                summary["reconciliation_attention_count"] += 1
+
+            due_value = str(payload.get("due_date") or "").strip()
+            due_dt: datetime | None = None
+            if due_value:
+                for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+                    try:
+                        due_dt = datetime.strptime(due_value, fmt).replace(
+                            tzinfo=timezone.utc
+                        )
+                        break
+                    except ValueError:
+                        continue
+            if doc_kind == "invoice" and confidence >= 0.45 and due_dt is not None:
+                delta_days = (due_dt.date() - now_dt.date()).days
+                if delta_days < 0:
+                    summary["overdue_due_count"] += 1
+                elif delta_days <= 7:
+                    summary["due_soon_count"] += 1
+
+            issuer_profile = issuer_profile_from_interpretation_payload(payload)
+            if issuer_profile is None:
+                continue
+            profile = issuer_profiles.setdefault(
+                issuer_profile.issuer_key,
+                {
+                    "issuer_key": issuer_profile.issuer_key,
+                    "issuer_label": issuer_profile.issuer_label,
+                    "issuer_domain": issuer_profile.sender_domain,
+                    "issuer_tax_id": issuer_profile.issuer_tax_id,
+                    "payable_amount_total": 0,
+                    "payable_invoice_count": 0,
+                    "contract_review_count": 0,
+                    "reconciliation_attention_count": 0,
+                    "documents_waiting_attention_count": 0,
+                    "total_documents": 0,
+                },
+            )
+            profile["total_documents"] = int(profile["total_documents"] or 0) + 1
+            if waiting_attention:
+                profile["documents_waiting_attention_count"] = (
+                    int(profile["documents_waiting_attention_count"] or 0) + 1
+                )
+            if doc_kind == "invoice":
+                profile["payable_invoice_count"] = int(
+                    profile["payable_invoice_count"] or 0
+                ) + 1
+                if amount_value is not None:
+                    profile["payable_amount_total"] = int(
+                        profile["payable_amount_total"] or 0
+                    ) + int(round(amount_value))
+            elif doc_kind == "contract":
+                profile["contract_review_count"] = int(
+                    profile["contract_review_count"] or 0
+                ) + 1
+            elif doc_kind == "reconciliation":
+                profile["reconciliation_attention_count"] = int(
+                    profile["reconciliation_attention_count"] or 0
+                ) + 1
+
+        ordered_profiles = sorted(
+            issuer_profiles.values(),
+            key=lambda item: (
+                -(
+                    int(item.get("payable_amount_total") or 0)
+                    + int(item.get("payable_invoice_count") or 0) * 10_000
+                    + int(item.get("contract_review_count") or 0) * 5_000
+                    + int(item.get("reconciliation_attention_count") or 0) * 4_000
+                    + int(item.get("documents_waiting_attention_count") or 0) * 1_000
+                ),
+                -int(item.get("total_documents") or 0),
+                str(item.get("issuer_label") or ""),
+            ),
+        )
+        return summary, ordered_profiles
+
+    def top_issuer_profiles(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        days: int = 7,
+        limit: int = 5,
+        now: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        if not account_ids or days <= 0 or limit <= 0:
+            return []
+        now_dt = now or datetime.now(timezone.utc)
+        _, issuer_profiles = self._business_projection_from_interpretations(
+            account_ids=account_ids,
+            since_ts=(now_dt - timedelta(days=days)).timestamp(),
+            now_dt=now_dt,
+        )
+        return issuer_profiles[:limit]
+
+    def business_summary(
+        self,
+        *,
+        account_email: str,
+        account_emails: Iterable[str] | None = None,
+        window_days: int = 7,
+        now: datetime | None = None,
+        top_issuer_limit: int = 5,
+    ) -> dict[str, object]:
+        account_ids = self._normalize_account_scope(account_email, account_emails)
+        now_dt = now or datetime.now(timezone.utc)
+        if not account_ids or window_days <= 0:
+            return {
+                "payable_amount_total": 0,
+                "payable_invoice_count": 0,
+                "documents_waiting_attention_count": 0,
+                "contract_review_count": 0,
+                "reconciliation_attention_count": 0,
+                "silence_risk_count": 0,
+                "overdue_due_count": 0,
+                "due_soon_count": 0,
+                "top_issuers": [],
+            }
+        summary, issuer_profiles = self._business_projection_from_interpretations(
+            account_ids=account_ids,
+            since_ts=(now_dt - timedelta(days=window_days)).timestamp(),
+            now_dt=now_dt,
+        )
+        silence_risk_count = len(
+            self.get_silence_insights(
+                account_email=account_email,
+                account_emails=account_ids,
+                window_days=window_days,
+                limit=max(1, top_issuer_limit),
+            )
+        )
+        summary["silence_risk_count"] = silence_risk_count
+        summary["top_issuers"] = issuer_profiles[:top_issuer_limit]
+        return summary
 
     def silence_insights(
         self,

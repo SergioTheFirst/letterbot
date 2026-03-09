@@ -39,6 +39,7 @@ from mailbot_v26.config.delivery_policy import (
     DeliveryPolicyConfig,
     load_delivery_policy_config,
 )
+from mailbot_v26.config.learning import get_learning_config
 from mailbot_v26.config.budget_policy import (
     load_budget_gate_config,
     load_budget_usage_config,
@@ -56,6 +57,8 @@ from mailbot_v26.config_loader import (
 )
 from mailbot_v26.facts.fact_extractor import FactExtractor
 from mailbot_v26.domain.document_templates import select_document_template
+from mailbot_v26.domain.issuer_profile import IssuerProfile, build_issuer_profile
+from mailbot_v26.domain.template_promotion import find_runtime_template_promotion
 from mailbot_v26.domain.fact_snippets import pick_attachment_fact, pick_email_body_fact
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
 from mailbot_v26.features import FeatureFlags
@@ -1007,6 +1010,11 @@ class MessageInterpretation:
     confidence: float
     context: str
     document_id: str | None
+    template_id: str | None = None
+    issuer_key: str | None = None
+    issuer_label: str | None = None
+    issuer_domain: str | None = None
+    issuer_tax_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -4253,6 +4261,7 @@ def _build_message_interpretation(
     document_id: str | None,
     action: str | None = None,
     priority: str | None = None,
+    issuer_profile: IssuerProfile | None = None,
 ) -> MessageInterpretation:
     due_date = (
         str(decision.due_date or message_facts.get("due_date") or "").strip() or None
@@ -4263,6 +4272,10 @@ def _build_message_interpretation(
     )
     resolved_action = str(action or decision.action or "").strip()
     resolved_priority = str(priority or decision.priority or "").strip()
+    resolved_issuer_profile = issuer_profile or build_issuer_profile(
+        sender_email=sender_email,
+        message_facts=message_facts,
+    )
     return MessageInterpretation(
         email_id=str(email_id),
         sender_email=str(sender_email or "").strip(),
@@ -4276,6 +4289,27 @@ def _build_message_interpretation(
         confidence=float(decision.confidence or 0.0),
         context=str(decision.context or "").strip() or "NEW_MESSAGE",
         document_id=(str(document_id).strip() or None) if document_id else None,
+        template_id=(str(message_facts.get("template_id") or "").strip() or None),
+        issuer_key=(
+            str(resolved_issuer_profile.issuer_key).strip()
+            if resolved_issuer_profile is not None
+            else None
+        ),
+        issuer_label=(
+            str(resolved_issuer_profile.issuer_label).strip()
+            if resolved_issuer_profile is not None
+            else None
+        ),
+        issuer_domain=(
+            str(resolved_issuer_profile.sender_domain).strip()
+            if resolved_issuer_profile is not None and resolved_issuer_profile.sender_domain
+            else None
+        ),
+        issuer_tax_id=(
+            str(resolved_issuer_profile.issuer_tax_id).strip()
+            if resolved_issuer_profile is not None and resolved_issuer_profile.issuer_tax_id
+            else None
+        ),
     )
 
 
@@ -5062,18 +5096,33 @@ def _set_message_doc_kind(
 def _apply_document_template_layer(
     *,
     message_facts: dict[str, Any],
+    account_id: str = "",
     sender_email: str,
     subject: str,
     body_text: str,
     attachments: list[dict[str, Any]],
     action_line: str,
+    priority_locked_by_user: bool = False,
 ) -> tuple[dict[str, Any], str]:
     facts = dict(message_facts or {})
+    learning_config = get_learning_config()
     attachment_names = [
         str(item.get("filename") or "").strip() for item in (attachments or [])
     ]
     attachment_text = " ".join(
         str(item.get("text") or "")[:240] for item in (attachments or [])
+    )
+    normalized_template_text = _normalized_lower(
+        " ".join(
+            part
+            for part in (
+                subject,
+                body_text,
+                " ".join(attachment_names),
+                attachment_text,
+            )
+            if part
+        )
     )
     match = select_document_template(
         sender_email=sender_email,
@@ -5082,61 +5131,229 @@ def _apply_document_template_layer(
         attachment_names=attachment_names,
         attachment_text=attachment_text,
     )
-    if match is None:
-        return facts, action_line
-
-    template = match.template
-    facts["template_id"] = template.id
-    facts["template_strong_match"] = bool(match.strong_match)
-    facts["template_sender_match"] = bool(match.sender_match)
-    if match.preferred_amount_anchor_hit and str(facts.get("amount") or "").strip():
-        facts["amount_window_hit"] = True
-    if match.preferred_due_date_anchor_hit and str(facts.get("due_date") or "").strip():
-        facts["due_date_window_hit"] = True
-
-    confidence_boost = float(template.confidence_boost or 0.0)
-    if confidence_boost > 0:
-        if match.strong_match:
-            facts["template_confidence_boost"] = min(confidence_boost, 0.2)
-        elif match.sender_match:
-            # Sender-only confidence influence must stay weak.
-            facts["template_confidence_boost"] = min(confidence_boost, 0.04)
-
-    if template.doc_kind_override and match.strong_match:
-        _set_message_doc_kind(facts, doc_kind=template.doc_kind_override)
-
     normalized_action = _normalize_mojibake_text((action_line or "").strip())
     resolved_action = normalized_action or str(action_line or "").strip()
-    if template.action_override and match.strong_match:
-        resolved_action = template.action_override
-    elif template.action_hint and match.strong_match:
-        lowered = _normalized_lower(resolved_action)
-        if not resolved_action or _contains_any(
-            lowered,
-            (
-                "\u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c",
-                "\u043e\u0437\u043d\u0430\u043a\u043e\u043c",
-                "check",
-                "review",
-            ),
-        ):
-            resolved_action = template.action_hint
+    if match is not None:
+        template = match.template
+        facts["template_id"] = template.id
+        facts["template_strong_match"] = bool(match.strong_match)
+        facts["template_sender_match"] = bool(match.sender_match)
+        if match.preferred_amount_anchor_hit and str(facts.get("amount") or "").strip():
+            facts["amount_window_hit"] = True
+        if match.preferred_due_date_anchor_hit and str(facts.get("due_date") or "").strip():
+            facts["due_date_window_hit"] = True
 
-    suppression_flags = {
-        str(flag).strip()
-        for flag in (template.strong_suppression_flags or ())
-        if str(flag).strip()
-    }
-    if (
-        "suppress_invoice_payment_action" in suppression_flags
-        and _contains_any(_normalized_lower(resolved_action), _PAYMENT_ACTION_MARKERS)
-    ):
-        if match.strong_match and template.action_override:
+        confidence_boost = float(template.confidence_boost or 0.0)
+        if confidence_boost > 0:
+            if match.strong_match:
+                facts["template_confidence_boost"] = min(confidence_boost, 0.2)
+            elif match.sender_match:
+                # Sender-only confidence influence must stay weak.
+                facts["template_confidence_boost"] = min(confidence_boost, 0.04)
+
+        if template.doc_kind_override and match.strong_match:
+            _set_message_doc_kind(facts, doc_kind=template.doc_kind_override)
+
+        if template.action_override and match.strong_match:
             resolved_action = template.action_override
-        elif str(facts.get("doc_kind") or "").strip().lower() == "contract":
-            resolved_action = "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0434\u043e\u0433\u043e\u0432\u043e\u0440"
+        elif template.action_hint and match.strong_match:
+            lowered = _normalized_lower(resolved_action)
+            if not resolved_action or _contains_any(
+                lowered,
+                (
+                    "\u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c",
+                    "\u043e\u0437\u043d\u0430\u043a\u043e\u043c",
+                    "check",
+                    "review",
+                ),
+            ):
+                resolved_action = template.action_hint
+
+        suppression_flags = {
+            str(flag).strip()
+            for flag in (template.strong_suppression_flags or ())
+            if str(flag).strip()
+        }
+        if (
+            "suppress_invoice_payment_action" in suppression_flags
+            and _contains_any(_normalized_lower(resolved_action), _PAYMENT_ACTION_MARKERS)
+        ):
+            if match.strong_match and template.action_override:
+                resolved_action = template.action_override
+            elif str(facts.get("doc_kind") or "").strip().lower() == "contract":
+                resolved_action = "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0434\u043e\u0433\u043e\u0432\u043e\u0440"
+            else:
+                resolved_action = "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c"
+
+    promoted_doc_kind = str(facts.get("doc_kind") or "").strip().lower()
+    promotion, promotion_reason = find_runtime_template_promotion(
+        DB_PATH,
+        account_id=account_id,
+        sender_email=sender_email,
+        doc_kind=promoted_doc_kind,
+    )
+    if promotion is not None:
+        shadow_enabled = bool(learning_config.template_promotion_shadow)
+        runtime_enabled = bool(learning_config.template_promotion_runtime)
+        logger.info(
+            "promotion_candidate_found",
+            account_id=str(account_id or "").strip(),
+            sender_email=(sender_email or "").strip().lower(),
+            template_id=promotion.signal.template_id,
+            scope=promotion.signal.scope_kind,
+            correction_count=promotion.signal.correction_count,
+            contradiction_count=0,
+            mode="runtime" if runtime_enabled else "shadow",
+        )
+        contradictions = 0
+        consistency_issues = {
+            str(item)
+            for item in (facts.get("consistency_issues") or [])
+            if str(item).strip()
+        }
+        if any(issue in consistency_issues for issue in _STRONG_CONSISTENCY_ISSUES):
+            contradictions += 1
+        if promoted_doc_kind == "invoice" and (
+            bool(facts.get("payroll_signal"))
+            or str(facts.get("doc_kind") or "").strip().lower() in {"payroll", "reconciliation"}
+        ):
+            contradictions += 1
+        if (
+            str(facts.get("template_id") or "").strip()
+            and str(facts.get("template_id") or "").strip() != promotion.signal.template_id
+        ):
+            contradictions += 1
+        if promoted_doc_kind == "invoice":
+            content_supported = bool(
+                facts.get("invoice_signal")
+                or facts.get("amount_window_hit")
+                or facts.get("due_date_window_hit")
+                or facts.get("doc_number_window_hit")
+                or (
+                    str(facts.get("amount") or "").strip()
+                    and _contains_any(
+                        normalized_template_text,
+                        (
+                            "invoice",
+                            "\u0441\u0447\u0435\u0442",
+                            "\u0441\u0447\u0451\u0442",
+                            "\u0438\u0442\u043e\u0433\u043e",
+                            "\u043a \u043e\u043f\u043b\u0430\u0442\u0435",
+                            "amount due",
+                            "payment due",
+                        ),
+                    )
+                )
+            )
+        elif promoted_doc_kind == "payroll":
+            content_supported = bool(
+                facts.get("payroll_signal")
+                or _contains_any(
+                    normalized_template_text,
+                    (
+                        "\u0440\u0430\u0441\u0447\u0435\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a",
+                        "\u0440\u0430\u0441\u0447\u0451\u0442\u043d\u044b\u0439 \u043b\u0438\u0441\u0442\u043e\u043a",
+                        "\u043d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e",
+                        "\u0443\u0434\u0435\u0440\u0436\u0430\u043d\u043e",
+                        "\u043a \u0432\u044b\u043f\u043b\u0430\u0442\u0435",
+                    ),
+                )
+            )
+        elif promoted_doc_kind == "reconciliation":
+            content_supported = bool(
+                _contains_any(
+                    normalized_template_text,
+                    (
+                        "\u0430\u043a\u0442 \u0441\u0432\u0435\u0440\u043a\u0438",
+                        "\u0432\u0437\u0430\u0438\u043c\u043d\u044b\u0445 \u0440\u0430\u0441\u0447\u0435\u0442\u043e\u0432",
+                        "\u0432\u0437\u0430\u0438\u043c\u043d\u044b\u0445 \u0440\u0430\u0441\u0447\u0451\u0442\u043e\u0432",
+                        "reconciliation",
+                    ),
+                )
+            )
         else:
-            resolved_action = "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c"
+            content_supported = bool(
+                facts.get("contract_signal")
+                or _contains_any(
+                    normalized_template_text,
+                    (
+                        "\u0434\u043e\u0433\u043e\u0432\u043e\u0440",
+                        "\u0441\u043e\u0433\u043b\u0430\u0448\u0435\u043d\u0438\u0435",
+                        "\u0434\u043e\u043f\u0441\u043e\u0433\u043b\u0430\u0448\u0435\u043d\u0438\u0435",
+                        "contract",
+                        "amendment",
+                    ),
+                )
+            )
+        blocked_reason: str | None = None
+        if priority_locked_by_user:
+            blocked_reason = "manual_override"
+        elif contradictions > 0:
+            blocked_reason = "contradictions"
+        elif (
+            bool(learning_config.template_promotion_require_content_agreement)
+            and not content_supported
+        ):
+            blocked_reason = "sender_only_without_content_support"
+        elif not runtime_enabled:
+            blocked_reason = "runtime_disabled"
+        elif not shadow_enabled and not runtime_enabled:
+            blocked_reason = "shadow_disabled"
+
+        if blocked_reason == "contradictions":
+            logger.info(
+                "promotion_rejected_reason",
+                account_id=str(account_id or "").strip(),
+                sender_email=(sender_email or "").strip().lower(),
+                template_id=promotion.signal.template_id,
+                scope=promotion.signal.scope_kind,
+                correction_count=promotion.signal.correction_count,
+                contradiction_count=contradictions,
+                reason=blocked_reason,
+            )
+        elif blocked_reason is not None:
+            logger.info(
+                "promotion_rejected_reason",
+                account_id=str(account_id or "").strip(),
+                sender_email=(sender_email or "").strip().lower(),
+                template_id=promotion.signal.template_id,
+                scope=promotion.signal.scope_kind,
+                correction_count=promotion.signal.correction_count,
+                contradiction_count=0,
+                reason=blocked_reason,
+            )
+        else:
+            existing_boost = float(facts.get("template_confidence_boost") or 0.0)
+            facts["template_id"] = str(facts.get("template_id") or "").strip() or promotion.signal.template_id
+            facts["template_promotion_applied"] = True
+            facts["template_promotion_scope_kind"] = promotion.signal.scope_kind
+            facts["template_promotion_scope_value"] = promotion.signal.scope_value
+            facts["template_promotion_correction_count"] = promotion.signal.correction_count
+            facts["template_promotion_strength"] = promotion.signal.strength
+            facts["template_confidence_boost"] = min(
+                0.2,
+                existing_boost + float(promotion.confidence_boost or 0.0),
+            )
+            logger.info(
+                "promotion_applied",
+                account_id=str(account_id or "").strip(),
+                sender_email=(sender_email or "").strip().lower(),
+                template_id=promotion.signal.template_id,
+                scope=promotion.signal.scope_kind,
+                correction_count=promotion.signal.correction_count,
+                contradiction_count=0,
+            )
+    elif promotion_reason not in {"missing_scope", "no_candidate", "unsupported_doc_kind"}:
+        logger.info(
+            "promotion_rejected_reason",
+            account_id=str(account_id or "").strip(),
+            sender_email=(sender_email or "").strip().lower(),
+            template_id=str(facts.get("template_id") or "").strip(),
+            scope="",
+            correction_count=0,
+            contradiction_count=0,
+            reason=promotion_reason,
+        )
 
     return facts, resolved_action
 
@@ -5147,20 +5364,24 @@ def _build_message_decision(
     action_line: str,
     summary: str,
     message_facts: dict[str, Any],
+    account_id: str = "",
     sender_email: str = "",
     subject: str = "",
     body_text: str = "",
     attachments: list[dict[str, Any]] | None = None,
     context: str = "NEW_MESSAGE",
+    priority_locked_by_user: bool = False,
 ) -> MessageDecision:
     attachment_items = attachments or []
     message_facts, action_line = _apply_document_template_layer(
         message_facts=message_facts,
+        account_id=account_id,
         sender_email=sender_email,
         subject=subject,
         body_text=body_text,
         attachments=attachment_items,
         action_line=action_line,
+        priority_locked_by_user=priority_locked_by_user,
     )
     doc_kind = str(message_facts.get("doc_kind") or "")
     confidence = _compute_decision_confidence(
@@ -7446,11 +7667,13 @@ def process_message(
             action_line=action_line,
             summary=body_summary,
             message_facts=message_facts,
+            account_id=account_email,
             sender_email=from_email,
             subject=subject,
             body_text=body_text,
             attachments=attachments,
             context=context,
+            priority_locked_by_user=priority_locked_by_user,
         )
         duplicate_event: dict[str, Any] | None = None
         document_id = ""
@@ -7684,6 +7907,21 @@ def process_message(
                 email_id=message_id,
             )
 
+        issuer_profile = build_issuer_profile(
+            sender_email=from_email,
+            subject=subject,
+            body_text=" ".join(
+                part for part in (body_summary, body_text) if str(part or "").strip()
+            ),
+            attachment_names=[
+                str(attachment.get("filename") or "").strip()
+                for attachment in attachments
+            ],
+            attachment_text=" ".join(
+                str(attachment.get("text") or "")[:240] for attachment in attachments
+            ),
+            message_facts=decision.facts,
+        )
         interpretation = _build_message_interpretation(
             email_id=message_id,
             sender_email=from_email,
@@ -7692,6 +7930,7 @@ def process_message(
             document_id=document_id or None,
             action=action_line,
             priority=priority,
+            issuer_profile=issuer_profile,
         )
         _emit_contract_event(
             EventType.MESSAGE_INTERPRETATION,
@@ -7709,6 +7948,11 @@ def process_message(
                 "confidence": interpretation.confidence,
                 "context": interpretation.context,
                 "document_id": interpretation.document_id,
+                "template_id": interpretation.template_id,
+                "issuer_key": interpretation.issuer_key,
+                "issuer_label": interpretation.issuer_label,
+                "issuer_domain": interpretation.issuer_domain,
+                "issuer_tax_id": interpretation.issuer_tax_id,
             },
         )
 
