@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -61,6 +62,10 @@ _CALLBACK_PREFIXES = ("mb:prio:", "prio:")
 _TOGGLE_PREFIXES = ("mb:toggle:", "toggle:")
 _HELP_PREFIXES = ("mb:help:", "help:")
 _UI_LOCALE = "ru"
+_TELEGRAM_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
+_SENSITIVE_KV_RE = re.compile(
+    r"(?i)\b(token|password|secret|api[_-]?key)\b\s*[:=]\s*([^\s,;]+)"
+)
 
 _PRIORITY_MAP = {
     "R": "\U0001f534",
@@ -83,6 +88,40 @@ _PRIORITY_MAP = {
 
 def _clean_text(text: str | None) -> str:
     return str(text or "").strip()
+
+
+def _safe_log_text(value: object, *, limit: int = 160) -> str:
+    text = _clean_text(str(value or ""))
+    if not text:
+        return ""
+    text = _TELEGRAM_TOKEN_RE.sub("bot<redacted>", text)
+    text = _SENSITIVE_KV_RE.sub(r"\1=<redacted>", text)
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
+def _summarize_poll_payload(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        return {
+            "payload_kind": type(payload).__name__,
+            "payload_summary": _safe_log_text(payload),
+        }
+    summary: dict[str, object] = {
+        "payload_ok": bool(payload.get("ok")),
+        "payload_keys": sorted(str(key) for key in payload.keys())[:8],
+    }
+    if "error_code" in payload:
+        try:
+            summary["error_code"] = int(payload["error_code"])
+        except (TypeError, ValueError):
+            summary["error_code"] = _safe_log_text(payload.get("error_code"))
+    if "description" in payload:
+        summary["description"] = _safe_log_text(payload.get("description"))
+    result = payload.get("result")
+    if isinstance(result, list):
+        summary["result_count"] = len(result)
+    return summary
 
 
 def _t(key: str, **kwargs: object) -> str:
@@ -517,10 +556,14 @@ class TelegramInboundClient:
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:
-            logger.error("telegram_inbound_poll_failed", error=str(exc))
+            logger.error(
+                "telegram_inbound_poll_failed",
+                error_type=type(exc).__name__,
+                error=_safe_log_text(exc),
+            )
             return []
         if not payload or not payload.get("ok"):
-            logger.error("telegram_inbound_poll_error", payload=str(payload))
+            logger.error("telegram_inbound_poll_error", **_summarize_poll_payload(payload))
             return []
         result = payload.get("result", [])
         if isinstance(result, list):

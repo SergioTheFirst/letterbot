@@ -365,7 +365,7 @@ def test_db_parent_dir_created_before_storage_init() -> None:
     source = Path("mailbot_v26/start.py").read_text(encoding="utf-8")
 
     mkdir_index = source.index(
-        "config.storage.db_path.parent.mkdir(parents=True, exist_ok=True)"
+        "_ensure_runtime_dirs(db_path=config.storage.db_path, log_path=LOG_PATH)"
     )
     storage_index = source.index("storage = Storage(config.storage.db_path)")
 

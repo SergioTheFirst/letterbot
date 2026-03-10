@@ -1,4 +1,0 @@
-[ARCHIVE] DATA_SOURCE: mixed
-[ARCHIVE] MISSING: canonical MessageInterpretation-backed list API; sender/priority/doc_kind/confidence filters; 25-row pagination; interpretation-focused columns; detail API with interpretation_summary/why_classified/key_facts; sender display from issuer identity; guard against raw body re-parse
-[HEALTH] DATA_SOURCE: mixed
-[HEALTH] MISSING: unified /api/health/status endpoint from imap_health_v1 + canonical projections; operator-facing ok/degraded/down component matrix; human-readable cause mapping; cooldown block from health events; guard against live network checks on load

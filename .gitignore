@@ -2,17 +2,20 @@
 **/venv/
 **/.venv/
 __pycache__/
-*.pyc
+*.py[cod]
 
 # logs
 *.log
+*.log.*
 logs/
+mailbot_v26/mailbot.log*
 
 # secrets / local configs
 mailbot_v26/config/accounts.ini
 mailbot_v26/config/keys.ini
 mailbot_v26/config/config.ini
 mailbot_v26/config/*.zip
+keys.ini
 
 # venv
 venv/
@@ -31,12 +34,15 @@ data/
 *.db
 runtime/logs/
 runtime/tmp_*.ps1
+_audit_*.txt
 
 # caches
 .pytest_cache/
 .ruff_cache/
 
 # local runtime configs
+.env
+.env.*
 mailbot_v26/config/settings.ini
 settings.ini
 accounts.ini

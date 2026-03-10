@@ -48,7 +48,7 @@ show_decision_trace = false
 
 [web_ui]
 ; Password for Web UI login. Empty is allowed only as local fallback and logs a warning.
-password = 1
+password = CHANGE_ME
 ; Explicitly allow local smoke bypass for loopback-only/dev-safe checks (default keeps auth/CIDR strict).
 allow_local_smoke_bypass = false
 
@@ -230,7 +230,7 @@ ACCOUNTS_TEMPLATE = """[example_account]
 ; account_id rules: lowercase, [a-z0-9_], no spaces.
 ; For Windows login use domain\\user without quotes (example: HQ\\MedvedevSS).
 login = user@example.com
-password = 1
+password = CHANGE_ME
 host = imap.example.com
 port = 993
 use_ssl = true

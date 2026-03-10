@@ -29,7 +29,7 @@ show_decision_trace = false
 
 [web_ui]
 ; Password for Web UI login. Empty is allowed only as local fallback and logs a warning.
-password = 1
+password = CHANGE_ME
 ; Explicitly allow local smoke bypass for loopback-only/dev-safe checks (default keeps auth/CIDR strict).
 allow_local_smoke_bypass = false
 
