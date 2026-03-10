@@ -409,6 +409,7 @@ def _ensure_snooze_table(db_path: Path) -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email_id INTEGER NOT NULL,
                 deliver_at_utc TEXT NOT NULL,
+                snoozed_at_utc TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 reminder_text TEXT,
                 attempts INTEGER NOT NULL DEFAULT 0,
@@ -419,6 +420,13 @@ def _ensure_snooze_table(db_path: Path) -> None:
                 UNIQUE(email_id, deliver_at_utc)
             );
             """)
+        columns = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(telegram_snooze)").fetchall()
+        }
+        if "snoozed_at_utc" not in columns:
+            conn.execute("ALTER TABLE telegram_snooze ADD COLUMN snoozed_at_utc TEXT;")
+        conn.commit()
 
 
 def _save_snooze(
@@ -436,6 +444,7 @@ def _save_snooze(
             INSERT INTO telegram_snooze (
                 email_id,
                 deliver_at_utc,
+                snoozed_at_utc,
                 status,
                 reminder_text,
                 attempts,
@@ -443,16 +452,24 @@ def _save_snooze(
                 created_at,
                 updated_at,
                 delivered_at
-            ) VALUES (?, ?, 'pending', ?, 0, NULL, ?, ?, NULL)
+            ) VALUES (?, ?, ?, 'pending', ?, 0, NULL, ?, ?, NULL)
             ON CONFLICT(email_id, deliver_at_utc) DO UPDATE SET
                 status = 'pending',
+                snoozed_at_utc = excluded.snoozed_at_utc,
                 reminder_text = excluded.reminder_text,
                 attempts = 0,
                 last_error = NULL,
                 updated_at = excluded.updated_at,
                 delivered_at = NULL
             """,
-            (email_id, deliver_at_utc.isoformat(), reminder_text.strip(), now, now),
+            (
+                email_id,
+                deliver_at_utc.isoformat(),
+                now,
+                reminder_text.strip(),
+                now,
+                now,
+            ),
         )
         conn.commit()
 
@@ -1458,6 +1475,23 @@ class TelegramInboundProcessor:
             email_id=email_id,
             deliver_at_utc=deliver_local.astimezone(timezone.utc),
             reminder_text=reminder_text,
+        )
+        snapshot = _load_email_snapshot(self.knowledge_db.path, email_id) or {}
+        account_id = str(snapshot.get("account_email") or "").strip() or "unknown"
+        snoozed_at_utc = datetime.now(timezone.utc)
+        self.contract_event_emitter.emit(
+            EventV1(
+                event_type=EventType.SNOOZE_RECORDED,
+                ts_utc=snoozed_at_utc.timestamp(),
+                account_id=account_id,
+                entity_id=None,
+                email_id=email_id,
+                payload={
+                    "snooze_code": snooze_code,
+                    "snoozed_at_utc": snoozed_at_utc.isoformat(),
+                    "deliver_at_utc": deliver_local.astimezone(timezone.utc).isoformat(),
+                },
+            )
         )
         self._render_with_keyboard(chat_id, message, payload, snooze_menu=False)
         return ack
