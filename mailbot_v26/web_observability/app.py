@@ -1078,6 +1078,10 @@ def _humanize_health_detail(
 ) -> str:
     lowered = f"{subtype} {detail}".lower()
     if component == "IMAP":
+        if status == "unavailable":
+            return "История IMAP health недоступна — проверьте events_v1 и доступ к базе"
+        if status == "unknown":
+            return "Нет подтверждённого успешного IMAP цикла в выбранном окне"
         if "auth" in lowered or "login" in lowered or "password" in lowered:
             return "Ошибка авторизации — проверьте пароль IMAP в настройках"
         if subtype == "cooldown" or "cooldown" in lowered:
@@ -1091,17 +1095,33 @@ def _humanize_health_detail(
         if status == "down":
             return "Нет свежего успешного контакта с IMAP"
     if component == "Telegram":
+        if status == "unavailable":
+            return "Статус Telegram недоступен — health snapshot отсутствует"
+        if status == "unknown":
+            return "Нет подтверждённого Telegram health snapshot в выбранном окне"
         if "token" in lowered or "auth" in lowered:
             return "Ошибка Telegram — проверьте токен и доступность API"
         if status != "ok":
             return "Доставка в Telegram деградировала — проверьте последние ошибки"
     if component == "LLM":
+        if status == "unavailable":
+            return "Статус LLM недоступен — snapshot и метрики не прочитаны"
+        if status == "unknown":
+            return "Нет свежего LLM snapshot в выбранном окне"
         if status != "ok":
             return "Активен fallback режим — LLM недоступен, работает только template"
     if component == "DB":
+        if status == "unavailable":
+            return "Статус БД недоступен — проверьте файл SQLite и права доступа"
+        if status == "unknown":
+            return "Нет подтверждённого DB snapshot в выбранном окне"
         if status != "ok":
             return "База данных недоступна или перегружена — проверьте файл и блокировки"
     if component == "Scheduler / Digests":
+        if status == "unavailable":
+            return "Статус планировщика недоступен — runtime snapshot отсутствует"
+        if status == "unknown":
+            return "Нет свежего подтверждения цикла планировщика"
         if status != "ok":
             return "Планировщик дайджестов давно не подтверждал успешный цикл"
     sanitized = " ".join(str(detail or "").split())
@@ -1855,8 +1875,12 @@ def _status_from_value(value: object) -> tuple[str, str]:
         "green",
     }:
         return "ok", "success"
+    if lowered in {"partial", "unavailable", "not available"}:
+        return lowered, "warn"
     if lowered in {"warn", "warning", "degraded", "yellow"}:
         return "warn", "warn"
+    if lowered in {"disabled", "not configured"}:
+        return lowered, "muted"
     if lowered in {"down", "fail", "failed", "error", "closed", "red", "false", "0"}:
         return "down", "danger"
     return text, "muted"
@@ -1905,6 +1929,7 @@ def _status_strip_view(
     tg_success_rate = None
     if isinstance(metrics_window, Mapping):
         tg_success_rate = metrics_window.get("telegram_delivery_success_rate")
+    db_value = _status_from_mapping(gates_state, keys=["db", "database", "sqlite"])
 
     llm_status = "unknown"
     llm_class = "muted"
@@ -1929,15 +1954,12 @@ def _status_strip_view(
             tg_status, tg_class = "down", "danger"
 
     db_size_bytes = status_strip.get("db_size_bytes")
-    db_status = "unknown"
-    db_class = "muted"
-    if db_size_bytes is not None:
-        db_status, db_class = "ok", "success"
+    db_status, db_class = _status_from_value(db_value)
 
     imap_status_text, imap_class = _status_from_value(imap_value)
 
     updated_ts = _safe_float(status_strip.get("updated_ts_utc"))
-    updated_ago = "–"
+    updated_ago = "unknown"
     if updated_ts is not None:
         age = max(0, int(now_ts - updated_ts))
         updated_ago = f"{age}s ago"
@@ -2078,6 +2100,8 @@ def _status_class_for_label(label: str) -> str:
     normalized = str(label or "").strip().lower()
     if normalized in {"ok", "delivered", "success", "full", "ready"}:
         return "success"
+    if normalized in {"partial", "unavailable", "not available"}:
+        return "warn"
     if normalized in {"failed", "fail", "error", "down", "emergency"}:
         return "danger"
     if normalized in {"warn", "warning", "degraded", "in-flight", "pending"}:
@@ -2468,6 +2492,23 @@ def _db_size_bytes(db_path: Path) -> int | None:
         return db_path.stat().st_size
     except OSError:
         return None
+
+
+def _path_stat_token(path: Path) -> tuple[int | None, int | None]:
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return None, None
+    return int(stat_result.st_mtime_ns), int(stat_result.st_size)
+
+
+def _db_change_token(db_path: Path) -> tuple[tuple[str, int | None, int | None], ...]:
+    tokens: list[tuple[str, int | None, int | None]] = []
+    for suffix in ("", "-wal", "-shm"):
+        target = db_path if not suffix else db_path.with_name(db_path.name + suffix)
+        mtime_ns, size_bytes = _path_stat_token(target)
+        tokens.append((target.name, mtime_ns, size_bytes))
+    return tuple(tokens)
 
 
 def _decision_trace_payload(
@@ -2996,6 +3037,7 @@ def create_app(
         cache_key = (
             "cockpit",
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
             bool(reveal_pii),
@@ -3003,13 +3045,17 @@ def create_app(
         )
         summary = _COCKPIT_CACHE.get(cache_key)
         if summary is None:
-            summary = analytics.cockpit_summary(
-                account_emails=account_emails,
-                window_days=window_days,
-                allow_pii=reveal_pii,
-                include_engineer=include_engineer,
-                activity_limit=15,
-            )
+            try:
+                summary = analytics.cockpit_summary(
+                    account_emails=account_emails,
+                    window_days=window_days,
+                    allow_pii=reveal_pii,
+                    include_engineer=include_engineer,
+                    activity_limit=15,
+                )
+            except Exception as exc:
+                logger.warning("cockpit_summary_failed", extra={"error": str(exc)})
+                summary = {}
             _COCKPIT_CACHE.set(cache_key, summary)
 
         summary = summary if isinstance(summary, Mapping) else {}
@@ -3020,6 +3066,7 @@ def create_app(
         activity_cache_key = (
             "lane_activity",
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
             lane,
@@ -3029,14 +3076,18 @@ def create_app(
         cached_activity = _COCKPIT_CACHE.get(activity_cache_key)
         if cached_activity is None:
             if account_emails and hasattr(analytics, "lane_activity_rows"):
-                cached_activity = analytics.lane_activity_rows(
-                    account_email=account_emails[0],
-                    account_emails=account_emails,
-                    window_days=window_days,
-                    limit=dashboard_vars.limit,
-                    lane=lane,
-                    reveal_pii=reveal_pii,
-                )
+                try:
+                    cached_activity = analytics.lane_activity_rows(
+                        account_email=account_emails[0],
+                        account_emails=account_emails,
+                        window_days=window_days,
+                        limit=dashboard_vars.limit,
+                        lane=lane,
+                        reveal_pii=reveal_pii,
+                    )
+                except Exception as exc:
+                    logger.warning("cockpit_lane_activity_failed", extra={"error": str(exc)})
+                    cached_activity = []
             else:
                 cached_activity = (
                     summary.get("recent_activity")
@@ -3052,6 +3103,7 @@ def create_app(
             lane_cache_key = (
                 "lane_counts",
                 str(app.config["DB_PATH"]),
+                _db_change_token(app.config["DB_PATH"]),
                 tuple(account_emails),
                 window_days,
             )
@@ -3061,11 +3113,15 @@ def create_app(
                     key: int(cached_counts.get(key) or 0) for key in LANE_KEYS
                 }
             else:
-                lane_counts = analytics.lane_counts(
-                    account_email=account_emails[0],
-                    account_emails=account_emails,
-                    window_days=window_days,
-                )
+                try:
+                    lane_counts = analytics.lane_counts(
+                        account_email=account_emails[0],
+                        account_emails=account_emails,
+                        window_days=window_days,
+                    )
+                except Exception as exc:
+                    logger.warning("cockpit_lane_counts_failed", extra={"error": str(exc)})
+                    lane_counts = {key: 0 for key in LANE_KEYS}
                 _COCKPIT_CACHE.set(lane_cache_key, lane_counts)
         digest_today = (
             summary.get("today_digest") if isinstance(summary, Mapping) else {}
@@ -3864,6 +3920,7 @@ def create_app(
         cache_key = (
             "cockpit",
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
             bool(reveal_pii),
@@ -3871,13 +3928,17 @@ def create_app(
         )
         summary = _COCKPIT_CACHE.get(cache_key)
         if summary is None:
-            summary = analytics.cockpit_summary(
-                account_emails=account_emails,
-                window_days=window_days,
-                allow_pii=reveal_pii,
-                include_engineer=include_engineer,
-                activity_limit=15,
-            )
+            try:
+                summary = analytics.cockpit_summary(
+                    account_emails=account_emails,
+                    window_days=window_days,
+                    allow_pii=reveal_pii,
+                    include_engineer=include_engineer,
+                    activity_limit=15,
+                )
+            except Exception as exc:
+                logger.warning("status_strip_summary_failed", extra={"error": str(exc)})
+                summary = {}
             _COCKPIT_CACHE.set(cache_key, summary)
 
         summary = summary if isinstance(summary, Mapping) else {}
@@ -3953,6 +4014,7 @@ def create_app(
         now = time.time()
         cache_key = (
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             request.args.get("account_emails") or "",
             request.args.get("window_days") or "",
             request.args.get("pii") or "",
@@ -3970,32 +4032,74 @@ def create_app(
         hour_ago_ts = now_ts - 3_600
         week_ago_ts = now_ts - 7 * 86_400
         payload: dict[str, object] = {
-            "emails_today": 0,
-            "emails_last_hour": 0,
-            "llm_calls_today": 0,
-            "llm_fallback_today": 0,
-            "priority": {"red": 0, "yellow": 0, "blue": 0},
-            "corrections_week": 0,
-            "surprise_rate": 0.0,
+            "emails_today": None,
+            "emails_last_hour": None,
+            "llm_calls_today": None,
+            "llm_fallback_today": None,
+            "priority": {"red": None, "yellow": None, "blue": None},
+            "corrections_week": None,
+            "surprise_rate": None,
             "recent_events": [],
             "top_contacts": [],
             "top_issuers": [],
             "interpretation": {
-                "invoice_count": 0,
-                "contract_count": 0,
-                "invoice_total": 0,
+                "invoice_count": None,
+                "contract_count": None,
+                "invoice_total": None,
             },
             "business": {
-                "payable_amount_total": 0,
-                "payable_invoice_count": 0,
-                "documents_waiting_attention_count": 0,
-                "contract_review_count": 0,
-                "reconciliation_attention_count": 0,
-                "silence_risk_count": 0,
-                "overdue_due_count": 0,
-                "due_soon_count": 0,
+                "payable_amount_total": None,
+                "payable_invoice_count": None,
+                "documents_waiting_attention_count": None,
+                "contract_review_count": None,
+                "reconciliation_attention_count": None,
+                "silence_risk_count": None,
+                "overdue_due_count": None,
+                "due_soon_count": None,
+            },
+            "meta": {
+                "status": "ok",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "sections": {
+                    "emails": {"status": "ok", "detail": None},
+                    "llm": {"status": "ok", "detail": None},
+                    "priority": {"status": "ok", "detail": None},
+                    "learning": {"status": "ok", "detail": None},
+                    "events": {"status": "ok", "detail": None},
+                    "interpretation": {"status": "ok", "detail": None},
+                    "business": {"status": "ok", "detail": None},
+                    "contacts": {"status": "ok", "detail": None},
+                    "issuers": {"status": "ok", "detail": None},
+                },
             },
         }
+        meta = payload["meta"] if isinstance(payload.get("meta"), dict) else {}
+
+        def _mark_section(section: str, status: str, detail: str) -> None:
+            sections = meta.get("sections")
+            if not isinstance(sections, dict):
+                return
+            severity = {"ok": 0, "partial": 1, "unknown": 1, "unavailable": 2}
+            current = sections.get(section)
+            current_status = (
+                str(current.get("status") or "ok")
+                if isinstance(current, Mapping)
+                else "ok"
+            )
+            if severity.get(status, 0) >= severity.get(current_status, 0):
+                sections[section] = {"status": status, "detail": detail}
+
+        def _finalize_meta() -> None:
+            sections = meta.get("sections")
+            if not isinstance(sections, Mapping):
+                return
+            statuses = [str(item.get("status") or "ok") for item in sections.values()]
+            if not statuses or all(status == "ok" for status in statuses):
+                meta["status"] = "ok"
+            elif all(status in {"unknown", "unavailable"} for status in statuses):
+                meta["status"] = "unavailable"
+            else:
+                meta["status"] = "partial"
         try:
             dashboard_vars = _dashboard_vars()
             account_scope = _resolve_account_scope(dashboard_vars)
@@ -4016,112 +4120,147 @@ def create_app(
             account_event_clause = f" AND account_id IN ({placeholders})"
             account_event_params.extend(account_scope)
 
+        def _cache_and_return() -> dict[str, object]:
+            _finalize_meta()
+            _DASHBOARD_CACHE["payload"] = payload
+            _DASHBOARD_CACHE["ts"] = now
+            _DASHBOARD_CACHE["key"] = cache_key
+            return payload
+
         try:
             with _open_readonly_connection(app.config["DB_PATH"]) as conn:
                 conn.row_factory = sqlite3.Row
                 email_columns = _table_columns(conn, "emails")
 
-                row = conn.execute(
-                    (
-                        "SELECT "
-                        "COUNT(*) AS emails_today, "
-                        "SUM(CASE WHEN ("
-                        "COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
-                        ") THEN 1 ELSE 0 END) AS emails_last_hour "
-                        "FROM emails "
-                        "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
-                        f"{account_clause}"
-                    ),
-                    (hour_ago_ts, day_ago_ts, *account_params),
-                ).fetchone()
-                if row:
-                    payload["emails_today"] = int(row["emails_today"] or 0)
-                    payload["emails_last_hour"] = int(row["emails_last_hour"] or 0)
-
-                if "llm_provider" in email_columns:
-                    llm_row = conn.execute(
-                        (
-                            "SELECT COUNT(*) AS llm_calls_today "
-                            "FROM emails "
-                            "WHERE llm_provider IS NOT NULL "
-                            "AND TRIM(llm_provider) != '' "
-                            "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
-                            f"{account_clause}"
-                        ),
-                        (day_ago_ts, *account_params),
-                    ).fetchone()
-                    if llm_row:
-                        payload["llm_calls_today"] = int(llm_row["llm_calls_today"] or 0)
-
-                fallback_row = conn.execute(
-                    (
-                        "SELECT COUNT(*) AS llm_fallback_today "
-                        "FROM events_v1 "
-                        "WHERE ts_utc >= ? "
-                        f"{account_event_clause} "
-                        "AND ("
-                        "event_type IN ('llm_fallback', 'llm_fallback_used', 'pipeline_error') "
-                        "OR LOWER(event_type) LIKE '%fallback%'"
-                        ")"
-                    ),
-                    (day_ago_ts, *account_event_params),
-                ).fetchone()
-                if fallback_row:
-                    payload["llm_fallback_today"] = int(
-                        fallback_row["llm_fallback_today"] or 0
-                    )
-
-                if "priority" in email_columns:
-                    pr_row = conn.execute(
+                try:
+                    row = conn.execute(
                         (
                             "SELECT "
-                            "SUM(CASE WHEN priority IN ('🔴', 'red', 'RED') THEN 1 ELSE 0 END) AS red, "
-                            "SUM(CASE WHEN priority IN ('🟡', 'yellow', 'YELLOW') THEN 1 ELSE 0 END) AS yellow, "
-                            "SUM(CASE WHEN priority IN ('🔵', 'blue', 'BLUE') THEN 1 ELSE 0 END) AS blue "
+                            "COUNT(*) AS emails_today, "
+                            "SUM(CASE WHEN ("
+                            "COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                            ") THEN 1 ELSE 0 END) AS emails_last_hour "
                             "FROM emails "
                             "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
                             f"{account_clause}"
                         ),
-                        (day_ago_ts, *account_params),
+                        (hour_ago_ts, day_ago_ts, *account_params),
                     ).fetchone()
-                    if pr_row:
-                        payload["priority"] = {
-                            "red": int(pr_row["red"] or 0),
-                            "yellow": int(pr_row["yellow"] or 0),
-                            "blue": int(pr_row["blue"] or 0),
-                        }
+                except sqlite3.Error as exc:
+                    _mark_section("emails", "unavailable", f"emails metrics unavailable: {exc}")
+                else:
+                    if row:
+                        payload["emails_today"] = int(row["emails_today"] or 0)
+                        payload["emails_last_hour"] = int(row["emails_last_hour"] or 0)
 
-                corr_row = conn.execute(
-                    (
-                        "SELECT COUNT(*) AS corrections_week "
-                        "FROM priority_feedback "
-                        "WHERE kind IN ('correction', 'priority_correction') "
-                        "AND COALESCE(strftime('%s', created_at), 0) >= ?"
-                        f"{account_clause}"
-                    ),
-                    (week_ago_ts, *account_params),
-                ).fetchone()
-                if corr_row:
-                    payload["corrections_week"] = int(corr_row["corrections_week"] or 0)
+                if "llm_provider" in email_columns:
+                    try:
+                        llm_row = conn.execute(
+                            (
+                                "SELECT COUNT(*) AS llm_calls_today "
+                                "FROM emails "
+                                "WHERE llm_provider IS NOT NULL "
+                                "AND TRIM(llm_provider) != '' "
+                                "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                                f"{account_clause}"
+                            ),
+                            (day_ago_ts, *account_params),
+                        ).fetchone()
+                    except sqlite3.Error as exc:
+                        _mark_section("llm", "unavailable", f"LLM call metrics unavailable: {exc}")
+                    else:
+                        if llm_row:
+                            payload["llm_calls_today"] = int(llm_row["llm_calls_today"] or 0)
+                else:
+                    _mark_section("llm", "partial", "emails.llm_provider missing in this schema")
 
-                surprise_row = conn.execute(
-                    (
-                        "SELECT "
-                        "SUM(CASE WHEN event_type = 'surprise_detected' THEN 1 ELSE 0 END) AS surprises, "
-                        "SUM(CASE WHEN event_type = 'priority_correction_recorded' THEN 1 ELSE 0 END) AS corrections "
-                        "FROM events_v1 "
-                        "WHERE ts_utc >= ?"
-                        f"{account_event_clause}"
-                    ),
-                    (week_ago_ts, *account_event_params),
-                ).fetchone()
-                surprises = int(surprise_row["surprises"] or 0) if surprise_row else 0
-                corrections = (
-                    int(surprise_row["corrections"] or 0) if surprise_row else 0
-                )
-                payload["surprise_rate"] = (
-                    round(surprises / corrections, 4) if corrections > 0 else 0.0
-                )
+                try:
+                    fallback_row = conn.execute(
+                        (
+                            "SELECT COUNT(*) AS llm_fallback_today "
+                            "FROM events_v1 "
+                            "WHERE ts_utc >= ? "
+                            f"{account_event_clause} "
+                            "AND ("
+                            "event_type IN ('llm_fallback', 'llm_fallback_used', 'pipeline_error') "
+                            "OR LOWER(event_type) LIKE '%fallback%'"
+                            ")"
+                        ),
+                        (day_ago_ts, *account_event_params),
+                    ).fetchone()
+                except sqlite3.Error as exc:
+                    _mark_section("llm", "unavailable", f"LLM fallback feed unavailable: {exc}")
+                else:
+                    if fallback_row:
+                        payload["llm_fallback_today"] = int(
+                            fallback_row["llm_fallback_today"] or 0
+                        )
+
+                if "priority" in email_columns:
+                    try:
+                        pr_row = conn.execute(
+                            (
+                                "SELECT "
+                                "SUM(CASE WHEN priority IN ('🔴', 'red', 'RED') THEN 1 ELSE 0 END) AS red, "
+                                "SUM(CASE WHEN priority IN ('🟡', 'yellow', 'YELLOW') THEN 1 ELSE 0 END) AS yellow, "
+                                "SUM(CASE WHEN priority IN ('🔵', 'blue', 'BLUE') THEN 1 ELSE 0 END) AS blue "
+                                "FROM emails "
+                                "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                                f"{account_clause}"
+                            ),
+                            (day_ago_ts, *account_params),
+                        ).fetchone()
+                    except sqlite3.Error as exc:
+                        _mark_section("priority", "unavailable", f"priority metrics unavailable: {exc}")
+                    else:
+                        if pr_row:
+                            payload["priority"] = {
+                                "red": int(pr_row["red"] or 0),
+                                "yellow": int(pr_row["yellow"] or 0),
+                                "blue": int(pr_row["blue"] or 0),
+                            }
+                else:
+                    _mark_section("priority", "partial", "emails.priority missing in this schema")
+
+                try:
+                    corr_row = conn.execute(
+                        (
+                            "SELECT COUNT(*) AS corrections_week "
+                            "FROM priority_feedback "
+                            "WHERE kind IN ('correction', 'priority_correction') "
+                            "AND COALESCE(strftime('%s', created_at), 0) >= ?"
+                            f"{account_clause}"
+                        ),
+                        (week_ago_ts, *account_params),
+                    ).fetchone()
+                except sqlite3.Error as exc:
+                    _mark_section("learning", "unavailable", f"priority feedback unavailable: {exc}")
+                else:
+                    if corr_row:
+                        payload["corrections_week"] = int(corr_row["corrections_week"] or 0)
+
+                try:
+                    surprise_row = conn.execute(
+                        (
+                            "SELECT "
+                            "SUM(CASE WHEN event_type = 'surprise_detected' THEN 1 ELSE 0 END) AS surprises, "
+                            "SUM(CASE WHEN event_type = 'priority_correction_recorded' THEN 1 ELSE 0 END) AS corrections "
+                            "FROM events_v1 "
+                            "WHERE ts_utc >= ?"
+                            f"{account_event_clause}"
+                        ),
+                        (week_ago_ts, *account_event_params),
+                    ).fetchone()
+                except sqlite3.Error as exc:
+                    _mark_section("learning", "unavailable", f"learning event feed unavailable: {exc}")
+                else:
+                    surprises = int(surprise_row["surprises"] or 0) if surprise_row else 0
+                    corrections = (
+                        int(surprise_row["corrections"] or 0) if surprise_row else 0
+                    )
+                    payload["surprise_rate"] = (
+                        round(surprises / corrections, 4) if corrections > 0 else 0.0
+                    )
 
                 try:
                     interpretation_row = conn.execute(
@@ -4137,7 +4276,12 @@ def create_app(
                         ),
                         (week_ago_ts, *account_event_params),
                     ).fetchone()
-                except sqlite3.Error:
+                except sqlite3.Error as exc:
+                    _mark_section(
+                        "interpretation",
+                        "unavailable",
+                        f"interpretation event feed unavailable: {exc}",
+                    )
                     interpretation_row = None
                 if interpretation_row:
                     payload["interpretation"] = {
@@ -4165,7 +4309,8 @@ def create_app(
                         ),
                         tuple(account_event_params),
                     ).fetchall()
-                except sqlite3.Error:
+                except sqlite3.Error as exc:
+                    _mark_section("events", "unavailable", f"event feed unavailable: {exc}")
                     recent_rows = []
                 recent_events: list[dict[str, str]] = []
                 for item in recent_rows:
@@ -4185,49 +4330,104 @@ def create_app(
                 payload["recent_events"] = recent_events
                 try:
                     analytics = _analytics()
+                except Exception as exc:
+                    logger.warning("dashboard_analytics_factory_failed", extra={"error": str(exc)})
+                    _mark_section("business", "unavailable", f"analytics unavailable: {exc}")
+                    _mark_section("contacts", "unavailable", f"analytics unavailable: {exc}")
+                    _mark_section("issuers", "unavailable", f"analytics unavailable: {exc}")
+                else:
                     account_email = account_scope[0] if account_scope else ""
                     if account_email:
-                        business_summary = analytics.business_summary(
-                            account_email=account_email,
-                            account_emails=account_scope,
-                            window_days=7,
-                            top_issuer_limit=5,
-                        )
-                        payload["business"] = {
-                            key: value
-                            for key, value in business_summary.items()
-                            if key != "top_issuers"
-                        }
-                        payload["top_issuers"] = list(
-                            business_summary.get("top_issuers") or []
-                        )
-                        payload["top_contacts"] = (
-                            analytics.top_sender_relationship_profiles(
+                        try:
+                            business_summary = analytics.business_summary(
                                 account_email=account_email,
                                 account_emails=account_scope,
-                                days=7,
-                                limit=5,
+                                window_days=7,
+                                top_issuer_limit=5,
                             )
+                        except Exception as exc:
+                            logger.warning(
+                                "dashboard_business_summary_failed",
+                                extra={"error": str(exc)},
+                            )
+                            _mark_section(
+                                "business",
+                                "unavailable",
+                                f"business summary unavailable: {exc}",
+                            )
+                            _mark_section(
+                                "issuers",
+                                "unavailable",
+                                f"issuer summary unavailable: {exc}",
+                            )
+                        else:
+                            payload["business"] = {
+                                key: value
+                                for key, value in business_summary.items()
+                                if key != "top_issuers"
+                            }
+                            payload["top_issuers"] = list(
+                                business_summary.get("top_issuers") or []
+                            )
+                        try:
+                            payload["top_contacts"] = (
+                                analytics.top_sender_relationship_profiles(
+                                    account_email=account_email,
+                                    account_emails=account_scope,
+                                    days=7,
+                                    limit=5,
+                                )
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "dashboard_top_contacts_failed",
+                                extra={"error": str(exc)},
+                            )
+                            _mark_section(
+                                "contacts",
+                                "unavailable",
+                                f"contact summary unavailable: {exc}",
+                            )
+                    else:
+                        _mark_section(
+                            "business",
+                            "partial",
+                            "account scope unavailable for this summary",
                         )
-                except Exception as exc:
-                    logger.warning(
-                        "dashboard_top_contacts_failed", extra={"error": str(exc)}
-                    )
-                _DASHBOARD_CACHE["payload"] = payload
-                _DASHBOARD_CACHE["ts"] = now
-                _DASHBOARD_CACHE["key"] = cache_key
-        except Exception as exc:
+                        _mark_section(
+                            "contacts",
+                            "partial",
+                            "account scope unavailable for this summary",
+                        )
+                        _mark_section(
+                            "issuers",
+                            "partial",
+                            "account scope unavailable for this summary",
+                        )
+        except sqlite3.Error as exc:
             logger.warning("dashboard_payload_failed", extra={"error": str(exc)})
-        return payload
+            for section in (
+                "emails",
+                "llm",
+                "priority",
+                "learning",
+                "events",
+                "interpretation",
+                "business",
+                "contacts",
+                "issuers",
+            ):
+                _mark_section(section, "unavailable", f"dashboard DB read failed: {exc}")
+        return _cache_and_return()
 
     def _imap_health_payload(account_emails: list[str]) -> dict[str, object]:
         now_ts = datetime.now(timezone.utc).timestamp()
         since_24h = now_ts - 86_400
         payload: dict[str, object] = {
-            "status": "down",
+            "status": "unknown",
             "last_success_ts": None,
-            "reconnect_count_24h": 0,
-            "dead_letter_count": 0,
+            "reconnect_count_24h": None,
+            "dead_letter_count": None,
         }
         account_clause = ""
         account_params: list[object] = []
@@ -4271,6 +4471,7 @@ def create_app(
                     (EventType.IMAP_HEALTH.value, *account_params),
                 ).fetchone()
         except sqlite3.Error:
+            payload["status"] = "unavailable"
             return payload
 
         last_success_ts = ""
@@ -4291,7 +4492,7 @@ def create_app(
         payload["dead_letter_count"] = dead_letter_count
 
         if last_success_utc <= 0:
-            payload["status"] = "down"
+            payload["status"] = "unknown"
             return payload
         age_seconds = max(now_ts - last_success_utc, 0.0)
         if age_seconds > 3_600:
@@ -4306,10 +4507,10 @@ def create_app(
         now_ts = datetime.now(timezone.utc).timestamp()
         since_24h = now_ts - 86_400
         payload: dict[str, object] = {
-            "status": "degraded",
+            "status": "unknown",
             "last_processed_ts": None,
-            "processing_failure_count_24h": 0,
-            "pending_action_count": 0,
+            "processing_failure_count_24h": None,
+            "pending_action_count": None,
         }
         account_clause = ""
         account_params: list[object] = []
@@ -4342,6 +4543,7 @@ def create_app(
                     (EventType.IMAP_HEALTH.value, since_24h, *account_params),
                 ).fetchone()
         except sqlite3.Error:
+            payload["status"] = "unavailable"
             return payload
 
         last_processed_ts = ""
@@ -4370,11 +4572,11 @@ def create_app(
                 payload["pending_action_count"] = int(
                     business_summary.get("documents_waiting_attention_count") or 0
                 )
-        except Exception:
-            payload["pending_action_count"] = 0
+        except Exception as exc:
+            logger.warning("pipeline_pending_actions_failed", extra={"error": str(exc)})
 
         if last_processed_utc <= 0:
-            payload["status"] = "degraded"
+            payload["status"] = "unknown"
             return payload
         age_seconds = max(now_ts - last_processed_utc, 0.0)
         payload["status"] = (
@@ -4638,10 +4840,21 @@ def create_app(
         now_dt = now or datetime.now(timezone.utc)
         now_ts = now_dt.timestamp()
 
-        def _component_status(last_ok: object, *, hard_down: bool = False, degraded: bool = False) -> str:
+        def _component_status(
+            last_ok: object,
+            *,
+            explicit_status: str = "",
+            hard_down: bool = False,
+            degraded: bool = False,
+        ) -> str:
+            normalized_status = str(explicit_status or "").strip().lower()
+            if normalized_status in {"unknown", "unavailable", "disabled", "not configured"}:
+                return normalized_status
             parsed = _parse_datetime_value(last_ok)
-            if hard_down or parsed is None:
+            if hard_down:
                 return "down"
+            if parsed is None:
+                return "unknown"
             age_seconds = max(now_ts - parsed.timestamp(), 0.0)
             if age_seconds > 3600:
                 return "down"
@@ -4720,6 +4933,7 @@ def create_app(
                 latest_imap_payload = {}
         imap_status = _component_status(
             imap_payload.get("last_success_ts"),
+            explicit_status=str(imap_payload.get("status") or ""),
             hard_down=imap_payload.get("status") == "down",
             degraded=imap_payload.get("status") == "degraded",
         )
@@ -4759,10 +4973,12 @@ def create_app(
                 if isinstance(strip_status, Mapping)
                 else ""
             )
+            normalized_status_text = status_text.strip().lower()
             status = _component_status(
                 last_snapshot_ts,
-                hard_down=status_text == "down",
-                degraded=status_text in {"warn", "degraded"},
+                explicit_status=normalized_status_text,
+                hard_down=normalized_status_text == "down",
+                degraded=normalized_status_text in {"warn", "degraded", "partial"},
             )
             incident = incident_by_component.get(component_name, {})
             raw_detail = str(incident.get("symptom") or "").strip()
@@ -4788,6 +5004,7 @@ def create_app(
 
         scheduler_status = _component_status(
             pipeline_payload.get("last_processed_ts"),
+            explicit_status=str(pipeline_payload.get("status") or ""),
             hard_down=pipeline_payload.get("status") == "down",
             degraded=pipeline_payload.get("status") == "degraded",
         )
@@ -4857,12 +5074,14 @@ def create_app(
         totals_cache_key = (
             "attention_totals",
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
         )
         table_cache_key = (
             "attention_table",
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
             sort_mode,
@@ -4915,6 +5134,7 @@ def create_app(
         cache_key = (
             "cockpit_budgets",
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
             trend_days,
@@ -4960,6 +5180,7 @@ def create_app(
         cache_key = (
             "cockpit_lanes",
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
         )
@@ -4984,6 +5205,7 @@ def create_app(
         cache_key = (
             "health_summary",
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
             mode,
@@ -5016,22 +5238,34 @@ def create_app(
 
         primary = account_emails[0]
         analytics = _analytics()
-        current = analytics.processing_spans_health_current(
-            account_email=primary,
-            account_emails=account_emails,
-            window_days=window_days,
-        )
-        metrics_digest = analytics.processing_spans_metrics_digest(
-            account_email=primary,
-            account_emails=account_emails,
-            window_days=window_days,
-        )
-        trend = analytics.processing_spans_health_timeline(
-            account_email=primary,
-            account_emails=account_emails,
-            window_days=window_days,
-            limit=5,
-        )
+        try:
+            current = analytics.processing_spans_health_current(
+                account_email=primary,
+                account_emails=account_emails,
+                window_days=window_days,
+            )
+        except Exception as exc:
+            logger.warning("health_summary_current_failed", extra={"error": str(exc)})
+            current = None
+        try:
+            metrics_digest = analytics.processing_spans_metrics_digest(
+                account_email=primary,
+                account_emails=account_emails,
+                window_days=window_days,
+            )
+        except Exception as exc:
+            logger.warning("health_summary_metrics_failed", extra={"error": str(exc)})
+            metrics_digest = {}
+        try:
+            trend = analytics.processing_spans_health_timeline(
+                account_email=primary,
+                account_emails=account_emails,
+                window_days=window_days,
+                limit=5,
+            )
+        except Exception as exc:
+            logger.warning("health_summary_timeline_failed", extra={"error": str(exc)})
+            trend = []
         status_payload = {
             "system_mode": current.get("system_mode") if current else "unknown",
             "gates_state": current.get("gates_state") if current else {},
@@ -5060,6 +5294,7 @@ def create_app(
         cache_key = (
             "health_incidents",
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
             mode,
@@ -5073,12 +5308,16 @@ def create_app(
             return []
         primary = account_emails[0]
         analytics = _analytics()
-        raw_incidents = analytics.processing_spans_recent_errors(
-            account_email=primary,
-            account_emails=account_emails,
-            window_days=window_days,
-            limit=10,
-        )
+        try:
+            raw_incidents = analytics.processing_spans_recent_errors(
+                account_email=primary,
+                account_emails=account_emails,
+                window_days=window_days,
+                limit=10,
+            )
+        except Exception as exc:
+            logger.warning("health_incidents_failed", extra={"error": str(exc)})
+            raw_incidents = []
         incidents = _health_incidents_view(raw_incidents)[:5]
         _HEALTH_INCIDENT_CACHE.set(cache_key, incidents)
         return incidents
@@ -5096,6 +5335,7 @@ def create_app(
         cache_key = (
             "health_components",
             str(app.config["DB_PATH"]),
+            _db_change_token(app.config["DB_PATH"]),
             tuple(account_emails),
             window_days,
             mode,

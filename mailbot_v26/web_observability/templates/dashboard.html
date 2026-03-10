@@ -13,6 +13,9 @@
     <section class="card live-card" id="card-system">
       <h2>System</h2>
       <p class="hint">{{ scope_hint or 'Live observability feed.' }}</p>
+      <div class="metric"><span>Dashboard</span><strong id="dashboard-meta-status">UNKNOWN</strong></div>
+      <div class="hint" id="dashboard-meta-updated">payload updated: unknown</div>
+      <div class="hint" id="dashboard-meta-detail">Waiting for canonical runtime data.</div>
       {% if cfg.features.donate_enabled and support_nav_enabled %}
       <div class="support-card-copy">Support Letterbot</div>
       {% if support_methods and support_methods[0].qr_image_data_uri %}
@@ -27,13 +30,13 @@
 
     <section class="card live-card" id="card-ops-health">
       <h2>System status</h2>
-      <div class="metric"><span>IMAP</span><strong id="health-imap-status">● down</strong></div>
-      <div class="hint" id="health-imap-meta">last success: --</div>
-      <div class="metric"><span>Pipeline</span><strong id="health-pipeline-status">● degraded</strong></div>
-      <div class="hint" id="health-pipeline-meta">last processed: --</div>
-      <div class="metric"><span>Dead letters</span><strong id="health-dead-letters">0</strong></div>
-      <div class="metric"><span>24h reconnects</span><strong id="health-reconnects">0</strong></div>
-      <div class="metric"><span>Pending actions</span><strong id="health-pending-actions">0</strong></div>
+      <div class="metric"><span>IMAP</span><strong id="health-imap-status">● unknown</strong></div>
+      <div class="hint" id="health-imap-meta">last success: unknown</div>
+      <div class="metric"><span>Pipeline</span><strong id="health-pipeline-status">● unknown</strong></div>
+      <div class="hint" id="health-pipeline-meta">last processed: unknown</div>
+      <div class="metric"><span>Dead letters</span><strong id="health-dead-letters">unknown</strong></div>
+      <div class="metric"><span>24h reconnects</span><strong id="health-reconnects">unknown</strong></div>
+      <div class="metric"><span>Pending actions</span><strong id="health-pending-actions">unknown</strong></div>
     </section>
 
     <section class="card live-card" id="card-emails">
@@ -99,15 +102,21 @@
       const eventsList = document.getElementById('events-list');
       const topContactsList = document.getElementById('top-contacts-list');
       const topIssuersList = document.getElementById('top-issuers-list');
+      const dashboardMetaStatus = document.getElementById('dashboard-meta-status');
+      const dashboardMetaUpdated = document.getElementById('dashboard-meta-updated');
+      const dashboardMetaDetail = document.getElementById('dashboard-meta-detail');
       const statusLabel = (status) => {
         if (status === 'ok') return '● running';
-        if (status === 'degraded') return '● degraded';
+        if (status === 'degraded' || status === 'warn' || status === 'partial') return '● degraded';
+        if (status === 'unknown') return '● unknown';
+        if (status === 'unavailable') return '● unavailable';
+        if (status === 'disabled' || status === 'not configured') return `● ${status}`;
         return '● down';
       };
       const minutesAgo = (ts) => {
-        if (!ts) return '--';
+        if (!ts) return 'unknown';
         const parsed = new Date(ts);
-        if (Number.isNaN(parsed.getTime())) return '--';
+        if (Number.isNaN(parsed.getTime())) return 'unknown';
         const deltaMs = Math.max(Date.now() - parsed.getTime(), 0);
         const minutes = Math.floor(deltaMs / 60000);
         if (minutes <= 0) return '<1 min ago';
@@ -117,6 +126,23 @@
       const setText = (id, value) => {
         const node = document.getElementById(id);
         if (node) node.textContent = String(value);
+      };
+      const displayValue = (value, fallback = 'unknown') => {
+        if (value === null || value === undefined || value === '') return fallback;
+        return String(value);
+      };
+      const sectionState = (meta, section) => {
+        const entry = meta?.sections?.[section];
+        if (entry && typeof entry === 'object') return entry;
+        return { status: 'unknown', detail: '' };
+      };
+      const dashboardMetaSummary = (meta) => {
+        const sections = meta?.sections || {};
+        const issues = Object.entries(sections)
+          .filter(([, entry]) => entry && typeof entry === 'object' && entry.status && entry.status !== 'ok')
+          .map(([name, entry]) => `${name}: ${entry.detail || entry.status}`);
+        if (issues.length) return issues.slice(0, 3).join(' · ');
+        return 'Canonical events and runtime storage are in sync.';
       };
       const formatEventTime = (ts) => {
         if (!ts) return '--:--';
@@ -131,23 +157,42 @@
             return resp.json();
           })
           .then((data) => {
-            setText('emails-today', data.emails_today ?? 0);
-            setText('emails-hour', data.emails_last_hour ?? 0);
-            setText('llm-calls', data.llm_calls_today ?? 0);
-            setText('llm-fallback', data.llm_fallback_today ?? 0);
-            setText('priority-red', data.priority?.red ?? 0);
-            setText('priority-yellow', data.priority?.yellow ?? 0);
-            setText('priority-blue', data.priority?.blue ?? 0);
-            setText('corrections-week', data.corrections_week ?? 0);
-            setText('surprise-rate', `${Math.round((data.surprise_rate ?? 0) * 100)}%`);
-            setText('business-payable', data.business?.payable_amount_total ?? 0);
-            setText('business-waiting', data.business?.documents_waiting_attention_count ?? 0);
-            setText('business-silence', data.business?.silence_risk_count ?? 0);
-            setText('business-due', `${data.business?.due_soon_count ?? 0} / ${data.business?.overdue_due_count ?? 0}`);
+            const meta = data.meta || {};
+            if (dashboardMetaStatus) dashboardMetaStatus.textContent = String(meta.status || 'unknown').toUpperCase();
+            if (dashboardMetaUpdated) dashboardMetaUpdated.textContent = `payload updated: ${minutesAgo(meta.generated_at)}`;
+            if (dashboardMetaDetail) dashboardMetaDetail.textContent = dashboardMetaSummary(meta);
+            setText('emails-today', displayValue(data.emails_today));
+            setText('emails-hour', displayValue(data.emails_last_hour));
+            setText('llm-calls', displayValue(data.llm_calls_today));
+            setText('llm-fallback', displayValue(data.llm_fallback_today));
+            setText('priority-red', displayValue(data.priority?.red));
+            setText('priority-yellow', displayValue(data.priority?.yellow));
+            setText('priority-blue', displayValue(data.priority?.blue));
+            setText('corrections-week', displayValue(data.corrections_week));
+            setText(
+              'surprise-rate',
+              data.surprise_rate === null || data.surprise_rate === undefined
+                ? 'unknown'
+                : `${Math.round(data.surprise_rate * 100)}%`
+            );
+            setText('business-payable', displayValue(data.business?.payable_amount_total));
+            setText('business-waiting', displayValue(data.business?.documents_waiting_attention_count));
+            setText('business-silence', displayValue(data.business?.silence_risk_count));
+            const dueSoon = data.business?.due_soon_count;
+            const overdue = data.business?.overdue_due_count;
+            setText(
+              'business-due',
+              dueSoon === null || dueSoon === undefined || overdue === null || overdue === undefined
+                ? 'unknown'
+                : `${dueSoon} / ${overdue}`
+            );
             if (eventsList) {
               const items = Array.isArray(data.recent_events) ? data.recent_events : [];
               if (!items.length) {
-                eventsList.innerHTML = '<li class="hint">No recent events yet.</li>';
+                const eventSection = sectionState(meta, 'events');
+                eventsList.innerHTML = eventSection.status !== 'ok'
+                  ? `<li class="hint">Unavailable: ${eventSection.detail || eventSection.status}</li>`
+                  : '<li class="hint">No recent events yet.</li>';
               } else {
                 eventsList.innerHTML = items.map((item) => {
                   const ts = formatEventTime(item.ts || '');
@@ -159,7 +204,10 @@
             if (topContactsList) {
               const topContacts = Array.isArray(data.top_contacts) ? data.top_contacts : [];
               if (!topContacts.length) {
-                topContactsList.innerHTML = '<li class="hint">No contacts yet.</li>';
+                const contactsSection = sectionState(meta, 'contacts');
+                topContactsList.innerHTML = contactsSection.status !== 'ok'
+                  ? `<li class="hint">Unavailable: ${contactsSection.detail || contactsSection.status}</li>`
+                  : '<li class="hint">No contacts yet.</li>';
               } else {
                 topContactsList.innerHTML = topContacts.map((item) => {
                   const sender = item.sender_email || 'contact';
@@ -172,7 +220,10 @@
             if (topIssuersList) {
               const topIssuers = Array.isArray(data.top_issuers) ? data.top_issuers : [];
               if (!topIssuers.length) {
-                topIssuersList.innerHTML = '<li class="hint">No issuers yet.</li>';
+                const issuersSection = sectionState(meta, 'issuers');
+                topIssuersList.innerHTML = issuersSection.status !== 'ok'
+                  ? `<li class="hint">Unavailable: ${issuersSection.detail || issuersSection.status}</li>`
+                  : '<li class="hint">No issuers yet.</li>';
               } else {
                 topIssuersList.innerHTML = topIssuers.map((item) => {
                   const issuer = item.issuer_label || item.issuer_key || 'issuer';
@@ -183,7 +234,13 @@
               }
             }
           })
-          .catch(() => {});
+          .catch(() => {
+            if (dashboardMetaStatus) dashboardMetaStatus.textContent = 'UNAVAILABLE';
+            if (dashboardMetaUpdated) dashboardMetaUpdated.textContent = 'payload refresh failed';
+            if (dashboardMetaDetail) {
+              dashboardMetaDetail.textContent = 'Showing last known values until the next successful refresh.';
+            }
+          });
       };
 
       const updateHealth = () => {
@@ -202,11 +259,16 @@
             setText('health-imap-meta', `last success: ${minutesAgo(imap.last_success_ts)}`);
             setText('health-pipeline-status', statusLabel(pipeline.status));
             setText('health-pipeline-meta', `last processed: ${minutesAgo(pipeline.last_processed_ts)}`);
-            setText('health-dead-letters', imap.dead_letter_count ?? 0);
-            setText('health-reconnects', imap.reconnect_count_24h ?? 0);
-            setText('health-pending-actions', pipeline.pending_action_count ?? 0);
+            setText('health-dead-letters', displayValue(imap.dead_letter_count));
+            setText('health-reconnects', displayValue(imap.reconnect_count_24h));
+            setText('health-pending-actions', displayValue(pipeline.pending_action_count));
           })
-          .catch(() => {});
+          .catch(() => {
+            setText('health-imap-status', '● unavailable');
+            setText('health-imap-meta', 'last success: refresh failed');
+            setText('health-pipeline-status', '● unavailable');
+            setText('health-pipeline-meta', 'last processed: refresh failed');
+          });
       };
 
       const refreshStatus = () => {

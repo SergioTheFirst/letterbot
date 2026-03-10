@@ -191,7 +191,7 @@ def test_render_invoice_priority_buttons_preserve_low_medium_high_order() -> Non
 
     assert result.reply_markup is not None
     priority_row = result.reply_markup["inline_keyboard"][-2]
-    assert [button["text"] for button in priority_row] == ["LOW", "MEDIUM", "HIGH"]
+    assert [button["text"] for button in priority_row] == ["🔵 LOW", "🟡 MEDIUM", "🔴 HIGH"]
     assert [decode(button["callback_data"]).action for button in priority_row] == [
         "lo",
         "med",
