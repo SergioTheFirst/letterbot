@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -75,3 +77,66 @@ def test_source_bundle_includes_required_docs_examples_and_templates(
     assert "mailbot_v26/config/accounts.ini.example" in names
     assert "mailbot_v26/web_observability/static/style.css" in names
     assert "mailbot_v26/tests/test_smoke.py" in names
+
+
+def _gitignore_text() -> str:
+    return (Path(__file__).resolve().parents[2] / ".gitignore").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_gitignore_covers_log_files() -> None:
+    text = _gitignore_text()
+
+    assert "logs/" in text
+    assert "*.log" in text
+    assert "mailbot_v26/mailbot.log*" in text
+
+
+def test_gitignore_covers_db_files() -> None:
+    text = _gitignore_text()
+
+    assert "*.sqlite" in text
+    assert "*.sqlite3" in text
+    assert "*.db" in text
+    assert "data/" in text
+
+
+def test_gitignore_covers_env_files() -> None:
+    text = _gitignore_text()
+
+    assert ".env" in text
+    assert "settings.ini" in text
+    assert "accounts.ini" in text
+    assert "keys.ini" in text
+
+
+def test_gitignore_covers_runtime_temp_files() -> None:
+    text = _gitignore_text()
+
+    assert "runtime/tmp_*.ps1" in text
+    assert "_audit_*.txt" in text
+
+
+def test_no_runtime_garbage_tracked_in_repo() -> None:
+    git = shutil.which("git")
+    assert git is not None
+    repo_root = Path(__file__).resolve().parents[2]
+    tracked = subprocess.run(
+        [
+            git,
+            "ls-files",
+            "--",
+            "settings.ini",
+            "logs/decision_trace_failures.ndjson",
+            "logs/decision_trace_failures.ndjson.1",
+            "logs/priority_calibration_cache.json",
+            "mailbot_v26/tools/_audit_webui_minimal.txt",
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    assert tracked == ""

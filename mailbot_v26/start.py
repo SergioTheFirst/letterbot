@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import configparser
 import logging
 import argparse
 import sys
@@ -71,6 +72,7 @@ from mailbot_v26.pipeline.digest_scheduler import (
     configure_digest_config_dir,
     run_digest_tick,
 )
+from mailbot_v26.observability import configure_logging as configure_runtime_logging
 from mailbot_v26.observability import get_logger
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.state_manager import StateManager
@@ -106,21 +108,120 @@ MAX_TELEGRAM_STAGE_ATTEMPTS = 3
 
 
 def _configure_logging() -> None:
-    handlers: List[logging.Handler] = []
     try:
-        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(LOG_PATH, encoding="utf-8")
-        handlers.append(file_handler)
+        configure_runtime_logging(log_path=LOG_PATH, console_stream=sys.stdout)
     except OSError as exc:
         print(f"File logging unavailable: {exc}")
+        configure_runtime_logging(console_stream=sys.stdout)
 
-    handlers.append(logging.StreamHandler(sys.stdout))
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=handlers,
-        force=True,
+
+def _mask_startup_value(value: str | None) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return "<missing>"
+    if len(token) <= 4:
+        return "*" * len(token)
+    return f"{token[:2]}...({len(token)})"
+
+
+def _looks_like_placeholder(value: str | None) -> bool:
+    token = str(value or "").strip()
+    return not token or token == "CHANGE_ME"
+
+
+def _run_startup_preflight(config_dir: Path) -> tuple[bool, list[str], list[str]]:
+    critical: list[str] = []
+    warnings: list[str] = []
+    settings_path = config_dir / "settings.ini"
+    legacy_settings_path = config_dir / "config.ini"
+    accounts_path = config_dir / "accounts.ini"
+
+    if not settings_path.exists() and not legacy_settings_path.exists():
+        critical.append(f"Missing settings.ini in {config_dir}")
+    if not accounts_path.exists():
+        critical.append(f"Missing accounts.ini in {config_dir}")
+        return False, critical, warnings
+
+    parser = configparser.ConfigParser()
+    parser.read(accounts_path, encoding="utf-8")
+    imap_sections = [
+        section_name
+        for section_name in parser.sections()
+        if section_name.lower() not in {"telegram", "cloudflare", "gigachat", "llm"}
+    ]
+    if not imap_sections:
+        critical.append("accounts.ini has no IMAP account sections")
+        return False, critical, warnings
+
+    for section_name in imap_sections:
+        section = parser[section_name]
+        missing = [
+            key
+            for key in ("login", "password", "host")
+            if _looks_like_placeholder(section.get(key, ""))
+        ]
+        if missing:
+            critical.append(
+                f"[{section_name}] missing required fields: {', '.join(missing)}"
+            )
+
+    telegram_section = parser["telegram"] if parser.has_section("telegram") else None
+    if telegram_section is None or _looks_like_placeholder(
+        telegram_section.get("bot_token", "")
+    ):
+        warnings.append(
+            "[telegram] bot_token is not configured (Telegram delivery may be disabled)"
+        )
+    return not critical, critical, warnings
+
+
+def _print_startup_preflight_failure(
+    config_dir: Path, critical: list[str], warnings: list[str]
+) -> None:
+    print("[ERROR] Configuration is not ready for startup.")
+    print(f"[ERROR] Config dir: {config_dir.resolve()}")
+    for item in critical:
+        print(f"[ERROR] {item}")
+    for item in warnings:
+        print(f"[WARN] {item}")
+    print(
+        "[NEXT] Run: "
+        f'python -m mailbot_v26 init-config --config-dir "{config_dir.resolve()}"'
     )
+    print(
+        "[NEXT] Fill settings.ini and accounts.ini placeholders, then run "
+        f'python -m mailbot_v26 config-ready --config-dir "{config_dir.resolve()}" --verbose'
+    )
+
+
+def _ensure_runtime_dirs(*, db_path: Path, log_path: Path) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _build_startup_confirmation_lines(
+    *,
+    config: BotConfig,
+    resolved_config_dir: Path,
+    two_file_mode: bool,
+) -> list[str]:
+    lines = [
+        f"[OK] Loaded {len(config.accounts)} accounts",
+        "[CONFIG] summary: "
+        f"config_dir={resolved_config_dir.resolve()} "
+        f"two_file_mode={str(two_file_mode).lower()} "
+        f"db_path={config.storage.db_path} "
+        f"log_path={LOG_PATH}",
+    ]
+    for account in config.accounts:
+        lines.append(
+            "[CONFIG] account "
+            f"[{account.account_id}] "
+            f"login={_mask_startup_value(account.login)} "
+            f"host={_mask_startup_value(account.host)} "
+            f"chat_configured={str(bool(account.telegram_chat_id)).lower()}"
+        )
+    return lines
 
 
 _configure_logging()
@@ -214,6 +315,9 @@ def load_config(
     print("[INFO] config.yaml not found. YAML-only gates use deterministic defaults.")
     config = _load_ini_config_or_defaults(paths.config_dir)
     return None, raw_config, config
+
+
+_ORIGINAL_LOAD_CONFIG = load_config
 
 
 def _load_ini_config_or_defaults(config_dir: Path) -> BotConfig:
@@ -992,6 +1096,21 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         CURRENT_DIR / "data" / "runtime_health.json"
     )
     try:
+        resolved_paths = resolve_config_paths(config_dir)
+        resolved_config_dir = resolved_paths.config_dir
+        preflight_warnings: list[str] = []
+        if load_config is _ORIGINAL_LOAD_CONFIG:
+            preflight_ready, preflight_errors, preflight_warnings = (
+                _run_startup_preflight(resolved_config_dir)
+            )
+            if not preflight_ready:
+                _print_startup_preflight_failure(
+                    resolved_config_dir, preflight_errors, preflight_warnings
+                )
+                sys.exit(2)
+        for warning in preflight_warnings:
+            print(f"[WARN] {warning}")
+
         config_result = load_config(config_dir)
         if (
             isinstance(config_result, tuple)
@@ -1003,22 +1122,11 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             config_path = None
             raw_config = {}
             config = config_result
-        resolved_paths = resolve_config_paths(config_dir)
-        resolved_config_dir = resolved_paths.config_dir
         processor_module.configure_processor_config_dir(resolved_config_dir)
         processor_module.configure_processor_db_path(config.storage.db_path)
         configure_digest_config_dir(resolved_config_dir)
         flags = FeatureFlags(base_dir=resolved_config_dir)
         logger.info("Configuration loaded: %d accounts", len(config.accounts))
-        print(f"[OK] Loaded {len(config.accounts)} accounts")
-        print(
-            "[CONFIG] snapshot: "
-            f"config_dir={resolved_config_dir.resolve()} "
-            f"two_file_mode={str(resolved_paths.two_file_mode).lower()} "
-            f"accounts_path={resolved_paths.accounts_path.resolve()} exists={resolved_paths.accounts_path.exists()} "
-            f"settings_path={resolved_paths.settings_path.resolve()} exists={resolved_paths.settings_path.exists()} "
-            f"telegram_bot_token_present={str(bool(str(config.keys.telegram_bot_token or '').strip())).lower()}"
-        )
 
         telegram_errors = validate_telegram_contract(
             config, config_dir=resolved_config_dir
@@ -1034,11 +1142,12 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 print(f"[ERROR] {error}")
             sys.exit(2)
 
-        print("[CONFIG] telegram configured: yes (bot_token present)")
-        for account in config.accounts:
-            print(
-                f"[CONFIG] account [{account.account_id}] chat_id={account.telegram_chat_id}"
-            )
+        for line in _build_startup_confirmation_lines(
+            config=config,
+            resolved_config_dir=resolved_config_dir,
+            two_file_mode=resolved_paths.two_file_mode,
+        ):
+            print(line)
 
         polling_interval, reload_interval = get_polling_intervals(raw_config)
         last_reload_at = time.monotonic()
@@ -1114,7 +1223,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         )
 
         try:
-            config.storage.db_path.parent.mkdir(parents=True, exist_ok=True)
+            _ensure_runtime_dirs(db_path=config.storage.db_path, log_path=LOG_PATH)
             storage = Storage(config.storage.db_path)
             logger.info("Storage initialized at %s", config.storage.db_path)
         except Exception as exc:

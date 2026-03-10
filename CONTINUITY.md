@@ -1,5 +1,5 @@
 Goal (incl. success criteria):
-- Complete the v3 observability + reliability pass so Letterbot is not only semantically strong but operationally visible: Telegram render snapshots locked, correction loop provably closed, offline `.eml` dry-run available end-to-end, IMAP health/dead-letter events exposed to the cockpit, and golden corpus upgraded to E2E render validation with full green verification (`python -m compileall mailbot_v26 -q`, full `python -m pytest -q --tb=short`, `python -m pytest mailbot_v26/tests/ -q --tb=short`, `python -m mailbot_v26.tools.eval_golden_corpus`, `python -m mailbot_v26.tools.eval_golden_corpus --report`).
+- Keep Letterbot operationally reliable, self-hostable, and public-repo ready: deterministic canonical pipeline, bounded runtime growth (logs + low-value retention), clear first-run diagnostics, secrets-safe config templates, clean source tree, and full green verification (`python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short`, `python -m mailbot_v26.tools.eval_golden_corpus`).
 Constraints / Assumptions:
 - Pipeline order unchanged (PARSE -> LLM -> TG; digests as-is).
 - Telegram payload schema for outbound notifications unchanged.
@@ -20,7 +20,12 @@ State:
 - Telegram render contract is snapshotted via `mailbot_v26/telegram/render_contract.py`, `test_telegram_render.py`, and 4 locked snapshot fixtures (`full`, `premium_clarity`, `safe_fallback`, `short_template`).
 - Correction callbacks, dry-run harness, IMAP operational health, and cockpit health APIs are all regression-covered and green.
 - Golden corpus is now 138 synthetic cases / 61 critical / 10 dry-run-validated E2E cases with deterministic category/subset/failure summaries and a developer-facing `--report` section for E2E render health; full suite, targeted suites, and evaluator are green in both default mode and explicit runtime-promotion mode.
+- Runtime logging is centralized and idempotent via stdlib rotating handlers (UTF-8, bounded size/backups, no duplicate handlers on re-init).
+- Offline cleanup is available through `python -m mailbot_v26.tools.cleanup` with `--status`/default dry-run/`--run`/optional `--vacuum`; deletion is allowlist-only and protects canonical interpretation, feedback, business events, `events` legacy history, and business tables by default.
+- First-run startup now performs clear preflight checks for missing config files and unchanged placeholders, auto-creates DB/log directories, and prints masked startup confirmation without credentials.
+- Public repo surface is hardened: local runtime files are gitignored/untracked, config examples use placeholders only, README/CONTRIBUTING are user-facing, and `LICENSE` is AGPL-3.0-only.
 Done:
+- 2026-03-10: Completed long-term self-hosting/public-repo hardening pass: introduced rotating file logging with idempotent handler setup and sanitized Telegram inbound poll logging (`mailbot_v26/observability/logger.py`, `mailbot_v26/start.py`, `mailbot_v26/telegram/inbound.py`, `test_log_rotation.py`), added dry-run-first offline cleanup tool with narrow allowlists and protected canonical tables/types (`mailbot_v26/tools/cleanup.py`, `test_retention_cleanup.py`), tightened `.gitignore` and removed tracked runtime garbage (`settings.ini`, `logs/decision_trace_failures.ndjson*`, `logs/priority_calibration_cache.json`, `mailbot_v26/tools/_audit_webui_minimal.txt`) with guard tests in `test_source_bundle.py`, replaced config template secrets with placeholders (`keys.ini.example`, `settings.ini.example`, `tools/config_bootstrap.py`), added startup preflight/auto-create/masked-summary regressions (`test_first_run.py`, updated startup/config bootstrap tests), and rewrote public docs (`README.md`, `CONTRIBUTING.md`, `LICENSE`) with repo-readiness regressions (`test_public_repo_readiness.py`); verification green (`python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1285 passed / 3 warnings, `python -m mailbot_v26.tools.eval_golden_corpus` => 138/138 passed, `python -m mailbot_v26.tools.cleanup --status` shows allowlisted-only eligible noise).
 - 2026-03-09: Completed minimal Web UI Archive + Health pass: `/archive` now exposes canonical sender/priority/doc_kind/confidence filters, 25-row pagination, interpretation-first table/detail payloads, and sender display from issuer identity; `/health` now exposes unified `/api/health/status`, operator-facing component matrix, cooldown state, ISO `last_ok`, and human-readable causes without embedding raw traceback in page HTML. Updated `test_web_dashboard_api.py` and `test_web_archive_forensics.py`; verification green (`python -m compileall mailbot_v26 -q`, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1245 passed / 3 warnings, `python -m mailbot_v26.tools.eval_golden_corpus` => 138/138 passed, `python -m mailbot_v26.tools.eval_golden_corpus --report` clean, targeted web/processor/imap/corpus suites passed).
 - 2026-03-09: Completed v3 observability/reliability pass end-to-end: added Telegram render contract + snapshot discipline (`mailbot_v26/telegram/render_contract.py`, `test_telegram_render.py`, 4 snapshot fixtures), correction-loop E2E regression coverage (`test_correction_loop.py`, enriched correction payloads in `feedback.py`), deterministic offline dry-run harness with synthetic `.eml` fixture library (`mailbot_v26/tools/dry_run.py`, `mailbot_v26/tests/fixtures/eml/`, `test_e2e_dry_run.py`), IMAP health/dead-letter events + cockpit health endpoints/panel (`mailbot_v26/events/contract.py`, `start.py`, `web_observability/app.py`, `dashboard.html`, `test_imap_health.py`, expanded dashboard tests), and E2E golden-corpus integration (`cases.json` -> 138 cases, 10 `dry_run_validated`, updated `eval_golden_corpus.py` + report section + `test_golden_corpus_eval.py`); verification green (`python -m compileall mailbot_v26 -q`, `python -m pytest -q --tb=short` => 1336 passed / 5 warnings, `python -m pytest mailbot_v26/tests/ -q --tb=short` => 1226 passed / 3 warnings, `python -m mailbot_v26.tools.eval_golden_corpus` => 138/138 passed / 61/61 critical / 10/10 E2E, `python -m mailbot_v26.tools.eval_golden_corpus --report` clean, targeted processor/imap/polling/source-bundle/weekly/dashboard/corpus/promotion/issuer/render/correction/dry-run/imap-health/projection suites all passed).
 - 2026-03-09: Completed final Stage 6-7 verification sweep for the mega-pass with no new regressions: cleaned runtime log artifacts from the working diff, re-ran `python -m compileall mailbot_v26 -q`, `python -m pytest -q --tb=short` (1280 passed, 5 warnings), `python -m pytest mailbot_v26/tests/ -q --tb=short` (1170 passed, 3 warnings), `python -m mailbot_v26.tools.eval_golden_corpus` (128/128 passed, 56/56 critical), `python -m mailbot_v26.tools.eval_golden_corpus --report` (clean deterministic output), explicitly re-ran evaluator with `template_promotion_runtime=True` (128/128 passed), and re-verified targeted processor/imap/polling/source-bundle/weekly/dashboard/corpus/promotion/issuer/projection suites; current PR diff is code/tests/docs only.
@@ -229,58 +234,14 @@ Done:
 - 2026-03-06: Telegram UX hotfix pass started: wired startup `config.storage.db_path` into processor module (`configure_processor_db_path`), ensured `start.py` creates DB parent directory before `Storage(...)`, switched user path keyboards to direct priority buttons (`initial_prio=True`), and updated auto-priority-gate defaults/examples (`enabled=true`, `min_samples=10`); runtime verification currently FAILED with broad pre-existing+regression suite failures (94 failed / 950 passed).
 - 2026-03-06: user-facing reliability hardening applied with minimal runtime patchset: outbound Telegram send/edit now normalizes mojibake text centrally, `/status` now includes AI + delivery mode and uses global startup health mode (fixed `StartupHealthChecker.evaluate_mode` global-state update), IMAP runtime health now classifies repeated handshake/connect timeouts and enters per-account 24h cooldown with cooldown metadata/log fields, default progressive pre-message disabled unless `MAILBOT_ENABLE_PROGRESSIVE_PREMESSAGE` is explicitly enabled, weekly digest defaults switched ON across templates/bootstrap/feature defaults, and inbound callback rerender now adds a single `РџСЂРёРѕСЂРёС‚РµС‚: ... РІСЂСѓС‡РЅСѓСЋ` marker when `priority_source=user_override`; runtime verification remains UNCONFIRMED here because no Python interpreter is available (`.venv` missing, `python/py` unavailable).
 Now:
-- v3 observability/reliability and the follow-up minimal Web UI archive/health pass are complete and verified; no active code work is in progress.
-- Working tree should retain only code/test/docs changes plus `CONTINUITY.md` once `logs/*` artifacts are restored to `HEAD`.
+- No active repair in progress; repo is green with bounded logging, cleanup tooling, safe config templates, and public docs.
 Next:
-- Future follow-up only: Telegram render quality/correction-loop UX polish, quiet evaluator info logging for cleaner CI output, and richer issuer/business summaries without breaking canonical-event discipline.
+- Next recommended step: add an operator-facing dead-letter review/export flow that stays projection-only and does not turn the cockpit into a source of truth.
+- Secondary follow-up: quiet/suppress verbose evaluator segmentation logs for cleaner CI output without changing corpus semantics.
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: What operator-visible flag or review workflow should gate any future promotion beyond the current safe internal thresholds?
 Working set (files / tables / tests):
-- mailbot_v26/telegram/render_contract.py
-- mailbot_v26/tests/test_telegram_render.py
-- mailbot_v26/tests/fixtures/telegram_snapshots/full.txt
-- mailbot_v26/tests/fixtures/telegram_snapshots/premium_clarity.txt
-- mailbot_v26/tests/fixtures/telegram_snapshots/safe_fallback.txt
-- mailbot_v26/tests/fixtures/telegram_snapshots/short_template.txt
-- mailbot_v26/feedback.py
-- mailbot_v26/tests/test_correction_loop.py
-- mailbot_v26/tools/dry_run.py
-- mailbot_v26/tests/fixtures/eml/fixture_builder.py
-- mailbot_v26/tests/fixtures/eml/invoice_simple.eml
-- mailbot_v26/tests/fixtures/eml/invoice_with_attachment.eml
-- mailbot_v26/tests/fixtures/eml/payroll_standard.eml
-- mailbot_v26/tests/fixtures/eml/reconciliation.eml
-- mailbot_v26/tests/fixtures/eml/contract_amendment.eml
-- mailbot_v26/tests/fixtures/eml/generic_notification.eml
-- mailbot_v26/tests/fixtures/eml/reply_forward_polluted.eml
-- mailbot_v26/tests/fixtures/eml/sender_ambiguous_content_clear.eml
-- mailbot_v26/tests/fixtures/eml/sender_clear_content_weak.eml
-- mailbot_v26/tests/fixtures/eml/table_heavy_attachment.eml
-- mailbot_v26/tests/test_e2e_dry_run.py
-- mailbot_v26/events/contract.py
-- mailbot_v26/start.py
-- mailbot_v26/tests/test_imap_health.py
-- mailbot_v26/config/learning.py
-- mailbot_v26/domain/issuer_identity.py
-- mailbot_v26/domain/issuer_profile.py
-- mailbot_v26/domain/template_promotion.py
-- mailbot_v26/observability/processing_span.py
-- mailbot_v26/tools/eval_golden_corpus.py
-- mailbot_v26/tests/fixtures/golden_corpus/cases.json
-- mailbot_v26/tests/fixtures/golden_corpus/README.md
-- mailbot_v26/tests/test_golden_corpus_eval.py
-- mailbot_v26/tests/test_issuer_profile.py
-- mailbot_v26/tests/test_template_promotion.py
-- mailbot_v26/pipeline/processor.py
-- mailbot_v26/storage/analytics.py
-- mailbot_v26/pipeline/weekly_digest.py
-- mailbot_v26/web_observability/app.py
-- mailbot_v26/web_observability/templates/dashboard.html
-- mailbot_v26/tests/test_pipeline_processor.py
-- mailbot_v26/tests/test_weekly_digest.py
-- mailbot_v26/tests/test_weekly_digest_calibration_render.py
-- mailbot_v26/tests/test_web_dashboard_api.py
-- mailbot_v26/tools/_audit_stage0_v3.txt
-- mailbot_v26/tools/_audit_webui_minimal.txt
-- mailbot_v26/tests/test_web_archive_forensics.py
-- CONTINUITY.md
+- Core runtime: `mailbot_v26/start.py`, `mailbot_v26/observability/logger.py`, `mailbot_v26/telegram/inbound.py`, `mailbot_v26/tools/cleanup.py`, `mailbot_v26/tools/dry_run.py`, `mailbot_v26/tools/eval_golden_corpus.py`, `mailbot_v26/events/contract.py`, `mailbot_v26/pipeline/processor.py`, `mailbot_v26/storage/analytics.py`, `mailbot_v26/pipeline/weekly_digest.py`.
+- Config/docs/repo hygiene: `.gitignore`, `README.md`, `CONTRIBUTING.md`, `LICENSE`, `mailbot_v26/config/settings.ini.example`, `mailbot_v26/config/keys.ini.example`, `mailbot_v26/tools/config_bootstrap.py`.
+- Protected retention/data: `events_v1` canonical rows (`message_interpretation`, feedback/corrections, delivery/business events), legacy `events`, `emails`, `priority_feedback`, `action_feedback`, `commitments`, `budget_consumption`; cleanup allowlist currently covers only `imap_health_v1`, `tg_render_recorded`, `DECISION_TRACE_RECORDED`, `trust_score_updated`, `relationship_health_updated`, `decision_traces`, `trust_snapshots`, and `relationship_health_snapshots`.
+- Key tests: `mailbot_v26/tests/test_log_rotation.py`, `mailbot_v26/tests/test_retention_cleanup.py`, `mailbot_v26/tests/test_first_run.py`, `mailbot_v26/tests/test_source_bundle.py`, `mailbot_v26/tests/test_public_repo_readiness.py`, `mailbot_v26/tests/test_golden_corpus_eval.py`, `mailbot_v26/tests/test_web_dashboard_api.py`, `mailbot_v26/tests/test_pipeline_processor.py`.

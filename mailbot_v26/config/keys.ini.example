@@ -1,5 +1,5 @@
 [telegram]
-bot_token = 8280024825:AAEjGrUWYenStG3zRR2rrhzqnSxvKZ1Mo6Y
+bot_token = CHANGE_ME
 
 [cloudflare]
 account_id = CHANGE_ME
