@@ -168,5 +168,5 @@ def test_premium_clarity_single_message(monkeypatch) -> None:
     assert preview_called["called"] is False
     keyboard = captured[0].reply_markup or {}
     rows = keyboard.get("inline_keyboard", [[], []])
-    assert [button["text"] for button in rows[0]] == ["LOW", "MEDIUM", "HIGH"]
+    assert [button["text"] for button in rows[0]] == ["🔵 LOW", "🟡 MEDIUM", "🔴 HIGH"]
     assert [button["text"] for button in rows[1]] == ["Snooze 2 часа", "Завтра"]

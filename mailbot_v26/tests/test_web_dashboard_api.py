@@ -215,29 +215,35 @@ def test_api_dashboard_survives_empty_db(tmp_path: Path) -> None:
 
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data == {
-        "emails_today": 0,
-        "emails_last_hour": 0,
-        "llm_calls_today": 0,
-        "llm_fallback_today": 0,
-        "priority": {"red": 0, "yellow": 0, "blue": 0},
-        "corrections_week": 0,
-        "surprise_rate": 0.0,
-        "recent_events": [],
-        "top_contacts": [],
-        "top_issuers": [],
-        "interpretation": {"invoice_count": 0, "contract_count": 0, "invoice_total": 0},
-        "business": {
-            "payable_amount_total": 0,
-            "payable_invoice_count": 0,
-            "documents_waiting_attention_count": 0,
-            "contract_review_count": 0,
-            "reconciliation_attention_count": 0,
-            "silence_risk_count": 0,
-            "overdue_due_count": 0,
-            "due_soon_count": 0,
-        },
+    assert data["emails_today"] is None
+    assert data["emails_last_hour"] is None
+    assert data["llm_calls_today"] is None
+    assert data["llm_fallback_today"] is None
+    assert data["priority"] == {"red": None, "yellow": None, "blue": None}
+    assert data["corrections_week"] is None
+    assert data["surprise_rate"] is None
+    assert data["recent_events"] == []
+    assert data["top_contacts"] == []
+    assert data["top_issuers"] == []
+    assert data["interpretation"] == {
+        "invoice_count": None,
+        "contract_count": None,
+        "invoice_total": None,
     }
+    assert data["business"] == {
+        "payable_amount_total": None,
+        "payable_invoice_count": None,
+        "documents_waiting_attention_count": None,
+        "contract_review_count": None,
+        "reconciliation_attention_count": None,
+        "silence_risk_count": None,
+        "overdue_due_count": None,
+        "due_soon_count": None,
+    }
+    assert data["meta"]["status"] == "partial"
+    assert data["meta"]["sections"]["emails"]["status"] == "unavailable"
+    assert data["meta"]["sections"]["events"]["status"] == "unavailable"
+    assert data["meta"]["sections"]["business"]["status"] == "partial"
 
 
 def test_api_dashboard_survives_legacy_emails_schema(tmp_path: Path) -> None:
@@ -332,9 +338,12 @@ def test_api_dashboard_survives_legacy_emails_schema(tmp_path: Path) -> None:
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["emails_today"] == 1
-    assert data["llm_calls_today"] == 0
-    assert data["priority"] == {"red": 0, "yellow": 0, "blue": 0}
+    assert data["llm_calls_today"] is None
+    assert data["priority"] == {"red": None, "yellow": None, "blue": None}
     assert data["recent_events"][0]["type"] == "email_processed"
+    assert data["meta"]["status"] == "partial"
+    assert data["meta"]["sections"]["llm"]["status"] == "partial"
+    assert data["meta"]["sections"]["priority"]["status"] == "partial"
 
 
 def test_dashboard_template_renders_events_block(tmp_path: Path) -> None:
@@ -354,6 +363,55 @@ def test_dashboard_template_renders_events_block(tmp_path: Path) -> None:
     assert 'id="card-ops-health"' in body
     assert 'id="health-imap-status"' in body
     assert 'id="health-pipeline-status"' in body
+    assert 'id="dashboard-meta-status"' in body
+    assert 'id="dashboard-meta-detail"' in body
+
+
+def test_api_dashboard_invalidates_cache_after_worker_write(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-cache-refresh.sqlite"
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO emails (account_email, from_email, subject, received_at, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "primary@example.com",
+                "alice@example.com",
+                "First",
+                now.isoformat(),
+                now.isoformat(),
+            ),
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        first = client.get("/api/dashboard").get_json()
+        with sqlite3.connect(db_path) as conn:
+            later = now + timedelta(minutes=1)
+            conn.execute(
+                """
+                INSERT INTO emails (account_email, from_email, subject, received_at, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    "primary@example.com",
+                    "bob@example.com",
+                    "Second",
+                    later.isoformat(),
+                    later.isoformat(),
+                ),
+            )
+            conn.commit()
+        second = client.get("/api/dashboard").get_json()
+
+    assert first["emails_today"] == 1
+    assert second["emails_today"] == 2
+    assert second["meta"]["status"] == "partial" or second["meta"]["status"] == "ok"
 
 
 def test_api_dashboard_limits_recent_events_to_20(tmp_path: Path) -> None:
@@ -611,6 +669,22 @@ def test_health_panel_imap_status_down_when_no_success_over_threshold(
     assert resp.get_json()["status"] == "down"
 
 
+def test_health_panel_imap_status_unknown_without_events(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-health-unknown.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/health/imap")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["status"] == "unknown"
+    assert data["last_success_ts"] is None
+    assert data["dead_letter_count"] == 0
+
+
 def test_health_panel_pipeline_last_processed_correct(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard-pipeline-last-processed.sqlite"
     KnowledgeDB(db_path)
@@ -693,6 +767,29 @@ def test_health_panel_pending_actions_count_from_canonical_events(
 
     assert resp.status_code == 200
     assert resp.get_json()["pending_action_count"] == 1
+
+
+def test_health_status_components_unknown_without_runtime_evidence(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "health-status-unknown.sqlite"
+    KnowledgeDB(db_path)
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    assert resp.status_code == 200
+    components = {row["name"]: row for row in resp.get_json()["components"]}
+    assert components["IMAP"]["status"] == "unknown"
+    assert components["Telegram"]["status"] == "unknown"
+    assert components["DB"]["status"] == "unknown"
+    assert components["LLM"]["status"] == "unknown"
+    assert components["Scheduler / Digests"]["status"] == "unknown"
 
 
 def test_archive_filter_by_priority_returns_correct_items(tmp_path: Path) -> None:

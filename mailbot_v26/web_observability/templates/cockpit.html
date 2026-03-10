@@ -35,7 +35,7 @@
       <span class="badge muted">Events: <b id="preview-events-count">0</b></span>
     </div>
     <div class="hint">
-      <span>Priority</span> · <span>Events</span>
+      <span id="preview-dashboard-status">Preview status: unknown</span> · <span>Priority</span> · <span>Events</span>
     </div>
   </div>
 
@@ -366,6 +366,11 @@
         const node = document.getElementById(id);
         if (node) node.textContent = String(value);
       };
+      const previewStatus = document.getElementById('preview-dashboard-status');
+      const displayValue = (value, fallback = 'unknown') => {
+        if (value === null || value === undefined || value === '') return fallback;
+        return String(value);
+      };
       const refreshDashboardPreview = () => {
         fetch('/api/dashboard', { credentials: 'same-origin' })
           .then((resp) => {
@@ -373,12 +378,19 @@
             return resp.json();
           })
           .then((data) => {
-            setPreview('preview-emails-today', data.emails_today ?? 0);
-            setPreview('preview-llm-calls', data.llm_calls_today ?? 0);
-            setPreview('preview-priority-red', data.priority?.red ?? 0);
-            setPreview('preview-events-count', Array.isArray(data.recent_events) ? data.recent_events.length : 0);
+            setPreview('preview-emails-today', displayValue(data.emails_today));
+            setPreview('preview-llm-calls', displayValue(data.llm_calls_today));
+            setPreview('preview-priority-red', displayValue(data.priority?.red));
+            setPreview('preview-events-count', Array.isArray(data.recent_events) ? data.recent_events.length : 'unknown');
+            if (previewStatus) {
+              previewStatus.textContent = `Preview status: ${String(data.meta?.status || 'unknown')}`;
+            }
           })
-          .catch(() => {});
+          .catch(() => {
+            if (previewStatus) {
+              previewStatus.textContent = 'Preview status: unavailable (refresh failed)';
+            }
+          });
       };
       refreshDashboardPreview();
       setInterval(refresh, {{ status_refresh_ms }});
