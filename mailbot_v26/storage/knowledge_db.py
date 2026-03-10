@@ -121,6 +121,11 @@ class KnowledgeDB:
 
     def _ensure_optional_columns(self, conn: sqlite3.Connection) -> None:
         try:
+            table_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='emails';"
+            ).fetchone()
+            if not table_exists:
+                return
             cur = conn.execute("PRAGMA table_info(emails);")
             columns = {row[1] for row in cur.fetchall()}
 

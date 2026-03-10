@@ -1,4 +1,5 @@
 import logging
+from types import SimpleNamespace
 
 import mailbot_v26.start as start_module
 from mailbot_v26.config_loader import (
@@ -224,6 +225,55 @@ def test_polling_loop_continues_after_imap_exception(monkeypatch, tmp_path, capl
     start_module.main(max_cycles=3)
 
     _assert_cycle_logs(caplog)
+
+
+def test_polling_loop_uses_explicit_config_dir_for_startup_health_and_report(
+    monkeypatch, tmp_path
+):
+    explicit_config_dir = tmp_path / "runtime-config"
+    explicit_config_dir.mkdir()
+    account = AccountConfig(
+        account_id="acc1",
+        login="acc1@example.com",
+        password="pw",
+        host="imap.example.com",
+        port=993,
+        use_ssl=True,
+        telegram_chat_id="chat1",
+    )
+    responses = {account.login: [[]]}
+    monkeypatch.setattr(start_module, "ResilientIMAP", _build_imap(responses))
+    _install_common_patches(monkeypatch, [account], tmp_path)
+    monkeypatch.setattr(
+        start_module, "_run_startup_preflight", lambda *_args, **_kwargs: (True, [], [])
+    )
+
+    observed: dict[str, Path] = {}
+
+    class CaptureHealthChecker:
+        def __init__(self, config_dir, config):
+            observed["checker"] = config_dir
+
+        def run(self):
+            return []
+
+        def evaluate_mode(self, results):
+            return SimpleNamespace(value="FULL")
+
+    class CaptureLaunchReportBuilder:
+        def __init__(self, *args, **kwargs):
+            observed["builder"] = kwargs["config_dir"]
+
+        def build(self, results, mode, **kwargs):
+            return "report"
+
+    monkeypatch.setattr(start_module, "StartupHealthChecker", CaptureHealthChecker)
+    monkeypatch.setattr(start_module, "LaunchReportBuilder", CaptureLaunchReportBuilder)
+
+    start_module.main(config_dir=explicit_config_dir, max_cycles=1)
+
+    assert observed["checker"] == explicit_config_dir
+    assert observed["builder"] == explicit_config_dir
 
 
 def test_polling_loop_keeps_other_accounts_running(monkeypatch, tmp_path, caplog):

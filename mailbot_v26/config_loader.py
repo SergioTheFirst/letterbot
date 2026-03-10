@@ -377,14 +377,20 @@ def parse_telegram_chat_id(raw_chat_id: object) -> str:
     return value
 
 
+def _telegram_chat_id_format_hint() -> str:
+    return "use a numeric chat id like 272250747 or -1001234567890 without '='"
+
+
 def validate_telegram_contract(config: BotConfig, *, config_dir: Path) -> list[str]:
     errors: list[str] = []
     token = str(config.keys.telegram_bot_token or "").strip()
 
     global_chat_id = parse_telegram_chat_id(config.keys.telegram_chat_id)
     if str(config.keys.telegram_chat_id or "").strip() and not global_chat_id:
+        raw_global_chat_id = str(config.keys.telegram_chat_id or "").strip()
         errors.append(
-            f"Invalid [telegram].chat_id in {config_dir / 'accounts.ini'} (remove placeholders/leading '=')."
+            f"Invalid [telegram].chat_id in {config_dir / 'accounts.ini'} "
+            f"(got '{raw_global_chat_id}'; {_telegram_chat_id_format_hint()})."
         )
 
     telegram_targets = [
@@ -407,7 +413,7 @@ def validate_telegram_contract(config: BotConfig, *, config_dir: Path) -> list[s
         if account_chat_raw and not account_chat_id:
             errors.append(
                 f"Invalid [{account.account_id}].telegram_chat_id in {config_dir / 'accounts.ini'} "
-                f"(got '{account_chat_raw}'; remove placeholders/leading '=')."
+                f"(got '{account_chat_raw}'; {_telegram_chat_id_format_hint()})."
             )
         resolved_chat_id = account_chat_id or global_chat_id
         if not account.enabled:

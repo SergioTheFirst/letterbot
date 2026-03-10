@@ -240,6 +240,103 @@ def test_api_dashboard_survives_empty_db(tmp_path: Path) -> None:
     }
 
 
+def test_api_dashboard_survives_legacy_emails_schema(tmp_path: Path) -> None:
+    db_path = tmp_path / "dashboard-legacy.sqlite"
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE emails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_email TEXT NOT NULL,
+                uid INTEGER NOT NULL,
+                message_id TEXT,
+                from_email TEXT,
+                from_name TEXT,
+                subject TEXT,
+                received_at TEXT,
+                attachments_count INTEGER DEFAULT 0,
+                status TEXT NOT NULL,
+                error_last TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                telegram_delivered_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE priority_feedback (
+                id TEXT PRIMARY KEY,
+                email_id TEXT,
+                kind TEXT,
+                value TEXT,
+                account_email TEXT,
+                created_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE events_v1 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT,
+                ts_utc REAL,
+                ts TEXT,
+                account_id TEXT,
+                entity_id TEXT,
+                email_id TEXT,
+                payload TEXT,
+                payload_json TEXT,
+                schema_version INTEGER,
+                fingerprint TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO emails (
+                account_email, uid, message_id, from_email, from_name, subject,
+                received_at, status, error_last, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "primary@example.com",
+                1,
+                "<m1>",
+                "alice@example.com",
+                "Alice",
+                "Legacy invoice",
+                now.isoformat(),
+                "NEW",
+                "",
+                now.isoformat(),
+                now.isoformat(),
+            ),
+        )
+        _insert_event(
+            conn,
+            event_type="email_processed",
+            ts_utc=now.timestamp(),
+            account_id="primary@example.com",
+            email_id=1,
+            payload={"text": "processed"},
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/dashboard")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["emails_today"] == 1
+    assert data["llm_calls_today"] == 0
+    assert data["priority"] == {"red": 0, "yellow": 0, "blue": 0}
+    assert data["recent_events"][0]["type"] == "email_processed"
+
+
 def test_dashboard_template_renders_events_block(tmp_path: Path) -> None:
     db_path = tmp_path / "dashboard-template.sqlite"
     KnowledgeDB(db_path)
