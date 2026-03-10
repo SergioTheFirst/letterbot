@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from pathlib import Path
 
 from mailbot_v26.config.learning import configure_learning_config, reset_learning_config
@@ -8,6 +9,7 @@ from mailbot_v26.domain.template_promotion import (
     analyze_template_promotion_candidates,
     clear_runtime_template_promotion_cache,
     find_runtime_template_promotion,
+    main as template_promotion_main,
 )
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter
@@ -629,4 +631,56 @@ def test_shadow_output_is_deterministic(tmp_path: Path) -> None:
     second = analyze_template_promotion_candidates(db_path)
 
     assert first == second
+
+
+def test_template_promotion_report_outputs_candidates(
+    tmp_path: Path, capsys
+) -> None:
+    db_path = tmp_path / "promotion_report.sqlite"
+    emitter = EventEmitter(db_path)
+    for email_id in (791, 792, 793):
+        _emit_interpretation(
+            emitter,
+            db_path=db_path,
+            email_id=email_id,
+            sender_email="billing@billing.vendor.test",
+            doc_kind="invoice",
+        )
+        _emit_priority_correction(emitter, email_id=email_id, new_priority="🔴")
+
+    exit_code = template_promotion_main(["--db", str(db_path), "--report"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Candidates: 2" in output
+    assert "russian_invoice_common" in output
+    assert "billing@billing.vendor.test" in output
+
+
+def test_template_promotion_json_output_is_deterministic(
+    tmp_path: Path, capsys
+) -> None:
+    db_path = tmp_path / "promotion_report_json.sqlite"
+    emitter = EventEmitter(db_path)
+    for email_id in (801, 802, 803):
+        _emit_interpretation(
+            emitter,
+            db_path=db_path,
+            email_id=email_id,
+            sender_email="billing@billing.vendor.test",
+            doc_kind="invoice",
+        )
+        _emit_priority_correction(emitter, email_id=email_id, new_priority="🔴")
+
+    first_exit = template_promotion_main(["--db", str(db_path), "--json"])
+    first_output = capsys.readouterr().out
+    second_exit = template_promotion_main(["--db", str(db_path), "--json"])
+    second_output = capsys.readouterr().out
+
+    assert first_exit == 0
+    assert second_exit == 0
+    assert first_output == second_output
+    payload = json.loads(first_output)
+    assert payload["candidate_count"] == 2
+    assert payload["candidates"][0]["template_id"] == "russian_invoice_common"
 

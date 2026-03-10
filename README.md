@@ -51,7 +51,8 @@ These checks explain what is missing without dumping secrets or a raw traceback.
 ## Running Letterbot
 
 - Windows launcher: `letterbot.bat`
-- Windows dist launcher: `run_dist.bat`
+- Windows dist helper in the source repo: `run_dist.bat`
+- Extracted Windows ZIP launcher: `run.bat`
 - Direct start: `python -m mailbot_v26 --config-dir mailbot_v26/config`
 - Doctor mode: `python -m mailbot_v26 doctor --config-dir mailbot_v26/config`
 

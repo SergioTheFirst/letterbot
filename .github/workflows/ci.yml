@@ -15,6 +15,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,7 +23,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
 
       - name: Install dependencies
@@ -33,8 +34,14 @@ jobs:
       - name: Compile check
         run: python -m compileall mailbot_v26 -q
 
-      - name: Run tests
-        run: python -m pytest -q
+      - name: Run full test suite
+        run: python -m pytest mailbot_v26/tests/ -q --tb=short
+
+      - name: Run golden corpus
+        run: python -m mailbot_v26.tools.eval_golden_corpus
+
+      - name: Run cleanup status
+        run: python -m mailbot_v26.tools.cleanup --status
 
       - name: Show version & entrypoint
         run: python -c "import sys; print(sys.version); import mailbot_v26; print('IMPORT_OK')"
@@ -62,14 +69,19 @@ jobs:
           python-version: "3.10"
           cache: "pip"
 
-      - name: Install dependencies
+      - name: Create build venv
+        shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install -r requirements-build.txt
+          python -m venv .venv
+          .\.venv\Scripts\python -m pip install --upgrade pip
+          .\.venv\Scripts\python -m pip install -r requirements.txt
+          .\.venv\Scripts\python -m pip install -r requirements-build.txt
 
       - name: Build one-folder release
         run: cmd /c build_windows_onefolder.bat
+
+      - name: Verify one-folder release
+        run: cmd /c verify_dist.bat
 
       - name: Package release
         run: powershell Compress-Archive dist/Letterbot dist/Letterbot.zip

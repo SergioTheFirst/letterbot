@@ -15,10 +15,16 @@ Run these commands locally:
 - `python -m compileall mailbot_v26 -q`
 - `python -m pytest mailbot_v26/tests/ -q --tb=short`
 - `python -m mailbot_v26.tools.eval_golden_corpus`
+- `python -m mailbot_v26.tools.eval_golden_corpus --report`
 
 If your change touches operational maintenance, also run:
 
 - `python -m mailbot_v26.tools.cleanup --status`
+
+If your change touches Windows packaging or release docs, also run:
+
+- `build_windows_onefolder.bat`
+- `verify_dist.bat`
 
 ## Configuration and secrets
 

@@ -1,51 +1,28 @@
-# Windows Quickstart
-1. Установите Python 3.10+ и клонируйте репозиторий в `C:\pro\mailpro`.
-2. Дважды кликните `letterbot.bat` в корне.
-3. Для повторного запуска используйте `letterbot.bat` из того же каталога.
-4. Для dist-режима используйте `run_dist.bat`.
-5. Для запуска тестов откройте `run_tests.bat` в корне.
-6. Скрипты автоматически создают venv в корне и запускают `python -m mailbot_v26`.
-7. Все установки выполняйте через `.venv\Scripts\python -m pip ...`.
+﻿# Letterbot Premium - Windows Quickstart
 
-Опциональный офлайн-путь (если есть прокси/блокировки):
-- На машине с доступом в интернет: `.venv\Scripts\python -m pip download -r requirements.txt -d wheelhouse`
-- На целевой машине: `.venv\Scripts\python -m pip install --no-index --find-links wheelhouse -r requirements.txt`
+## 1) Installation and first start
+1. Download or clone the repository.
+2. Open the project folder.
+3. Run `letterbot.bat`.
 
-> LAN-режим открывает доступ в вашей сети, используйте сильный пароль.
+The launcher creates `.venv`, installs dependencies, and starts `python -m mailbot_v26`.
 
+## 2) Where the config lives
+All config files live in `mailbot_v26/config/`:
+- `settings.ini` - general settings (web, storage, feature flags)
+- `accounts.ini` - IMAP accounts and Telegram chat settings
 
-## LAN mode (safe)
-```ini
-[web_ui]
-enabled = true
-bind = 0.0.0.0
-port = 8787
-allow_lan = true
-allow_cidrs = 192.168.0.0/16
-password = use-10-plus-chars-here
-prod_server = true
-require_strong_password_on_lan = true
+## 3) Diagnostics: doctor mode
+If the bot does not start, run:
+
+```powershell
+python -m mailbot_v26 doctor --config-dir mailbot_v26/config
 ```
 
-Сузьте `allow_cidrs` до вашей подсети, если знаете точный диапазон (например `192.168.1.0/24`).
-
-Найдите IP компьютера: откройте `cmd` и выполните `ipconfig`, затем возьмите `IPv4 Address`.
-
-Откройте с телефона/другого ПК: `http://<IPv4_вашего_ПК>:8787/`.
-
-Не открывайте `http://0.0.0.0:8787/` в браузере: это адрес прослушивания, а не адрес для подключения.
-
-Если страница не открывается, добавьте правило Windows Firewall (PowerShell/cmd):
-
-`netsh advfirewall firewall add rule name="Letterbot Web UI 8787" protocol=TCP dir=in localport=8787 action=allow`
-
-`prod_server: true` включает waitress для LAN/production, а встроенный Flask-сервер оставляйте только для localhost и локальной отладки.
-
-
-## Windows SmartScreen (первый запуск)
-Если при запуске `Letterbot.exe` видно «Windows protected your PC», это стандартное предупреждение для неподписанных файлов. Нажмите `More info` → `Run anyway` (или «Подробнее» → «Выполнить в любом случае»).
-
-## Module-based commands (recommended)
-- Doctor diagnostics: `python -m mailbot_v26.doctor`
-- Normal startup: `python -m mailbot_v26.start`
-- Avoid direct script launch (`python start.py`) on Windows; module mode resolves package paths deterministically.
+## 4) Useful commands
+- Source mode: `letterbot.bat`
+- Config readiness: `python -m mailbot_v26 config-ready --config-dir mailbot_v26/config --verbose`
+- Validation: `python -m mailbot_v26 validate-config --config-dir mailbot_v26/config`
+- Extracted ZIP dist mode: `run.bat`
+- Repository-side dist helper: `run_dist.bat`
+- Test suite: `run_tests.bat`

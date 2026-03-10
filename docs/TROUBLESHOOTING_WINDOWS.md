@@ -1,4 +1,4 @@
-# Troubleshooting (Windows)
+﻿# Troubleshooting (Windows)
 
 Use one block per incident.
 Each block is one symptom, one cause, one fix.
@@ -54,9 +54,9 @@ Each block is one symptom, one cause, one fix.
 - Fix: Install runtime requirements in `.venv` and restart.
 
 ## 11) Dist run fails with missing `Letterbot.exe`
-- Symptom: `run_dist.bat` or `run_dist.bat` says `Letterbot.exe not found`.
-- Cause: Dist folder is incomplete or wrong launch directory is used.
-- Fix: Start from `dist\Letterbot` folder that contains `Letterbot.exe`.
+- Symptom: `run.bat` says `Letterbot.exe not found`.
+- Cause: Dist folder is incomplete or the wrong launch directory is used.
+- Fix: Start from the extracted `Letterbot` folder that contains `Letterbot.exe`.
 
 ## 12) SmartScreen blocks first run
 - Symptom: Windows shows `Windows protected your PC`.
@@ -96,3 +96,4 @@ Each block is one symptom, one cause, one fix.
 - Если до сих пор работает — оставьте как есть. Для новой установки не используйте.
 - Для миграции: скопируйте значения из `config.ini`/`keys.ini` в соответствующие
   секции `settings.ini`, значения аккаунтов — в `accounts.ini`.
+

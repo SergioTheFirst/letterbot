@@ -13,6 +13,7 @@ from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
 from mailbot_v26.config_loader import SupportSettings, load_support_settings
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.feedback import (
+    record_action_feedback,
     record_priority_confirmation,
     record_priority_correction,
 )
@@ -45,6 +46,12 @@ from mailbot_v26.telegram.decision_trace_ui import (
     SNOOZE_SET_PREFIX,
     build_email_actions_keyboard,
 )
+from mailbot_v26.telegram.callback_data import (
+    FEEDBACK_PREFIX,
+    PRIORITY_PREFIX,
+    decode as decode_callback_data_contract,
+)
+from mailbot_v26.telegram.keyboard_builder import build_notification_keyboard
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
 from mailbot_v26.ui.i18n import humanize_mode, t
 from mailbot_v26.text.mojibake import normalize_mojibake_text
@@ -83,6 +90,26 @@ _PRIORITY_MAP = {
     "\u0441\u0452\u0441\u045f\u0432\u0402\u045c\u0422\u2018": "\U0001f534",
     "\u0441\u0452\u0441\u045f\u0421\u045f\u045f\u0420\u040b": "\U0001f7e1",
     "\u0441\u0452\u0441\u045f\u0432\u0402\u045c\u0412\u00b5": "\U0001f535",
+}
+_INLINE_PRIORITY_MAP = {
+    "hi": "\U0001f534",
+    "med": "\U0001f7e1",
+    "lo": "\U0001f535",
+}
+_FEEDBACK_DECISION_MAP = {
+    "paid": "paid",
+    "not_invoice": "not_invoice",
+    "not_payroll": "not_payroll",
+    "not_contract": "not_contract",
+    "correct": "accepted",
+}
+_FEEDBACK_ACK_MAP = {
+    "paid": "Отмечено: оплачено",
+    "not_invoice": "Отмечено: не счёт",
+    "not_payroll": "Отмечено: неверная классификация",
+    "not_contract": "Отмечено: не договор",
+    "correct": "Принято",
+    "snooze": "Выберите время",
 }
 
 
@@ -272,6 +299,88 @@ def _load_email_render_snapshot(
     return snapshot
 
 
+def _load_message_interpretation_snapshot(
+    db_path: Path, email_id: int
+) -> dict[str, object] | None:
+    try:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT payload
+                FROM events_v1
+                WHERE event_type = 'message_interpretation'
+                  AND email_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (email_id,),
+            ).fetchone()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("telegram_inbound_interpretation_lookup_failed", error=str(exc))
+        return None
+    if not row or not row[0]:
+        return None
+    try:
+        payload = json.loads(str(row[0]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _build_default_reply_markup(
+    *,
+    db_path: Path,
+    email_id: int,
+    priority: str,
+    show_decision_trace: bool,
+    expanded: bool,
+) -> dict[str, object] | None:
+    interpretation = _load_message_interpretation_snapshot(db_path, email_id)
+    doc_kind = ""
+    if interpretation:
+        doc_kind = str(interpretation.get("doc_kind") or "").strip().lower()
+    if not doc_kind:
+        return build_email_actions_keyboard(
+            email_id=email_id,
+            expanded=expanded,
+            show_decision_trace=show_decision_trace,
+        )
+    return build_notification_keyboard(
+        render_mode="full",
+        doc_kind=doc_kind,
+        priority=priority,
+        message_key=email_id,
+        show_decision_trace=show_decision_trace,
+        decision_trace_expanded=expanded,
+    )
+
+
+def _action_feedback_exists(
+    db_path: Path,
+    *,
+    email_id: int,
+    decision: str,
+) -> bool:
+    try:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM action_feedback
+                WHERE email_id = ?
+                  AND decision = ?
+                LIMIT 1
+                """,
+                (str(email_id), decision),
+            ).fetchone()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("telegram_inbound_action_feedback_lookup_failed", error=str(exc))
+        return False
+    return row is not None
+
+
 def _update_email_snapshot_priority(
     db_path: Path, email_id: int, new_priority: str
 ) -> bool:
@@ -408,6 +517,23 @@ def _render_decision_trace_details(snapshot: list[dict[str, object]]) -> str:
 
 def parse_callback_data(data: str) -> tuple[str, dict[str, str]] | None:
     raw = _clean_text(data)
+    if not raw:
+        return None
+    try:
+        callback = decode_callback_data_contract(raw)
+    except ValueError:
+        callback = None
+    if callback is not None:
+        if callback.prefix == FEEDBACK_PREFIX:
+            return "feedback", {
+                "email_id": callback.msg_key,
+                "feedback_action": callback.action,
+            }
+        if callback.prefix == PRIORITY_PREFIX:
+            return "priority_inline", {
+                "email_id": callback.msg_key,
+                "priority_action": callback.action,
+            }
     if raw.startswith(DETAILS_PREFIX):
         email_id = raw[len(DETAILS_PREFIX) :].strip()
         if not email_id.isdigit():
@@ -679,6 +805,7 @@ class TelegramInboundProcessor:
         message = callback.get("message")
         chat_id = ""
         callback_id = _clean_text(callback.get("id"))
+        ack_text = _t("inbound.ok")
         message_id: int | None = None
         from_user_id = ""
         if isinstance(message, dict):
@@ -694,85 +821,116 @@ class TelegramInboundProcessor:
             from_user_id = _clean_text(str(from_user.get("id") or ""))
         if not chat_id or not self._is_allowed_chat(chat_id):
             logger.warning("telegram_inbound_unauthorized_callback", chat_id=chat_id)
+            self._answer_callback(callback_id, _t("inbound.bad_button"))
             return
-
-        parsed = parse_callback_data(data)
-        if not parsed:
-            if data.startswith(("mb:prio:", "prio_set:", "mb:setprio:")):
+        try:
+            parsed = parse_callback_data(data)
+            if not parsed:
+                if data.startswith(("mb:prio:", "prio_set:", "mb:setprio:")):
+                    logger.warning(
+                        "tg_priority_callback_missing_email_id",
+                        callback_data=data,
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        from_user_id=from_user_id,
+                    )
+                    ack_text = "Не нашёл письмо для изменения"
+                    return
                 logger.warning(
-                    "tg_priority_callback_missing_email_id",
+                    "telegram_inbound_callback_invalid",
+                    callback_data=_safe_log_text(data),
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    from_user_id=from_user_id,
+                )
+                ack_text = _t("inbound.bad_button")
+                return
+
+            action, payload = parsed
+            if action in {"priority", "prio_set"}:
+                logger.info(
+                    "tg_priority_callback_received",
                     callback_data=data,
                     chat_id=chat_id,
                     message_id=message_id,
                     from_user_id=from_user_id,
                 )
-                self._answer_callback(
-                    callback_id,
-                    "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e \u0434\u043b\u044f \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f",
+                ack_text = self._apply_priority_edit(chat_id, message, payload)
+                return
+            if action == "priority_inline":
+                logger.info(
+                    "tg_priority_inline_callback_received",
+                    callback_data=data,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    from_user_id=from_user_id,
+                )
+                priority = _INLINE_PRIORITY_MAP.get(
+                    str(payload.get("priority_action") or "").strip().lower()
+                )
+                if not priority:
+                    ack_text = _t("inbound.bad_button")
+                    return
+                ack_text = self._apply_priority_edit(
+                    chat_id,
+                    message,
+                    {
+                        "email_id": str(payload.get("email_id") or ""),
+                        "priority": priority,
+                    },
                 )
                 return
-            self._reply(chat_id, _t("inbound.bad_button"))
-            self._answer_callback(callback_id, _t("inbound.bad_button"))
-            return
-
-        action, payload = parsed
-        if action == "priority":
-            logger.info(
-                "tg_priority_callback_received",
-                callback_data=data,
-                chat_id=chat_id,
-                message_id=message_id,
-                from_user_id=from_user_id,
-            )
-            ack_text = self._apply_priority_edit(chat_id, message, payload)
-            self._answer_callback(callback_id, ack_text)
-        elif action == "toggle":
-            self._apply_toggle(chat_id, payload)
-            self._answer_callback(callback_id, _t("inbound.ok"))
-        elif action == "help":
-            self._reply(chat_id, self._priority_help_text())
-            self._answer_callback(callback_id, _t("inbound.ok"))
-        elif action in {"details", "hide"}:
-            self._toggle_decision_trace(
-                chat_id, message, payload, expanded=action == "details"
-            )
-            self._answer_callback(callback_id, _t("inbound.ok"))
-        elif action == "prio_menu":
-            self._open_priority_menu(chat_id, message, payload)
-            self._answer_callback(callback_id, _t("inbound.ok"))
-        elif action == "prio_back":
-            self._close_priority_menu(chat_id, message, payload)
-            self._answer_callback(callback_id, _t("inbound.ok"))
-        elif action == "prio_set":
-            logger.info(
-                "tg_priority_callback_received",
-                callback_data=data,
-                chat_id=chat_id,
-                message_id=message_id,
-                from_user_id=from_user_id,
-            )
-            ack_text = self._apply_priority_edit(chat_id, message, payload)
-            self._answer_callback(callback_id, ack_text)
-        elif action == "snooze_menu":
-            self._open_snooze_menu(chat_id, message, payload)
-            self._answer_callback(callback_id, _t("inbound.ok"))
-        elif action == "snooze_back":
-            self._close_snooze_menu(chat_id, message, payload)
-            self._answer_callback(callback_id, _t("inbound.ok"))
-        elif action == "snooze_set":
-            ack = self._set_snooze(chat_id, message, payload)
-            self._answer_callback(callback_id, ack or _t("inbound.bad_button"))
-        elif action == "priority_ok":
-            if self._record_priority_confirmation(payload):
-                self._answer_callback(
-                    callback_id,
-                    "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e \u0434\u043b\u044f \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f",
+            if action == "feedback":
+                ack_text = self._handle_feedback_callback(chat_id, message, payload)
+                return
+            if action == "toggle":
+                self._apply_toggle(chat_id, payload)
+                ack_text = _t("inbound.ok")
+                return
+            if action == "help":
+                self._reply(chat_id, self._priority_help_text())
+                ack_text = _t("inbound.ok")
+                return
+            if action in {"details", "hide"}:
+                self._toggle_decision_trace(
+                    chat_id, message, payload, expanded=action == "details"
                 )
-            else:
-                self._answer_callback(
-                    callback_id,
-                    "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e \u0434\u043b\u044f \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f",
-                )
+                ack_text = _t("inbound.ok")
+                return
+            if action == "prio_menu":
+                self._open_priority_menu(chat_id, message, payload)
+                ack_text = _t("inbound.ok")
+                return
+            if action == "prio_back":
+                self._close_priority_menu(chat_id, message, payload)
+                ack_text = _t("inbound.ok")
+                return
+            if action == "snooze_menu":
+                self._open_snooze_menu(chat_id, message, payload)
+                ack_text = _t("inbound.ok")
+                return
+            if action == "snooze_back":
+                self._close_snooze_menu(chat_id, message, payload)
+                ack_text = _t("inbound.ok")
+                return
+            if action == "snooze_set":
+                ack = self._set_snooze(chat_id, message, payload)
+                ack_text = ack or _t("inbound.bad_button")
+                return
+            if action == "priority_ok":
+                self._record_priority_confirmation(payload)
+                ack_text = "Не нашёл письмо для изменения"
+                return
+            ack_text = _t("inbound.bad_button")
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "telegram_inbound_callback_failed",
+                callback_data=_safe_log_text(data),
+                error=str(exc),
+            )
+            ack_text = _t("inbound.bad_button")
+        finally:
+            self._answer_callback(callback_id, ack_text)
 
     def handle_message(self, message: dict[str, object]) -> None:
         chat_id = ""
@@ -877,6 +1035,63 @@ class TelegramInboundProcessor:
             logger.error("telegram_inbound_priority_ok_failed", error=str(exc))
             return False
         return True
+
+    def _handle_feedback_callback(
+        self,
+        chat_id: str,
+        message: dict[str, object] | None,
+        payload: dict[str, str],
+    ) -> str:
+        email_id_raw = str(payload.get("email_id") or "").strip()
+        if not email_id_raw.isdigit():
+            return "Не нашёл письмо"
+        email_id = int(email_id_raw)
+        snapshot = _load_email_snapshot(self.knowledge_db.path, email_id)
+        if not snapshot:
+            return "Не нашёл письмо"
+        action = str(payload.get("feedback_action") or "").strip().lower()
+        if action == "snooze":
+            self._open_snooze_menu(chat_id, message, {"email_id": email_id_raw})
+            return _FEEDBACK_ACK_MAP["snooze"]
+        decision = _FEEDBACK_DECISION_MAP.get(action)
+        if not decision:
+            return _t("inbound.bad_button")
+        if _action_feedback_exists(
+            self.knowledge_db.path,
+            email_id=email_id,
+            decision=decision,
+        ):
+            return "Уже отмечено"
+        interpretation = _load_message_interpretation_snapshot(
+            self.knowledge_db.path, email_id
+        )
+        proposed_action = {
+            "type": "telegram_inline_feedback",
+            "callback_action": action,
+            "doc_kind": str(interpretation.get("doc_kind") or "").strip()
+            if interpretation
+            else "",
+            "current_action": (
+                str(interpretation.get("action") or "").strip() if interpretation else ""
+            ),
+            "source": "telegram_inline",
+        }
+        record_action_feedback(
+            knowledge_db=self.knowledge_db,
+            email_id=str(email_id),
+            proposed_action=proposed_action,
+            decision=decision,
+            user_note="telegram_inline",
+            system_mode=system_health.mode,
+        )
+        logger.info(
+            "telegram_inline_feedback_recorded",
+            email_id=email_id,
+            chat_id=chat_id,
+            feedback_action=action,
+            decision=decision,
+        )
+        return _FEEDBACK_ACK_MAP.get(action, _t("inbound.ok"))
 
     def _apply_priority(
         self, chat_id: str, payload: dict[str, str], *, send_ack: bool = True
@@ -1020,12 +1235,12 @@ class TelegramInboundProcessor:
             full_text = f"{tier1_text}\n\n{details_text}"
         else:
             full_text = tier1_text
-        reply_markup = build_email_actions_keyboard(
+        reply_markup = _build_default_reply_markup(
+            db_path=self.knowledge_db.path,
             email_id=email_id,
-            expanded=expanded,
-            prio_menu=False,
-            initial_prio=False,
+            priority=new_priority,
             show_decision_trace=self.show_decision_trace,
+            expanded=expanded,
         )
         try:
             edit_telegram_message(
@@ -1162,11 +1377,12 @@ class TelegramInboundProcessor:
             full_text = f"{tier1_text}\n\n{details_text}"
         else:
             full_text = tier1_text
-        reply_markup = build_email_actions_keyboard(
+        reply_markup = _build_default_reply_markup(
+            db_path=self.knowledge_db.path,
             email_id=email_id,
-            expanded=expanded,
-            prio_menu=False,
+            priority=str(snapshot.get("priority") or ""),
             show_decision_trace=self.show_decision_trace,
+            expanded=expanded,
         )
         try:
             edit_telegram_message(
@@ -1297,12 +1513,21 @@ class TelegramInboundProcessor:
             details_text = _render_decision_trace_details(trace_payload)
             full_text = f"{tier1_text}\n\n{details_text}"
 
-        reply_markup = build_email_actions_keyboard(
-            email_id=email_id,
-            expanded=expanded,
-            snooze_menu=snooze_menu,
-            show_decision_trace=self.show_decision_trace,
-        )
+        if snooze_menu:
+            reply_markup = build_email_actions_keyboard(
+                email_id=email_id,
+                expanded=expanded,
+                snooze_menu=True,
+                show_decision_trace=self.show_decision_trace,
+            )
+        else:
+            reply_markup = _build_default_reply_markup(
+                db_path=self.knowledge_db.path,
+                email_id=email_id,
+                priority=str(snapshot.get("priority") or ""),
+                show_decision_trace=self.show_decision_trace,
+                expanded=expanded,
+            )
         try:
             edit_telegram_message(
                 bot_token=self.bot_token,
@@ -1364,11 +1589,12 @@ class TelegramInboundProcessor:
             full_text = f"{tier1_text}\n\n{details_text}"
         else:
             full_text = tier1_text
-        reply_markup = build_email_actions_keyboard(
+        reply_markup = _build_default_reply_markup(
+            db_path=self.knowledge_db.path,
             email_id=email_id,
-            expanded=expanded,
-            prio_menu=False,
+            priority=str(snapshot.get("priority") or ""),
             show_decision_trace=self.show_decision_trace,
+            expanded=expanded,
         )
         try:
             edit_telegram_message(

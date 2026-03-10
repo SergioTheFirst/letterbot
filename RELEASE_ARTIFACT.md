@@ -1,28 +1,41 @@
-# RELEASE_ARTIFACT.md — v28 RC artifact contract
+﻿# Release Artifact Contract
 
-## Required files in release package
-- `requirements.txt`
-- `mailbot_v26/config/accounts.ini.example`
+This repository ships a Windows one-folder artifact built by
+`build_windows_onefolder.bat` and verified by `verify_dist.bat`.
+
+## Source-repo helpers
+
+- `letterbot.bat` - source-mode launcher
+- `run_dist.bat` - repository helper for local dist smoke checks
+- `build_windows_onefolder.bat` - one-folder builder
+- `verify_dist.bat` - manifest and contract verifier
+
+## Required files in `dist/Letterbot`
+
+- `Letterbot.exe`
+- `run.bat`
 - `mailbot_v26/config/settings.ini.example`
-- `update_and_run.bat`
-- `install_and_run.bat`
+- `mailbot_v26/config/accounts.ini.example`
+- `README_QUICKSTART_WINDOWS.md`
+- `manifest.sha256.json`
+- `UPGRADE.md`
+- `SMARTSCREEN.md`
 - `CHANGELOG.md`
-- `CONTINUITY.md`
-- `MANIFEST.json`
 
-## Windows: minimal first run
-1. Open terminal in project root.
-2. Run `install_and_run.bat`.
-3. Fill `mailbot_v26/config/accounts.ini` and `mailbot_v26/config/settings.ini` if prompted.
-4. Run `update_and_run.bat` for normal update/start cycle.
+`run.bat` is the extracted release launcher. It is produced from the repository
+helper `run_dist.bat` during the build.
 
-## Windows: minimal repair
-1. Run `python -m mailbot_v26 doctor --strict --config-dir mailbot_v26/config`.
-2. Recreate virtualenv if needed: delete `.venv` then run `install_and_run.bat`.
-3. Re-run `update_and_run.bat` and check `logs/update_and_run.log` on failures.
+## First run from the ZIP artifact
 
-## Linux/macOS: minimal run
-1. `python -m venv .venv && . .venv/bin/activate`
-2. `python -m pip install -r requirements.txt`
-3. `python -m mailbot_v26 migrate-config --config-dir mailbot_v26/config`
-4. `python -m mailbot_v26.start --config-dir mailbot_v26/config`
+1. Extract `Letterbot.zip` to a new folder.
+2. Open the extracted `Letterbot` folder.
+3. Run `run.bat`.
+4. Fill `mailbot_v26/config/settings.ini` and `mailbot_v26/config/accounts.ini`.
+5. Run `run.bat` again.
+
+## Local release verification
+
+1. Create `.venv` and install `requirements.txt` plus `requirements-build.txt`.
+2. Run `build_windows_onefolder.bat`.
+3. Run `verify_dist.bat`.
+4. Package `dist/Letterbot` only after verification passes.

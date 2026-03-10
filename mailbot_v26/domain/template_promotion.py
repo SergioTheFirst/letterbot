@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sqlite3
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +82,11 @@ _RUNTIME_PROMOTION_POLICIES = {
 }
 
 _RUNTIME_SIGNAL_CACHE: dict[str, tuple[int, tuple[TemplatePromotionSignal, ...]]] = {}
+_DEFAULT_DB_CANDIDATES: tuple[Path, ...] = (
+    Path("data/mailbot.sqlite"),
+    Path("mailbot.sqlite"),
+    Path("database.sqlite"),
+)
 
 
 def _safe_json_loads(raw: Any) -> dict[str, Any]:
@@ -342,6 +348,113 @@ def analyze_template_promotion_candidates(
     )
 
 
+def _default_db_path() -> Path:
+    for candidate in _DEFAULT_DB_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return _DEFAULT_DB_CANDIDATES[0]
+
+
+def render_template_promotion_report(
+    signals: tuple[TemplatePromotionSignal, ...],
+    *,
+    db_path: Path,
+) -> str:
+    lines = [
+        "Letterbot template promotion report",
+        f"DB: {db_path}",
+        f"Candidates: {len(signals)}",
+    ]
+    if not signals:
+        lines.append("- none")
+        return "\n".join(lines)
+    for signal in signals:
+        lines.append(
+            (
+                f"- account={signal.account_id} "
+                f"scope={signal.scope_kind}:{signal.scope_value} "
+                f"doc_kind={signal.doc_kind} "
+                f"template={signal.template_id} "
+                f"corrections={signal.correction_count} "
+                f"consistency={signal.consistency_ratio:.2f} "
+                f"strength={signal.strength:.2f} "
+                f"priority={signal.dominant_priority}"
+            )
+        )
+        if signal.sender_emails:
+            lines.append(f"  senders={', '.join(signal.sender_emails)}")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Analyze correction-driven template promotion candidates."
+    )
+    parser.add_argument(
+        "--db",
+        default=str(_default_db_path()),
+        help="Path to the SQLite database with canonical events.",
+    )
+    parser.add_argument(
+        "--min-corrections",
+        type=int,
+        default=3,
+        help="Minimum repeated corrections required for a candidate.",
+    )
+    parser.add_argument(
+        "--min-consistency",
+        type=float,
+        default=0.75,
+        help="Minimum dominant-direction consistency ratio.",
+    )
+    parser.add_argument(
+        "--min-distinct-senders-for-domain",
+        type=int,
+        default=2,
+        help="Minimum distinct senders before a domain-level candidate is emitted.",
+    )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Print a human-readable report (default output mode).",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON instead of text.",
+    )
+    args = parser.parse_args(argv)
+
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"Template promotion database not found: {db_path}")
+        return 1
+
+    signals = analyze_template_promotion_candidates(
+        db_path,
+        min_corrections=max(1, int(args.min_corrections)),
+        min_consistency=float(args.min_consistency),
+        min_distinct_senders_for_domain=max(1, int(args.min_distinct_senders_for_domain)),
+    )
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "db": str(db_path),
+                    "candidate_count": len(signals),
+                    "candidates": [asdict(signal) for signal in signals],
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    print(render_template_promotion_report(signals, db_path=db_path))
+    return 0
+
+
 __all__ = [
     "RuntimePromotionPolicy",
     "RuntimeTemplatePromotion",
@@ -349,4 +462,10 @@ __all__ = [
     "analyze_template_promotion_candidates",
     "clear_runtime_template_promotion_cache",
     "find_runtime_template_promotion",
+    "main",
+    "render_template_promotion_report",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
