@@ -19,6 +19,11 @@ from mailbot_v26.worker.telegram_sender import ping_telegram
 logger = logging.getLogger(__name__)
 
 
+def _is_missing_secret(value: object) -> bool:
+    token = str(value or "").strip()
+    return not token or token.upper() == "CHANGE_ME"
+
+
 class HealthStatus:
     OK = "OK"
     DEGRADED = "DEGRADED"
@@ -154,12 +159,12 @@ class StartupHealthChecker:
             ]
         provider = router._providers.get("gigachat")
         enabled = bool(config.gigachat_enabled or config.gigachat_api_key)
+        if _is_missing_secret(config.gigachat_api_key):
+            return [
+                HealthCheckResult("GigaChat", HealthStatus.DEGRADED, "NOT CONFIGURED")
+            ]
         if not enabled or not provider:
             return [HealthCheckResult("GigaChat", HealthStatus.DEGRADED, "disabled")]
-        if not config.gigachat_api_key:
-            return [
-                HealthCheckResult("GigaChat", HealthStatus.FAILED, "missing api key")
-            ]
         ok = provider.healthcheck()
         status = HealthStatus.OK if ok else HealthStatus.FAILED
         details = "active" if ok else "healthcheck failed"
@@ -176,14 +181,16 @@ class StartupHealthChecker:
                 )
             ]
         provider = router._providers.get("cloudflare")
-        if not config.cloudflare_enabled or not provider:
-            return [HealthCheckResult("Cloudflare", HealthStatus.DEGRADED, "disabled")]
-        if not config.cloudflare_account_id or not config.cloudflare_api_key:
+        if _is_missing_secret(config.cloudflare_account_id) or _is_missing_secret(
+            config.cloudflare_api_key
+        ):
             return [
                 HealthCheckResult(
-                    "Cloudflare", HealthStatus.FAILED, "missing credentials"
+                    "Cloudflare", HealthStatus.DEGRADED, "NOT CONFIGURED"
                 )
             ]
+        if not config.cloudflare_enabled or not provider:
+            return [HealthCheckResult("Cloudflare", HealthStatus.DEGRADED, "disabled")]
         ok = provider.healthcheck()
         status = HealthStatus.OK if ok else HealthStatus.FAILED
         details = "active" if ok else "healthcheck failed"
@@ -194,9 +201,21 @@ class StartupHealthChecker:
         router = llm_router.LLMRouter(llm_config)
         provider_name = llm_config.primary
         provider = router._providers.get(provider_name)
+        provider_is_configured = self._provider_has_real_credentials(
+            llm_config, provider_name
+        )
         if provider is None and llm_config.fallback:
             provider_name = llm_config.fallback
             provider = router._providers.get(provider_name)
+            provider_is_configured = self._provider_has_real_credentials(
+                llm_config, provider_name
+            )
+        if not provider_is_configured:
+            return HealthCheckResult(
+                "LLM Direct",
+                HealthStatus.DEGRADED,
+                "NOT CONFIGURED",
+            )
         if provider is None:
             return HealthCheckResult("LLM Direct", HealthStatus.DEGRADED, "disabled")
         if not provider.healthcheck():
@@ -307,11 +326,11 @@ class LaunchReportBuilder:
         llm_config = llm_router._load_llm_config(self._config_dir)
         has_direct_provider = (
             bool(llm_config.cloudflare_enabled)
-            and bool(llm_config.cloudflare_account_id)
-            and bool(llm_config.cloudflare_api_key)
+            and not _is_missing_secret(llm_config.cloudflare_account_id)
+            and not _is_missing_secret(llm_config.cloudflare_api_key)
         ) or (
             bool(llm_config.gigachat_enabled or llm_config.gigachat_api_key)
-            and bool(llm_config.gigachat_api_key)
+            and not _is_missing_secret(llm_config.gigachat_api_key)
         )
         if not has_direct_provider:
             return "DISABLED"
@@ -338,6 +357,17 @@ class LaunchReportBuilder:
         ):
             return "enabled"
         return "disabled"
+
+    def _provider_has_real_credentials(
+        self, llm_config: llm_router.LLMRouterConfig, provider_name: str
+    ) -> bool:
+        if provider_name == "cloudflare":
+            return not _is_missing_secret(
+                llm_config.cloudflare_account_id
+            ) and not _is_missing_secret(llm_config.cloudflare_api_key)
+        if provider_name == "gigachat":
+            return not _is_missing_secret(llm_config.gigachat_api_key)
+        return False
 
 
 def dispatch_launch_report(bot_token: str, chat_id: str, report: str) -> bool:

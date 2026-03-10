@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from mailbot_v26 import doctor
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
@@ -210,3 +212,20 @@ def test_doctor_reports_web_settings_and_warns_when_port_busy(
         for entry in report.entries
         if entry.component == "web port availability"
     )
+
+
+def test_doctor_missing_accounts_ini_uses_explicit_config_dir_in_hint(tmp_path: Path) -> None:
+    entry, accounts = doctor._validate_accounts_ini(tmp_path)
+
+    assert accounts == []
+    assert entry.status == "FAIL"
+    assert str(tmp_path / "accounts.ini") in entry.details
+    assert f'"{tmp_path / "accounts.ini"}"' in entry.details
+
+
+def test_doctor_llm_placeholder_credentials_report_not_configured(monkeypatch) -> None:
+    class _Router:
+        _providers = {"cloudflare": object(), "gigachat": object()}
+
+    assert doctor._check_provider(_Router(), "cloudflare", True, ("CHANGE_ME", "CHANGE_ME")).details == "NOT CONFIGURED"
+    assert doctor._check_provider(_Router(), "gigachat", True, "CHANGE_ME").details == "NOT CONFIGURED"

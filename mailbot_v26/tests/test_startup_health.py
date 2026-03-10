@@ -245,6 +245,54 @@ def test_launch_report_marks_direct_delivery_mode(tmp_path) -> None:
     assert "Immediate TG summaries: direct" in report
 
 
+def test_launch_report_marks_placeholder_llm_credentials_not_configured(tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.ini").write_text(
+        "\n".join(
+            [
+                "[llm]",
+                "primary = cloudflare",
+                "",
+                "[cloudflare]",
+                "enabled = true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text(
+        "\n".join(
+            [
+                "[cloudflare]",
+                "account_id = CHANGE_ME",
+                "api_token = CHANGE_ME",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = LaunchReportBuilder(config_dir=config_dir).build(
+        results=[
+            {
+                "component": "Cloudflare",
+                "status": HealthStatus.DEGRADED,
+                "details": "NOT CONFIGURED",
+            },
+            {
+                "component": "LLM Direct",
+                "status": HealthStatus.DEGRADED,
+                "details": "NOT CONFIGURED",
+            },
+        ],
+        mode=SimpleNamespace(value="FULL"),
+    )
+
+    assert "Cloudflare: DEGRADED (NOT CONFIGURED)" in report
+    assert "direct path check: NOT CONFIGURED" in report
+    assert "LLM delivery mode: DISABLED" in report
+    assert "Immediate TG summaries: heuristic" in report
+
+
 def test_startup_report_default_branding_and_watermark() -> None:
     report = LaunchReportBuilder().build(results=[], mode=SimpleNamespace(value="FULL"))
     assert "Letterbot Premium" in report

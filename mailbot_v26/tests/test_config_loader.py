@@ -185,6 +185,55 @@ bot_token = 123:abc
     assert any("[primary].telegram_chat_id" in item for item in errors)
 
 
+def test_parse_telegram_chat_id_leading_equals_returns_none() -> None:
+    assert parse_telegram_chat_id("=272250747") == ""
+
+
+def test_validate_telegram_contract_leading_equals_error_message_shows_value(
+    tmp_path: Path,
+) -> None:
+    build_sample_config(tmp_path)
+    (tmp_path / "accounts.ini").write_text(
+        """[primary]
+login = sample@example.com
+password = secret
+host = imap.example.com
+
+[telegram]
+bot_token = 123:abc
+chat_id = =272250747
+""",
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+
+    errors = validate_telegram_contract(cfg, config_dir=tmp_path)
+
+    assert any("got '=272250747'" in item for item in errors)
+    assert any("272250747 or -1001234567890" in item for item in errors)
+
+
+def test_validate_telegram_contract_correct_numeric_id_passes(tmp_path: Path) -> None:
+    build_sample_config(tmp_path)
+    (tmp_path / "accounts.ini").write_text(
+        """[primary]
+login = sample@example.com
+password = secret
+host = imap.example.com
+
+[telegram]
+bot_token = 123:abc
+chat_id = -100272250747
+""",
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+
+    errors = validate_telegram_contract(cfg, config_dir=tmp_path)
+
+    assert errors == []
+
+
 def test_missing_files_use_deterministic_defaults() -> None:
     general = load_general_config(Path("/nonexistent"))
     assert general.check_interval == 120

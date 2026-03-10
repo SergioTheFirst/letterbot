@@ -214,6 +214,14 @@ def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table_name});").fetchall()
+    except sqlite3.Error:
+        return set()
+    return {str(row[1]) for row in rows}
+
+
 def _render_template(app: Flask, template_name: str, **context: object) -> str:
     context.setdefault("request", request)
     context.setdefault("session", session)
@@ -4011,6 +4019,7 @@ def create_app(
         try:
             with _open_readonly_connection(app.config["DB_PATH"]) as conn:
                 conn.row_factory = sqlite3.Row
+                email_columns = _table_columns(conn, "emails")
 
                 row = conn.execute(
                     (
@@ -4029,19 +4038,20 @@ def create_app(
                     payload["emails_today"] = int(row["emails_today"] or 0)
                     payload["emails_last_hour"] = int(row["emails_last_hour"] or 0)
 
-                llm_row = conn.execute(
-                    (
-                        "SELECT COUNT(*) AS llm_calls_today "
-                        "FROM emails "
-                        "WHERE llm_provider IS NOT NULL "
-                        "AND TRIM(llm_provider) != '' "
-                        "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
-                        f"{account_clause}"
-                    ),
-                    (day_ago_ts, *account_params),
-                ).fetchone()
-                if llm_row:
-                    payload["llm_calls_today"] = int(llm_row["llm_calls_today"] or 0)
+                if "llm_provider" in email_columns:
+                    llm_row = conn.execute(
+                        (
+                            "SELECT COUNT(*) AS llm_calls_today "
+                            "FROM emails "
+                            "WHERE llm_provider IS NOT NULL "
+                            "AND TRIM(llm_provider) != '' "
+                            "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                            f"{account_clause}"
+                        ),
+                        (day_ago_ts, *account_params),
+                    ).fetchone()
+                    if llm_row:
+                        payload["llm_calls_today"] = int(llm_row["llm_calls_today"] or 0)
 
                 fallback_row = conn.execute(
                     (
@@ -4061,24 +4071,25 @@ def create_app(
                         fallback_row["llm_fallback_today"] or 0
                     )
 
-                pr_row = conn.execute(
-                    (
-                        "SELECT "
-                        "SUM(CASE WHEN priority IN ('🔴', 'red', 'RED') THEN 1 ELSE 0 END) AS red, "
-                        "SUM(CASE WHEN priority IN ('🟡', 'yellow', 'YELLOW') THEN 1 ELSE 0 END) AS yellow, "
-                        "SUM(CASE WHEN priority IN ('🔵', 'blue', 'BLUE') THEN 1 ELSE 0 END) AS blue "
-                        "FROM emails "
-                        "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
-                        f"{account_clause}"
-                    ),
-                    (day_ago_ts, *account_params),
-                ).fetchone()
-                if pr_row:
-                    payload["priority"] = {
-                        "red": int(pr_row["red"] or 0),
-                        "yellow": int(pr_row["yellow"] or 0),
-                        "blue": int(pr_row["blue"] or 0),
-                    }
+                if "priority" in email_columns:
+                    pr_row = conn.execute(
+                        (
+                            "SELECT "
+                            "SUM(CASE WHEN priority IN ('🔴', 'red', 'RED') THEN 1 ELSE 0 END) AS red, "
+                            "SUM(CASE WHEN priority IN ('🟡', 'yellow', 'YELLOW') THEN 1 ELSE 0 END) AS yellow, "
+                            "SUM(CASE WHEN priority IN ('🔵', 'blue', 'BLUE') THEN 1 ELSE 0 END) AS blue "
+                            "FROM emails "
+                            "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                            f"{account_clause}"
+                        ),
+                        (day_ago_ts, *account_params),
+                    ).fetchone()
+                    if pr_row:
+                        payload["priority"] = {
+                            "red": int(pr_row["red"] or 0),
+                            "yellow": int(pr_row["yellow"] or 0),
+                            "blue": int(pr_row["blue"] or 0),
+                        }
 
                 corr_row = conn.execute(
                     (

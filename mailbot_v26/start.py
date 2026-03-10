@@ -1173,7 +1173,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
         llm_any_ok = False
         try:
-            health_checker = StartupHealthChecker(REPO_ROOT, config)
+            health_checker = StartupHealthChecker(resolved_config_dir, config)
             results = health_checker.run()
             health_results = results if isinstance(results, list) else []
             llm_any_ok = any(
@@ -1186,7 +1186,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             mode = health_checker.evaluate_mode(results)
             report = LaunchReportBuilder(
                 version_label=f"Letterbot Premium {__version__}",
-                config_dir=REPO_ROOT,
+                config_dir=resolved_config_dir,
             ).build(
                 results,
                 mode,

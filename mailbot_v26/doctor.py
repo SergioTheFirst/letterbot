@@ -102,6 +102,13 @@ _STATUS_LABELS_RU = {
 logger = logging.getLogger(__name__)
 
 
+def _is_missing_secret(value: object) -> bool:
+    if isinstance(value, (tuple, list)):
+        return any(_is_missing_secret(item) for item in value)
+    token = str(value or "").strip()
+    return not token or token.upper() == "CHANGE_ME"
+
+
 def run_doctor(config_dir: Path | None = None) -> DoctorReport:
     require_runtime_for("doctor")
     base_dir = config_dir or CONFIG_DIR
@@ -345,7 +352,7 @@ def _validate_accounts_ini(
     if not path.exists():
         repo_root = Path(__file__).resolve().parents[1]
         source = repo_root / "mailbot_v26" / "config" / "accounts.ini.example"
-        target = repo_root / "accounts.ini"
+        target = path
         return (
             DoctorEntry(
                 "accounts.ini",
@@ -586,7 +593,7 @@ def _check_llm(base_dir: Path) -> list[DoctorEntry]:
             router,
             "cloudflare",
             config.cloudflare_enabled,
-            config.cloudflare_account_id and config.cloudflare_api_key,
+            (config.cloudflare_account_id, config.cloudflare_api_key),
         )
     )
     return entries
@@ -599,10 +606,10 @@ def _check_provider(
     has_credentials: object,
 ) -> DoctorEntry:
     provider = router._providers.get(name)
-    if not enabled_flag and not has_credentials:
+    if not enabled_flag and _is_missing_secret(has_credentials):
         return DoctorEntry(name.capitalize(), "WARN", "отключен")
-    if not has_credentials:
-        return DoctorEntry(name.capitalize(), "WARN", "нет учётных данных")
+    if _is_missing_secret(has_credentials):
+        return DoctorEntry(name.capitalize(), "WARN", "NOT CONFIGURED")
     if not provider:
         return DoctorEntry(name.capitalize(), "WARN", "провайдер недоступен")
     ok = provider.healthcheck()
