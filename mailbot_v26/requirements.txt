@@ -1,6 +1,6 @@
 # Windows / Python 3.10 compatible requirements (avoid building from source)
 
-imapclient==2.2.0
+imapclient==3.1.0
 PyYAML>=6.0.1
 requests>=2.31.0
 
