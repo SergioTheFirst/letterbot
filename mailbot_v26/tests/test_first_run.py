@@ -8,6 +8,7 @@ import pytest
 import mailbot_v26.start as start_module
 from mailbot_v26.config_loader import load_config
 from mailbot_v26.config.paths import resolve_config_paths
+from mailbot_v26.tools.config_bootstrap import init_config, run_config_ready
 
 
 def _write_valid_two_file_config(base_dir: Path) -> None:
@@ -45,6 +46,84 @@ def test_first_run_missing_config_gives_clear_message(tmp_path: Path, capsys) ->
     assert "Missing settings.ini" in output
     assert "Missing accounts.ini" in output
     assert "init-config" in output
+
+
+def test_first_run_no_config_creates_accounts_ini(tmp_path: Path) -> None:
+    result = init_config(tmp_path)
+
+    settings_path = tmp_path / "settings.ini"
+    accounts_path = tmp_path / "accounts.ini"
+
+    assert settings_path.exists()
+    assert accounts_path.exists()
+    assert settings_path in result["created"]
+    assert accounts_path in result["created"]
+    assert "CHANGE_ME" in settings_path.read_text(encoding="utf-8")
+    assert "CHANGE_ME" in accounts_path.read_text(encoding="utf-8")
+
+
+def test_first_run_config_ready_fails_on_placeholder_values(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init_config(tmp_path)
+
+    exit_code = run_config_ready(tmp_path, verbose=True)
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "STATUS: NOT_READY" in output
+    assert "password" in output
+    assert "No ready IMAP account found" in output
+    assert "bot_token" in output
+
+
+def test_first_run_config_ready_passes_after_filling_credentials(tmp_path: Path) -> None:
+    _write_valid_two_file_config(tmp_path)
+
+    assert run_config_ready(tmp_path, verbose=False) == 0
+
+
+def test_init_config_idempotent_second_run_does_not_overwrite(tmp_path: Path) -> None:
+    init_config(tmp_path)
+    accounts_path = tmp_path / "accounts.ini"
+    settings_path = tmp_path / "settings.ini"
+
+    accounts_path.write_text(
+        "[work]\nlogin = real@example.com\npassword = secret\nhost = imap.example.com\nport = 993\nuse_ssl = true\n",
+        encoding="utf-8",
+    )
+    settings_path.write_text("[general]\ncheck_interval = 42\n", encoding="utf-8")
+
+    result = init_config(tmp_path)
+
+    assert result["created"] == []
+    assert "real@example.com" in accounts_path.read_text(encoding="utf-8")
+    assert "check_interval = 42" in settings_path.read_text(encoding="utf-8")
+
+
+def test_init_config_works_from_arbitrary_path(tmp_path: Path) -> None:
+    target_dir = tmp_path / "первый запуск с пробелом"
+
+    run_result = init_config(target_dir)
+
+    assert (target_dir / "settings.ini").exists()
+    assert (target_dir / "accounts.ini").exists()
+    assert len(run_result["created"]) == 2
+
+
+def test_config_ready_output_is_human_readable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init_config(tmp_path)
+
+    exit_code = run_config_ready(tmp_path, verbose=True)
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Traceback" not in output
+    assert "ConfigParser" not in output
+    assert "password" in output
+    assert "bot_token" in output
 
 
 def test_first_run_placeholder_credentials_give_clear_message(

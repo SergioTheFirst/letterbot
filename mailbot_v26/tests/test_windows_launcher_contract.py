@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -56,3 +57,58 @@ def test_docs_do_not_reference_legacy_source_launchers() -> None:
         assert "run_dist.bat" in text or "run.bat" in text
         for marker in legacy_markers:
             assert marker not in text
+
+
+def test_letterbot_bat_uses_repo_root_not_cwd() -> None:
+    text = (REPO_ROOT / "letterbot.bat").read_text(encoding="utf-8")
+
+    assert 'set "REPO_ROOT=%~dp0"' in text
+    assert 'cd /d "%REPO_ROOT%"' in text
+    assert 'start "" notepad "%REPO_ROOT%\\accounts.ini"' in text
+
+    required_commands = (
+        '-m mailbot_v26 init-config --config-dir "%CONFIG_DIR%"',
+        '-m mailbot_v26 config-ready --config-dir "%CONFIG_DIR%" --verbose',
+        '-m mailbot_v26 doctor --config-dir "%CONFIG_DIR%"',
+        '-m mailbot_v26 validate-config --config-dir "%CONFIG_DIR%"',
+        '-m mailbot_v26.tools.run_stack --config-dir "%CONFIG_DIR%" --no-browser',
+    )
+    for marker in required_commands:
+        assert marker in text
+
+
+def test_letterbot_bat_error_paths_pause_before_exit() -> None:
+    text = (REPO_ROOT / "letterbot.bat").read_text(encoding="utf-8")
+    error_labels = (
+        ":error_python_missing",
+        ":error_python_version",
+        ":error_venv_create",
+        ":error_dependency_install",
+        ":error_bootstrap_failed",
+        ":error_config_not_ready",
+        ":error_run_stack",
+    )
+    for label in error_labels:
+        start_match = re.search(rf"(?m)^{re.escape(label)}\s*$", text)
+        assert start_match is not None, label
+        start = start_match.start()
+        next_label_match = re.search(r"(?m)^:[A-Za-z0-9_]+\s*$", text[start + 1 :])
+        end = start + 1 + next_label_match.start() if next_label_match else len(text)
+        block = text[start:end]
+        assert "pause" in block, label
+        assert "exit /b" in block, label
+
+
+def test_letterbot_bat_bootstrap_exits_after_opening_accounts_ini() -> None:
+    text = (REPO_ROOT / "letterbot.bat").read_text(encoding="utf-8")
+    start_match = re.search(r"(?m)^:bootstrap_config\s*$", text)
+    end_match = re.search(r"(?m)^:error_python_missing\s*$", text)
+    assert start_match is not None
+    assert end_match is not None
+    start = start_match.start()
+    end = end_match.start()
+    block = text[start:end]
+
+    assert 'start "" notepad "%REPO_ROOT%\\accounts.ini"' in block
+    assert "pause >nul" in block
+    assert "exit /b 2" in block

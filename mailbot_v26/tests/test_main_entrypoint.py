@@ -1,5 +1,6 @@
 import runpy
 import sys
+from pathlib import Path
 
 import mailbot_v26.deps
 import mailbot_v26.start
@@ -47,3 +48,27 @@ def test_module_entrypoint_config_ready_command(monkeypatch):
 
     assert str(called["config_dir"]) == "x"
     assert called["verbose"] is True
+
+
+def test_config_dir_resolved_from_explicit_arg_not_cwd(
+    monkeypatch, tmp_path: Path
+) -> None:
+    target_dir = tmp_path / "cfg path"
+    other_cwd = tmp_path / "other"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+    monkeypatch.setattr(
+        mailbot_v26.deps, "require_runtime_for", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["mailbot_v26", "init-config", "--config-dir", str(target_dir)],
+    )
+
+    runpy.run_module("mailbot_v26", run_name="__main__")
+
+    assert (target_dir / "settings.ini").exists()
+    assert (target_dir / "accounts.ini").exists()
+    assert not (other_cwd / "settings.ini").exists()
+    assert not (other_cwd / "accounts.ini").exists()
