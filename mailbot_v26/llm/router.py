@@ -24,6 +24,7 @@ from mailbot_v26.config_yaml import validate_config as validate_yaml_config
 
 logger = logging.getLogger(__name__)
 DEFAULT_CLOUDFLARE_MODEL = "@cf/meta/llama-3-8b-instruct"
+_SUPPORTED_LLM_PROVIDERS = {"cloudflare", "gigachat"}
 
 
 @dataclass(frozen=True)
@@ -365,8 +366,31 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         parser["llm_safety"] if "llm_safety" in parser else parser["DEFAULT"]
     )
 
-    primary_provider = llm_section.get("primary", "cloudflare")
-    fallback_provider = llm_section.get("fallback", primary_provider)
+    primary_provider = str(llm_section.get("primary", "cloudflare")).strip().lower()
+    fallback_provider = str(llm_section.get("fallback", primary_provider)).strip().lower()
+    accounts_llm_section = (
+        accounts_parser["llm"]
+        if "llm" in accounts_parser
+        else accounts_parser["DEFAULT"]
+    )
+    preferred_primary = _normalize_provider_name(
+        accounts_llm_section.get("llm_priority_primary")
+        or accounts_llm_section.get("priority_llm_primary")
+    )
+    preferred_fallback = _normalize_provider_name(
+        accounts_llm_section.get("llm_priority_secondary")
+        or accounts_llm_section.get("priority_llm_secondary")
+    )
+    if preferred_primary:
+        primary_provider = preferred_primary
+        if not preferred_fallback:
+            fallback_provider = primary_provider
+    if preferred_fallback:
+        fallback_provider = preferred_fallback
+    if primary_provider not in _SUPPORTED_LLM_PROVIDERS:
+        primary_provider = "cloudflare"
+    if fallback_provider not in _SUPPORTED_LLM_PROVIDERS:
+        fallback_provider = primary_provider
 
     return LLMRouterConfig(
         primary=primary_provider,
@@ -392,6 +416,13 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         ),
         gigachat_cooldown_sec=_get_int(safety_section, "gigachat_cooldown_sec", 600),
     )
+
+
+def _normalize_provider_name(raw: object) -> str:
+    value = str(raw or "").strip().lower()
+    if value in _SUPPORTED_LLM_PROVIDERS:
+        return value
+    return ""
 
 
 def _load_yaml_config(base_dir: Path) -> LLMRouterConfig | None:

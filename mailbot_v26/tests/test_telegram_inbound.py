@@ -29,7 +29,10 @@ from mailbot_v26.telegram.callback_data import (
     PRIORITY_PREFIX,
     encode as encode_callback_data,
 )
-from mailbot_v26.telegram.decision_trace_ui import build_decision_trace_keyboard
+from mailbot_v26.telegram.decision_trace_ui import (
+    build_decision_trace_keyboard,
+    build_email_actions_keyboard,
+)
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 from mailbot_v26.text.mojibake import normalize_mojibake_text
 
@@ -263,17 +266,11 @@ def test_priority_callback_updates_snapshot_priority(
     assert len(edited) == 1
     assert "\U0001f534" in _norm(str(edited[0]["html_text"]))
     assert "Принято: приоритет исправлен" not in str(edited[0]["html_text"])
-    assert edited[0]["reply_markup"] == {
-        "inline_keyboard": [
-            [
-                {
-                    "text": "Изменить приоритет",
-                    "callback_data": f"prio_menu:{email_id}",
-                },
-                {"text": "⏰ Отложить", "callback_data": f"snz_m:{email_id}"},
-            ]
-        ]
-    }
+    assert edited[0]["reply_markup"] == build_email_actions_keyboard(
+        email_id=email_id,
+        expanded=False,
+        show_decision_trace=False,
+    )
     sent: list[str] = []
     gate_result = GateResult(
         passed=True,

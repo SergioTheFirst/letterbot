@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from mailbot_v26.telegram.callback_data import (
     FEEDBACK_PREFIX,
     PRIORITY_PREFIX,
@@ -16,7 +14,7 @@ from mailbot_v26.telegram.decision_trace_ui import (
 InlineKeyboardMarkup = dict[str, list[list[dict[str, str]]]]
 
 _ACTIONABLE_DOC_KINDS = {"invoice", "payroll", "reconciliation", "contract"}
-_LOW_PRIORITY = "\U0001f535"
+_LOW_PRIORITY = "🔵"
 
 
 def _safe_button(*, text: str, prefix: str, action: str, message_key: str) -> dict[str, str]:
@@ -29,23 +27,36 @@ def _safe_button(*, text: str, prefix: str, action: str, message_key: str) -> di
 def _priority_row(message_key: str) -> list[dict[str, str]]:
     return [
         _safe_button(
-            text="🔴 Срочно",
+            text="LOW",
             prefix=PRIORITY_PREFIX,
-            action="hi",
+            action="lo",
             message_key=message_key,
         ),
         _safe_button(
-            text="🟡 Важно",
+            text="MEDIUM",
             prefix=PRIORITY_PREFIX,
             action="med",
             message_key=message_key,
         ),
         _safe_button(
-            text="🔵 Низкий",
+            text="HIGH",
             prefix=PRIORITY_PREFIX,
-            action="lo",
+            action="hi",
             message_key=message_key,
         ),
+    ]
+
+
+def _snooze_row(message_key: str) -> list[dict[str, str]]:
+    return [
+        {
+            "text": "Snooze 2 часа",
+            "callback_data": f"snz_s:{message_key}:2h",
+        },
+        {
+            "text": "Завтра",
+            "callback_data": f"snz_s:{message_key}:tom",
+        },
     ]
 
 
@@ -151,6 +162,7 @@ def build_notification_keyboard(
     rows = _feedback_rows(normalized_doc_kind, normalized_key)
     if normalized_doc_kind in _ACTIONABLE_DOC_KINDS or normalized_mode == "full":
         rows.append(_priority_row(normalized_key))
+        rows.append(_snooze_row(normalized_key))
     if show_decision_trace:
         rows.append(
             _trace_row(

@@ -138,6 +138,7 @@ class Storage:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     email_id INTEGER NOT NULL,
                     deliver_at_utc TEXT NOT NULL,
+                    snoozed_at_utc TEXT,
                     status TEXT NOT NULL DEFAULT 'pending',
                     reminder_text TEXT,
                     attempts INTEGER NOT NULL DEFAULT 0,
@@ -153,6 +154,16 @@ class Storage:
                 CREATE INDEX IF NOT EXISTS idx_telegram_snooze_due
                 ON telegram_snooze(status, deliver_at_utc);
                 """)
+            snooze_columns = {
+                str(row[1])
+                for row in self.conn.execute(
+                    "PRAGMA table_info(telegram_snooze);"
+                ).fetchall()
+            }
+            if "snoozed_at_utc" not in snooze_columns:
+                self.conn.execute(
+                    "ALTER TABLE telegram_snooze ADD COLUMN snoozed_at_utc TEXT;"
+                )
 
     def close(self) -> None:
         try:
@@ -326,7 +337,7 @@ class Storage:
     ) -> List[Dict[str, Any]]:
         rows = self.conn.execute(
             """
-            SELECT id, email_id, deliver_at_utc, reminder_text, attempts
+            SELECT id, email_id, deliver_at_utc, snoozed_at_utc, reminder_text, attempts
             FROM telegram_snooze
             WHERE status = 'pending'
               AND deliver_at_utc <= ?
@@ -342,8 +353,9 @@ class Storage:
                     "id": int(row[0]),
                     "email_id": int(row[1]),
                     "deliver_at_utc": str(row[2]),
-                    "reminder_text": str(row[3] or ""),
-                    "attempts": int(row[4] or 0),
+                    "snoozed_at_utc": str(row[3] or ""),
+                    "reminder_text": str(row[4] or ""),
+                    "attempts": int(row[5] or 0),
                 }
             )
         return result

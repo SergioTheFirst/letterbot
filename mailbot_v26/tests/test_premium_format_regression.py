@@ -13,14 +13,14 @@ def _base_context(**overrides):
         "received_at": datetime(2024, 1, 1, 12, 0),
         "priority": "🟡",
         "from_email": "mss777@mail.ru",
-        "subject": "FW: Счет на оплату",
+        "subject": "FW: Счёт на оплату",
         "action_line": "Ответить",
         "mail_type": "",
         "body_summary": "",
         "body_text": "",
         "attachment_summary": "",
         "attachment_details": [],
-        "attachment_files": [{"filename": "Счет.xls", "text": "1405 chars..."}],
+        "attachment_files": [{"filename": "Счёт.xls", "text": "1405 chars..."}],
         "attachments_count": 1,
         "extracted_text_len": 0,
         "llm_failed": True,
@@ -57,10 +57,10 @@ def test_full_render_contains_watermark() -> None:
 
 def test_full_render_contains_attachment_line() -> None:
     payload, _, _ = processor.build_telegram_payload(
-        _base_context(attachment_files=[{"filename": "Счет.xls", "text": ""}])
+        _base_context(attachment_files=[{"filename": "Счёт.xls", "text": ""}])
     )
 
-    assert "📎" in payload.html_text or "Счет.xls" in payload.html_text
+    assert "📎" in payload.html_text or "Счёт.xls" in payload.html_text
 
 
 def test_initial_keyboard_priority_buttons() -> None:
@@ -68,15 +68,22 @@ def test_initial_keyboard_priority_buttons() -> None:
         email_id=1, expanded=False, initial_prio=True
     )
 
-    labels = [button["text"] for button in keyboard["inline_keyboard"][0]]
-    assert "🔴 Срочно" in labels
-    assert len(keyboard["inline_keyboard"]) == 1
+    assert [button["text"] for button in keyboard["inline_keyboard"][0]] == [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+    ]
+    assert [button["text"] for button in keyboard["inline_keyboard"][1]] == [
+        "Snooze 2 часа",
+        "Завтра",
+    ]
 
 
-def test_prio_menu_keeps_back_button() -> None:
+def test_prio_menu_keeps_no_back_button() -> None:
     keyboard = build_email_actions_keyboard(email_id=1, expanded=False, prio_menu=True)
 
-    assert keyboard["inline_keyboard"][1][0]["text"] == "↩ Назад"
+    labels = [button["text"] for row in keyboard["inline_keyboard"] for button in row]
+    assert "Назад" not in labels
 
 
 def test_simple_email_without_llm_renders_full() -> None:
@@ -108,9 +115,10 @@ def test_initial_keyboard_shows_human_readable_actions_and_no_trace() -> None:
 
     keyboard = payload.reply_markup or {}
     rows = keyboard.get("inline_keyboard") or []
-    assert len(rows) == 1
-    labels = [button["text"] for button in rows[0]]
-    assert labels == ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"]
+    assert len(rows) == 2
+    labels = [button["text"] for row in rows for button in row]
+    assert [button["text"] for button in rows[0]] == ["LOW", "MEDIUM", "HIGH"]
+    assert [button["text"] for button in rows[1]] == ["Snooze 2 часа", "Завтра"]
     assert "Почему так?" not in labels
     assert "◀ Скрыть" not in labels
 
@@ -144,7 +152,7 @@ def test_render_notification_applies_arbiter_without_runtime_error() -> None:
         priority="🟡",
         from_email="billing@example.com",
         from_name="Billing",
-        subject="Счет",
+        subject="Счёт",
         action_line="Проверьте вручную",
         mail_type="INVOICE",
         body_summary="проверить письмо",

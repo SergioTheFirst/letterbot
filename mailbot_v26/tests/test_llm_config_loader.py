@@ -156,3 +156,41 @@ llm:
     assert loaded is not None
     assert loaded.primary == "gigachat"
     assert loaded.fallback == "gigachat"
+
+
+def test_llm_loader_reads_priority_provider_preference_aliases_from_accounts_ini(
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "settings.ini").write_text(
+        "[llm]\nprimary=cloudflare\nfallback=cloudflare\n[gigachat]\nenabled=true\n",
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text(
+        "[llm]\nllm_priority_primary=gigachat\nllm_priority_secondary=cloudflare\n[gigachat]\napi_key=from_accounts\n",
+        encoding="utf-8",
+    )
+
+    loaded = _load_llm_config(config_dir)
+
+    assert loaded.primary == "gigachat"
+    assert loaded.fallback == "cloudflare"
+
+
+def test_llm_loader_reads_priority_llm_aliases_from_accounts_ini(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "settings.ini").write_text(
+        "[llm]\nprimary=cloudflare\nfallback=cloudflare\n",
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text(
+        "[llm]\npriority_llm_primary=gigachat\npriority_llm_secondary=cloudflare\n[gigachat]\napi_key=from_accounts\n",
+        encoding="utf-8",
+    )
+
+    loaded = _load_llm_config(config_dir)
+
+    assert loaded.primary == "gigachat"
+    assert loaded.fallback == "cloudflare"

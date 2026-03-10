@@ -179,6 +179,26 @@ def test_render_invoice_has_reply_markup() -> None:
     }
 
 
+def test_render_invoice_priority_buttons_preserve_low_medium_high_order() -> None:
+    result = render_email_notification(
+        _request(
+            email_id=107,
+            doc_kind="invoice",
+            priority="рџџЎ",
+            action="РћРїР»Р°С‚РёС‚СЊ СЃС‡С‘С‚",
+        )
+    )
+
+    assert result.reply_markup is not None
+    priority_row = result.reply_markup["inline_keyboard"][-2]
+    assert [button["text"] for button in priority_row] == ["LOW", "MEDIUM", "HIGH"]
+    assert [decode(button["callback_data"]).action for button in priority_row] == [
+        "lo",
+        "med",
+        "hi",
+    ]
+
+
 def test_render_payroll_has_reply_markup() -> None:
     result = render_email_notification(
         _request(

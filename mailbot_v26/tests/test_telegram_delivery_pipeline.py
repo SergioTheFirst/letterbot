@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +21,8 @@ from mailbot_v26.config_loader import (
     KeysConfig,
     StorageConfig,
 )
+from mailbot_v26.events.contract import EventType, EventV1
+from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
 from mailbot_v26.start import (
     _build_telegram_delivery_key,
@@ -28,6 +30,7 @@ from mailbot_v26.start import (
     _process_queue,
 )
 from mailbot_v26.features.flags import FeatureFlags
+from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
@@ -542,6 +545,102 @@ def test_snooze_retry_on_failure_not_stuck(monkeypatch, tmp_path) -> None:
     assert "tg down" in str(row[2])
 
 
+def test_due_snooze_includes_smart_return_context(monkeypatch, tmp_path) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    email_id = _seed_queue(storage, config.accounts[0].login)
+    now_utc = datetime.now(timezone.utc)
+    with storage.conn:
+        storage.conn.execute("DELETE FROM queue")
+        storage.conn.execute(
+            """
+            INSERT INTO telegram_snooze (
+                email_id, deliver_at_utc, snoozed_at_utc, status, reminder_text, attempts, created_at, updated_at
+            )
+            VALUES (?, ?, ?, 'pending', ?, 0, ?, ?)
+            """,
+            (
+                email_id,
+                (now_utc - timedelta(minutes=1)).isoformat(),
+                (now_utc - timedelta(minutes=20)).isoformat(),
+                "Письмо от sender@example.com",
+                now_utc.isoformat(),
+                now_utc.isoformat(),
+            ),
+        )
+
+    processor = _configure_pipeline(config)
+    captured: dict[str, object] = {}
+
+    def fake_send(payload):
+        captured["payload"] = payload
+        return DeliveryResult(delivered=True, retryable=False, message_id=99)
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+    flags = FeatureFlags(base_dir=tmp_path)
+
+    _process_queue(storage, config, processor, flags)
+
+    payload = captured["payload"]
+    assert "Вы отложили это письмо 20 минут назад" in payload.html_text
+    assert "Письмо от sender@example.com" in payload.html_text
+
+
+def test_due_snooze_warns_after_three_snoozes(monkeypatch, tmp_path) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    email_id = _seed_queue(storage, config.accounts[0].login)
+    event_emitter = ContractEventEmitter(config.storage.db_path)
+    base_ts = datetime.now(timezone.utc) - timedelta(hours=3)
+    for offset in range(3):
+        event_emitter.emit(
+            EventV1(
+                event_type=EventType.SNOOZE_RECORDED,
+                ts_utc=(base_ts + timedelta(minutes=offset)).timestamp(),
+                account_id=config.accounts[0].login,
+                entity_id=None,
+                email_id=email_id,
+                payload={"snooze_code": "2h"},
+            )
+        )
+    now_utc = datetime.now(timezone.utc)
+    with storage.conn:
+        storage.conn.execute("DELETE FROM queue")
+        storage.conn.execute(
+            """
+            INSERT INTO telegram_snooze (
+                email_id, deliver_at_utc, snoozed_at_utc, status, reminder_text, attempts, created_at, updated_at
+            )
+            VALUES (?, ?, ?, 'pending', ?, 0, ?, ?)
+            """,
+            (
+                email_id,
+                (now_utc - timedelta(minutes=1)).isoformat(),
+                base_ts.isoformat(),
+                "Письмо от sender@example.com",
+                now_utc.isoformat(),
+                now_utc.isoformat(),
+            ),
+        )
+
+    processor = _configure_pipeline(config)
+    captured: dict[str, object] = {}
+
+    def fake_send(payload):
+        captured["payload"] = payload
+        return DeliveryResult(delivered=True, retryable=False, message_id=100)
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+    flags = FeatureFlags(base_dir=tmp_path)
+
+    _process_queue(storage, config, processor, flags)
+
+    payload = captured["payload"]
+    assert "Вы откладывали это письмо уже 3 раза" in payload.html_text
+
+
 def test_stage_tg_uses_real_priority_and_attachment_insight(
     monkeypatch, tmp_path
 ) -> None:
@@ -614,6 +713,10 @@ def test_priority_keyboard_uses_initial_prio_true_in_user_path(
     _process_queue(storage, config, processor, flags)
 
     keyboard = captured["payload"].reply_markup["inline_keyboard"]
-    labels = [button["text"] for button in keyboard[0]]
-    assert labels == ["🔴 Срочно", "🟡 Важно", "🔵 Низкий"]
+    assert keyboard == build_email_actions_keyboard(
+        email_id=email_id,
+        expanded=False,
+        initial_prio=True,
+        show_decision_trace=False,
+    )["inline_keyboard"]
     _cleanup_pipeline(email_id)

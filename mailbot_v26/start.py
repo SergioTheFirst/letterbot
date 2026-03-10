@@ -5,6 +5,7 @@ from __future__ import annotations
 import configparser
 import logging
 import argparse
+import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
@@ -995,6 +996,98 @@ def _render_snooze_reminder_text(
     return f"{priority} от {from_email}:\n{subject}\n{action_line}"
 
 
+def _build_snooze_return_text(
+    storage: Storage,
+    *,
+    email_id: int,
+    reminder_text: str,
+    snoozed_at_utc: str = "",
+) -> str:
+    def _pluralize(value: int, one: str, few: str, many: str) -> str:
+        mod10 = value % 10
+        mod100 = value % 100
+        if mod10 == 1 and mod100 != 11:
+            return one
+        if mod10 in {2, 3, 4} and mod100 not in {12, 13, 14}:
+            return few
+        return many
+
+    def _parse_utc(raw_value: str) -> datetime | None:
+        value = str(raw_value or "").strip()
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _render_delay(now_utc: datetime, snoozed_at: datetime | None) -> str:
+        if snoozed_at is None:
+            return ""
+        delta_seconds = max(int((now_utc - snoozed_at).total_seconds()), 0)
+        if delta_seconds < 60:
+            return "только что"
+        if (
+            now_utc.date() != snoozed_at.date()
+            and (now_utc.date() - snoozed_at.date()).days == 1
+        ):
+            return "вчера"
+        minutes = delta_seconds // 60
+        if minutes < 60:
+            return (
+                f"{minutes} "
+                f"{_pluralize(minutes, 'минуту', 'минуты', 'минут')} назад"
+            )
+        hours = delta_seconds // 3600
+        if hours < 24:
+            return f"{hours} {_pluralize(hours, 'час', 'часа', 'часов')} назад"
+        days = delta_seconds // 86400
+        return f"{days} {_pluralize(days, 'день', 'дня', 'дней')} назад"
+
+    def _load_snooze_count() -> int:
+        try:
+            row = storage.conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM events_v1
+                WHERE event_type = ?
+                  AND email_id = ?
+                """,
+                (EventType.SNOOZE_RECORDED.value, email_id),
+            ).fetchone()
+            if row:
+                return int(row[0] or 0)
+        except sqlite3.OperationalError:
+            pass
+        row = storage.conn.execute(
+            "SELECT COUNT(*) FROM telegram_snooze WHERE email_id = ?",
+            (email_id,),
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+
+    existing = _render_snooze_reminder_text(
+        storage,
+        email_id=email_id,
+        reminder_text=reminder_text,
+    )
+    prefix_lines: list[str] = []
+    delay_text = _render_delay(datetime.now(timezone.utc), _parse_utc(snoozed_at_utc))
+    if delay_text:
+        prefix_lines.append(f"⏰ Вы отложили это письмо {delay_text}")
+    snooze_count = _load_snooze_count()
+    if snooze_count >= 3:
+        prefix_lines.append(
+            f"⚠️ Вы откладывали это письмо уже {snooze_count} "
+            f"{_pluralize(snooze_count, 'раз', 'раза', 'раз')}"
+        )
+    if not prefix_lines:
+        return existing
+    return "\n\n".join(["\n".join(prefix_lines), existing])
+
+
 def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
     now = datetime.now(timezone.utc)
     due_items = storage.list_due_snoozes(now_iso=now.isoformat(), limit=20)
@@ -1009,10 +1102,11 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
         email_id = int(item["email_id"])
         deliver_at = str(item["deliver_at_utc"])
         attempts = int(item.get("attempts") or 0)
-        reminder_text = _render_snooze_reminder_text(
+        reminder_text = _build_snooze_return_text(
             storage,
             email_id=email_id,
             reminder_text=str(item.get("reminder_text") or ""),
+            snoozed_at_utc=str(item.get("snoozed_at_utc") or ""),
         )
         delivery_key = _build_telegram_delivery_key(
             email_id=email_id,
@@ -1039,6 +1133,7 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
             reply_markup=build_email_actions_keyboard(
                 email_id=email_id,
                 expanded=False,
+                initial_prio=True,
                 show_decision_trace=load_telegram_ui_config().show_decision_trace,
             ),
         )

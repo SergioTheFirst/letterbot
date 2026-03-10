@@ -47,6 +47,36 @@ def _fallback_keyboard(*, email_id: int, expanded: bool) -> dict[str, Any]:
     return {"inline_keyboard": [[{"text": label, "callback_data": callback}]]}
 
 
+def _priority_row(email_id: int) -> list[dict[str, str]]:
+    return [
+        {
+            "text": "LOW",
+            "callback_data": _safe_callback(f"{PRIO_SET_PREFIX}{email_id}:B"),
+        },
+        {
+            "text": "MEDIUM",
+            "callback_data": _safe_callback(f"{PRIO_SET_PREFIX}{email_id}:Y"),
+        },
+        {
+            "text": "HIGH",
+            "callback_data": _safe_callback(f"{PRIO_SET_PREFIX}{email_id}:R"),
+        },
+    ]
+
+
+def _snooze_row(email_id: int) -> list[dict[str, str]]:
+    return [
+        {
+            "text": "Snooze 2 часа",
+            "callback_data": _safe_callback(f"{SNOOZE_SET_PREFIX}{email_id}:2h"),
+        },
+        {
+            "text": "Завтра",
+            "callback_data": _safe_callback(f"{SNOOZE_SET_PREFIX}{email_id}:tom"),
+        },
+    ]
+
+
 def build_decision_trace_keyboard(*, email_id: int, expanded: bool) -> dict[str, Any]:
     if expanded:
         label = "◀ Скрыть"
@@ -66,114 +96,24 @@ def build_email_actions_keyboard(
     initial_prio: bool = False,
     show_decision_trace: bool = False,
 ) -> dict[str, Any]:
+    del expanded, initial_prio, show_decision_trace
     email_id_int = int(str(email_id))
     try:
         if prio_menu:
-            priority_row = [
-                {
-                    "text": "🔴 Срочно",
-                    "callback_data": _safe_callback(
-                        f"{PRIO_SET_PREFIX}{email_id_int}:R"
-                    ),
-                },
-                {
-                    "text": "🟡 Важно",
-                    "callback_data": _safe_callback(
-                        f"{PRIO_SET_PREFIX}{email_id_int}:Y"
-                    ),
-                },
-                {
-                    "text": "🔵 Низкий",
-                    "callback_data": _safe_callback(
-                        f"{PRIO_SET_PREFIX}{email_id_int}:B"
-                    ),
-                },
-            ]
-            back_row = [
-                {
-                    "text": "↩ Назад",
-                    "callback_data": _safe_callback(
-                        f"{PRIO_BACK_PREFIX}{email_id_int}"
-                    ),
-                }
-            ]
-            return {"inline_keyboard": [priority_row, back_row]}
+            return {"inline_keyboard": [_priority_row(email_id_int)]}
 
         if snooze_menu:
-            snooze_row = [
-                {
-                    "text": "2ч",
-                    "callback_data": _safe_callback(
-                        f"{SNOOZE_SET_PREFIX}{email_id_int}:2h"
-                    ),
-                },
-                {
-                    "text": "6ч",
-                    "callback_data": _safe_callback(
-                        f"{SNOOZE_SET_PREFIX}{email_id_int}:6h"
-                    ),
-                },
-                {
-                    "text": "Завтра",
-                    "callback_data": _safe_callback(
-                        f"{SNOOZE_SET_PREFIX}{email_id_int}:tom"
-                    ),
-                },
-            ]
-            back_row = [
-                {
-                    "text": "↩ Назад",
-                    "callback_data": _safe_callback(
-                        f"{SNOOZE_BACK_PREFIX}{email_id_int}"
-                    ),
-                }
-            ]
-            return {"inline_keyboard": [snooze_row, back_row]}
+            return {"inline_keyboard": [_snooze_row(email_id_int)]}
 
-        if initial_prio and not prio_menu and not snooze_menu:
-            priority_row = [
-                {
-                    "text": "🔴 Срочно",
-                    "callback_data": _safe_callback(
-                        f"{PRIO_SET_PREFIX}{email_id_int}:R"
-                    ),
-                },
-                {
-                    "text": "🟡 Важно",
-                    "callback_data": _safe_callback(
-                        f"{PRIO_SET_PREFIX}{email_id_int}:Y"
-                    ),
-                },
-                {
-                    "text": "🔵 Низкий",
-                    "callback_data": _safe_callback(
-                        f"{PRIO_SET_PREFIX}{email_id_int}:B"
-                    ),
-                },
+        return {
+            "inline_keyboard": [
+                _priority_row(email_id_int),
+                _snooze_row(email_id_int),
             ]
-            return {"inline_keyboard": [priority_row]}
-
-        prio_callback = _safe_callback(f"{PRIO_MENU_PREFIX}{email_id_int}")
-        snooze_callback = _safe_callback(f"{SNOOZE_MENU_PREFIX}{email_id_int}")
-        first_row: list[dict[str, str]] = []
-        if show_decision_trace:
-            trace_label = "◀ Скрыть" if expanded else "Почему так?"
-            trace_callback = _safe_callback(
-                build_decision_trace_callback(
-                    HIDE_PREFIX if expanded else DETAILS_PREFIX, email_id_int
-                )
-            )
-            first_row.append({"text": trace_label, "callback_data": trace_callback})
-        first_row.extend(
-            [
-                {"text": "Изменить приоритет", "callback_data": prio_callback},
-                {"text": "⏰ Отложить", "callback_data": snooze_callback},
-            ]
-        )
-        return {"inline_keyboard": [first_row]}
+        }
     except ValueError as exc:
         logger.error("telegram_keyboard_callback_invalid", error=str(exc))
-        return _fallback_keyboard(email_id=email_id_int, expanded=expanded)
+        return _fallback_keyboard(email_id=email_id_int, expanded=False)
 
 
 __all__ = [
