@@ -63,8 +63,9 @@ def test_letterbot_bat_uses_repo_root_not_cwd() -> None:
     text = (REPO_ROOT / "letterbot.bat").read_text(encoding="utf-8")
 
     assert 'set "REPO_ROOT=%~dp0"' in text
+    assert 'set "CONFIG_DIR=%REPO_ROOT%"' in text
     assert 'cd /d "%REPO_ROOT%"' in text
-    assert 'start "" notepad "%REPO_ROOT%\\accounts.ini"' in text
+    assert 'start "" notepad "%CONFIG_DIR%\\accounts.ini"' in text
 
     required_commands = (
         '-m mailbot_v26 init-config --config-dir "%CONFIG_DIR%"',
@@ -109,6 +110,21 @@ def test_letterbot_bat_bootstrap_exits_after_opening_accounts_ini() -> None:
     end = end_match.start()
     block = text[start:end]
 
-    assert 'start "" notepad "%REPO_ROOT%\\accounts.ini"' in block
-    assert "pause >nul" in block
+    assert "call :open_accounts_ini" in block
+    assert "call :pause_if_needed" in block
     assert "exit /b 2" in block
+
+
+def test_letterbot_bat_is_ascii_safe() -> None:
+    content = (REPO_ROOT / "letterbot.bat").read_bytes()
+    assert all(byte < 128 for byte in content)
+
+
+def test_letterbot_bat_uses_python_launcher_fallback_chain() -> None:
+    text = (REPO_ROOT / "letterbot.bat").read_text(encoding="utf-8")
+    assert "call :probe_python py -3.10" in text
+    assert "call :probe_python py -3" in text
+    assert "call :probe_python py" in text
+    assert "call :probe_python python" in text
+    assert 'set "REQ_STAMP=%VENV_DIR%\\.deps_ready"' in text
+    assert "Dependencies are up to date." in text
