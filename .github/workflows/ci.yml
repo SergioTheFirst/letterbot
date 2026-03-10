@@ -87,7 +87,7 @@ jobs:
         run: powershell Compress-Archive dist/Letterbot dist/Letterbot.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Letterbot-windows-onefolder
           path: dist/Letterbot.zip
