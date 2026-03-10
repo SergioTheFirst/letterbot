@@ -24,6 +24,11 @@ from mailbot_v26.telegram.inbound import (
     parse_command,
     run_inbound_polling,
 )
+from mailbot_v26.telegram.callback_data import (
+    FEEDBACK_PREFIX,
+    PRIORITY_PREFIX,
+    encode as encode_callback_data,
+)
 from mailbot_v26.telegram.decision_trace_ui import build_decision_trace_keyboard
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 from mailbot_v26.text.mojibake import normalize_mojibake_text
@@ -72,6 +77,30 @@ def _insert_email(db_path: Path) -> int:
     return int(row[0])
 
 
+def _emit_interpretation(db_path: Path, *, email_id: int, doc_kind: str) -> None:
+    ContractEventEmitter(db_path).emit(
+        EventV1(
+            event_type=EventType.MESSAGE_INTERPRETATION,
+            ts_utc=float(email_id),
+            account_id="account@example.com",
+            entity_id=None,
+            email_id=email_id,
+            payload={
+                "sender_email": "sender@example.com",
+                "doc_kind": doc_kind,
+                "amount": 87500.0 if doc_kind == "invoice" else None,
+                "due_date": "2026-04-15" if doc_kind == "invoice" else None,
+                "priority": "🟡",
+                "action": "Проверить",
+                "confidence": 0.92,
+                "context": "NEW_MESSAGE",
+                "document_id": f"{doc_kind}-{email_id}",
+                "issuer_label": "ООО Вектор",
+            },
+        )
+    )
+
+
 def _build_processor(
     tmp_path: Path, sent: list[str], gate_result: GateResult
 ) -> TelegramInboundProcessor:
@@ -118,6 +147,23 @@ def test_parse_callback_data_priority() -> None:
     parsed = parse_callback_data("mb:ok:11")
     assert parsed == ("priority_ok", {"email_id": "11"})
     assert parse_callback_data("mb:prio:bad") is None
+
+
+def test_parse_callback_data_new_contract() -> None:
+    parsed = parse_callback_data(
+        encode_callback_data(prefix=FEEDBACK_PREFIX, action="paid", msg_key="12")
+    )
+    assert parsed == (
+        "feedback",
+        {"email_id": "12", "feedback_action": "paid"},
+    )
+    parsed = parse_callback_data(
+        encode_callback_data(prefix=PRIORITY_PREFIX, action="hi", msg_key="44")
+    )
+    assert parsed == (
+        "priority_inline",
+        {"email_id": "44", "priority_action": "hi"},
+    )
     assert parse_callback_data("mb:prio::R") is None
 
 
@@ -997,6 +1043,298 @@ def test_priority_callback_always_answers_callback_query(
             "timeout": 5,
         }
     ]
+
+
+def test_callback_answer_always_called(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    callback_acks: list[dict[str, object]] = []
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            callback_acks.append({"json": json, "timeout": timeout})
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-malformed",
+            "data": "FB:broken",
+            "message": {"chat": {"id": "chat"}, "message_id": 15},
+        }
+    )
+
+    assert sent == []
+    assert len(callback_acks) == 1
+    assert callback_acks[0]["json"]["callback_query_id"] == "cb-malformed"
+
+
+def test_callback_invalid_data_does_not_crash(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-invalid",
+            "data": "PR:???:999",
+            "message": {"chat": {"id": "chat"}, "message_id": 16},
+        }
+    )
+
+    assert sent == []
+
+
+def test_callback_feedback_writes_correction_event(
+    tmp_path: Path, monkeypatch
+) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+    _emit_interpretation(processor.knowledge_db.path, email_id=email_id, doc_kind="invoice")
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-paid",
+            "data": encode_callback_data(
+                prefix=FEEDBACK_PREFIX,
+                action="paid",
+                msg_key=str(email_id),
+            ),
+            "message": {"chat": {"id": "chat"}, "message_id": 17},
+        }
+    )
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        row = conn.execute(
+            """
+            SELECT decision, user_note
+            FROM action_feedback
+            WHERE email_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (str(email_id),),
+        ).fetchone()
+    assert row == ("paid", "telegram_inline")
+    assert sent == []
+
+
+def test_callback_priority_writes_priority_override(
+    tmp_path: Path, monkeypatch
+) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+    _emit_interpretation(processor.knowledge_db.path, email_id=email_id, doc_kind="invoice")
+
+    edited: list[dict[str, object]] = []
+
+    def _fake_edit(**kwargs):
+        edited.append(kwargs)
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            return object()
+
+    monkeypatch.setattr(
+        "mailbot_v26.telegram.inbound.edit_telegram_message", _fake_edit
+    )
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-pr-hi",
+            "data": encode_callback_data(
+                prefix=PRIORITY_PREFIX,
+                action="hi",
+                msg_key=str(email_id),
+            ),
+            "message": {"chat": {"id": "chat"}, "message_id": 18},
+        }
+    )
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        priority_row = conn.execute(
+            "SELECT priority, priority_source FROM emails WHERE id = ?",
+            (email_id,),
+        ).fetchone()
+        event_rows = conn.execute(
+            "SELECT COUNT(*) FROM events_v1 WHERE event_type = 'priority_correction_recorded'"
+        ).fetchone()
+    assert priority_row == ("🔴", "user_override")
+    assert event_rows is not None and int(event_rows[0]) == 1
+    assert edited
+    assert sent == []
+
+
+def test_callback_double_tap_is_idempotent_or_safely_deduped(
+    tmp_path: Path, monkeypatch
+) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+    _emit_interpretation(processor.knowledge_db.path, email_id=email_id, doc_kind="invoice")
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    callback = {
+        "id": "cb-paid-once",
+        "data": encode_callback_data(
+            prefix=FEEDBACK_PREFIX,
+            action="paid",
+            msg_key=str(email_id),
+        ),
+        "message": {"chat": {"id": "chat"}, "message_id": 19},
+    }
+    processor.handle_callback_query(callback)
+    callback["id"] = "cb-paid-twice"
+    processor.handle_callback_query(callback)
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM action_feedback WHERE email_id = ? AND decision = 'paid'",
+            (str(email_id),),
+        ).fetchone()[0]
+    assert int(count) == 1
+    assert sent == []
+
+
+def test_callback_unknown_msg_key_is_safe(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    callback_acks: list[dict[str, object]] = []
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            callback_acks.append({"json": json, "timeout": timeout})
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-missing-feedback",
+            "data": encode_callback_data(
+                prefix=FEEDBACK_PREFIX,
+                action="paid",
+                msg_key="99999",
+            ),
+            "message": {"chat": {"id": "chat"}, "message_id": 20},
+        }
+    )
+
+    assert sent == []
+    assert callback_acks
+    assert _norm(str(callback_acks[0]["json"]["text"])) == _norm("Не нашёл письмо")
+
+
+def test_callback_does_not_send_second_message(tmp_path: Path, monkeypatch) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+    _emit_interpretation(processor.knowledge_db.path, email_id=email_id, doc_kind="invoice")
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            return object()
+
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-correct",
+            "data": encode_callback_data(
+                prefix=FEEDBACK_PREFIX,
+                action="correct",
+                msg_key=str(email_id),
+            ),
+            "message": {"chat": {"id": "chat"}, "message_id": 21},
+        }
+    )
+
+    assert sent == []
 
 
 def test_priority_callback_edits_same_message_and_changes_text(

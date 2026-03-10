@@ -150,7 +150,7 @@ from mailbot_v26.priority.priority_engine_v2 import (
     PriorityResultV2,
     VipSenderMatcher,
 )
-from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
+from mailbot_v26.telegram.keyboard_builder import build_notification_keyboard
 from mailbot_v26.text.clean_email import clean_email_body, segment_email_body
 from mailbot_v26.text.mojibake import (
     normalize_mojibake_text as _normalize_mojibake_text_impl,
@@ -4808,10 +4808,13 @@ def build_telegram_payload(
         html_text=telegram_text,
         priority=context.priority,
         metadata=metadata,
-        reply_markup=build_email_actions_keyboard(
-            email_id=context.email_id,
-            expanded=False,
-            initial_prio=True,
+        reply_markup=build_notification_keyboard(
+            render_mode=render_mode.value,
+            doc_kind=(
+                context.interpretation.doc_kind if context.interpretation is not None else None
+            ),
+            priority=context.priority,
+            message_key=context.email_id,
             show_decision_trace=False,
         ),
     )

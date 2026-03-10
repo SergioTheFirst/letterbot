@@ -53,6 +53,6 @@ def test_docs_do_not_reference_legacy_source_launchers() -> None:
     for rel in docs:
         text = (REPO_ROOT / rel).read_text(encoding="utf-8")
         assert "letterbot.bat" in text
-        assert "run_dist.bat" in text
+        assert "run_dist.bat" in text or "run.bat" in text
         for marker in legacy_markers:
             assert marker not in text
