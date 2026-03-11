@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Letterbot — главная{% endblock %}
+{% block title %}LetterBot.ru — главная{% endblock %}
 
 {% block page_actions %}
   <div class="mode-toggle">
@@ -19,9 +19,9 @@
   {% set ai = dashboard_preview.ai if dashboard_preview and dashboard_preview.ai else {} %}
   {% set donate_method = support_methods[0] if support_methods else None %}
   {% set donate_card_url = support_url or (donate_method.url if donate_method and donate_method.url else '') %}
-  {% set donate_card_title = donate_method.label if donate_method and donate_method.label else 'Поддержать Letterbot' %}
+  {% set donate_card_title = donate_method.label if donate_method and donate_method.label else 'Поддержать LetterBot.ru' %}
   {% set donate_card_qr = donate_method.qr_image_data_uri if donate_method and donate_method.qr_image_data_uri else '' %}
-  {% set donate_card_alt = 'QR-код для поддержки Letterbot' %}
+  {% set donate_card_alt = 'QR-код для поддержки LetterBot.ru' %}
   {% set donate_card_fallback = 'QR недоступен. Используйте ссылку для доната.' %}
   {% set donate_card_target = donate_card_url or (url_for('support') if donate_card_qr and support_nav_enabled else '') %}
 

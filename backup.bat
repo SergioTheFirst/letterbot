@@ -9,7 +9,7 @@ set "CONFIG_DIR=%REPO_ROOT%"
 cd /d "%REPO_ROOT%"
 
 echo =============================================
-echo   Letterbot Premium - Backup
+echo   LetterBot.ru - Backup
 echo =============================================
 
 set "VENV_PY=%REPO_ROOT%\.venv\Scripts\python.exe"

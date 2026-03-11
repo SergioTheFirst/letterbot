@@ -19,7 +19,7 @@ def test_web_cockpit_and_template_show_version(tmp_path: Path) -> None:
     rendered = render_template(
         "mailbot_v26/web_observability/templates/base.html", app_version=get_version()
     )
-    assert f"Letterbot v{__version__}" in rendered
+    assert f"LetterBot.ru v{__version__}" in rendered
 
     db_path = tmp_path / "observability.sqlite"
     KnowledgeDB(db_path)
@@ -32,7 +32,7 @@ def test_web_cockpit_and_template_show_version(tmp_path: Path) -> None:
         response = client.get("/cockpit", follow_redirects=True)
 
     assert response.status_code == 200
-    assert f"Letterbot v{__version__}" in response.get_data(as_text=True)
+    assert f"LetterBot.ru v{__version__}" in response.get_data(as_text=True)
 
 
 def test_tg_payload_generation_smoke() -> None:

@@ -99,9 +99,9 @@ enabled = false
 ; Visibility switch: hides nav/footer/cockpit link while keeping /support available when enabled=true.
 show_in_nav = true
 ; Card/page title for support block.
-label = Support Letterbot
+label = ?????????? LetterBot.ru
 ; Calm helper text shown on support page hero.
-text = Letterbot остаётся бесплатным. Спасибо за поддержку развития.
+text = LetterBot.ru остаётся бесплатным. Спасибо за поддержку развития.
 ; Optional CTA link (example: Boosty/Donation page).
 url = https://example.com/support
 ; Secondary details line (bank, SBP, context).
@@ -113,7 +113,7 @@ telegram = true
 ; Min days between asks (hard cap: 30 by default).
 min_days_between_asks = 30
 ; Short message shown in weekly digest footer.
-message = Поддержать Letterbot → {url}
+message = Поддержать LetterBot.ru → {url}
 
 [premium_clarity]
 premium_clarity_confidence_dots = auto

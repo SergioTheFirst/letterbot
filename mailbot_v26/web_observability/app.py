@@ -114,7 +114,7 @@ LANE_LABELS = {
 ALLOWED_ATTENTION_SORTS = {"time", "cost", "count"}
 DEFAULT_HOMEPAGE_DONATE_URL = "https://pay.cloudtips.ru/p/00d77c6a"
 DEFAULT_HOMEPAGE_DONATE_QR_PATH = Path(__file__).resolve().parent.parent / "qrcode.png"
-DEFAULT_HOMEPAGE_DONATE_QR_ALT = "QR-код для поддержки Letterbot"
+DEFAULT_HOMEPAGE_DONATE_QR_ALT = "QR-код для поддержки LetterBot.ru"
 DEFAULT_HOMEPAGE_DONATE_QR_SIZE = 192
 
 
@@ -429,7 +429,7 @@ def _render_stub_html(
                     support_preview = '<img alt="Support QR" src="%s">' % html.escape(
                         qr_uri
                     )
-            support_card = f'<h2>Support Letterbot</h2><a href="/support">/support</a>{support_preview}'
+            support_card = f'<h2>?????????? LetterBot.ru</h2><a href="/support">/support</a>{support_preview}'
         footer_parts = ['<footer class="app-footer">']
         if nav_support_enabled:
             footer_parts.append('<a href="/support" class="footer-support-link">Support</a>')
@@ -519,7 +519,7 @@ def _render_stub_html(
                 )
             donate_block = (
                 '<div class="card donate-card" data-testid="homepage-donate">'
-                f'<h2>{html.escape(str(homepage_donate.get("title") or "Поддержать Letterbot"))}</h2>'
+                f'<h2>{html.escape(str(homepage_donate.get("title") or "Поддержать LetterBot.ru"))}</h2>'
                 f"{donate_img}"
                 f'<p><a href="{html.escape(donate_url)}" target="_blank" rel="noopener noreferrer">{html.escape(donate_url)}</a></p>'
                 "</div>"
@@ -1634,7 +1634,7 @@ def _homepage_donate_context(
                 f"QR-код недоступен: {resolved_qr_path.as_posix()} пуст или повреждён."
             )
     return {
-        "title": "Поддержать Letterbot",
+        "title": "Поддержать LetterBot.ru",
         "url": donate_url,
         "qr_image_data_uri": qr_data_uri,
         "qr_alt": DEFAULT_HOMEPAGE_DONATE_QR_ALT,
@@ -2302,7 +2302,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
 
         enabled = parser.getboolean("support", "enabled", fallback=False)
         show_in_nav = parser.getboolean("support", "show_in_nav", fallback=True)
-        label = parser.get("support", "label", fallback="Support Letterbot").strip()
+        label = parser.get("support", "label", fallback="?????????? LetterBot.ru").strip()
         text = parser.get("support", "text", fallback="").strip()
         details = parser.get("support", "details", fallback="").strip()
         url = parser.get("support", "url", fallback="").strip()
@@ -7621,7 +7621,7 @@ def _build_access_urls(*, bind_address: str, port: int) -> tuple[str, str | None
 
 def main() -> None:
     require_runtime_for("web_ui")
-    parser = argparse.ArgumentParser(description="Letterbot Observability Console")
+    parser = argparse.ArgumentParser(description="LetterBot.ru Observability Console")
     parser.add_argument("--db", type=Path, help="Path to SQLite database")
     parser.add_argument(
         "--config", type=Path, default=CONFIG_DIR, help="Config directory"

@@ -71,8 +71,8 @@ def test_support_page_renders_methods(tmp_path: Path) -> None:
         response = client.get("/support")
         body = response.get_data(as_text=True)
         assert response.status_code == 200
-        assert "Support Letterbot" in body
-        assert "Letterbot остаётся бесплатным" in body
+        assert "?????????? LetterBot.ru" in body
+        assert "LetterBot.ru остаётся бесплатным" in body
         assert "support-method-card" in body
         assert "2202 20XX XXXX XXXX" in body
         assert "+70000000000" in body
@@ -90,7 +90,7 @@ def test_support_page_renders_qr_when_available(tmp_path: Path) -> None:
             methods=[
                 SupportMethod(
                     "support",
-                    "Поддержать Letterbot",
+                    "Поддержать LetterBot.ru",
                     "",
                     "",
                     "",
@@ -155,7 +155,7 @@ def test_support_page_renders_from_ini_fallback(tmp_path: Path) -> None:
 [support]
 enabled = true
 show_in_nav = true
-label = Поддержать Letterbot
+label = Поддержать LetterBot.ru
 text = Поддержать проект можно по ссылке или QR-коду
 url = https://example.com/support
 details = Boosty / СБП
@@ -172,7 +172,7 @@ qr_image = support.png
         response = client.get("/support")
         body = response.get_data(as_text=True)
         assert response.status_code == 200
-        assert "Поддержать Letterbot" in body
+        assert "Поддержать LetterBot.ru" in body
         assert "Поддержать проект можно по ссылке или QR-коду" in body
         assert "https://example.com/support" in body
         assert '<img src="data:image/png;base64,' in body

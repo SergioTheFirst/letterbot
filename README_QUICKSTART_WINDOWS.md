@@ -1,10 +1,10 @@
-﻿## Quickstart (Windows)
+## Quickstart (Windows)
 
 ### 1) Source mode (run from repository)
 
 1. Open the repository folder.
 2. Run `letterbot.bat`.
-3. On first launch, Letterbot bootstraps config files in the repository root:
+3. On first launch, LetterBot.ru bootstraps config files in the repository root:
    - `settings.ini`
    - `accounts.ini`
 4. Fill required values in `accounts.ini` (`bot_token`, `chat_id`, IMAP account fields).

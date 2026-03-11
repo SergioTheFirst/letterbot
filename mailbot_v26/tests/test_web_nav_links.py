@@ -45,7 +45,7 @@ def test_learning_page_uses_dark_theme(tmp_path: Path) -> None:
         resp = client.get("/learning")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "Letterbot" in body
+        assert "LetterBot.ru" in body
         assert '<header class="navbar">' not in body
 
 
@@ -57,7 +57,7 @@ def test_relationships_page_uses_dark_theme(tmp_path: Path) -> None:
         resp = client.get("/relationships")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "Letterbot" in body
+        assert "LetterBot.ru" in body
         assert '<header class="navbar">' not in body
 
 

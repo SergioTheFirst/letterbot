@@ -829,7 +829,7 @@ def test_week_command_returns_compact_summary_with_empty_dataset(
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/week"})
 
-    assert _norm("📊 Letterbot — неделя") in _norm(sent[-1])
+    assert _norm("📊 LetterBot.ru — неделя") in _norm(sent[-1])
     assert _norm("Коррекций: 0") in _norm(sent[-1])
     assert _norm("Surprise rate: н/д") in _norm(sent[-1])
     assert _norm("Переходы: нет данных") in _norm(sent[-1])
@@ -883,7 +883,7 @@ def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "week"})
 
-    assert _norm("📊 Letterbot — неделя") in _norm(sent[-1])
+    assert _norm("📊 LetterBot.ru — неделя") in _norm(sent[-1])
     assert _norm("Коррекций: 1 · Точность: 100%") in _norm(sent[-1])
     assert _norm("Surprise rate: 0%") in _norm(sent[-1])
     assert _norm("Переходы: 🔵→🔴 ×1") in _norm(sent[-1])
@@ -973,7 +973,7 @@ def test_support_command_disabled_returns_honest_message(tmp_path: Path) -> None
         enabled=False,
         text="text",
         url="CHANGE_ME",
-        label="Поддержать Letterbot",
+        label="Поддержать LetterBot.ru",
         frequency_days=30,
     )
 
@@ -996,16 +996,16 @@ def test_support_command_enabled_with_url_returns_three_lines(tmp_path: Path) ->
     processor = _build_processor(tmp_path, sent, gate_result)
     processor.support_settings = SupportSettings(
         enabled=True,
-        text="Если Letterbot помогает, проект можно поддержать",
+        text="Если LetterBot.ru помогает, проект можно поддержать",
         url="https://example.com/insider",
-        label="Поддержать Letterbot",
+        label="Поддержать LetterBot.ru",
         frequency_days=30,
     )
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "support"})
 
     assert _norm(sent[-1]) == _norm(
-        "Поддержать Letterbot\nЕсли Letterbot помогает, проект можно поддержать\nhttps://example.com/insider"
+        "Поддержать LetterBot.ru\nЕсли LetterBot.ru помогает, проект можно поддержать\nhttps://example.com/insider"
     )
 
 
@@ -1027,7 +1027,7 @@ def test_support_command_enabled_without_url_reports_not_configured(
         enabled=True,
         text="text",
         url="CHANGE_ME",
-        label="Поддержать Letterbot",
+        label="Поддержать LetterBot.ru",
         frequency_days=30,
     )
 
@@ -1143,7 +1143,7 @@ def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
-    assert _norm("РІВ­С’ Letterbot Insider since:") not in _norm(sent[-1])
+    assert _norm("РІВ­С’ LetterBot.ru Insider since:") not in _norm(sent[-1])
     assert f"Version: {__version__}" in sent[-1]
 
 
@@ -1163,7 +1163,7 @@ def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
-    assert _norm("⭐ Letterbot Insider since: 2026-02") in _norm(sent[-1])
+    assert _norm("⭐ LetterBot.ru Insider since: 2026-02") in _norm(sent[-1])
 
 
 def test_runtime_override_store_insider_roundtrip(tmp_path: Path) -> None:

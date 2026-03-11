@@ -8,7 +8,7 @@ if "%REPO_ROOT:~-1%"=="\" set "REPO_ROOT=%REPO_ROOT:~0,-1%"
 cd /d "%REPO_ROOT%"
 
 echo =============================================
-echo   Letterbot Premium - Windows Build (one-folder)
+echo   LetterBot.ru - Windows Build (one-folder)
 echo =============================================
 
 set "VENV_PY=%REPO_ROOT%\.venv\Scripts\python.exe"

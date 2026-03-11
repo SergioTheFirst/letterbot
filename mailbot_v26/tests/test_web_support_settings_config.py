@@ -70,7 +70,7 @@ def test_load_support_settings_uses_ini_when_yaml_missing(tmp_path: Path) -> Non
 [support]
 enabled = true
 show_in_nav = true
-label = Поддержать Letterbot
+label = Поддержать LetterBot.ru
 text = Поддержать проект можно по ссылке или QR-коду
 url = https://example.com/support
 details = Boosty / СБП
@@ -87,7 +87,7 @@ qr_image = support.png
     assert settings.show_in_nav is True
     assert settings.text == "Поддержать проект можно по ссылке или QR-коду"
     assert len(settings.methods) == 1
-    assert settings.methods[0].label == "Поддержать Letterbot"
+    assert settings.methods[0].label == "Поддержать LetterBot.ru"
     assert settings.methods[0].url == "https://example.com/support"
     assert settings.methods[0].qr_image_data_uri.startswith("data:image/png;base64,")
 
@@ -99,7 +99,7 @@ def test_load_support_settings_ini_master_switch_off(tmp_path: Path) -> None:
 [support]
 enabled = false
 show_in_nav = true
-label = Поддержать Letterbot
+label = Поддержать LetterBot.ru
 """,
     )
 
@@ -116,7 +116,7 @@ def test_load_support_settings_ini_nav_hidden_but_page_enabled(tmp_path: Path) -
 [support]
 enabled = true
 show_in_nav = false
-label = Поддержать Letterbot
+label = Поддержать LetterBot.ru
 url = https://example.com/support
 """,
     )

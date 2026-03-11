@@ -22,7 +22,7 @@ def _create_min_db(path: Path) -> None:
 def test_web_base_template_renders_version_footer() -> None:
     template_path = Path("mailbot_v26/web_observability/templates/base.html")
     rendered = render_template(str(template_path), app_version=__version__)
-    assert f"Letterbot v{get_version()}" in rendered
+    assert f"LetterBot.ru v{get_version()}" in rendered
 
 
 def test_doctor_diagnostics_metadata_contains_version(tmp_path: Path) -> None:
