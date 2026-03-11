@@ -145,6 +145,8 @@ def test_settings_example_parses_as_ints_and_booleans() -> None:
     assert parser.getboolean("telegram_ui", "show_decision_trace") is False
     assert parser.get("web_ui", "password") == "CHANGE_ME"
     assert parser.getboolean("web_ui", "allow_local_smoke_bypass") is False
+    assert parser.get("llm", "primary") == "gigachat"
+    assert parser.has_option("gigachat", "api_key") is False
 
 
 def test_settings_example_contains_runtime_sections_and_no_inline_comments() -> None:

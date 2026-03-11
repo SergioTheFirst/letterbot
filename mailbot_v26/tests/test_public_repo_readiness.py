@@ -24,7 +24,8 @@ def test_settings_example_has_no_real_credentials() -> None:
     parser.read(CONFIG_DIR / "settings.ini.example", encoding="utf-8")
 
     assert parser.get("web_ui", "password") == "CHANGE_ME"
-    assert parser.get("gigachat", "api_key") == "CHANGE_ME"
+    assert parser.get("llm", "primary") == "gigachat"
+    assert parser.has_option("gigachat", "api_key") is False
     assert TELEGRAM_TOKEN_RE.search(_read(CONFIG_DIR / "settings.ini.example")) is None
 
 

@@ -128,6 +128,64 @@ def test_llm_loader_fallback_defaults_to_primary_when_missing(tmp_path: Path) ->
     assert loaded.fallback == "gigachat"
 
 
+def test_llm_loader_reads_gigachat_secret_from_accounts_before_settings(
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "settings.ini").write_text(
+        "[llm]\nprimary=gigachat\n[gigachat]\nenabled=true\napi_key=legacy_settings\n",
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text(
+        "[gigachat]\napi_key=from_accounts\n",
+        encoding="utf-8",
+    )
+
+    loaded = _load_llm_config(config_dir)
+
+    assert loaded.primary == "gigachat"
+    assert loaded.gigachat_api_key == "from_accounts"
+
+
+def test_llm_loader_uses_legacy_keys_gigachat_secret_when_accounts_missing(
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "settings.ini").write_text(
+        "[llm]\nprimary=gigachat\n[gigachat]\nenabled=true\n",
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text("", encoding="utf-8")
+    (config_dir / "keys.ini").write_text(
+        "[gigachat]\napi_key=from_keys\n",
+        encoding="utf-8",
+    )
+
+    loaded = _load_llm_config(config_dir)
+
+    assert loaded.primary == "gigachat"
+    assert loaded.gigachat_api_key == "from_keys"
+
+
+def test_llm_loader_keeps_legacy_settings_gigachat_secret_as_final_fallback(
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "settings.ini").write_text(
+        "[llm]\nprimary=gigachat\n[gigachat]\nenabled=true\napi_key=legacy_settings\n",
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text("", encoding="utf-8")
+
+    loaded = _load_llm_config(config_dir)
+
+    assert loaded.primary == "gigachat"
+    assert loaded.gigachat_api_key == "legacy_settings"
+
+
 def test_yaml_llm_fallback_defaults_to_primary(tmp_path: Path) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True)

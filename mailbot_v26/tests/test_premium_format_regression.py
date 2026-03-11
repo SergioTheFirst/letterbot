@@ -69,9 +69,9 @@ def test_initial_keyboard_priority_buttons() -> None:
     )
 
     assert [button["text"] for button in keyboard["inline_keyboard"][0]] == [
-        "Low",
-        "Medium",
-        "High",
+        "🔵 Low",
+        "🟡 Medium",
+        "🔴 High",
     ]
     assert [button["text"] for button in keyboard["inline_keyboard"][1]] == [
         "Snooze 2 часа",
@@ -117,7 +117,11 @@ def test_initial_keyboard_shows_human_readable_actions_and_no_trace() -> None:
     rows = keyboard.get("inline_keyboard") or []
     assert len(rows) == 2
     labels = [button["text"] for row in rows for button in row]
-    assert [button["text"] for button in rows[0]] == ["Low", "Medium", "High"]
+    assert [button["text"] for button in rows[0]] == [
+        "🔵 Low",
+        "🟡 Medium",
+        "🔴 High",
+    ]
     assert [button["text"] for button in rows[1]] == ["Snooze 2 часа", "Завтра"]
     assert "Почему так?" not in labels
     assert "◀ Скрыть" not in labels

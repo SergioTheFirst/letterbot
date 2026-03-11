@@ -4,7 +4,6 @@ from pathlib import Path
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
 from datetime import datetime, timezone
-from urllib.parse import quote
 import sqlite3
 from mailbot_v26.tests._web_helpers import login_with_csrf
 
@@ -53,13 +52,13 @@ def test_dashboard_vars_precedence(tmp_path: Path) -> None:
         assert 'value="7" selected' in text
 
 
-def test_share_link_button_present(tmp_path: Path) -> None:
+def test_share_link_button_removed(tmp_path: Path) -> None:
     app = _build_app(tmp_path)
     with app.test_client() as client:
         login_with_csrf(client, "pw")
         page = client.get("/")
         body = page.get_data(as_text=True)
-        assert "copy-share-link" in body
+        assert "copy-share-link" not in body
 
 
 def _insert_email_samples(db_path: Path) -> None:
@@ -110,7 +109,7 @@ def test_dashboard_renders_for_lane_query_without_errors(tmp_path: Path) -> None
             assert phrase not in lowered
 
 
-def test_share_link_includes_lane_and_vars(tmp_path: Path) -> None:
+def test_share_link_payload_removed_from_toolbar(tmp_path: Path) -> None:
     db_path = tmp_path / "bridge.sqlite"
     KnowledgeDB(db_path)
     _insert_email_samples(db_path)
@@ -121,11 +120,7 @@ def test_share_link_includes_lane_and_vars(tmp_path: Path) -> None:
             "/?account_emails=acct@example.com&window_days=30&limit=25&lane=critical"
         )
         body = page.get_data(as_text=True)
-        assert "data-share-url" in body
-        assert "lane=critical" in body
-        assert (
-            f"account_emails={quote('acct@example.com')}" in body
-            or "account_emails=acct@example.com" in body
-        )
-        assert "window_days=30" in body
-        assert "limit=25" in body
+        assert "data-share-url" not in body
+        assert 'name="lane" value="critical"' in body
+        assert 'name="account_emails"' in body
+        assert 'value="30" selected' in body
