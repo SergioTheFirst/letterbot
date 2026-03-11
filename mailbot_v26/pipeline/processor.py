@@ -5575,6 +5575,11 @@ _PRIORITY_SCORE_TO_LEVEL = (
     (35, _PRIORITY_YELLOW),
     (0, _PRIORITY_BLUE),
 )
+_PRIORITY_LEVEL_TO_RANK = {
+    _PRIORITY_BLUE: 1,
+    _PRIORITY_YELLOW: 2,
+    _PRIORITY_RED: 3,
+}
 _SENDER_MEMORY_WINDOW_DAYS = 45
 _SENDER_MEMORY_MIN_CORRECTIONS = 3
 _SENDER_MEMORY_MAX_ABS_BIAS = 12
@@ -5586,39 +5591,78 @@ _SENDER_MEMORY_CORRECTION_SCORES = {
 }
 
 
-def _sender_memory_bias_for_priority(*, sender_email: str) -> tuple[int, int]:
+def _sender_memory_correction_signal(
+    *,
+    old_priority: str,
+    new_priority: str,
+    fallback_priority: str,
+) -> int | None:
+    normalized_old = _normalize_priority_value(old_priority)
+    normalized_new = _normalize_priority_value(new_priority)
+    old_rank = _PRIORITY_LEVEL_TO_RANK.get(normalized_old)
+    new_rank = _PRIORITY_LEVEL_TO_RANK.get(normalized_new)
+    if old_rank is not None and new_rank is not None:
+        return new_rank - old_rank
+    token = _normalize_priority_value(fallback_priority)
+    return _SENDER_MEMORY_CORRECTION_SCORES.get(token)
+
+
+def _sender_memory_bias_for_priority(
+    *,
+    sender_email: str,
+    account_email: str | None = None,
+) -> tuple[int, int]:
     normalized_sender = str(sender_email or "").strip().lower()
     if not normalized_sender:
         return 0, 0
+    normalized_account = str(account_email or "").strip().lower()
     cutoff = datetime.now(timezone.utc) - timedelta(days=_SENDER_MEMORY_WINDOW_DAYS)
     try:
         with sqlite3.connect(knowledge_db.path) as conn:
-            rows = conn.execute(
+            query = """
+                SELECT
+                    COALESCE(json_extract(contract.payload_json, '$.old_priority'), '') AS old_priority,
+                    COALESCE(json_extract(contract.payload_json, '$.new_priority'), '') AS new_priority,
+                    feedback.value AS fallback_priority
+                FROM priority_feedback AS feedback
+                LEFT JOIN events_v1 AS contract
+                    ON contract.event_type = 'priority_correction_recorded'
+                    AND contract.email_id = CASE
+                        WHEN feedback.email_id GLOB '[0-9]*' THEN CAST(feedback.email_id AS INTEGER)
+                        ELSE NULL
+                    END
+                    AND COALESCE(json_extract(contract.payload_json, '$.new_priority'), '') = feedback.value
+                WHERE feedback.kind = 'priority_correction'
+                    AND LOWER(COALESCE(feedback.sender_email, '')) = ?
+                    AND datetime(feedback.created_at) >= datetime(?)
+            """
+            params: list[object] = [normalized_sender, cutoff.isoformat()]
+            if normalized_account:
+                query += """
+                    AND LOWER(COALESCE(feedback.account_email, '')) = ?
                 """
-                SELECT value
-                FROM priority_feedback
-                WHERE kind = 'priority_correction'
-                    AND sender_email = ?
-                    AND datetime(created_at) >= datetime(?)
-                ORDER BY datetime(created_at) DESC, id DESC
+                params.append(normalized_account)
+            query += """
+                ORDER BY datetime(feedback.created_at) DESC, feedback.id DESC
                 LIMIT 40
-                """,
-                (normalized_sender, cutoff.isoformat()),
-            ).fetchall()
+            """
+            rows = conn.execute(query, params).fetchall()
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error(
             "sender_memory_lookup_failed",
             sender_email=normalized_sender,
+            account_email=normalized_account,
             error=str(exc),
         )
         return 0, 0
 
     corrections: list[int] = []
     for row in rows:
-        token = _normalize_priority_value(str(row[0] or "").strip())
-        if token not in _SENDER_MEMORY_CORRECTION_SCORES:
-            continue
-        score = _SENDER_MEMORY_CORRECTION_SCORES[token]
+        score = _sender_memory_correction_signal(
+            old_priority=str(row[0] or "").strip(),
+            new_priority=str(row[1] or "").strip(),
+            fallback_priority=str(row[2] or "").strip(),
+        )
         if score:
             corrections.append(score)
     sample_count = len(corrections)
@@ -5659,6 +5703,7 @@ def _apply_sender_memory_to_priority(
     *,
     priority: str,
     sender_email: str,
+    account_email: str | None = None,
     mail_type: str | None,
     priority_v2_result: PriorityResultV2 | None,
     email_id: int,
@@ -5667,7 +5712,10 @@ def _apply_sender_memory_to_priority(
     priority = _normalize_priority_value(priority)
     if priority not in _PRIORITY_LEVEL_TO_SCORE:
         return priority
-    bias, sample_count = _sender_memory_bias_for_priority(sender_email=sender_email)
+    bias, sample_count = _sender_memory_bias_for_priority(
+        sender_email=sender_email,
+        account_email=account_email,
+    )
     if bias == 0:
         return priority
     if bias < 0 and _is_dampening_protected_high_signal(
@@ -5678,6 +5726,7 @@ def _apply_sender_memory_to_priority(
             "sender_memory_skipped_high_signal",
             email_id=email_id,
             sender_email=(sender_email or "").strip().lower(),
+            account_email=(account_email or "").strip().lower(),
             base_priority=priority,
             bias=bias,
             samples=sample_count,
@@ -5701,6 +5750,7 @@ def _apply_sender_memory_to_priority(
             "sender_memory_applied",
             email_id=email_id,
             sender_email=(sender_email or "").strip().lower(),
+            account_email=(account_email or "").strip().lower(),
             base_priority=priority,
             final_priority=adjusted_priority,
             bias=bias,
@@ -5711,6 +5761,7 @@ def _apply_sender_memory_to_priority(
             "sender_memory_no_effect",
             email_id=email_id,
             sender_email=(sender_email or "").strip().lower(),
+            account_email=(account_email or "").strip().lower(),
             base_priority=priority,
             bias=bias,
             samples=sample_count,
@@ -7902,13 +7953,23 @@ def process_message(
             confidence_decision = auto_priority_outcome.confidence_decision
 
         if not priority_locked_by_user:
-            priority = _apply_sender_memory_to_priority(
+            sender_memory_priority = _apply_sender_memory_to_priority(
                 priority=priority,
                 sender_email=from_email,
+                account_email=account_email,
                 mail_type=mail_type,
                 priority_v2_result=priority_v2_result,
                 email_id=message_id,
             )
+            if sender_memory_priority != priority:
+                original_priority = original_priority or priority
+                priority = sender_memory_priority
+                priority_source = "sender_memory"
+                priority_engine_label = "sender_memory"
+                if not priority_reason:
+                    priority_reason = "Sender correction memory"
+            else:
+                priority = sender_memory_priority
 
         issuer_profile = build_issuer_profile(
             sender_email=from_email,

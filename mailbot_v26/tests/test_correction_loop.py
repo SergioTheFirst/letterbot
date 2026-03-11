@@ -468,14 +468,22 @@ def test_correction_event_idempotent_on_duplicate_tap(
     _apply_priority_callback(processor, monkeypatch, email_id=email_id, priority_token="R")
 
     with sqlite3.connect(processor.knowledge_db.path) as conn:
-        feedback_count = conn.execute(
-            "SELECT COUNT(*) FROM priority_feedback WHERE email_id = ?",
+        feedback_rows = conn.execute(
+            "SELECT kind, value FROM priority_feedback WHERE email_id = ? ORDER BY kind",
             (str(email_id),),
-        ).fetchone()[0]
-        event_count = conn.execute(
+        ).fetchall()
+        correction_count = conn.execute(
             "SELECT COUNT(*) FROM events_v1 WHERE event_type = ? AND email_id = ?",
             (EventType.PRIORITY_CORRECTION_RECORDED.value, email_id),
         ).fetchone()[0]
+        confirmation_count = conn.execute(
+            "SELECT COUNT(*) FROM priority_feedback WHERE email_id = ? AND kind = 'priority_confirmation'",
+            (str(email_id),),
+        ).fetchone()[0]
 
-    assert feedback_count == 1
-    assert event_count == 1
+    assert feedback_rows == [
+        ("priority_confirmation", "🔴"),
+        ("priority_correction", "🔴"),
+    ]
+    assert correction_count == 1
+    assert confirmation_count == 1

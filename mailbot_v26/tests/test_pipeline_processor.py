@@ -37,6 +37,7 @@ from mailbot_v26.events.emitter import EventEmitter
 from mailbot_v26.config.learning import configure_learning_config, reset_learning_config
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
+from mailbot_v26.feedback import record_priority_correction
 
 
 class DummyState:
@@ -775,7 +776,10 @@ def test_sender_memory_dampening_does_not_suppress_high_signal_mail(
 
 
 def test_sender_memory_scoped_per_sender(monkeypatch) -> None:
-    def _fake_bias(*, sender_email: str) -> tuple[int, int]:
+    def _fake_bias(
+        *, sender_email: str, account_email: str | None = None
+    ) -> tuple[int, int]:
+        del account_email
         if sender_email == "fav@example.com":
             return (12, 5)
         return (0, 5)
@@ -834,6 +838,117 @@ def test_sender_memory_empty_sender_or_query_failure_keeps_priority(
     )
 
     assert no_data == "🟡"
+
+def test_sender_memory_uses_correction_direction_from_canonical_events(tmp_path) -> None:
+    db_path = tmp_path / "sender_memory_direction.sqlite"
+    original_db_path = pipeline_processor.DB_PATH
+    pipeline_processor.configure_processor_db_path(db_path)
+    try:
+        for email_id in (1, 2, 3):
+            record_priority_correction(
+                knowledge_db=pipeline_processor.knowledge_db,
+                email_id=email_id,
+                correction="🟡",
+                old_priority="🔴",
+                sender_email="billing@vendor.test",
+                account_email="account@example.com",
+                contract_event_emitter=pipeline_processor.contract_event_emitter,
+            )
+
+        bias, sample_count = pipeline_processor._sender_memory_bias_for_priority(
+            sender_email="billing@vendor.test",
+            account_email="account@example.com",
+        )
+        result = _apply_sender_memory_to_priority(
+            priority="🔴",
+            sender_email="billing@vendor.test",
+            account_email="account@example.com",
+            mail_type="UNKNOWN",
+            priority_v2_result=None,
+            email_id=9,
+        )
+    finally:
+        pipeline_processor.configure_processor_db_path(original_db_path)
+
+    assert sample_count == 3
+    assert bias < 0
+    assert result == "🟡"
+
+
+def test_sender_memory_inconsistent_corrections_do_not_trigger_adaptation(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "sender_memory_inconsistent.sqlite"
+    original_db_path = pipeline_processor.DB_PATH
+    pipeline_processor.configure_processor_db_path(db_path)
+    try:
+        for email_id, old_priority, new_priority in (
+            (1, "🔴", "🟡"),
+            (2, "🔴", "🟡"),
+            (3, "🔵", "🟡"),
+            (4, "🔵", "🟡"),
+        ):
+            record_priority_correction(
+                knowledge_db=pipeline_processor.knowledge_db,
+                email_id=email_id,
+                correction=new_priority,
+                old_priority=old_priority,
+                sender_email="billing@vendor.test",
+                account_email="account@example.com",
+                contract_event_emitter=pipeline_processor.contract_event_emitter,
+            )
+
+        bias, sample_count = pipeline_processor._sender_memory_bias_for_priority(
+            sender_email="billing@vendor.test",
+            account_email="account@example.com",
+        )
+        result = _apply_sender_memory_to_priority(
+            priority="🟡",
+            sender_email="billing@vendor.test",
+            account_email="account@example.com",
+            mail_type="UNKNOWN",
+            priority_v2_result=None,
+            email_id=10,
+        )
+    finally:
+        pipeline_processor.configure_processor_db_path(original_db_path)
+
+    assert sample_count == 4
+    assert bias == 0
+    assert result == "🟡"
+
+
+def test_sender_memory_scoped_per_account_with_runtime_feedback(tmp_path) -> None:
+    db_path = tmp_path / "sender_memory_account_scope.sqlite"
+    original_db_path = pipeline_processor.DB_PATH
+    pipeline_processor.configure_processor_db_path(db_path)
+    try:
+        for email_id in (1, 2, 3):
+            record_priority_correction(
+                knowledge_db=pipeline_processor.knowledge_db,
+                email_id=email_id,
+                correction="🔴",
+                old_priority="🔵",
+                sender_email="alerts@vendor.test",
+                account_email="primary@example.com",
+                contract_event_emitter=pipeline_processor.contract_event_emitter,
+            )
+
+        favored_bias, favored_samples = pipeline_processor._sender_memory_bias_for_priority(
+            sender_email="alerts@vendor.test",
+            account_email="primary@example.com",
+        )
+        other_bias, other_samples = pipeline_processor._sender_memory_bias_for_priority(
+            sender_email="alerts@vendor.test",
+            account_email="secondary@example.com",
+        )
+    finally:
+        pipeline_processor.configure_processor_db_path(original_db_path)
+
+    assert favored_samples == 3
+    assert favored_bias > 0
+    assert other_samples == 0
+    assert other_bias == 0
 
 
 def test_decision_layer_keeps_priority_action_consistent() -> None:
