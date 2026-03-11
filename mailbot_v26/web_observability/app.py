@@ -112,6 +112,10 @@ LANE_LABELS = {
     "learning": "обучение",
 }
 ALLOWED_ATTENTION_SORTS = {"time", "cost", "count"}
+DEFAULT_HOMEPAGE_DONATE_URL = "https://pay.cloudtips.ru/p/00d77c6a"
+DEFAULT_HOMEPAGE_DONATE_QR_PATH = Path(__file__).resolve().parent.parent / "qrcode.png"
+DEFAULT_HOMEPAGE_DONATE_QR_ALT = "QR-код для поддержки Letterbot"
+DEFAULT_HOMEPAGE_DONATE_QR_SIZE = 192
 
 
 @dataclass(frozen=True)
@@ -246,6 +250,7 @@ def _render_template(app: Flask, template_name: str, **context: object) -> str:
     context.setdefault("support_url", support_url)
     context.setdefault("support_nav_enabled", support_nav_enabled)
     context.setdefault("cfg", {"features": {"donate_enabled": donate_enabled}})
+    context.setdefault("homepage_donate", app.config.get("HOMEPAGE_DONATE", {}))
     context.setdefault("app_version", get_version())
     if USING_FLASK_STUB:
         template_path = Path(app.template_folder or "") / template_name
@@ -456,9 +461,72 @@ def _render_stub_html(
                 "Not enough feedback yet."
                 "</div>"
             )
+        dashboard_preview = (
+            context.get("dashboard_preview") if isinstance(context, Mapping) else {}
+        )
+        dashboard_preview = (
+            dashboard_preview if isinstance(dashboard_preview, Mapping) else {}
+        )
+        dashboard_preview_events = (
+            context.get("dashboard_preview_events") if isinstance(context, Mapping) else []
+        )
+        dashboard_preview_events = (
+            dashboard_preview_events if isinstance(dashboard_preview_events, list) else []
+        )
+        preview_meta = dashboard_preview.get("meta")
+        preview_meta = preview_meta if isinstance(preview_meta, Mapping) else {}
+        preview_block = (
+            '<div class="card live-dashboard-preview" data-testid="live-dashboard">'
+            '<div class="section-title"><h2>System</h2></div>'
+            '<div class="metric-row">'
+            f'<span class="badge muted">Emails: <b id="preview-emails-today">{html.escape(str(dashboard_preview.get("emails_today") if dashboard_preview.get("emails_today") is not None else "unknown"))}</b></span>'
+            f'<span class="badge muted">LLM: <b id="preview-llm-calls">{html.escape(str(dashboard_preview.get("llm_calls_today") if dashboard_preview.get("llm_calls_today") is not None else "unknown"))}</b></span>'
+            f'<span class="badge muted">Priority: <b id="preview-priority-red">{html.escape(str(((dashboard_preview.get("priority") or {}) if isinstance(dashboard_preview.get("priority"), Mapping) else {}).get("red") if (((dashboard_preview.get("priority") or {}) if isinstance(dashboard_preview.get("priority"), Mapping) else {}).get("red") is not None) else "unknown"))}</b></span>'
+            f'<span class="badge muted">Events: <b id="preview-events-count">{html.escape(str(len(dashboard_preview_events)))}</b></span>'
+            "</div>"
+            f'<div class="hint"><span id="preview-dashboard-status">Preview status: {html.escape(str(preview_meta.get("status") or "unknown"))}</span></div>'
+            f'<div class="hint" id="preview-dashboard-updated">Payload updated: {html.escape(str(context.get("dashboard_preview_updated") or "unknown"))}</div>'
+            f'<div class="hint" id="preview-dashboard-detail">{html.escape(str(context.get("dashboard_preview_detail") or "Waiting for canonical runtime data."))}</div>'
+            '<ul id="preview-recent-events">'
+            + (
+                "".join(
+                    f'<li>{html.escape(str(item.get("text") or item.get("type") or "event"))}</li>'
+                    for item in dashboard_preview_events
+                    if isinstance(item, Mapping)
+                )
+                or f'<li class="hint">{html.escape(str(context.get("dashboard_preview_events_empty") or "No recent events yet."))}</li>'
+            )
+            + "</ul></div>"
+        )
+        donate_block = ""
+        homepage_donate = (
+            context.get("homepage_donate") if isinstance(context, Mapping) else {}
+        )
+        homepage_donate = homepage_donate if isinstance(homepage_donate, Mapping) else {}
+        donate_url = str(homepage_donate.get("url") or "").strip()
+        if donate_url:
+            donate_qr = str(homepage_donate.get("qr_image_data_uri") or "").strip()
+            donate_img = ""
+            if donate_qr:
+                donate_img = (
+                    '<a class="donate-qr-link" href="'
+                    f'{html.escape(donate_url)}" target="_blank" rel="noopener noreferrer">'
+                    f'<img src="{html.escape(donate_qr)}" alt="{html.escape(str(homepage_donate.get("qr_alt") or DEFAULT_HOMEPAGE_DONATE_QR_ALT))}" width="{html.escape(str(homepage_donate.get("qr_width") or DEFAULT_HOMEPAGE_DONATE_QR_SIZE))}" height="{html.escape(str(homepage_donate.get("qr_height") or DEFAULT_HOMEPAGE_DONATE_QR_SIZE))}"></a>'
+                )
+            else:
+                donate_img = (
+                    f'<div class="hint">{html.escape(str(homepage_donate.get("fallback_message") or "QR unavailable."))}</div>'
+                )
+            donate_block = (
+                '<div class="card donate-card" data-testid="homepage-donate">'
+                f'<h2>{html.escape(str(homepage_donate.get("title") or "Поддержать Letterbot"))}</h2>'
+                f"{donate_img}"
+                f'<p><a href="{html.escape(donate_url)}" target="_blank" rel="noopener noreferrer">{html.escape(donate_url)}</a></p>'
+                "</div>"
+            )
         return (
-            f"<html><body>{header}{donate_corner}<h2>Today Digest</h2>{digest_today_block}<h2>Week Digest</h2>{digest_week_block}"
-            f"<h2>Recent Activity</h2>{lane_html}{quality_block}{engineer_block}{support_card}<table>{activity_body}</table>{donate_bottom}{footer}</body></html>"
+            f"<html><body>{header}{donate_corner}{preview_block}<h2>Today Digest</h2>{digest_today_block}<h2>Week Digest</h2>{digest_week_block}"
+            f"<h2>Recent Activity</h2>{lane_html}{quality_block}{engineer_block}{support_card}{donate_block}<table>{activity_body}</table>{donate_bottom}{footer}</body></html>"
         )
 
     if template_name in {"health.html", "partials/health_overview.html"}:
@@ -1524,6 +1592,422 @@ def _image_data_uri(path: Path) -> str:
         mime_type = "image/png"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def _homepage_donate_context(
+    *,
+    donate_url: str = DEFAULT_HOMEPAGE_DONATE_URL,
+    qr_path: Path | None = None,
+) -> dict[str, object]:
+    resolved_qr_path = Path(qr_path) if qr_path is not None else DEFAULT_HOMEPAGE_DONATE_QR_PATH
+    qr_data_uri = ""
+    fallback_message = ""
+    if not resolved_qr_path.exists():
+        logger.warning(
+            "homepage_donate_qr_missing",
+            extra={"path": str(resolved_qr_path)},
+        )
+        fallback_message = (
+            f"QR-код недоступен: {resolved_qr_path.as_posix()} не найден."
+        )
+    elif not resolved_qr_path.is_file():
+        logger.warning(
+            "homepage_donate_qr_invalid",
+            extra={"path": str(resolved_qr_path)},
+        )
+        fallback_message = (
+            f"QR-код недоступен: {resolved_qr_path.as_posix()} не является файлом."
+        )
+    else:
+        try:
+            qr_data_uri = _image_data_uri(resolved_qr_path)
+        except OSError as exc:
+            logger.warning(
+                "homepage_donate_qr_load_failed",
+                extra={"path": str(resolved_qr_path), "error": str(exc)},
+            )
+            fallback_message = (
+                f"QR-код недоступен: {resolved_qr_path.as_posix()} не удалось прочитать."
+            )
+        if not qr_data_uri and not fallback_message:
+            fallback_message = (
+                f"QR-код недоступен: {resolved_qr_path.as_posix()} пуст или повреждён."
+            )
+    return {
+        "title": "Поддержать Letterbot",
+        "url": donate_url,
+        "qr_image_data_uri": qr_data_uri,
+        "qr_alt": DEFAULT_HOMEPAGE_DONATE_QR_ALT,
+        "qr_width": DEFAULT_HOMEPAGE_DONATE_QR_SIZE,
+        "qr_height": DEFAULT_HOMEPAGE_DONATE_QR_SIZE,
+        "fallback_message": fallback_message,
+        "source_path": resolved_qr_path.as_posix(),
+    }
+
+
+def _dashboard_meta_summary(meta: Mapping[str, object] | None) -> str:
+    if not isinstance(meta, Mapping):
+        return "Waiting for canonical runtime data."
+    sections = meta.get("sections")
+    if not isinstance(sections, Mapping):
+        return "Waiting for canonical runtime data."
+    issues: list[str] = []
+    for name, entry in sections.items():
+        if not isinstance(entry, Mapping):
+            continue
+        status = str(entry.get("status") or "").strip()
+        if not status or status == "ok":
+            continue
+        detail = str(entry.get("detail") or status).strip()
+        issues.append(f"{name}: {detail}")
+    if issues:
+        return " · ".join(issues[:3])
+    return "Canonical events and runtime storage are in sync."
+
+
+def _dashboard_updated_label(generated_at: object) -> str:
+    raw_value = str(generated_at or "").strip()
+    if not raw_value:
+        return "unknown"
+    try:
+        parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        return "unknown"
+    normalized = parsed.astimezone(timezone.utc)
+    return normalized.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _scoped_in_clause(
+    column_name: str, values: Iterable[str] | None
+) -> tuple[str, list[object]]:
+    scoped: list[object] = []
+    seen: set[str] = set()
+    for value in values or []:
+        cleaned = str(value or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        scoped.append(cleaned)
+    if not scoped:
+        return "", []
+    placeholders = ", ".join(["?"] * len(scoped))
+    return f" AND {column_name} IN ({placeholders})", scoped
+
+
+def _dashboard_metric_text(value: object, suffix: str = "") -> str:
+    if value is None:
+        return _format_number(None)
+    formatted = _format_number(value)
+    if formatted == _format_number(None):
+        return formatted
+    return f"{formatted}{suffix}"
+
+
+def _dashboard_percent_text(value: object) -> str:
+    if value is None:
+        return _format_percent(None)
+    formatted = _format_percent(value)
+    if formatted == _format_percent(None):
+        return formatted
+    return f"{formatted}%"
+
+
+def _dashboard_latency_view(
+    summary: Mapping[str, object] | None, *, window_days: int
+) -> dict[str, object]:
+    detail = f"No latency data for the last {max(1, int(window_days))}d."
+    base = {
+        "status": "unknown",
+        "status_label": "NO LATENCY DATA",
+        "status_class": "muted",
+        "available": False,
+        "sample_count": 0,
+        "sample_count_display": "0 spans",
+        "pipeline_p50": _format_number(None),
+        "pipeline_p95": _format_number(None),
+        "llm_p90": _format_number(None),
+        "error_rate": _format_percent(None),
+        "fallback_rate": _format_percent(None),
+        "detail": detail,
+    }
+    if not isinstance(summary, Mapping):
+        return base
+    sample_count = int(summary.get("span_count") or 0)
+    if sample_count <= 0:
+        return base
+    return {
+        "status": "ok",
+        "status_label": "LIVE",
+        "status_class": "success",
+        "available": True,
+        "sample_count": sample_count,
+        "sample_count_display": f"{sample_count} spans",
+        "pipeline_p50": _dashboard_metric_text(
+            summary.get("total_duration_ms_p50"), " ms"
+        ),
+        "pipeline_p95": _dashboard_metric_text(
+            summary.get("total_duration_ms_p95"), " ms"
+        ),
+        "llm_p90": _dashboard_metric_text(summary.get("llm_latency_ms_p90"), " ms"),
+        "error_rate": _dashboard_percent_text(summary.get("error_rate")),
+        "fallback_rate": _dashboard_percent_text(summary.get("fallback_rate")),
+        "detail": f"{sample_count} spans captured in the last {max(1, int(window_days))}d.",
+    }
+
+
+def _dashboard_health_view(payload: Mapping[str, object] | None) -> dict[str, object]:
+    raw_components = payload.get("components") if isinstance(payload, Mapping) else []
+    if not isinstance(raw_components, list):
+        raw_components = []
+    components: list[dict[str, object]] = []
+    counts: Counter[str] = Counter()
+    for item in raw_components[:5]:
+        if not isinstance(item, Mapping):
+            continue
+        status = str(item.get("status") or "unknown").strip().lower() or "unknown"
+        counts[status] += 1
+        components.append(
+            {
+                "name": str(item.get("name") or "Component").strip() or "Component",
+                "status": status.upper(),
+                "status_class": _status_class_for_label(status),
+                "detail": str(
+                    item.get("detail") or item.get("last_ok_relative") or ""
+                ).strip(),
+            }
+        )
+    if not components:
+        return {
+            "status": "unknown",
+            "status_label": "UNKNOWN",
+            "status_class": "muted",
+            "detail": "No health evidence available for this scope.",
+            "components": [],
+        }
+    statuses = [
+        str(item.get("status") or "").strip().lower()
+        for item in raw_components
+        if isinstance(item, Mapping)
+    ]
+    if any(status == "down" for status in statuses):
+        status = "down"
+        status_label = "DOWN"
+        detail = "One or more core components are down."
+    elif any(status == "degraded" for status in statuses):
+        status = "degraded"
+        status_label = "DEGRADED"
+        detail = f"{counts.get('degraded', 0)} component(s) are degraded."
+    elif all(status in {"unknown", "unavailable"} for status in statuses):
+        status = "unknown"
+        status_label = "UNKNOWN"
+        detail = "Health evidence is not available yet."
+    elif any(
+        status in {"unknown", "unavailable", "disabled", "not configured"}
+        for status in statuses
+    ):
+        status = "partial"
+        status_label = "PARTIAL"
+        detail = "Some components do not have confirmed health evidence."
+    else:
+        status = "ok"
+        status_label = "LIVE"
+        detail = "Core health signals are present."
+    return {
+        "status": status,
+        "status_label": status_label,
+        "status_class": _status_class_for_label(status),
+        "detail": detail,
+        "components": components,
+    }
+
+
+def _recent_llm_provider_samples(
+    db_path: Path,
+    *,
+    account_emails: Iterable[str] | None = None,
+    limit: int = 3,
+) -> list[dict[str, object]]:
+    account_clause, account_params = _scoped_in_clause("account_id", account_emails)
+    try:
+        with _open_readonly_connection(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                (
+                    "SELECT ts_start_utc, llm_provider, llm_model "
+                    "FROM processing_spans "
+                    "WHERE llm_provider IS NOT NULL "
+                    "AND TRIM(llm_provider) != ''"
+                    f"{account_clause} "
+                    "ORDER BY ts_start_utc DESC "
+                    "LIMIT ?"
+                ),
+                (*account_params, max(1, int(limit))),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    samples: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for row in rows:
+        provider = str(row["llm_provider"] or "").strip()
+        model = str(row["llm_model"] or "").strip()
+        label = " ".join(part for part in [provider, model] if part)
+        if not provider or label in seen:
+            continue
+        seen.add(label)
+        samples.append(
+            {
+                "label": label,
+                "provider": provider,
+                "model": model,
+                "ts": _format_ts_utc(row["ts_start_utc"]),
+            }
+        )
+    return samples
+
+
+def _recent_decision_trace_items(
+    db_path: Path,
+    *,
+    account_emails: Iterable[str] | None = None,
+    limit: int = 3,
+) -> list[dict[str, object]]:
+    account_clause, account_params = _scoped_in_clause("account_id", account_emails)
+    try:
+        with _open_readonly_connection(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                (
+                    "SELECT email_id, ts_utc, payload_json, payload "
+                    "FROM events_v1 "
+                    "WHERE event_type = ?"
+                    f"{account_clause} "
+                    "ORDER BY ts_utc DESC "
+                    "LIMIT ?"
+                ),
+                (
+                    EventType.DECISION_TRACE_RECORDED.value,
+                    *account_params,
+                    max(3, int(limit) * 4),
+                ),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    items: list[dict[str, object]] = []
+    seen: set[tuple[int, str]] = set()
+    for row in rows:
+        trace = from_canonical_json(str(row["payload_json"] or row["payload"] or ""))
+        if not trace:
+            continue
+        email_id = int(row["email_id"] or 0)
+        decision_kind = str(trace.decision_kind or "decision").strip() or "decision"
+        key = (email_id, decision_kind)
+        if key in seen:
+            continue
+        seen.add(key)
+        codes = [str(code).strip() for code in trace.explain_codes[:3] if str(code).strip()]
+        items.append(
+            {
+                "email_id": email_id,
+                "decision_kind": decision_kind,
+                "codes": codes,
+                "codes_text": ", ".join(codes) if codes else "no explain codes",
+                "ts": _format_ts_utc(row["ts_utc"]),
+            }
+        )
+        if len(items) >= max(1, int(limit)):
+            break
+    return items
+
+
+def _dashboard_ai_view(
+    *,
+    llm_calls_today: object,
+    llm_fallback_today: object,
+    llm_section: Mapping[str, object] | None,
+    trace_health: Mapping[str, object] | None,
+    recent_traces: list[dict[str, object]],
+    recent_providers: list[dict[str, object]],
+) -> dict[str, object]:
+    llm_status = (
+        str(llm_section.get("status") or "").strip().lower()
+        if isinstance(llm_section, Mapping)
+        else ""
+    )
+    llm_detail = (
+        str(llm_section.get("detail") or llm_status).strip()
+        if isinstance(llm_section, Mapping)
+        else ""
+    )
+    snapshot = trace_health.get("snapshot") if isinstance(trace_health, Mapping) else {}
+    snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+    coverage_sample = (
+        trace_health.get("trace_coverage_sample")
+        if isinstance(trace_health, Mapping)
+        else {}
+    )
+    coverage_sample = coverage_sample if isinstance(coverage_sample, Mapping) else {}
+    delivered = int(coverage_sample.get("delivered") or 0)
+    traced = int(coverage_sample.get("traced") or 0)
+    coverage = (
+        _safe_float(trace_health.get("trace_coverage"))
+        if isinstance(trace_health, Mapping)
+        else None
+    )
+    coverage_display = (
+        f"{traced}/{delivered} ({coverage * 100:.0f}%)"
+        if delivered and coverage is not None
+        else ("0/0" if delivered == 0 else f"{traced}/{delivered}")
+    )
+    attempted = int(snapshot.get("attempted") or 0)
+    dropped = int(snapshot.get("dropped") or 0)
+    calls_value = (
+        "unknown" if llm_calls_today is None else str(int(llm_calls_today or 0))
+    )
+    fallback_value = (
+        "unknown"
+        if llm_fallback_today is None
+        else str(int(llm_fallback_today or 0))
+    )
+    if delivered > 0 and traced == 0:
+        status = "degraded"
+        label = "DEGRADED"
+        detail = "Delivered emails exist, but no decision traces were recorded in the latest sample."
+    elif recent_traces or recent_providers or traced > 0 or int(llm_calls_today or 0) > 0:
+        status = "ok"
+        label = "LIVE"
+        if delivered > 0:
+            detail = f"Decision traces cover {coverage_display} of recent delivered emails."
+        elif recent_traces:
+            detail = "Recent decision traces are available."
+        else:
+            detail = "Recent LLM activity is available."
+    elif llm_status == "unavailable":
+        status = "unavailable"
+        label = "UNAVAILABLE"
+        detail = llm_detail or "AI runtime data is unavailable."
+    elif llm_status in {"partial", "unknown"}:
+        status = "unknown"
+        label = "NO AI DATA"
+        detail = llm_detail or "No recent LLM calls or decision traces were recorded."
+    elif bool(snapshot.get("breaker_open")) and (attempted > 0 or dropped > 0):
+        status = "degraded"
+        label = "DEGRADED"
+        detail = "Decision trace recorder is degraded; recent trace drops were detected."
+    else:
+        status = "unknown"
+        label = "NO AI DATA"
+        detail = "No recent LLM calls or decision traces were recorded."
+    return {
+        "status": status,
+        "status_label": label,
+        "status_class": _status_class_for_label(status),
+        "detail": detail,
+        "llm_calls_today": calls_value,
+        "llm_fallback_today": fallback_value,
+        "trace_coverage": coverage_display,
+        "recent_traces": recent_traces[:3],
+        "recent_providers": recent_providers[:3],
+    }
 
 
 def _load_support_settings(config_path: Path | None) -> SupportSettings:
@@ -2749,11 +3233,13 @@ def _decision_trace_health_payload(
     db_path: Path,
     *,
     limit: int = 300,
+    account_emails: Iterable[str] | None = None,
 ) -> dict[str, object]:
     emitter = get_default_decision_trace_emitter()
     snapshot = emitter.snapshot()
     delivered_ids: list[int] = []
     traces_found: set[int] = set()
+    account_clause, account_params = _scoped_in_clause("account_id", account_emails)
     try:
         with _open_readonly_connection(db_path) as conn:
             rows = conn.execute(
@@ -2762,10 +3248,13 @@ def _decision_trace_health_payload(
                 FROM events_v1
                 WHERE event_type = ?
                   AND email_id IS NOT NULL
+                """
+                + account_clause
+                + """
                 ORDER BY ts_utc DESC
                 LIMIT ?
                 """,
-                ("telegram_delivered", int(limit)),
+                (EventType.TELEGRAM_DELIVERED.value, *account_params, int(limit)),
             ).fetchall()
             delivered_ids = [int(row[0]) for row in rows if row and row[0] is not None]
             if delivered_ids:
@@ -2776,8 +3265,13 @@ def _decision_trace_health_payload(
                     FROM events_v1
                     WHERE event_type = ?
                       AND email_id IN ({placeholders})
+                      {account_clause}
                     """,
-                    ["DECISION_TRACE_RECORDED", *delivered_ids],
+                    [
+                        EventType.DECISION_TRACE_RECORDED.value,
+                        *delivered_ids,
+                        *account_params,
+                    ],
                 ).fetchall()
                 traces_found = {
                     int(row[0]) for row in trace_rows if row and row[0] is not None
@@ -2870,6 +3364,7 @@ def create_app(
     )
     app.config["SUPPORT_SETTINGS"] = resolved_support_settings
     app.config["DONATE_ENABLED"] = bool(resolved_support_settings.enabled)
+    app.config["HOMEPAGE_DONATE"] = _homepage_donate_context()
 
     @app.before_request
     def _require_login():
@@ -3279,6 +3774,36 @@ def create_app(
             account_emails=account_emails,
             window_days=window_days,
         )
+        dashboard_preview = _dashboard_payload()
+        dashboard_preview_meta = (
+            dashboard_preview.get("meta")
+            if isinstance(dashboard_preview, Mapping)
+            else {}
+        )
+        dashboard_preview_meta = (
+            dashboard_preview_meta if isinstance(dashboard_preview_meta, Mapping) else {}
+        )
+        dashboard_preview_events = (
+            list(dashboard_preview.get("recent_events") or [])[:5]
+            if isinstance(dashboard_preview, Mapping)
+            else []
+        )
+        events_section = dashboard_preview_meta.get("sections", {})
+        events_entry = (
+            events_section.get("events")
+            if isinstance(events_section, Mapping)
+            else {}
+        )
+        events_entry = events_entry if isinstance(events_entry, Mapping) else {}
+        if dashboard_preview_events:
+            dashboard_preview_events_empty = ""
+        else:
+            events_status = str(events_entry.get("status") or "").strip()
+            events_detail = str(events_entry.get("detail") or events_status).strip()
+            if events_status and events_status != "ok":
+                dashboard_preview_events_empty = f"Unavailable: {events_detail}"
+            else:
+                dashboard_preview_events_empty = "No recent events yet."
 
         return _render_template(
             app,
@@ -3314,6 +3839,13 @@ def create_app(
             silent_contacts=silent_contacts,
             stalled_threads=stalled_threads,
             quality_summary=quality_summary,
+            dashboard_preview=dashboard_preview,
+            dashboard_preview_events=dashboard_preview_events,
+            dashboard_preview_updated=_dashboard_updated_label(
+                dashboard_preview_meta.get("generated_at")
+            ),
+            dashboard_preview_detail=_dashboard_meta_summary(dashboard_preview_meta),
+            dashboard_preview_events_empty=dashboard_preview_events_empty,
             support_methods=app.config["SUPPORT_SETTINGS"].methods[:1],
             hide_limit=True,
             status_refresh_ms=STATUS_STRIP_REFRESH_MS,
@@ -4057,6 +4589,38 @@ def create_app(
                 "overdue_due_count": None,
                 "due_soon_count": None,
             },
+            "latency": {
+                "status": "unknown",
+                "status_label": "NO LATENCY DATA",
+                "status_class": "muted",
+                "available": False,
+                "sample_count": 0,
+                "sample_count_display": "0 spans",
+                "pipeline_p50": "вЂ“",
+                "pipeline_p95": "вЂ“",
+                "llm_p90": "вЂ“",
+                "error_rate": "вЂ“",
+                "fallback_rate": "вЂ“",
+                "detail": "No latency data for the last 7d.",
+            },
+            "health": {
+                "status": "unknown",
+                "status_label": "UNKNOWN",
+                "status_class": "muted",
+                "detail": "No health evidence available for this scope.",
+                "components": [],
+            },
+            "ai": {
+                "status": "unknown",
+                "status_label": "NO AI DATA",
+                "status_class": "muted",
+                "detail": "No recent LLM calls or decision traces were recorded.",
+                "llm_calls_today": "unknown",
+                "llm_fallback_today": "unknown",
+                "trace_coverage": "0/0",
+                "recent_traces": [],
+                "recent_providers": [],
+            },
             "meta": {
                 "status": "ok",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -4070,6 +4634,9 @@ def create_app(
                     "business": {"status": "ok", "detail": None},
                     "contacts": {"status": "ok", "detail": None},
                     "issuers": {"status": "ok", "detail": None},
+                    "latency": {"status": "ok", "detail": None},
+                    "health": {"status": "ok", "detail": None},
+                    "ai": {"status": "ok", "detail": None},
                 },
             },
         }
@@ -4103,8 +4670,18 @@ def create_app(
         try:
             dashboard_vars = _dashboard_vars()
             account_scope = _resolve_account_scope(dashboard_vars)
+            window_days = max(1, int(getattr(dashboard_vars, "window_days", 7) or 7))
+            if not account_scope:
+                fallback_account = str(request.args.get("account_email") or "").strip()
+                if fallback_account:
+                    account_scope = [fallback_account]
+            if not account_scope:
+                available_accounts = _available_accounts(app.config["DB_PATH"])
+                if available_accounts:
+                    account_scope = [str(available_accounts[0])]
         except Exception:
             account_scope = []
+            window_days = 7
 
         account_clause = ""
         account_params: list[object] = []
@@ -4404,6 +4981,44 @@ def create_app(
                             "partial",
                             "account scope unavailable for this summary",
                         )
+                    if account_email:
+                        try:
+                            latency_summary = analytics.processing_spans_metrics_digest(
+                                account_email=account_email,
+                                account_emails=account_scope,
+                                window_days=window_days,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "dashboard_latency_summary_failed",
+                                extra={"error": str(exc)},
+                            )
+                            _mark_section(
+                                "latency",
+                                "unavailable",
+                                f"latency summary unavailable: {exc}",
+                            )
+                        else:
+                            payload["latency"] = _dashboard_latency_view(
+                                latency_summary, window_days=window_days
+                            )
+                            latency_status = str(
+                                payload["latency"].get("status") or "unknown"
+                            ).strip()
+                            latency_detail = str(
+                                payload["latency"].get("detail") or latency_status
+                            ).strip()
+                            if latency_status == "unknown":
+                                _mark_section("latency", "unknown", latency_detail)
+                    else:
+                        payload["latency"] = _dashboard_latency_view(
+                            {}, window_days=window_days
+                        )
+                        _mark_section(
+                            "latency",
+                            "unknown",
+                            "account scope unavailable for latency summary",
+                        )
         except sqlite3.Error as exc:
             logger.warning("dashboard_payload_failed", extra={"error": str(exc)})
             for section in (
@@ -4416,8 +5031,58 @@ def create_app(
                 "business",
                 "contacts",
                 "issuers",
+                "latency",
+                "health",
+                "ai",
             ):
                 _mark_section(section, "unavailable", f"dashboard DB read failed: {exc}")
+        health_payload = _health_status_payload(
+            account_scope,
+            window_days=window_days,
+        )
+        payload["health"] = _dashboard_health_view(health_payload)
+        health_status = str(payload["health"].get("status") or "unknown").strip()
+        health_detail = str(payload["health"].get("detail") or health_status).strip()
+        if health_status == "down":
+            _mark_section("health", "partial", health_detail)
+        elif health_status in {"degraded", "partial"}:
+            _mark_section("health", "partial", health_detail)
+        elif health_status in {"unknown", "unavailable"}:
+            _mark_section(
+                "health",
+                "unavailable" if health_status == "unavailable" else "unknown",
+                health_detail,
+            )
+
+        sections = meta.get("sections") if isinstance(meta, Mapping) else {}
+        llm_section = sections.get("llm") if isinstance(sections, Mapping) else {}
+        trace_health = _decision_trace_health_payload(
+            app.config["DB_PATH"],
+            limit=300,
+            account_emails=account_scope,
+        )
+        recent_traces = _recent_decision_trace_items(
+            app.config["DB_PATH"], account_emails=account_scope, limit=3
+        )
+        recent_providers = _recent_llm_provider_samples(
+            app.config["DB_PATH"], account_emails=account_scope, limit=3
+        )
+        payload["ai"] = _dashboard_ai_view(
+            llm_calls_today=payload.get("llm_calls_today"),
+            llm_fallback_today=payload.get("llm_fallback_today"),
+            llm_section=llm_section if isinstance(llm_section, Mapping) else {},
+            trace_health=trace_health,
+            recent_traces=recent_traces,
+            recent_providers=recent_providers,
+        )
+        ai_status = str(payload["ai"].get("status") or "unknown").strip()
+        ai_detail = str(payload["ai"].get("detail") or ai_status).strip()
+        if ai_status in {"degraded", "partial"}:
+            _mark_section("ai", "partial", ai_detail)
+        elif ai_status == "unavailable":
+            _mark_section("ai", "unavailable", ai_detail)
+        elif ai_status == "unknown":
+            _mark_section("ai", "unknown", ai_detail)
         return _cache_and_return()
 
     def _imap_health_payload(account_emails: list[str]) -> dict[str, object]:
