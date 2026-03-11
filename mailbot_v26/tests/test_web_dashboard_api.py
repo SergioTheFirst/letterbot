@@ -6,6 +6,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from mailbot_v26.observability.processing_span import ProcessingSpanRecorder
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.tests._web_helpers import login_with_csrf
 from mailbot_v26.web_observability.app import create_app
@@ -102,6 +103,73 @@ def _insert_archive_interpretation(
             "issuer_key": "domain:vendor.example",
             "issuer_domain": "vendor.example",
         },
+    )
+
+
+def _insert_health_snapshot(
+    conn: sqlite3.Connection,
+    *,
+    snapshot_id: str,
+    ts_utc: float,
+    system_mode: str = "FULL",
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO system_health_snapshots (
+            snapshot_id, ts_utc, payload_json, gates_state, metrics_brief, system_mode
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            snapshot_id,
+            ts_utc,
+            json.dumps({"system_mode": system_mode}, ensure_ascii=False),
+            json.dumps({"db": "ok"}, ensure_ascii=False),
+            json.dumps({"telegram_delivery_success_rate": 0.99}, ensure_ascii=False),
+            system_mode,
+        ),
+    )
+
+
+def _insert_processing_span(
+    conn: sqlite3.Connection,
+    *,
+    span_id: str,
+    ts_start_utc: float,
+    ts_end_utc: float,
+    account_id: str = "primary@example.com",
+    email_id: int = 1,
+    health_snapshot_id: str = "snap-1",
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO processing_spans (
+            span_id, ts_start_utc, ts_end_utc, total_duration_ms, account_id, email_id,
+            stage_durations_json, llm_provider, llm_model, llm_latency_ms, llm_quality_score,
+            fallback_used, outcome, error_code, health_snapshot_id, delivery_mode,
+            wait_budget_seconds, elapsed_to_first_send_ms, edit_applied
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            span_id,
+            ts_start_utc,
+            ts_end_utc,
+            int(max((ts_end_utc - ts_start_utc) * 1000.0, 1.0)),
+            account_id,
+            email_id,
+            json.dumps({"parse": 20, "llm": 180}, ensure_ascii=False),
+            "gigachat",
+            "giga-pro",
+            180,
+            0.92,
+            0,
+            "ok",
+            "",
+            health_snapshot_id,
+            "direct",
+            0,
+            0,
+            0,
+        ),
     )
 
 
@@ -202,6 +270,106 @@ def test_api_dashboard_returns_recent_events(tmp_path: Path) -> None:
         event for event, _ in tracked
     ]
     assert data["recent_events"][1]["text"] == "priority 🟡"
+
+
+def test_api_dashboard_includes_observability_sections_with_runtime_data(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "dashboard-observability.sqlite"
+    KnowledgeDB(db_path)
+    ProcessingSpanRecorder(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO emails (id, account_email, from_email, subject, priority, llm_provider, received_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1,
+                "primary@example.com",
+                "alice@example.com",
+                "Invoice",
+                "🔴",
+                "gigachat",
+                now.isoformat(),
+                now.isoformat(),
+            ),
+        )
+        _insert_health_snapshot(conn, snapshot_id="snap-1", ts_utc=now.timestamp())
+        _insert_processing_span(
+            conn,
+            span_id="span-1",
+            ts_start_utc=(now - timedelta(milliseconds=250)).timestamp(),
+            ts_end_utc=now.timestamp(),
+        )
+        _insert_event(
+            conn,
+            event_type="imap_health",
+            ts_utc=now.timestamp(),
+            payload={"subtype": "success"},
+        )
+        _insert_event(
+            conn,
+            event_type="message_interpretation",
+            ts_utc=now.timestamp(),
+            payload={"doc_kind": "invoice"},
+        )
+        _insert_event(conn, event_type="telegram_delivered", ts_utc=now.timestamp())
+        _insert_event(
+            conn,
+            event_type="DECISION_TRACE_RECORDED",
+            ts_utc=now.timestamp(),
+            payload={
+                "decision_key": "trace-1",
+                "decision_kind": "priority",
+                "anchor_ts_utc": now.timestamp(),
+                "signals_evaluated": ["INVOICE_KEYWORD"],
+                "signals_fired": ["INVOICE_KEYWORD"],
+                "evidence": {"matched": 1, "total": 1},
+                "model_fingerprint": "model-1",
+                "explain_codes": ["INVOICE_KEYWORD"],
+                "trace_schema": "DecisionTraceV1",
+                "trace_version": 1,
+            },
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/dashboard")
+
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["latency"]["status"] == "ok"
+    assert data["latency"]["sample_count"] == 1
+    assert data["health"]["status"] in {"ok", "partial"}
+    assert data["ai"]["status"] == "ok"
+    assert data["ai"]["trace_coverage"] == "1/1 (100%)"
+    assert data["ai"]["recent_traces"][0]["decision_kind"] == "priority"
+
+
+def test_api_dashboard_observability_sections_stay_honest_without_data(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "dashboard-observability-empty.sqlite"
+    sqlite3.connect(db_path).close()
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get("/api/dashboard")
+
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["latency"]["status"] == "unknown"
+    assert data["latency"]["status_label"] == "NO LATENCY DATA"
+    assert data["health"]["status"] == "unknown"
+    assert data["ai"]["status"] == "unavailable"
+    assert data["meta"]["sections"]["latency"]["status"] == "unknown"
+    assert data["meta"]["sections"]["health"]["status"] == "unknown"
+    assert data["meta"]["sections"]["ai"]["status"] == "unavailable"
 
 
 def test_api_dashboard_survives_empty_db(tmp_path: Path) -> None:

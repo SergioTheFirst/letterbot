@@ -23,21 +23,33 @@
 
 
 
-  <div class="card live-dashboard-preview" data-testid="live-dashboard">
+<div class="card live-dashboard-preview" data-testid="live-dashboard">
     <div class="section-title">
       <h2>System</h2>
       <div class="hint">Dashboard preview. Full live view is available at <a href="{{ url_for('dashboard_page') }}">/dashboard</a>.</div>
     </div>
     <div class="metric-row">
-      <span class="badge muted">Emails: <b id="preview-emails-today">0</b></span>
-      <span class="badge muted">LLM: <b id="preview-llm-calls">0</b></span>
-      <span class="badge muted">Priority: <b id="preview-priority-red">0</b></span>
-      <span class="badge muted">Events: <b id="preview-events-count">0</b></span>
+      <span class="badge muted">Emails: <b id="preview-emails-today">{{ dashboard_preview.emails_today if dashboard_preview.emails_today is not none else 'unknown' }}</b></span>
+      <span class="badge muted">LLM: <b id="preview-llm-calls">{{ dashboard_preview.llm_calls_today if dashboard_preview.llm_calls_today is not none else 'unknown' }}</b></span>
+      <span class="badge muted">Priority: <b id="preview-priority-red">{{ dashboard_preview.priority.red if dashboard_preview.priority.red is not none else 'unknown' }}</b></span>
+      <span class="badge muted">Events: <b id="preview-events-count">{{ dashboard_preview_events|length }}</b></span>
     </div>
     <div class="hint">
-      <span id="preview-dashboard-status">Preview status: unknown</span> · <span>Priority</span> · <span>Events</span>
+      <span id="preview-dashboard-status">Preview status: {{ dashboard_preview.meta.status if dashboard_preview.meta else 'unknown' }}</span> · <span>Priority</span> · <span>Events</span>
     </div>
   </div>
+
+  <div class="hint" id="preview-dashboard-updated">Payload updated: {{ dashboard_preview_updated }}</div>
+  <div class="hint" id="preview-dashboard-detail">{{ dashboard_preview_detail }}</div>
+  <ul class="simple-links" id="preview-recent-events">
+    {% if dashboard_preview_events %}
+      {% for item in dashboard_preview_events %}
+      <li>{{ item.text or item.type or 'event' }}</li>
+      {% endfor %}
+    {% else %}
+      <li class="hint">{{ dashboard_preview_events_empty }}</li>
+    {% endif %}
+  </ul>
 
   <div class="cockpit-grid cockpit-grid--home">
     <div class="cockpit-main">
@@ -240,25 +252,72 @@
       {% endif %}
     </div>
 
-    <div class="cockpit-side">
-      <div class="card golden-card">
+<div class="cockpit-side">
+      <div class="card golden-card" data-testid="homepage-health">
         <div class="section-title">
-          <h2>Состояние системы</h2>
-          <div class="hint">system status · Golden signals at a glance</div>
+          <h2>Health</h2>
+          <div class="hint">Canonical runtime health evidence.</div>
         </div>
-        {% if golden_signals %}
+        <div><span class="badge {{ dashboard_preview.health.status_class }}" id="home-health-status">{{ dashboard_preview.health.status_label }}</span></div>
+        <div class="hint" id="home-health-detail">{{ dashboard_preview.health.detail }}</div>
+        <ul class="simple-links" id="home-health-components">
+          {% if dashboard_preview.health.components %}
+            {% for item in dashboard_preview.health.components %}
+            <li><span class="badge {{ item.status_class }}">{{ item.name }}: {{ item.status }}</span>{% if item.detail %} {{ item.detail }}{% endif %}</li>
+            {% endfor %}
+          {% else %}
+            <li class="hint">No health evidence available for this scope.</li>
+          {% endif %}
+        </ul>
+      </div>
+
+      <div class="card golden-card" data-testid="homepage-latency">
+        <div class="section-title">
+          <h2>Latency</h2>
+          <div class="hint">Real processing spans from runtime.</div>
+        </div>
+        <div><span class="badge {{ dashboard_preview.latency.status_class }}" id="home-latency-status">{{ dashboard_preview.latency.status_label }}</span></div>
+        <div class="hint" id="home-latency-detail">{{ dashboard_preview.latency.detail }}</div>
+        {% if dashboard_preview.latency.available %}
         <div class="signal-grid">
-          <div class="signal-item"><div class="label">Latency p50</div><div class="value">{{ golden_signals.latency_p50 }}</div></div>
-          <div class="signal-item"><div class="label">Latency p95</div><div class="value">{{ golden_signals.latency_p95 }}</div></div>
-          <div class="signal-item"><div class="label">Error rate</div><div class="value">{{ golden_signals.error_rate }}</div></div>
-          <div class="signal-item"><div class="label">Fallback rate</div><div class="value">{{ golden_signals.fallback_rate }}</div></div>
-          <div class="signal-item"><div class="label">TG failure</div><div class="value">{{ golden_signals.tg_failure_rate }}</div></div>
-          <div class="signal-item"><div class="label">Traffic</div><div class="value">{{ golden_signals.traffic_volume }}</div></div>
-          <div class="signal-item"><div class="label">Saturation</div><div class="value">{{ golden_signals.saturation }}</div></div>
+          <div class="signal-item"><div class="label">Pipeline p50</div><div class="value" id="home-latency-p50">{{ dashboard_preview.latency.pipeline_p50 }}</div></div>
+          <div class="signal-item"><div class="label">Pipeline p95</div><div class="value" id="home-latency-p95">{{ dashboard_preview.latency.pipeline_p95 }}</div></div>
+          <div class="signal-item"><div class="label">LLM p90</div><div class="value" id="home-latency-llm-p90">{{ dashboard_preview.latency.llm_p90 }}</div></div>
+          <div class="signal-item"><div class="label">Samples</div><div class="value" id="home-latency-samples">{{ dashboard_preview.latency.sample_count_display }}</div></div>
+          <div class="signal-item"><div class="label">Error rate</div><div class="value" id="home-latency-error-rate">{{ dashboard_preview.latency.error_rate }}</div></div>
+          <div class="signal-item"><div class="label">Fallback rate</div><div class="value" id="home-latency-fallback-rate">{{ dashboard_preview.latency.fallback_rate }}</div></div>
         </div>
         {% else %}
-        <div class="hint">Adjust scope to surface system signals.</div>
+        <div class="hint" id="home-latency-empty">{{ dashboard_preview.latency.status_label }}</div>
         {% endif %}
+      </div>
+
+      <div class="card golden-card" data-testid="homepage-ai">
+        <div class="section-title">
+          <h2>AI / LLM decisions</h2>
+          <div class="hint">Decision traces and recent provider evidence.</div>
+        </div>
+        <div><span class="badge {{ dashboard_preview.ai.status_class }}" id="home-ai-status">{{ dashboard_preview.ai.status_label }}</span></div>
+        <div class="hint" id="home-ai-detail">{{ dashboard_preview.ai.detail }}</div>
+        <div class="metric-row">
+          <span class="badge muted">Calls: <b id="home-ai-calls">{{ dashboard_preview.ai.llm_calls_today }}</b></span>
+          <span class="badge muted">Fallback: <b id="home-ai-fallback">{{ dashboard_preview.ai.llm_fallback_today }}</b></span>
+          <span class="badge muted">Trace coverage: <b id="home-ai-trace-coverage">{{ dashboard_preview.ai.trace_coverage }}</b></span>
+        </div>
+        <ul class="simple-links" id="home-ai-items">
+          {% if dashboard_preview.ai.recent_providers %}
+            {% for item in dashboard_preview.ai.recent_providers %}
+            <li>Provider: {{ item.label }}</li>
+            {% endfor %}
+          {% endif %}
+          {% if dashboard_preview.ai.recent_traces %}
+            {% for item in dashboard_preview.ai.recent_traces %}
+            <li>{{ item.decision_kind }}: {{ item.codes_text }}</li>
+            {% endfor %}
+          {% elif not dashboard_preview.ai.recent_providers %}
+            <li class="hint">No recent AI decision traces recorded.</li>
+          {% endif %}
+        </ul>
       </div>
 
       <div class="card golden-card quality-card" data-testid="quality-summary">
@@ -288,6 +347,33 @@
         {% endif %}
         <div class="card-actions">
           <a class="btn" href="/support">Open support page</a>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if homepage_donate and homepage_donate.url %}
+      <div class="card golden-card donate-card" data-testid="homepage-donate">
+        <div class="section-title support-card-head">
+          <h2>{{ homepage_donate.title }}</h2>
+        </div>
+        <p class="support-card-copy">CloudTips donation link is read-only and separate from runtime state.</p>
+        {% if homepage_donate.qr_image_data_uri %}
+        <div class="support-card-qr-preview">
+          <a href="{{ homepage_donate.url }}" target="_blank" rel="noopener noreferrer">
+            <img
+              src="{{ homepage_donate.qr_image_data_uri }}"
+              alt="QR-код для поддержки Letterbot"
+              width="{{ homepage_donate.qr_width }}"
+              height="{{ homepage_donate.qr_height }}"
+            >
+          </a>
+          <div class="support-card-qr-caption">CloudTips QR</div>
+        </div>
+        {% else %}
+        <div class="hint">{{ homepage_donate.fallback_message }}</div>
+        {% endif %}
+        <div class="card-actions">
+          <a class="btn" href="{{ homepage_donate.url }}" target="_blank" rel="noopener noreferrer">{{ homepage_donate.url }}</a>
         </div>
       </div>
       {% endif %}
@@ -362,14 +448,98 @@
             offline.classList.add('active');
           });
       };
-      const setPreview = (id, value) => {
+const setPreview = (id, value) => {
         const node = document.getElementById(id);
         if (node) node.textContent = String(value);
       };
       const previewStatus = document.getElementById('preview-dashboard-status');
+      const previewUpdated = document.getElementById('preview-dashboard-updated');
+      const previewDetail = document.getElementById('preview-dashboard-detail');
+      const previewEvents = document.getElementById('preview-recent-events');
+      const escapeHtml = (value) => String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
       const displayValue = (value, fallback = 'unknown') => {
         if (value === null || value === undefined || value === '') return fallback;
         return String(value);
+      };
+      const setBadge = (id, label, statusClass) => {
+        const node = document.getElementById(id);
+        if (!node) return;
+        node.className = `badge ${statusClass || 'muted'}`;
+        node.textContent = String(label || 'UNKNOWN');
+      };
+      const previewMetaSummary = (meta) => {
+        const sections = meta?.sections || {};
+        const issues = Object.entries(sections)
+          .filter(([, entry]) => entry && typeof entry === 'object' && entry.status && entry.status !== 'ok')
+          .map(([name, entry]) => `${name}: ${entry.detail || entry.status}`);
+        if (issues.length) return issues.slice(0, 3).join(' · ');
+        return 'Canonical events and runtime storage are in sync.';
+      };
+      const renderPreviewEvents = (items, meta) => {
+        if (!previewEvents) return;
+        if (Array.isArray(items) && items.length) {
+          previewEvents.innerHTML = items.slice(0, 5)
+            .map((item) => `<li>${escapeHtml(String(item.text || item.type || 'event'))}</li>`)
+            .join('');
+          return;
+        }
+        const eventSection = meta?.sections?.events;
+        const detail = eventSection && eventSection.status && eventSection.status !== 'ok'
+          ? `Unavailable: ${String(eventSection.detail || eventSection.status)}`
+          : 'No recent events yet.';
+        previewEvents.innerHTML = `<li class="hint">${escapeHtml(detail)}</li>`;
+      };
+      const renderHealth = (health) => {
+        setBadge('home-health-status', health?.status_label || 'UNKNOWN', health?.status_class || 'muted');
+        setPreview('home-health-detail', displayValue(health?.detail, 'No health evidence available for this scope.'));
+        const list = document.getElementById('home-health-components');
+        if (!list) return;
+        const items = Array.isArray(health?.components) ? health.components : [];
+        if (!items.length) {
+          list.innerHTML = '<li class="hint">No health evidence available for this scope.</li>';
+          return;
+        }
+        list.innerHTML = items.map((item) => {
+          const detail = item?.detail ? ` ${escapeHtml(String(item.detail))}` : '';
+          return `<li><span class="badge ${escapeHtml(String(item?.status_class || 'muted'))}">${escapeHtml(String(item?.name || 'Component'))}: ${escapeHtml(String(item?.status || 'UNKNOWN'))}</span>${detail}</li>`;
+        }).join('');
+      };
+      const renderLatency = (latency) => {
+        setBadge('home-latency-status', latency?.status_label || 'NO LATENCY DATA', latency?.status_class || 'muted');
+        setPreview('home-latency-detail', displayValue(latency?.detail, 'No latency data for this scope.'));
+        setPreview('home-latency-p50', displayValue(latency?.pipeline_p50, '—'));
+        setPreview('home-latency-p95', displayValue(latency?.pipeline_p95, '—'));
+        setPreview('home-latency-llm-p90', displayValue(latency?.llm_p90, '—'));
+        setPreview('home-latency-samples', displayValue(latency?.sample_count_display, '0 spans'));
+        setPreview('home-latency-error-rate', displayValue(latency?.error_rate, '—'));
+        setPreview('home-latency-fallback-rate', displayValue(latency?.fallback_rate, '—'));
+        const empty = document.getElementById('home-latency-empty');
+        if (empty) {
+          empty.textContent = latency?.available ? '' : String(latency?.status_label || 'NO LATENCY DATA');
+        }
+      };
+      const renderAI = (ai) => {
+        setBadge('home-ai-status', ai?.status_label || 'NO AI DATA', ai?.status_class || 'muted');
+        setPreview('home-ai-detail', displayValue(ai?.detail, 'No recent LLM calls or decision traces were recorded.'));
+        setPreview('home-ai-calls', displayValue(ai?.llm_calls_today, 'unknown'));
+        setPreview('home-ai-fallback', displayValue(ai?.llm_fallback_today, 'unknown'));
+        setPreview('home-ai-trace-coverage', displayValue(ai?.trace_coverage, '0/0'));
+        const list = document.getElementById('home-ai-items');
+        if (!list) return;
+        const items = [];
+        const providers = Array.isArray(ai?.recent_providers) ? ai.recent_providers : [];
+        const traces = Array.isArray(ai?.recent_traces) ? ai.recent_traces : [];
+        providers.forEach((item) => items.push(`<li>Provider: ${escapeHtml(String(item?.label || 'unknown'))}</li>`));
+        traces.forEach((item) => items.push(`<li>${escapeHtml(String(item?.decision_kind || 'decision'))}: ${escapeHtml(String(item?.codes_text || 'no explain codes'))}</li>`));
+        if (!items.length) {
+          items.push('<li class="hint">No recent AI decision traces recorded.</li>');
+        }
+        list.innerHTML = items.join('');
       };
       const refreshDashboardPreview = () => {
         fetch('/api/dashboard', { credentials: 'same-origin' })
@@ -385,11 +555,33 @@
             if (previewStatus) {
               previewStatus.textContent = `Preview status: ${String(data.meta?.status || 'unknown')}`;
             }
+            if (previewUpdated) {
+              previewUpdated.textContent = `Payload updated: ${String(data.meta?.generated_at || 'unknown')}`;
+            }
+            if (previewDetail) {
+              previewDetail.textContent = previewMetaSummary(data.meta || {});
+            }
+            renderPreviewEvents(data.recent_events, data.meta || {});
+            renderHealth(data.health || {});
+            renderLatency(data.latency || {});
+            renderAI(data.ai || {});
           })
           .catch(() => {
             if (previewStatus) {
               previewStatus.textContent = 'Preview status: unavailable (refresh failed)';
             }
+            if (previewUpdated) {
+              previewUpdated.textContent = 'Payload updated: refresh failed';
+            }
+            if (previewDetail) {
+              previewDetail.textContent = 'Showing last known values until the next successful refresh.';
+            }
+            setBadge('home-health-status', 'UNAVAILABLE', 'warn');
+            setPreview('home-health-detail', 'Showing last known health values until refresh succeeds.');
+            setBadge('home-latency-status', 'UNAVAILABLE', 'warn');
+            setPreview('home-latency-detail', 'Showing last known latency values until refresh succeeds.');
+            setBadge('home-ai-status', 'UNAVAILABLE', 'warn');
+            setPreview('home-ai-detail', 'Showing last known AI values until refresh succeeds.');
           });
       };
       refreshDashboardPreview();
