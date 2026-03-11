@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
@@ -78,6 +78,41 @@ def _insert_email(db_path: Path) -> int:
         row = conn.execute("SELECT id FROM emails ORDER BY id DESC LIMIT 1").fetchone()
     assert row is not None
     return int(row[0])
+
+
+def _downgrade_emails_table_to_legacy_schema(db_path: Path, *, email_id: int) -> None:
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT id, account_email, from_email, subject, received_at, raw_body_hash
+            FROM emails
+            WHERE id = ?
+            """,
+            (email_id,),
+        ).fetchone()
+        assert row is not None
+        conn.execute("ALTER TABLE emails RENAME TO emails_runtime_full")
+        conn.execute(
+            """
+            CREATE TABLE emails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_email TEXT,
+                from_email TEXT,
+                subject TEXT,
+                received_at TEXT,
+                raw_body_hash TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO emails (id, account_email, from_email, subject, received_at, raw_body_hash)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            row,
+        )
+        conn.execute("DROP TABLE emails_runtime_full")
+        conn.commit()
 
 
 def _emit_interpretation(db_path: Path, *, email_id: int, doc_kind: str) -> None:
@@ -305,6 +340,63 @@ def test_priority_callback_updates_snapshot_priority(
     assert "🔴" in str(edited[1]["html_text"])
 
 
+def test_priority_callback_survives_legacy_emails_schema_and_migrates_columns(
+    tmp_path: Path, monkeypatch
+) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+    _emit_interpretation(
+        processor.knowledge_db.path, email_id=email_id, doc_kind="invoice"
+    )
+    _downgrade_emails_table_to_legacy_schema(
+        processor.knowledge_db.path, email_id=email_id
+    )
+
+    edited: list[dict[str, object]] = []
+
+    def _fake_edit(**kwargs):
+        edited.append(kwargs)
+
+    monkeypatch.setattr(
+        "mailbot_v26.telegram.inbound.edit_telegram_message", _fake_edit
+    )
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-pr-legacy",
+            "data": encode_callback_data(
+                prefix=PRIORITY_PREFIX, action="med", msg_key=str(email_id)
+            ),
+            "message": {"chat": {"id": "chat"}, "message_id": 18},
+        }
+    )
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(emails)").fetchall()
+        }
+        priority_row = conn.execute(
+            "SELECT priority, priority_source FROM emails WHERE id = ?",
+            (email_id,),
+        ).fetchone()
+
+    assert "priority" in columns
+    assert "priority_source" in columns
+    assert priority_row == ("\U0001f7e1", "user_override")
+    assert edited
+    assert sent == []
+
+
 def test_priority_callback_edit_same_message(tmp_path: Path, monkeypatch) -> None:
     sent: list[str] = []
     gate_result = GateResult(
@@ -512,6 +604,46 @@ def test_snooze_callback_creates_pending_record(tmp_path: Path) -> None:
     assert row is not None
     assert int(row[0]) == email_id
     assert row[1] == "pending"
+
+
+def test_snooze_tomorrow_creates_pending_record_for_next_morning(
+    tmp_path: Path,
+) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+    before_local = datetime.now().astimezone()
+
+    processor.handle_callback_query(
+        {
+            "id": "cb2",
+            "data": f"snz_s:{email_id}:tom",
+            "message": {"chat": {"id": "chat"}, "message_id": 11, "text": "msg"},
+        }
+    )
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        row = conn.execute(
+            "SELECT email_id, status, deliver_at_utc FROM telegram_snooze WHERE email_id = ?",
+            (email_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert int(row[0]) == email_id
+    assert row[1] == "pending"
+    deliver_local = datetime.fromisoformat(str(row[2])).astimezone()
+    assert deliver_local.date() == before_local.date() + timedelta(days=1)
+    assert deliver_local.hour == 9
+    assert deliver_local.minute == 0
 
 
 def test_commitments_command_empty(tmp_path: Path) -> None:
@@ -902,6 +1034,48 @@ def test_support_command_enabled_without_url_reports_not_configured(
     processor.handle_message({"chat": {"id": "chat"}, "text": "/support"})
 
     assert _norm(sent[-1]) == _norm("Поддержка включена, но ссылка ещё не настроена.")
+
+
+def test_unknown_slash_command_returns_help(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/wat"})
+    unknown_text = sent[-1]
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/help"})
+    help_text = sent[-1]
+
+    assert _norm(unknown_text) == _norm(help_text)
+
+
+def test_unknown_bot_command_returns_help(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "nonsense"})
+    unknown_text = sent[-1]
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/help"})
+    help_text = sent[-1]
+
+    assert _norm(unknown_text) == _norm(help_text)
 
 
 def test_help_contains_support_command(tmp_path: Path) -> None:
