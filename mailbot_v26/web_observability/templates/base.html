@@ -3,21 +3,44 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}{{ title or "Letterbot Web — Observability" }}{% endblock %}</title>
+  <title>{% block title %}{{ title or "Letterbot Web - Observability" }}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%235c8df6'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='white'>L</text></svg>">
 </head>
 <body>
+  {% set vars = dashboard_vars if dashboard_vars is defined and dashboard_vars else None %}
+  {% set donate_url = support_url if support_enabled else '' %}
+  {% set donate_cta_url = donate_url or ('/support' if support_enabled and support_nav_enabled else '') %}
   <div class="app-shell">
     <header class="topbar">
-      <div class="brand-stack">
-        <div class="brand">Letterbot Web — Observability</div>
-        {% if scope_hint %}<div class="subtitle">{{ scope_hint }}</div>{% endif %}
+      <div class="topbar-primary">
+        <a class="brand-mark" href="{{ url_for('index') }}" aria-label="Letterbot observability home">LB</a>
+        <div class="brand-stack">
+          <div class="brand">Letterbot Observability</div>
+          <div class="subtitle">{{ scope_hint or "Read-only runtime intelligence from canonical events and persisted state." }}</div>
+        </div>
       </div>
-      {% if not hide_nav %}
-      <div class="topbar-main">
+      <div class="topbar-actions">
+        {% if donate_cta_url %}
+        <a
+          class="topbar-donate"
+          href="{{ donate_cta_url }}"
+          {% if donate_cta_url.startswith('http') %}target="_blank" rel="noopener noreferrer"{% endif %}
+          aria-label="Support Letterbot"
+        >
+          <span class="topbar-donate-icon" aria-hidden="true">◌</span>
+          <span>Support</span>
+        </a>
+        {% endif %}
+        <div class="topbar-version">v{{ app_version }}</div>
+      </div>
+    </header>
+
+    {% if not hide_nav %}
+    <section class="toolbar-shell">
+      <div class="toolbar-main">
         <nav class="nav">
-          <a href="{{ url_for('index') }}" class="nav-link {% if request.path in ['/', '/cockpit'] %}active{% endif %}">Cockpit</a>
+          <a href="{{ url_for('index') }}" class="nav-link {% if request.path in ['/', '/cockpit', '/dashboard'] %}active{% endif %}">Cockpit</a>
           <a href="{{ url_for('archive') }}" class="nav-link {% if request.path.startswith('/archive') %}active{% endif %}">Archive</a>
           <a href="{{ url_for('health') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">Health</a>
           <a href="{{ url_for('events') }}" class="nav-link {% if request.path == '/events' %}active{% endif %}">Events</a>
@@ -29,7 +52,6 @@
           <a href="{{ url_for('relationships') }}" class="nav-link {% if request.path.startswith('/relationships') %}active{% endif %}">Relationships</a>
           {% if cfg.features.donate_enabled and support_nav_enabled %}<a href="{{ url_for('support') }}" class="nav-link {% if request.path.startswith('/support') %}active{% endif %}">Support</a>{% endif %}
         </nav>
-        {% set vars = dashboard_vars if dashboard_vars is defined and dashboard_vars else None %}
         <form method="get" action="{{ request.path }}" class="dashboard-vars">
           <div class="var-field">
             <label for="account_emails">Account scope</label>
@@ -78,8 +100,8 @@
           </div>
         </form>
       </div>
-      {% endif %}
-    </header>
+    </section>
+    {% endif %}
 
     <main class="page">
       {% if page_title or page_actions %}
@@ -97,11 +119,19 @@
     </main>
 
     <footer class="app-footer">
-      <span class="footer-brand">Letterbot v{{ app_version }}</span>
-      {% if support_nav_enabled %}<a href="/support" class="footer-support-link">Support</a>{% endif %}
-      {% if support_enabled and support_url %}
-      <a href="{{ support_url }}" class="footer-donate-link" target="_blank" rel="noopener noreferrer">Donate</a>
-      {% endif %}
+      <div class="footer-brand">Letterbot v{{ app_version }}</div>
+      <div class="footer-links">
+        <a href="https://letterbot.ru" target="_blank" rel="noopener noreferrer">LetterBot.ru</a>
+        <a href="mailto:master@letterbot.ru">master@letterbot.ru</a>
+        {% if support_nav_enabled %}<a href="/support" class="footer-support-link">Support</a>{% endif %}
+        {% if donate_url %}
+        <a
+          href="{{ donate_url }}"
+          class="footer-donate-link"
+          {% if donate_url.startswith('http') %}target="_blank" rel="noopener noreferrer"{% endif %}
+        >Donate</a>
+        {% endif %}
+      </div>
     </footer>
   </div>
   <script>

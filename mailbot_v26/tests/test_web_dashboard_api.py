@@ -525,8 +525,8 @@ def test_dashboard_template_renders_events_block(tmp_path: Path) -> None:
 
     assert 'data-testid="live-dashboard"' in body
     assert ">Recent events<" in body
-    assert 'id="events-list"' in body
-    assert 'id="business-payable"' in body
+    assert 'id="preview-recent-events"' in body
+    assert 'id="processed-table-body"' in body
     assert 'id="top-issuers-list"' in body
     assert 'id="card-ops-health"' in body
     assert 'id="health-imap-status"' in body

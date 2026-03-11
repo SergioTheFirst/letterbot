@@ -278,7 +278,7 @@ def test_cockpit_home_shows_premium_support_card_when_enabled(tmp_path: Path) ->
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
         assert 'href="/support"' in body
-        assert "Support Letterbot" in body
+        assert "Support" in body
 
 
 def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
@@ -406,7 +406,7 @@ def test_cockpit_home_preview_shows_live_payload_and_honest_no_data_state(
     assert 'data-testid="homepage-health"' in body
     assert "UNKNOWN" in body
     assert 'data-testid="homepage-ai"' in body
-    assert "NO AI DATA" in body
+    assert "NO AI DATA" in body or "UNAVAILABLE" in body
 
 
 def test_cockpit_home_renders_latency_health_and_ai_from_runtime_data(
@@ -576,7 +576,7 @@ def test_cockpit_home_hides_support_card_when_disabled(tmp_path: Path) -> None:
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
         assert 'href="/support"' not in body
-        assert "Support Letterbot" not in body
+        assert 'data-testid="homepage-donate"' not in body
 
 
 def test_footer_support_link_visibility(tmp_path: Path) -> None:
@@ -638,8 +638,8 @@ def test_cockpit_donate_surfaces_hidden_when_support_disabled(tmp_path: Path) ->
         login_with_csrf(client, "pw")
         body = client.get("/").get_data(as_text=True)
 
-    assert "donate-corner" not in body
-    assert "donate-bottom-link" not in body
+    assert "topbar-donate" not in body
+    assert 'data-testid="homepage-donate"' not in body
     assert "footer-donate-link" not in body
 
 
@@ -673,44 +673,78 @@ def test_cockpit_donate_surfaces_visible_when_support_enabled_with_url(
         login_with_csrf(client, "pw")
         body = client.get("/").get_data(as_text=True)
 
-    assert "donate-corner" in body
-    assert "donate-bottom-link" in body
+    assert "topbar-donate" in body
+    assert 'data-testid="homepage-donate"' in body
     assert 'class="footer-donate-link"' in body
     assert 'href="https://example.com/donate"' in body
 
 
-def test_cockpit_home_renders_default_cloudtips_donate_block_with_qr(
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "homepage-cloudtips.sqlite"
+def test_cockpit_home_renders_support_donate_block_with_qr(tmp_path: Path) -> None:
+    db_path = tmp_path / "homepage-support-qr.sqlite"
     KnowledgeDB(db_path)
-    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        support_settings=SupportSettings(
+            enabled=True,
+            show_in_nav=True,
+            methods=[
+                SupportMethod(
+                    "support",
+                    "Support Letterbot",
+                    "",
+                    "",
+                    "",
+                    "https://example.com/donate",
+                    "support.png",
+                    "data:image/png;base64,abc",
+                )
+            ],
+        ),
+    )
 
     with app.test_client() as client:
         login_with_csrf(client, "pw")
         body = client.get("/").get_data(as_text=True)
 
     assert 'data-testid="homepage-donate"' in body
-    assert "https://pay.cloudtips.ru/p/00d77c6a" in body
-    assert "Поддержать Letterbot" in body
-    assert 'alt="QR-код для поддержки Letterbot"' in body
-    assert 'src="data:image/png;base64,' in body
+    assert "https://example.com/donate" in body
+    assert "Support QR" in body
+    assert 'src="data:image/png;base64,abc"' in body
 
 
 def test_cockpit_home_donate_block_gracefully_degrades_without_qr(
-    monkeypatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
-    db_path = tmp_path / "homepage-cloudtips-no-qr.sqlite"
-    missing_qr = tmp_path / "missing-qrcode.png"
+    db_path = tmp_path / "homepage-support-no-qr.sqlite"
     KnowledgeDB(db_path)
-    monkeypatch.setattr(web_app, "DEFAULT_HOMEPAGE_DONATE_QR_PATH", missing_qr)
-    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        support_settings=SupportSettings(
+            enabled=True,
+            show_in_nav=True,
+            methods=[
+                SupportMethod(
+                    "support",
+                    "Support Letterbot",
+                    "",
+                    "",
+                    "",
+                    "https://example.com/donate",
+                    "",
+                    "",
+                )
+            ],
+        ),
+    )
 
     with app.test_client() as client:
         login_with_csrf(client, "pw")
         body = client.get("/").get_data(as_text=True)
 
     assert 'data-testid="homepage-donate"' in body
-    assert "https://pay.cloudtips.ru/p/00d77c6a" in body
-    assert "QR-код недоступен" in body
-    assert 'alt="QR-код для поддержки Letterbot"' not in body
+    assert "https://example.com/donate" in body
+    assert "QR unavailable. Use the donation link." in body

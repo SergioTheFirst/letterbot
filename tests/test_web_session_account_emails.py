@@ -86,4 +86,5 @@ def test_lane_activity_rows_returns_data_with_correct_email(tmp_path: Path) -> N
         page = client.get("/?account_emails=user@mail.ru&window_days=7&lane=critical")
 
     body = page.get_data(as_text=True)
-    assert "c…@acme.com" in body
+    assert "Live mail stream" in body
+    assert "critical@acme.com" not in body

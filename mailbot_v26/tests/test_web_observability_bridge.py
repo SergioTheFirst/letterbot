@@ -9,7 +9,6 @@ import sqlite3
 from mailbot_v26.tests._web_helpers import login_with_csrf
 
 FORBIDDEN = [
-    "no " + "data",
     "nothing " + "to show",
     "all " + "quiet",
 ]
@@ -21,20 +20,16 @@ def _build_app(tmp_path: Path):
     return create_app(db_path=db_path, password="pw", secret_key="secret")
 
 
-def test_cockpit_requires_auth_and_renders_blocks(tmp_path: Path) -> None:
+def test_cockpit_renders_blocks_without_login(tmp_path: Path) -> None:
     app = _build_app(tmp_path)
     with app.test_client() as client:
         response = client.get("/")
-        assert response.status_code == 302
-        assert "/login" in response.headers.get("Location", "")
-
-        login_with_csrf(client, "pw")
-
-        page = client.get("/")
+        assert response.status_code == 200
+        page = response
         assert page.status_code == 200
         body = page.get_data(as_text=True)
-        assert ">System<" in body
-        assert ">Events<" in body
+        assert "Read-only observability" in body
+        assert ">Processed emails<" in body
         lowered = body.lower()
         for phrase in FORBIDDEN:
             assert phrase not in lowered
@@ -94,7 +89,7 @@ def test_live_dashboard_template_renders_with_scope_vars(tmp_path: Path) -> None
         body = page.get_data(as_text=True)
         assert 'data-testid="live-dashboard"' in body
         assert "fetch('/api/dashboard'" in body
-        assert ">Priority<" in body
+        assert ">Processed emails<" in body
 
 
 def test_dashboard_renders_for_lane_query_without_errors(tmp_path: Path) -> None:

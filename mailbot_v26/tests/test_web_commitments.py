@@ -138,7 +138,7 @@ def _insert_processing_span(
         )
 
 
-def test_commitments_auth_required(tmp_path: Path) -> None:
+def test_commitments_page_accessible_without_login(tmp_path: Path) -> None:
     db_path, app = _build_app(tmp_path)
     now = datetime.now(timezone.utc)
     _insert_email(
@@ -159,11 +159,7 @@ def test_commitments_auth_required(tmp_path: Path) -> None:
 
     with app.test_client() as client:
         response = client.get("/commitments")
-        assert response.status_code == 302
-        assert "/login" in response.headers.get("Location", "")
-
-        login_with_csrf(client, "pw")
-        page = client.get("/commitments")
+        page = response
         assert page.status_code == 200
 
 

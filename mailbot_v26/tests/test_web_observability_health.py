@@ -75,16 +75,19 @@ def _build_app_with_health_data(tmp_path: Path) -> tuple[Path, object]:
     return db_path, app
 
 
-def test_health_auth_required(tmp_path: Path) -> None:
+def test_health_page_and_api_accessible_without_login(tmp_path: Path) -> None:
     _, app = _build_app_with_health_data(tmp_path)
     with app.test_client() as client:
-        response = client.get("/health")
-        assert response.status_code == 302
-        assert "/login" in response.headers.get("Location", "")
+        response = client.get(
+            "/health", query_string={"account_email": "primary@example.com"}
+        )
+        assert response.status_code == 200
 
-        api_response = client.get("/api/v1/observability/health_timeline")
-        assert api_response.status_code == 302
-        assert "/login" in api_response.headers.get("Location", "")
+        api_response = client.get(
+            "/api/v1/observability/health_timeline",
+            query_string={"account_email": "primary@example.com"},
+        )
+        assert api_response.status_code == 200
 
 
 def test_health_default_window_selected_and_api(tmp_path: Path) -> None:

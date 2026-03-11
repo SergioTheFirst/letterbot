@@ -2010,6 +2010,279 @@ def _dashboard_ai_view(
     }
 
 
+def _dashboard_priority_display(bucket: str) -> str:
+    return {
+        "high": "HIGH",
+        "medium": "MEDIUM",
+        "low": "LOW",
+        "suppressed": "SUPPRESSED",
+    }.get(bucket, "UNKNOWN")
+
+
+def _dashboard_runtime_view(
+    *,
+    health: Mapping[str, object] | None,
+    imap_payload: Mapping[str, object] | None,
+    pipeline_payload: Mapping[str, object] | None,
+) -> dict[str, object]:
+    health_map = health if isinstance(health, Mapping) else {}
+    imap_map = imap_payload if isinstance(imap_payload, Mapping) else {}
+    pipeline_map = pipeline_payload if isinstance(pipeline_payload, Mapping) else {}
+    status = str(health_map.get("status") or "unknown").strip().lower() or "unknown"
+    status_label = (
+        str(health_map.get("status_label") or "UNKNOWN").strip().upper() or "UNKNOWN"
+    )
+    detail = str(health_map.get("detail") or "").strip()
+    if not detail:
+        detail = "No runtime evidence available for this scope."
+
+    last_candidates = [
+        _parse_datetime_value(imap_map.get("last_success_ts")),
+        _parse_datetime_value(pipeline_map.get("last_processed_ts")),
+    ]
+    valid_candidates = [candidate for candidate in last_candidates if candidate is not None]
+    last_evidence = max(valid_candidates) if valid_candidates else None
+    last_processed = _parse_datetime_value(pipeline_map.get("last_processed_ts"))
+    last_imap = _parse_datetime_value(imap_map.get("last_success_ts"))
+
+    if last_evidence is None:
+        runtime_detail = (
+            "Process start and uptime are not persisted in canonical runtime storage."
+        )
+    else:
+        runtime_detail = (
+            "Process start and uptime are not persisted; showing the latest runtime evidence instead."
+        )
+
+    return {
+        "status": status,
+        "status_label": status_label,
+        "status_class": _status_class_for_label(status),
+        "detail": detail,
+        "started_at": None,
+        "started_at_display": "UNAVAILABLE",
+        "uptime_seconds": None,
+        "uptime_display": "UNAVAILABLE",
+        "last_runtime_evidence_at": (
+            last_evidence.isoformat() if last_evidence is not None else None
+        ),
+        "last_runtime_evidence_display": (
+            last_evidence.strftime("%Y-%m-%d %H:%M:%S UTC")
+            if last_evidence is not None
+            else "UNAVAILABLE"
+        ),
+        "last_runtime_evidence_relative": (
+            _format_relative_time(last_evidence)
+            if last_evidence is not None
+            else "No runtime evidence yet."
+        ),
+        "last_processed_at": (
+            last_processed.isoformat() if last_processed is not None else None
+        ),
+        "last_processed_display": (
+            last_processed.strftime("%Y-%m-%d %H:%M:%S UTC")
+            if last_processed is not None
+            else "UNAVAILABLE"
+        ),
+        "last_imap_success_at": last_imap.isoformat() if last_imap is not None else None,
+        "last_imap_success_display": (
+            last_imap.strftime("%Y-%m-%d %H:%M:%S UTC")
+            if last_imap is not None
+            else "UNAVAILABLE"
+        ),
+        "availability_note": runtime_detail,
+    }
+
+
+def _dashboard_processed_rows_view(
+    conn: sqlite3.Connection,
+    *,
+    account_event_clause: str,
+    account_event_params: list[object],
+    email_columns: set[str],
+    limit: int,
+) -> dict[str, object]:
+    base = {
+        "status": "unknown",
+        "status_label": "NO DATA",
+        "status_class": "muted",
+        "detail": "No processed emails recorded for this scope.",
+        "rows": [],
+        "available_count": 0,
+    }
+    resolved_limit = max(5, min(int(limit or 25), 100))
+    try:
+        interpretation_rows = conn.execute(
+            (
+                "SELECT ts, ts_utc, account_id, email_id, payload_json, payload "
+                "FROM events_v1 "
+                "WHERE event_type = ?"
+                f"{account_event_clause} "
+                "ORDER BY ts_utc DESC, email_id DESC "
+                "LIMIT ?"
+            ),
+            (
+                EventType.MESSAGE_INTERPRETATION.value,
+                *account_event_params,
+                max(resolved_limit * 4, 50),
+            ),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        return {
+            **base,
+            "status": "unavailable",
+            "status_label": "UNAVAILABLE",
+            "status_class": "warn",
+            "detail": f"Processed email timeline unavailable: {exc}",
+        }
+
+    latest_rows: list[sqlite3.Row] = []
+    seen_email_ids: set[int] = set()
+    for row in interpretation_rows:
+        email_id = int(row["email_id"] or 0)
+        if email_id <= 0 or email_id in seen_email_ids:
+            continue
+        seen_email_ids.add(email_id)
+        latest_rows.append(row)
+        if len(latest_rows) >= resolved_limit:
+            break
+    if not latest_rows:
+        return base
+
+    email_map: dict[int, dict[str, object]] = {}
+    email_query_error = ""
+    if "id" in email_columns:
+        select_columns = ["id"]
+        for name in (
+            "account_email",
+            "from_email",
+            "priority",
+            "action_line",
+            "body_summary",
+            "received_at",
+            "created_at",
+        ):
+            if name in email_columns:
+                select_columns.append(name)
+        placeholders = ", ".join(["?"] * len(latest_rows))
+        query = (
+            f"SELECT {', '.join(select_columns)} "
+            "FROM emails "
+            f"WHERE id IN ({placeholders})"
+        )
+        try:
+            email_rows = conn.execute(
+                query,
+                [int(row["email_id"] or 0) for row in latest_rows],
+            ).fetchall()
+        except sqlite3.Error as exc:
+            email_query_error = str(exc)
+        else:
+            for row in email_rows:
+                email_map[int(row["id"])] = dict(row)
+
+    rows: list[dict[str, object]] = []
+    missing_info_count = 0
+    for row in latest_rows:
+        raw_payload = row["payload_json"] or row["payload"]
+        try:
+            payload = json.loads(str(raw_payload or "{}"))
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        email_id = int(row["email_id"] or 0)
+        email_row = email_map.get(email_id, {})
+        event_dt = _parse_datetime_value(row["ts"])
+        if event_dt is None:
+            event_dt = _parse_datetime_value(row["ts_utc"])
+        received_dt = (
+            _parse_datetime_value(email_row.get("received_at"))
+            or _parse_datetime_value(email_row.get("created_at"))
+            or event_dt
+        )
+        sender_email = str(
+            payload.get("sender_email") or email_row.get("from_email") or ""
+        ).strip()
+        issuer_label = _clamp_text(_scrub_pii_line(payload.get("issuer_label") or ""), 64)
+        sender_display = issuer_label or "Sender hidden"
+        priority_bucket = _archive_priority_bucket(
+            payload.get("priority") or email_row.get("priority") or ""
+        )
+        interpretation_action = str(payload.get("action") or "").strip()
+        action_line = str(email_row.get("action_line") or "").strip()
+        body_summary = str(email_row.get("body_summary") or "").strip()
+        info_primary = _clamp_text(
+            _scrub_pii_line(action_line or interpretation_action), 160
+        )
+        info_secondary = _clamp_text(_scrub_pii_line(body_summary), 240)
+        info_available = bool(info_primary or info_secondary)
+        if not info_available:
+            missing_info_count += 1
+            info_primary = "UNAVAILABLE"
+        if not info_primary and info_secondary:
+            info_primary, info_secondary = info_secondary, ""
+        if received_dt is None:
+            date_display = "UNAVAILABLE"
+            time_display = "UNAVAILABLE"
+            relative_display = "Timestamp unavailable"
+            ts_iso = None
+        else:
+            date_display = received_dt.strftime("%Y-%m-%d")
+            time_display = received_dt.strftime("%H:%M:%S UTC")
+            relative_display = _format_relative_time(received_dt)
+            ts_iso = received_dt.isoformat()
+        rows.append(
+            {
+                "email_id": email_id,
+                "account_email": str(
+                    payload.get("account_email")
+                    or email_row.get("account_email")
+                    or row["account_id"]
+                    or ""
+                ).strip(),
+                "sender_display": sender_display,
+                "priority": priority_bucket,
+                "priority_label": _dashboard_priority_display(priority_bucket),
+                "priority_class": _archive_priority_class(priority_bucket),
+                "date": date_display,
+                "time": time_display,
+                "received_at": ts_iso,
+                "received_relative": relative_display,
+                "info_primary": info_primary,
+                "info_secondary": info_secondary,
+                "info_available": info_available,
+                "info_text": " ".join(
+                    part for part in (info_primary, info_secondary) if part
+                ).strip(),
+            }
+        )
+
+    if not rows:
+        return base
+    if email_query_error:
+        detail = f"Processed summaries are partial because emails lookup failed: {email_query_error}"
+        status = "partial"
+    elif missing_info_count:
+        detail = (
+            f"{missing_info_count} processed row(s) are missing persisted Telegram-safe summary fields."
+        )
+        status = "partial"
+    else:
+        detail = "Processed email timeline is backed by canonical interpretation events."
+        status = "ok"
+    return {
+        "status": status,
+        "status_label": (
+            "LIVE" if status == "ok" else "PARTIAL" if status == "partial" else "NO DATA"
+        ),
+        "status_class": _status_class_for_label(status),
+        "detail": detail,
+        "rows": rows,
+        "available_count": len(rows),
+    }
+
+
 def _load_support_settings(config_path: Path | None) -> SupportSettings:
     def _from_ini(settings_path: Path) -> SupportSettings:
         parser = configparser.ConfigParser()
@@ -3367,7 +3640,7 @@ def create_app(
     app.config["HOMEPAGE_DONATE"] = _homepage_donate_context()
 
     @app.before_request
-    def _require_login():
+    def _guard_request():
         remote_addr = _request_remote_addr()
         if _local_smoke_bypass_allowed(app, remote_addr):
             return None
@@ -3391,36 +3664,14 @@ def create_app(
                 return Response("Forbidden", status=403)
             return None
         if request.endpoint in open_paths or request.path.startswith("/static"):
-            if request.method == "POST" and not _validate_csrf_token():
-                return _text_response("Forbidden: invalid CSRF token", 403)
             return None
         if request.method == "POST" and not _validate_csrf_token():
             return _text_response("Forbidden: invalid CSRF token", 403)
-        if not _ensure_authenticated():
-            return redirect(url_for("login", next=request.path))
         return None
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
-        error: str | None = None
-        if request.method == "POST":
-            provided = request.form.get("password", "")
-            if hmac.compare_digest(str(provided), str(app.config["WEB_PASSWORD"])):
-                session["authenticated"] = True
-                session["auth_user"] = _request_remote_addr() or "local"
-                session.permanent = False
-                next_path = request.args.get("next")
-                return redirect(_resolve_login_next_target(next_path))
-            error = "Incorrect password. Please try again."
-        return _render_template(
-            app,
-            "login.html",
-            title=app.config["APP_TITLE"],
-            page_title="Login",
-            hide_nav=True,
-            error=error,
-            csrf_token=_get_or_create_csrf_token(),
-        )
+        return redirect(_resolve_login_next_target(request.args.get("next")))
 
     @app.route("/doctor", methods=["GET"])
     def doctor() -> str:
@@ -3858,54 +4109,7 @@ def create_app(
 
     @app.route("/dashboard")
     def dashboard_page():
-        dashboard_vars = _dashboard_vars()
-        account_emails = _resolve_account_scope(dashboard_vars)
-        window_days = dashboard_vars.window_days or 7
-        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
-            dashboard_vars.pii
-        )
-        mode = _resolve_cockpit_mode(request, session)
-        analytics = _analytics()
-        primary_account = account_emails[0] if account_emails else ""
-        quality_summary = _home_quality_summary(
-            analytics=analytics,
-            db_path=app.config["DB_PATH"],
-            account_email=primary_account,
-            account_emails=account_emails,
-            window_days=window_days,
-        )
-        status_strip = _status_strip_view(None, now_ts=time.time())
-        share_params: dict[str, str] = {}
-        if account_emails:
-            share_params["account_emails"] = ",".join(account_emails)
-        if window_days:
-            share_params["window_days"] = str(window_days)
-        if dashboard_vars.limit:
-            share_params["limit"] = str(dashboard_vars.limit)
-        if reveal_pii:
-            share_params["pii"] = "1"
-        if mode:
-            share_params["mode"] = mode
-        share_url = url_for("dashboard_page", **share_params)
-
-        return _render_template(
-            app,
-            "dashboard.html",
-            title=app.config["APP_TITLE"],
-            page_title="Live Dashboard",
-            dashboard_vars=dashboard_vars,
-            account_email=primary_account,
-            window_days=window_days,
-            lane="all",
-            status_strip=status_strip,
-            pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
-            pii_enabled=reveal_pii,
-            cockpit_mode=mode,
-            quality_summary=quality_summary,
-            support_methods=app.config["SUPPORT_SETTINGS"].methods[:1],
-            status_refresh_ms=STATUS_STRIP_REFRESH_MS,
-            share_url=share_url,
-        )
+        return index()
 
     @app.route("/l")
     def legacy_home_redirect():
@@ -4549,6 +4753,7 @@ def create_app(
             _db_change_token(app.config["DB_PATH"]),
             request.args.get("account_emails") or "",
             request.args.get("window_days") or "",
+            request.args.get("limit") or "",
             request.args.get("pii") or "",
         )
         cached = _DASHBOARD_CACHE.get("payload")
@@ -4621,6 +4826,32 @@ def create_app(
                 "recent_traces": [],
                 "recent_providers": [],
             },
+            "runtime": {
+                "status": "unknown",
+                "status_label": "UNKNOWN",
+                "status_class": "muted",
+                "detail": "No runtime evidence available for this scope.",
+                "started_at": None,
+                "started_at_display": "UNAVAILABLE",
+                "uptime_seconds": None,
+                "uptime_display": "UNAVAILABLE",
+                "last_runtime_evidence_at": None,
+                "last_runtime_evidence_display": "UNAVAILABLE",
+                "last_runtime_evidence_relative": "No runtime evidence yet.",
+                "last_processed_at": None,
+                "last_processed_display": "UNAVAILABLE",
+                "last_imap_success_at": None,
+                "last_imap_success_display": "UNAVAILABLE",
+                "availability_note": "Process start and uptime are not persisted in canonical runtime storage.",
+            },
+            "processed_table": {
+                "status": "unknown",
+                "status_label": "NO DATA",
+                "status_class": "muted",
+                "detail": "No processed emails recorded for this scope.",
+                "rows": [],
+                "available_count": 0,
+            },
             "meta": {
                 "status": "ok",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -4637,6 +4868,8 @@ def create_app(
                     "latency": {"status": "ok", "detail": None},
                     "health": {"status": "ok", "detail": None},
                     "ai": {"status": "ok", "detail": None},
+                    "runtime": {"status": "ok", "detail": None},
+                    "processed": {"status": "ok", "detail": None},
                 },
             },
         }
@@ -4671,6 +4904,7 @@ def create_app(
             dashboard_vars = _dashboard_vars()
             account_scope = _resolve_account_scope(dashboard_vars)
             window_days = max(1, int(getattr(dashboard_vars, "window_days", 7) or 7))
+            row_limit = max(10, int(getattr(dashboard_vars, "limit", 25) or 25))
             if not account_scope:
                 fallback_account = str(request.args.get("account_email") or "").strip()
                 if fallback_account:
@@ -4682,6 +4916,7 @@ def create_app(
         except Exception:
             account_scope = []
             window_days = 7
+            row_limit = 25
 
         account_clause = ""
         account_params: list[object] = []
@@ -4905,6 +5140,27 @@ def create_app(
                         }
                     )
                 payload["recent_events"] = recent_events
+                payload["processed_table"] = _dashboard_processed_rows_view(
+                    conn,
+                    account_event_clause=account_event_clause,
+                    account_event_params=account_event_params,
+                    email_columns=email_columns,
+                    limit=row_limit,
+                )
+                processed_status = str(
+                    payload["processed_table"].get("status") or "unknown"
+                ).strip()
+                processed_detail = str(
+                    payload["processed_table"].get("detail") or processed_status
+                ).strip()
+                if processed_status == "partial":
+                    _mark_section("processed", "partial", processed_detail)
+                elif processed_status in {"unknown", "unavailable"}:
+                    _mark_section(
+                        "processed",
+                        "unavailable" if processed_status == "unavailable" else "unknown",
+                        processed_detail,
+                    )
                 try:
                     analytics = _analytics()
                 except Exception as exc:
@@ -5061,6 +5317,8 @@ def create_app(
             limit=300,
             account_emails=account_scope,
         )
+        imap_payload = _imap_health_payload(account_scope)
+        pipeline_payload = _pipeline_health_payload(account_scope)
         recent_traces = _recent_decision_trace_items(
             app.config["DB_PATH"], account_emails=account_scope, limit=3
         )
@@ -5083,6 +5341,27 @@ def create_app(
             _mark_section("ai", "unavailable", ai_detail)
         elif ai_status == "unknown":
             _mark_section("ai", "unknown", ai_detail)
+        payload["runtime"] = _dashboard_runtime_view(
+            health=payload.get("health"),
+            imap_payload=imap_payload,
+            pipeline_payload=pipeline_payload,
+        )
+        runtime_status = str(payload["runtime"].get("status") or "unknown").strip()
+        runtime_detail = str(
+            payload["runtime"].get("availability_note")
+            or payload["runtime"].get("detail")
+            or runtime_status
+        ).strip()
+        if runtime_status in {"degraded", "partial"}:
+            _mark_section("runtime", "partial", runtime_detail)
+        elif runtime_status in {"unknown", "unavailable"}:
+            _mark_section(
+                "runtime",
+                "unavailable" if runtime_status == "unavailable" else "unknown",
+                runtime_detail,
+            )
+        elif payload["runtime"].get("started_at") is None:
+            _mark_section("runtime", "partial", runtime_detail)
         return _cache_and_return()
 
     def _imap_health_payload(account_emails: list[str]) -> dict[str, object]:

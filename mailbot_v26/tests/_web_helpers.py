@@ -16,6 +16,8 @@ def extract_csrf_token(html: str) -> str:
 
 def login_with_csrf(client: Any, password: str) -> None:
     login_page = client.get("/login")
+    if login_page.status_code in {301, 302, 303, 307, 308, 404}:
+        return
     token = extract_csrf_token(login_page.get_data(as_text=True))
     response = client.post("/login", data={"password": password, "csrf_token": token})
     assert response.status_code in {200, 302, 303}

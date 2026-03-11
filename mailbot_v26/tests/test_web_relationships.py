@@ -119,20 +119,27 @@ def _build_relationships_app(tmp_path: Path) -> Path:
     return db_path
 
 
-def test_relationships_auth_required(tmp_path: Path) -> None:
+def test_relationships_page_and_api_accessible_without_login(tmp_path: Path) -> None:
     db_path = _build_relationships_app(tmp_path)
     app = create_app(db_path=db_path, password="pw", secret_key="secret")
     with app.test_client() as client:
-        response = client.get("/relationships")
-        assert response.status_code == 302
-        assert "/login" in response.headers.get("Location", "")
-        api_graph = client.get("/api/v1/relationships/graph")
-        assert api_graph.status_code == 302
+        response = client.get(
+            "/relationships", query_string={"account_email": "primary@example.com"}
+        )
+        assert response.status_code == 200
+        api_graph = client.get(
+            "/api/v1/relationships/graph",
+            query_string={"account_email": "primary@example.com"},
+        )
+        assert api_graph.status_code == 200
         api_contact = client.get(
             "/api/v1/relationships/contact",
-            query_string={"contact_id": "contact:contact-a"},
+            query_string={
+                "account_email": "primary@example.com",
+                "contact_id": "contact:contact-a",
+            },
         )
-        assert api_contact.status_code == 302
+        assert api_contact.status_code == 200
 
 
 def test_relationships_deterministic_and_sorted(
