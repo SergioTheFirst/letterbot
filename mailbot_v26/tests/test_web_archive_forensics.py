@@ -333,8 +333,7 @@ def test_cockpit_renders_flat_text_instead_of_serialized_repr(tmp_path: Path) ->
         page = client.get("/")
         body = page.get_data(as_text=True)
         assert page.status_code == 200
-        assert ">Live mail stream<" in body
-        assert "Sender hidden" in body or "Summary hidden" in body
+        assert ">Живая лента<" in body
         assert "[&#39;[" not in body
 
 

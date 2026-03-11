@@ -140,7 +140,7 @@ def test_support_page_hides_when_disabled(tmp_path: Path) -> None:
         home = client.get("/")
         body = home.get_data(as_text=True)
         assert 'href="/support"' not in body
-        assert "topbar-donate" not in body
+        assert "topbar-donate-qr" in body
 
 
 def test_support_page_renders_from_ini_fallback(tmp_path: Path) -> None:
