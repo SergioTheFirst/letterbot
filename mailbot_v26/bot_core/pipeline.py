@@ -24,6 +24,7 @@ from mailbot_v26.constants import (
 )
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
 from mailbot_v26.pipeline.tg_renderer import build_attachment_insight
+from mailbot_v26.pipeline.tg_renderer import render_telegram_message
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.mime_utils import decode_bytes, decode_mime_header
@@ -614,6 +615,10 @@ def stage_llm(ctx: PipelineContext) -> None:
         "body_text": body_text,
         "attachments_text": attachments_text,
         "priority": ordinary_result.get("priority"),
+        "sender": ordinary_result.get("sender") or inbound.sender,
+        "subject": ordinary_result.get("subject") or inbound.subject,
+        "action_line": ordinary_result.get("action_line") or "",
+        "summary": ordinary_result.get("summary") or "",
         "attachments": ordinary_result.get("attachments")
         or [
             {
@@ -649,16 +654,44 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
     if not telegram_text or not telegram_text.strip():
         raise RuntimeError("telegram payload empty")
 
-    account_label = account.name or account.login or account.account_id
-    if account_label:
-        telegram_text = f"[{account_label}] {telegram_text}"
-
     llm_priority = ""
     attachments: list[dict[str, object]] = []
     if ctx.llm_result:
         llm_priority = str(ctx.llm_result.get("priority") or "").strip()
         attachments = list(ctx.llm_result.get("attachments") or [])
     priority = llm_priority if llm_priority in {"🔴", "🟡", "🔵"} else "🔵"
+
+    pretty_sender = (
+        str(ctx.llm_result.get("sender") or inbound.sender or "").strip()
+        if ctx.llm_result
+        else str(inbound.sender or "").strip()
+    )
+    pretty_subject = (
+        str(ctx.llm_result.get("subject") or inbound.subject or "").strip()
+        if ctx.llm_result
+        else str(inbound.subject or "").strip()
+    )
+    pretty_action = (
+        str(ctx.llm_result.get("action_line") or "").strip()
+        if ctx.llm_result
+        else ""
+    )
+    pretty_summary = (
+        str(ctx.llm_result.get("summary") or "").strip() if ctx.llm_result else ""
+    )
+    if pretty_sender and pretty_subject:
+        try:
+            telegram_text = render_telegram_message(
+                priority=priority,
+                from_email=pretty_sender,
+                subject=pretty_subject,
+                action_line=pretty_action,
+                summary=pretty_summary,
+                attachments=attachments,
+                mail_type=inbound.mail_type,
+            )
+        except Exception:
+            telegram_text = telegram_text or ""
 
     attachment_insight = build_attachment_insight(
         mail_type=inbound.mail_type,

@@ -1170,6 +1170,10 @@ class MessageProcessor:
         self._last_ordinary_result = {
             "text": text,
             "priority": priority,
+            "sender": sender,
+            "subject": subject,
+            "action_line": action_line,
+            "summary": summary,
             "attachments": [
                 {
                     "filename": attachment.filename,

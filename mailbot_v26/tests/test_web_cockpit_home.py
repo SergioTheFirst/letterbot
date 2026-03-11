@@ -291,13 +291,13 @@ def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
 
     assert ">Главная<" in body
     assert ">Архив<" in body
-    assert ">Health<" in body
+    assert ">Здоровье<" in body
     assert ">События<" in body
-    assert ">Doctor<" in body
+    assert ">Диагностика<" in body
     assert ">Обязательства<" in body
     assert ">Latency<" in body
     assert ">Фокус<" in body
-    assert ">Learning<" in body
+    assert ">Обучение<" in body
     assert ">Связи<" in body
     assert "Telegram-канал" in body
     assert "https://t.me/+1xHH6NwJONVlZTA6" in body
@@ -385,7 +385,7 @@ def test_cockpit_home_renders_initial_live_preview_from_dashboard_payload(
         body = client.get("/?account_emails=primary@example.com").get_data(as_text=True)
 
     assert 'id="preview-emails-today">1<' in body
-    assert "Payload updated:" in body
+    assert "Обновлено:" in body
     assert 'id="preview-recent-events"' in body
     assert "email processed" in body
 
@@ -402,9 +402,9 @@ def test_cockpit_home_preview_shows_live_payload_and_honest_no_data_state(
         body = client.get("/").get_data(as_text=True)
 
     assert 'id="preview-emails-today">0<' in body
-    assert 'id="preview-dashboard-updated">Payload updated:' in body
+    assert 'id="preview-dashboard-updated">Обновлено:' in body
     assert 'id="preview-dashboard-detail">' in body
-    assert "No recent events yet." in body or "Unavailable:" in body
+    assert "Пока нет свежих событий." in body or "Unavailable:" in body
     assert 'data-testid="homepage-latency"' in body
     assert "NO LATENCY DATA" in body
     assert 'data-testid="homepage-health"' in body
@@ -561,7 +561,7 @@ def test_cockpit_home_shows_support_qr_preview_when_available(tmp_path: Path) ->
         resp = client.get("/")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "Support QR" in body
+        assert "QR для поддержки" in body
         assert "<img" in body
 
 
@@ -642,7 +642,7 @@ def test_cockpit_donate_surfaces_hidden_when_support_disabled(tmp_path: Path) ->
         login_with_csrf(client, "pw")
         body = client.get("/").get_data(as_text=True)
 
-    assert "topbar-donate" not in body
+    assert "topbar-donate-qr" in body
     assert 'data-testid="homepage-donate"' not in body
     assert "footer-donate-link" not in body
 
@@ -677,7 +677,6 @@ def test_cockpit_donate_surfaces_visible_when_support_enabled_with_url(
         login_with_csrf(client, "pw")
         body = client.get("/").get_data(as_text=True)
 
-    assert "topbar-donate" in body
     assert "topbar-donate-qr" in body
     assert 'data-testid="homepage-donate"' in body
     assert 'class="footer-donate-link"' in body
@@ -715,7 +714,7 @@ def test_cockpit_home_renders_support_donate_block_with_qr(tmp_path: Path) -> No
 
     assert 'data-testid="homepage-donate"' in body
     assert "https://example.com/donate" in body
-    assert "Support QR" in body
+    assert "QR для поддержки" in body
     assert 'src="data:image/png;base64,abc"' in body
 
 
@@ -752,4 +751,4 @@ def test_cockpit_home_donate_block_gracefully_degrades_without_qr(
 
     assert 'data-testid="homepage-donate"' in body
     assert "https://example.com/donate" in body
-    assert "QR unavailable. Use the donation link." in body
+    assert "QR недоступен. Используйте ссылку для доната." in body

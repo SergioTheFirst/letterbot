@@ -843,6 +843,18 @@ h3,
   text-transform: uppercase;
 }
 
+.topbar-donate-qr-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.1;
+}
+
+.topbar-donate-qr-link {
+  color: var(--text);
+  font-size: 12px;
+}
+
 .topbar-donate-icon {
   width: 18px;
   height: 18px;

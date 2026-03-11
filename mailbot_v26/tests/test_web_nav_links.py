@@ -94,11 +94,11 @@ def test_nav_links_have_no_span_nbsp_wrappers() -> None:
     assert "<span>Обязательства&nbsp;</span>" not in content
     assert "<span>Latency&nbsp;</span>" not in content
     assert "<span>Фокус&nbsp;</span>" not in content
-    assert "<span>Learning&nbsp;</span>" not in content
+    assert "<span>Обучение&nbsp;</span>" not in content
     assert "<span>Связи&nbsp;</span>" not in content
     assert "&nbsp;" not in content
     assert ">Обязательства</a>" in content
     assert ">Latency</a>" in content
     assert ">Фокус</a>" in content
-    assert ">Learning</a>" in content
+    assert ">Обучение</a>" in content
     assert ">Связи</a>" in content
