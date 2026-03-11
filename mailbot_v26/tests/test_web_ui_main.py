@@ -134,7 +134,7 @@ def test_web_main_reports_busy_port_without_traceback(
     out = capsys.readouterr().out
     assert isinstance(raised, SystemExit)
     assert raised.code == 1
-    assert "Порт 8787 занят" in out
+    assert "Port 8787 is already in use" in out
 
 
 def test_load_web_ui_settings_falls_back_when_yaml_missing_web_ui(

@@ -91,14 +91,14 @@ def test_templates_do_not_contain_hardcoded_boosty_url() -> None:
 def test_nav_links_have_no_span_nbsp_wrappers() -> None:
     base_template = Path("mailbot_v26/web_observability/templates/base.html")
     content = base_template.read_text(encoding="utf-8")
-    assert "<span>Обязательства&nbsp;</span>" not in content
+    assert "<span>Commitments&nbsp;</span>" not in content
     assert "<span>Latency&nbsp;</span>" not in content
-    assert "<span>Фокус&nbsp;</span>" not in content
-    assert "<span>Обучение&nbsp;</span>" not in content
-    assert "<span>Связи&nbsp;</span>" not in content
+    assert "<span>Attention&nbsp;</span>" not in content
+    assert "<span>Learning&nbsp;</span>" not in content
+    assert "<span>Relationships&nbsp;</span>" not in content
     assert "&nbsp;" not in content
-    assert ">Обязательства</a>" in content
+    assert ">Commitments</a>" in content
     assert ">Latency</a>" in content
-    assert ">Фокус</a>" in content
-    assert ">Обучение</a>" in content
-    assert ">Связи</a>" in content
+    assert ">Attention</a>" in content
+    assert ">Learning</a>" in content
+    assert ">Relationships</a>" in content

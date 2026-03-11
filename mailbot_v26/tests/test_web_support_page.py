@@ -71,14 +71,14 @@ def test_support_page_renders_methods(tmp_path: Path) -> None:
         response = client.get("/support")
         body = response.get_data(as_text=True)
         assert response.status_code == 200
-        assert "?????????? LetterBot.ru" in body
-        assert "LetterBot.ru остаётся бесплатным" in body
+        assert "Support LetterBot.ru" in body
+        assert "LetterBot.ru remains a free and local tool for your email." in body
         assert "support-method-card" in body
         assert "2202 20XX XXXX XXXX" in body
         assert "+70000000000" in body
         assert 'href="https://yoomoney.ru/to/abc"' in body
         assert "support-url-cta" in body
-        assert "Скопировать" in body
+        assert "Copy" in body
 
 
 def test_support_page_renders_qr_when_available(tmp_path: Path) -> None:
@@ -120,7 +120,7 @@ def test_support_page_renders_empty_state_when_no_methods(tmp_path: Path) -> Non
         response = client.get("/support")
         body = response.get_data(as_text=True)
         assert response.status_code == 200
-        assert "Способы поддержки ещё не настроены" in body
+        assert "Support methods are not configured yet" in body
 
 
 def test_support_page_hides_when_disabled(tmp_path: Path) -> None:

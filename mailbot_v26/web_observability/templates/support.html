@@ -4,9 +4,9 @@
 
 {% block content %}
 <section class="support-hero card">
-  <h2>?????????? LetterBot.ru</h2>
-  <p>LetterBot.ru остаётся бесплатным и локальным инструментом для вашей почты.</p>
-  <p>Если хотите поддержать развитие, выберите удобный способ ниже — это помогает развивать продукт без навязчивых paywall.</p>
+  <h2>Support LetterBot.ru</h2>
+  <p>LetterBot.ru remains a free and local tool for your email.</p>
+  <p>If you want to support development, choose any convenient option below. It helps us improve the product without intrusive paywalls.</p>
   {% if support_text %}<p class="support-hero-note">{{ support_text }}</p>{% endif %}
 </section>
 
@@ -20,21 +20,21 @@
   <ul class="support-method-list">
     {% if method.phone %}
       <li>
-        <span class="support-field-label">Телефон</span>
+        <span class="support-field-label">Phone</span>
         <code id="phone-{{ loop.index }}">{{ method.phone }}</code>
-        <button type="button" class="ghost" onclick="copySupportValue('phone-{{ loop.index }}', this)">Скопировать</button>
+        <button type="button" class="ghost" onclick="copySupportValue('phone-{{ loop.index }}', this)">Copy</button>
       </li>
     {% endif %}
     {% if method.number %}
       <li>
-        <span class="support-field-label">Карта</span>
+        <span class="support-field-label">Card</span>
         <code id="card-{{ loop.index }}">{{ method.number }}</code>
-        <button type="button" class="ghost" onclick="copySupportValue('card-{{ loop.index }}', this)">Скопировать</button>
+        <button type="button" class="ghost" onclick="copySupportValue('card-{{ loop.index }}', this)">Copy</button>
       </li>
     {% endif %}
     {% if method.url %}
       <li>
-        <span class="support-field-label">Ссылка</span>
+        <span class="support-field-label">Link</span>
         <a class="btn support-url-cta" href="{{ method.url }}" target="_blank" rel="noopener noreferrer">Open support link</a>
       </li>
     {% endif %}
@@ -43,7 +43,7 @@
   {% if method.qr_image_data_uri %}
     <figure class="support-qr-frame">
       <img src="{{ method.qr_image_data_uri }}" alt="QR {{ method.label }}">
-      <figcaption>Сканируйте QR для быстрого перевода</figcaption>
+      <figcaption>Scan the QR code for a quick transfer</figcaption>
     </figure>
   {% endif %}
 </section>
@@ -51,8 +51,8 @@
 </div>
 {% else %}
 <section class="support-empty card">
-  <h3>Способы поддержки ещё не настроены</h3>
-  <p>Страница доступна, но методы поддержки пока не заполнены в конфигурации.</p>
+  <h3>Support methods are not configured yet</h3>
+  <p>The page is available, but support methods have not been filled in the configuration yet.</p>
 </section>
 {% endif %}
 
@@ -64,7 +64,7 @@ function copySupportValue(elementId, button) {
   if (!value) return;
   const success = function() {
     const oldText = button.textContent;
-    button.textContent = 'Скопировано';
+    button.textContent = 'Copied';
     setTimeout(function() { button.textContent = oldText; }, 1200);
   };
   if (navigator.clipboard && navigator.clipboard.writeText) {

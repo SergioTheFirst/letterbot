@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Здоровье системы — {{ title }}{% endblock %}
+{% block title %}System health - {{ title }}{% endblock %}
 
 {% block page_actions %}
   <div class="mode-toggle">
-    <a class="mode-pill {% if cockpit_mode == 'basic' %}active{% endif %}" href="{{ mode_basic_url }}">Базовый</a>
+    <a class="mode-pill {% if cockpit_mode == 'basic' %}active{% endif %}" href="{{ mode_basic_url }}">Basic</a>
     <a class="mode-pill {% if cockpit_mode == 'engineer' %}active{% endif %}" href="{{ mode_engineer_url }}">Engineer</a>
   </div>
 {% endblock %}
@@ -20,13 +20,13 @@
     <div class="health-main stack">
       <div class="card health-header surface-panel" data-testid="health-header">
         <div class="section-title">
-          <h2>Здоровье системы</h2>
-          <div class="hint">Snapshot summary для текущего operating mode.</div>
+          <h2>System health</h2>
+          <div class="hint">Snapshot summary for the current operating mode.</div>
         </div>
         <div class="health-header-body">
           <div>
             <div class="health-explanation">{{ health_header.explanation }}</div>
-            <div class="health-meta">Последний snapshot: <span class="mono">{{ health_header.last_snapshot }}</span></div>
+            <div class="health-meta">Latest snapshot: <span class="mono">{{ health_header.last_snapshot }}</span></div>
           </div>
           <div class="health-mode">
             <div class="label">System mode</div>
@@ -39,7 +39,7 @@
         <div id="health-overview-content">
           {% include "partials/health_overview.html" %}
         </div>
-        <div class="status-strip-offline" id="health-overview-offline">обновление health приостановлено</div>
+        <div class="status-strip-offline" id="health-overview-offline">health refresh paused</div>
       </div>
     </div>
 
@@ -47,7 +47,7 @@
       <div class="card surface-panel">
         <div class="section-title">
           <h2>Golden signals</h2>
-          <div class="hint">Ключевые индикаторы для выбранного scope.</div>
+          <div class="hint">Key indicators for the selected scope.</div>
         </div>
         {% if health_signals %}
         <div class="signal-grid health-signal-grid">
@@ -65,21 +65,21 @@
           </div>
         </div>
         {% else %}
-        <div class="hint">Для этого scope пока нет health indicators.</div>
+        <div class="hint">No health indicators yet for this scope.</div>
         {% endif %}
       </div>
 
       <div class="card surface-panel" data-testid="health-trend">
         <div class="section-title">
-          <h2>Инциденты и тренд</h2>
-          <div class="hint">Свежие snapshots и переходы mode.</div>
+          <h2>Incidents and trend</h2>
+          <div class="hint">Recent snapshots and mode transitions.</div>
         </div>
         {% if health_trend %}
         <div class="table-scroll">
           <table class="table compact fixed">
             <thead>
               <tr>
-                <th>Время (UTC)</th>
+                <th>Time (UTC)</th>
                 <th>Mode</th>
                 <th>Gates</th>
                 <th>Metrics</th>
@@ -100,7 +100,7 @@
           </table>
         </div>
         {% else %}
-        <div class="hint">Для этого набора фильтров нет данных по инцидентам и тренду.</div>
+        <div class="hint">No incident or trend data for this filter set.</div>
         {% endif %}
       </div>
     </div>
@@ -110,14 +110,14 @@
   <div class="card engineer-card" data-testid="health-engineer-block">
     <div class="section-title">
       <h2>Health timeline</h2>
-      <div class="hint">Расширенное окно наблюдения</div>
+      <div class="hint">Extended observation window</div>
     </div>
     {% if engineer_timeline %}
     <div class="table-scroll">
       <table class="table compact fixed">
         <thead>
           <tr>
-            <th>Время (UTC)</th>
+            <th>Time (UTC)</th>
             <th>Mode</th>
             <th>Gates</th>
             <th>Metrics</th>
@@ -138,7 +138,7 @@
       </table>
     </div>
     {% else %}
-    <div class="hint">Расширьте окно, чтобы посмотреть дополнительные snapshots.</div>
+    <div class="hint">Expand the window to view additional snapshots.</div>
     {% endif %}
   </div>
   {% endif %}
