@@ -623,6 +623,62 @@ def test_priority_ok_callback_graceful_on_missing_email(tmp_path: Path) -> None:
         count = conn.execute("SELECT COUNT(*) FROM priority_feedback").fetchone()[0]
     assert count == 0
 
+def test_priority_callback_same_priority_records_confirmation_not_correction(
+    tmp_path: Path, monkeypatch
+) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    edited: list[dict[str, object]] = []
+
+    def _fake_edit(**kwargs):
+        edited.append(kwargs)
+
+    class _StubRequests:
+        def post(self, _url: str, json: dict[str, object], timeout: int):
+            return object()
+
+    monkeypatch.setattr(
+        "mailbot_v26.telegram.inbound.edit_telegram_message", _fake_edit
+    )
+    monkeypatch.setattr("mailbot_v26.worker.telegram_sender.requests", _StubRequests())
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-prio-confirm",
+            "data": f"prio_set:{email_id}:B",
+            "message": {"chat": {"id": "chat"}, "message_id": 404, "text": "old"},
+        }
+    )
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        feedback_rows = conn.execute(
+            "SELECT kind, value FROM priority_feedback WHERE email_id = ?",
+            (str(email_id),),
+        ).fetchall()
+        correction_count = conn.execute(
+            "SELECT COUNT(*) FROM events_v1 WHERE event_type = 'priority_correction_recorded'"
+        ).fetchone()
+        priority_row = conn.execute(
+            "SELECT priority, priority_source FROM emails WHERE id = ?",
+            (email_id,),
+        ).fetchone()
+
+    assert edited
+    assert feedback_rows == [("priority_confirmation", "🔵")]
+    assert correction_count is not None and int(correction_count[0]) == 0
+    assert priority_row == ("🔵", "auto")
+
 
 def test_week_command_returns_compact_summary_with_empty_dataset(
     tmp_path: Path,

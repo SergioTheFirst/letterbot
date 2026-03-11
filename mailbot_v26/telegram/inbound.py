@@ -1053,6 +1053,38 @@ class TelegramInboundProcessor:
             return False
         return True
 
+    def _record_priority_feedback_signal(
+        self,
+        *,
+        email_id: int,
+        account_email: str,
+        sender_email: str,
+        old_priority: str,
+        new_priority: str,
+    ) -> str:
+        normalized_old = _normalize_priority_token(old_priority)
+        normalized_new = _normalize_priority_token(new_priority) or "🔵"
+        if normalized_old and normalized_old == normalized_new:
+            if self._record_priority_confirmation({"email_id": str(email_id)}):
+                return "confirmation"
+            return "missing"
+        record_priority_correction(
+            knowledge_db=self.knowledge_db,
+            email_id=email_id,
+            correction=normalized_new,
+            entity_id=None,
+            sender_email=sender_email or None,
+            account_email=account_email or None,
+            system_mode=system_health.mode,
+            event_emitter=self.event_emitter,
+            contract_event_emitter=self.contract_event_emitter,
+            old_priority=normalized_old or None,
+            engine="priority_v2_auto",
+            source="telegram_inbound",
+            surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
+        )
+        return "correction"
+
     def _handle_feedback_callback(
         self,
         chat_id: str,
@@ -1122,20 +1154,12 @@ class TelegramInboundProcessor:
         account_email = str(snapshot.get("account_email") or "") if snapshot else ""
         sender_email = str(snapshot.get("from_email") or "") if snapshot else ""
         old_priority = str(snapshot.get("priority") or "") if snapshot else ""
-        record_priority_correction(
-            knowledge_db=self.knowledge_db,
+        self._record_priority_feedback_signal(
             email_id=email_id,
-            correction=payload.get("priority") or "🔵",
-            entity_id=None,
-            sender_email=sender_email or None,
-            account_email=account_email or None,
-            system_mode=system_health.mode,
-            event_emitter=self.event_emitter,
-            contract_event_emitter=self.contract_event_emitter,
-            old_priority=old_priority or None,
-            engine="priority_v2_auto",
-            source="telegram_inbound",
-            surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
+            account_email=account_email,
+            sender_email=sender_email,
+            old_priority=old_priority,
+            new_priority=payload.get("priority") or "🔵",
         )
         if send_ack:
             priority = (
@@ -1175,55 +1199,56 @@ class TelegramInboundProcessor:
         new_priority = (
             _normalize_priority_token(payload.get("priority")) or "\U0001f535"
         )
-        record_priority_correction(
-            knowledge_db=self.knowledge_db,
+        feedback_kind = self._record_priority_feedback_signal(
             email_id=email_id,
-            correction=new_priority,
-            entity_id=None,
-            sender_email=sender_email or None,
-            account_email=account_email or None,
-            system_mode=system_health.mode,
-            event_emitter=self.event_emitter,
-            contract_event_emitter=self.contract_event_emitter,
-            old_priority=old_priority or None,
-            engine="priority_v2_auto",
-            source="telegram_inbound",
-            surprise_mode=self.feature_flags.ENABLE_SURPRISE_BUDGET,
+            account_email=account_email,
+            sender_email=sender_email,
+            old_priority=old_priority or "",
+            new_priority=new_priority,
         )
-        logger.info(
-            "tg_priority_feedback_saved",
-            email_id=email_id,
-            chat_id=chat_id,
-            message_id=message_id_int,
-            priority=new_priority,
-        )
-        if not _update_email_snapshot_priority(
-            self.knowledge_db.path, email_id, new_priority
-        ):
-            logger.warning(
-                "tg_priority_snapshot_update_missing_email",
+        if feedback_kind == "correction":
+            logger.info(
+                "tg_priority_feedback_saved",
                 email_id=email_id,
                 chat_id=chat_id,
                 message_id=message_id_int,
                 priority=new_priority,
             )
-            return "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e"
-        logger.info(
-            "tg_priority_snapshot_updated",
-            email_id=email_id,
-            chat_id=chat_id,
-            message_id=message_id_int,
-            priority=new_priority,
-        )
-        snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
-        if not snapshot:
-            logger.warning(
-                "tg_priority_snapshot_reload_failed",
+            if not _update_email_snapshot_priority(
+                self.knowledge_db.path, email_id, new_priority
+            ):
+                logger.warning(
+                    "tg_priority_snapshot_update_missing_email",
+                    email_id=email_id,
+                    chat_id=chat_id,
+                    message_id=message_id_int,
+                    priority=new_priority,
+                )
+                return "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e"
+            logger.info(
+                "tg_priority_snapshot_updated",
                 email_id=email_id,
                 chat_id=chat_id,
                 message_id=message_id_int,
+                priority=new_priority,
             )
-            return "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e"
+            snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
+            if not snapshot:
+                logger.warning(
+                    "tg_priority_snapshot_reload_failed",
+                    email_id=email_id,
+                    chat_id=chat_id,
+                    message_id=message_id_int,
+                )
+                return "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e"
+        else:
+            logger.info(
+                "tg_priority_confirmation_saved",
+                email_id=email_id,
+                chat_id=chat_id,
+                message_id=message_id_int,
+                priority=new_priority,
+            )
         tier1_text = _render_tier1_message(snapshot)
         expanded = _is_trace_expanded(message)
         if expanded:
