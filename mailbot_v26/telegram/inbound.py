@@ -11,6 +11,7 @@ from typing import Callable, Iterable
 
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
 from mailbot_v26.config_loader import SupportSettings, load_support_settings
+from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.feedback import (
     record_action_feedback,
@@ -205,9 +206,18 @@ def _load_email_snapshot(db_path: Path, email_id: int) -> dict[str, object] | No
     try:
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
+            columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(emails)").fetchall()
+            }
+            if not columns:
+                return None
+            select_fields = ["account_email", "from_email"]
+            if "priority" in columns:
+                select_fields.append("priority")
             row = conn.execute(
-                """
-                SELECT account_email, from_email, priority
+                f"""
+                SELECT {", ".join(select_fields)}
                 FROM emails
                 WHERE id = ?
                 """,
@@ -267,9 +277,30 @@ def _load_email_render_snapshot(
     try:
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
+            columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(emails)").fetchall()
+            }
+            if not columns:
+                return None
+            select_fields = [
+                field
+                for field in (
+                    "account_email",
+                    "from_email",
+                    "subject",
+                    "priority",
+                    "priority_source",
+                    "action_line",
+                    "body_summary",
+                )
+                if field in columns
+            ]
+            if not select_fields:
+                return None
             email_row = conn.execute(
-                """
-                SELECT account_email, from_email, subject, priority, priority_source, action_line, body_summary
+                f"""
+                SELECT {", ".join(select_fields)}
                 FROM emails
                 WHERE id = ?
                 """,
@@ -295,6 +326,10 @@ def _load_email_render_snapshot(
         if row and row[0]
     ]
     snapshot = dict(email_row)
+    snapshot.setdefault("priority", "")
+    snapshot.setdefault("priority_source", "")
+    snapshot.setdefault("action_line", "")
+    snapshot.setdefault("body_summary", "")
     snapshot["attachments"] = attachment_rows
     return snapshot
 
@@ -386,14 +421,43 @@ def _update_email_snapshot_priority(
 ) -> bool:
     try:
         with sqlite3.connect(db_path) as conn:
+            columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(emails)").fetchall()
+            }
+            migrations: list[str] = []
+            if "priority" not in columns:
+                migrations.append("ALTER TABLE emails ADD COLUMN priority TEXT;")
+            if "priority_source" not in columns:
+                migrations.append(
+                    "ALTER TABLE emails ADD COLUMN priority_source TEXT DEFAULT 'auto';"
+                )
+            for statement in migrations:
+                conn.execute(statement)
+            if migrations:
+                conn.commit()
+                columns = {
+                    str(row[1])
+                    for row in conn.execute("PRAGMA table_info(emails)").fetchall()
+                }
+            if "priority" not in columns:
+                logger.error(
+                    "telegram_inbound_priority_snapshot_update_failed",
+                    error="emails.priority column unavailable",
+                )
+                return False
+            set_clauses = ["priority = ?"]
+            params: list[object] = [new_priority]
+            if "priority_source" in columns:
+                set_clauses.append("priority_source = 'user_override'")
+            params.append(email_id)
             cursor = conn.execute(
-                """
+                f"""
                 UPDATE emails
-                SET priority = ?,
-                    priority_source = 'user_override'
+                SET {", ".join(set_clauses)}
                 WHERE id = ?
                 """,
-                (new_priority, email_id),
+                tuple(params),
             )
             conn.commit()
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -935,8 +999,10 @@ class TelegramInboundProcessor:
                 ack_text = ack or _t("inbound.bad_button")
                 return
             if action == "priority_ok":
-                self._record_priority_confirmation(payload)
-                ack_text = "Не нашёл письмо для изменения"
+                if self._record_priority_confirmation(payload):
+                    ack_text = _t("inbound.ok")
+                else:
+                    ack_text = "Не нашёл письмо для изменения"
                 return
             ack_text = _t("inbound.bad_button")
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -962,7 +1028,7 @@ class TelegramInboundProcessor:
         command, args = parse_command(text)
 
         if not command:
-            self._reply(chat_id, _t("inbound.command_unknown"))
+            self._reply(chat_id, self._help_text())
             return
 
         if command in {"/help", "help"}:
@@ -993,7 +1059,7 @@ class TelegramInboundProcessor:
             self._reply(chat_id, self._support_text())
             return
 
-        self._reply(chat_id, _t("inbound.command_unknown"))
+        self._reply(chat_id, self._help_text())
 
     def _reply(self, chat_id: str, text: str) -> None:
         safe_text = normalize_mojibake_text(text)
