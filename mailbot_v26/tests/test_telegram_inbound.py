@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -606,6 +607,52 @@ def test_snooze_callback_creates_pending_record(tmp_path: Path) -> None:
     assert row[1] == "pending"
 
 
+def test_snooze_state_matches_canonical_email_scope(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-snooze-canonical",
+            "data": f"snz_s:{email_id}:2h",
+            "message": {"chat": {"id": "chat"}, "message_id": 12, "text": "msg"},
+        }
+    )
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        snooze_row = conn.execute(
+            "SELECT email_id, status FROM telegram_snooze WHERE email_id = ?",
+            (email_id,),
+        ).fetchone()
+        event_row = conn.execute(
+            """
+            SELECT account_id, email_id, payload_json
+            FROM events_v1
+            WHERE event_type = ?
+            ORDER BY ts_utc DESC
+            LIMIT 1
+            """,
+            (EventType.SNOOZE_RECORDED.value,),
+        ).fetchone()
+
+    assert snooze_row == (email_id, "pending")
+    assert event_row is not None
+    payload = json.loads(str(event_row[2] or "{}"))
+    assert event_row[0] == "account@example.com"
+    assert int(event_row[1]) == email_id
+    assert payload["snooze_code"] == "2h"
+
+
 def test_snooze_tomorrow_creates_pending_record_for_next_morning(
     tmp_path: Path,
 ) -> None:
@@ -754,6 +801,58 @@ def test_priority_ok_callback_graceful_on_missing_email(tmp_path: Path) -> None:
     with sqlite3.connect(processor.knowledge_db.path) as conn:
         count = conn.execute("SELECT COUNT(*) FROM priority_feedback").fetchone()[0]
     assert count == 0
+
+
+def test_priority_state_matches_canonical_snapshot_and_event(
+    tmp_path: Path, monkeypatch
+) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=100,
+        corrections=1,
+        correction_rate=0.01,
+        engine="priority_v2_auto",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    email_id = _insert_email(processor.knowledge_db.path)
+
+    monkeypatch.setattr(
+        "mailbot_v26.telegram.inbound.edit_telegram_message",
+        lambda **_kwargs: None,
+    )
+
+    processor.handle_callback_query(
+        {
+            "id": "cb-prio-canonical",
+            "data": f"prio_set:{email_id}:Y",
+            "message": {"chat": {"id": "chat"}, "message_id": 405, "text": "old"},
+        }
+    )
+
+    with sqlite3.connect(processor.knowledge_db.path) as conn:
+        priority_row = conn.execute(
+            "SELECT priority, priority_source FROM emails WHERE id = ?",
+            (email_id,),
+        ).fetchone()
+        event_row = conn.execute(
+            """
+            SELECT payload_json
+            FROM events_v1
+            WHERE event_type = 'priority_correction_recorded'
+            ORDER BY ts_utc DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert priority_row == ("\U0001f7e1", "user_override")
+    assert event_row is not None
+    payload = json.loads(str(event_row[0] or "{}"))
+    assert payload["old_priority"] == "\U0001f535"
+    assert payload["new_priority"] == "\U0001f7e1"
+
 
 def test_priority_callback_same_priority_records_confirmation_not_correction(
     tmp_path: Path, monkeypatch

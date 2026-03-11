@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import socket
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -1393,6 +1394,52 @@ def test_health_status_keeps_db_snapshot_signal_without_false_down_on_idle(
 
     components = {row["name"]: row for row in resp.get_json()["components"]}
     assert components["DB"]["status"] == "ok"
+
+
+def test_web_ui_does_not_invent_state_when_only_stale_projection_exists(
+    tmp_path: Path, caplog
+) -> None:
+    db_path = tmp_path / "health-status-stale-projection.sqlite"
+    KnowledgeDB(db_path)
+    ProcessingSpanRecorder(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_health_snapshot(
+            conn,
+            snapshot_id="snap-stale",
+            ts_utc=(now - timedelta(hours=2)).timestamp(),
+        )
+        _insert_processing_span(
+            conn,
+            span_id="span-stale",
+            ts_start_utc=(now - timedelta(hours=2, minutes=1)).timestamp(),
+            ts_end_utc=(now - timedelta(hours=2)).timestamp(),
+            health_snapshot_id="snap-stale",
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with caplog.at_level(logging.WARNING):
+        with app.test_client() as client:
+            login_with_csrf(client, "pw")
+            resp = client.get(
+                "/api/health/status",
+                query_string={"account_emails": "primary@example.com"},
+            )
+
+    components = {row["name"]: row for row in resp.get_json()["components"]}
+    telegram = components["Telegram"]
+    db_component = components["DB"]
+    assert telegram["truth_source"] == "processing_spans.status_strip"
+    assert telegram["canonical_evidence"] is False
+    assert telegram["stale"] is True
+    assert db_component["truth_source"] == "processing_spans.status_strip"
+    assert db_component["canonical_evidence"] is True
+    assert any(
+        record.message == "web_projection_without_canonical_evidence"
+        and getattr(record, "component", "") == "telegram"
+        for record in caplog.records
+    )
 
 
 def test_health_status_shows_human_readable_cause_not_traceback(tmp_path: Path) -> None:

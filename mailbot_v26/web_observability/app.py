@@ -76,6 +76,10 @@ from mailbot_v26.observability.decision_trace_v1 import (
 from mailbot_v26.observability.decision_trace_view import summaries_as_payload
 from mailbot_v26.events.contract import EventType
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.system.truth_guard import (
+    assert_not_projection_source,
+    mark_as_stale,
+)
 from mailbot_v26.version import get_version
 from mailbot_v26.web_observability.doctor_export import build_diagnostics_zip
 from mailbot_v26.tools.networking import get_primary_ipv4
@@ -185,6 +189,8 @@ class _TTLCache:
 
 STATUS_STRIP_REFRESH_MS = 10_000
 HEALTH_REFRESH_MS = 30_000
+STATUS_STRIP_STALE_SECONDS = 900.0
+PROCESSING_SPANS_STALE_SECONDS = 900.0
 
 _COCKPIT_CACHE = _TTLCache(10.0)
 _HEALTH_SUMMARY_CACHE = _TTLCache(15.0)
@@ -2730,6 +2736,14 @@ def _status_strip_view(
     if updated_ts is not None:
         age = max(0, int(now_ts - updated_ts))
         updated_ago = f"{age}s ago"
+    stale_guard = mark_as_stale(
+        source="status_strip",
+        snapshot_ts=updated_ts,
+        now_ts=now_ts,
+        threshold_seconds=STATUS_STRIP_STALE_SECONDS,
+        context="web_status_strip",
+        logger_=logger,
+    )
 
     return {
         "system_mode": system_mode,
@@ -2739,6 +2753,9 @@ def _status_strip_view(
         "db": {"text": db_status, "class": db_class},
         "db_size": _format_bytes(db_size_bytes),
         "updated_ago": updated_ago,
+        "truth_source": "processing_spans.status_strip",
+        "snapshot_stale": bool(stale_guard.get("stale")),
+        "snapshot_age_seconds": stale_guard.get("age_seconds"),
     }
 
 
@@ -5883,6 +5900,48 @@ def create_app(
             if isinstance(current, Mapping)
             else None
         )
+        projection_stale = mark_as_stale(
+            source="processing_spans",
+            snapshot_ts=last_snapshot_ts,
+            now_ts=now_ts,
+            threshold_seconds=PROCESSING_SPANS_STALE_SECONDS,
+            context="web_health_status",
+            logger_=logger,
+        )
+        evidence_since_ts = now_ts - (max(1, int(window_days)) * 86_400)
+        telegram_canonical_evidence = bool(
+            _scoped_event_rows(
+                account_emails=account_emails,
+                event_type=EventType.TELEGRAM_DELIVERED.value,
+                since_ts=evidence_since_ts,
+                limit=1,
+            )
+            or _scoped_event_rows(
+                account_emails=account_emails,
+                event_type=EventType.TELEGRAM_FAILED.value,
+                since_ts=evidence_since_ts,
+                limit=1,
+            )
+        )
+        llm_canonical_evidence = bool(
+            _scoped_event_rows(
+                account_emails=account_emails,
+                event_type=EventType.DECISION_TRACE_RECORDED.value,
+                since_ts=evidence_since_ts,
+                limit=1,
+            )
+            or _scoped_event_rows(
+                account_emails=account_emails,
+                event_type=EventType.MESSAGE_INTERPRETATION.value,
+                since_ts=evidence_since_ts,
+                limit=1,
+            )
+        )
+        component_canonical_evidence = {
+            "Telegram": telegram_canonical_evidence,
+            "DB": bool(app.config["DB_PATH"].exists()),
+            "LLM": llm_canonical_evidence,
+        }
         latest_imap_payload: dict[str, object] = {}
         if latest_imap_event and latest_imap_event.get("payload_json"):
             try:
@@ -5914,6 +5973,10 @@ def create_app(
                     detail=str(latest_imap_payload.get("detail") or ""),
                     status=imap_status,
                 ),
+                "truth_source": "events_v1",
+                "canonical_evidence": True,
+                "stale": False,
+                "snapshot_age_seconds": None,
             }
         )
 
@@ -5941,6 +6004,29 @@ def create_app(
                 degraded=normalized_status_text in {"warn", "degraded", "partial"},
                 use_age_threshold=False,
             )
+            canonical_evidence = bool(
+                component_canonical_evidence.get(component_name, False)
+            )
+            if (
+                bool(projection_stale.get("stale"))
+                and normalized_status_text
+                and normalized_status_text
+                not in {"unknown", "unavailable", "disabled", "not configured"}
+                and not canonical_evidence
+            ):
+                assert_not_projection_source(
+                    source="processing_spans",
+                    context=f"web_health_component:{component_name.lower()}",
+                    logger_=logger,
+                )
+                logger.warning(
+                    "web_projection_without_canonical_evidence",
+                    extra={
+                        "component": component_name.lower(),
+                        "source": "processing_spans.status_strip",
+                        "snapshot_age_seconds": projection_stale.get("age_seconds"),
+                    },
+                )
             incident = incident_by_component.get(component_name, {})
             raw_detail = str(incident.get("symptom") or "").strip()
             component_last_ok = _parse_datetime_value(last_snapshot_ts)
@@ -5960,6 +6046,10 @@ def create_app(
                         detail=raw_detail,
                         status=status,
                     ),
+                    "truth_source": "processing_spans.status_strip",
+                    "canonical_evidence": canonical_evidence,
+                    "stale": bool(projection_stale.get("stale")),
+                    "snapshot_age_seconds": projection_stale.get("age_seconds"),
                 }
             )
 
@@ -5987,6 +6077,10 @@ def create_app(
                     "Scheduler / Digests",
                     status=scheduler_status,
                 ),
+                "truth_source": "events_v1",
+                "canonical_evidence": True,
+                "stale": False,
+                "snapshot_age_seconds": None,
             }
         )
 
