@@ -104,17 +104,17 @@ WEB_EMAIL_REDACTED_PREVIEW = "Summary hidden"
 WEB_EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 LANE_KEYS = ("all", "critical", "commitments", "deferred", "failures", "learning")
 LANE_LABELS = {
-    "all": "все",
-    "critical": "критично",
-    "commitments": "обязательства",
-    "deferred": "отложено",
-    "failures": "сбои",
-    "learning": "обучение",
+    "all": "all",
+    "critical": "critical",
+    "commitments": "commitments",
+    "deferred": "deferred",
+    "failures": "failures",
+    "learning": "learning",
 }
 ALLOWED_ATTENTION_SORTS = {"time", "cost", "count"}
 DEFAULT_HOMEPAGE_DONATE_URL = "https://pay.cloudtips.ru/p/00d77c6a"
 DEFAULT_HOMEPAGE_DONATE_QR_PATH = Path(__file__).resolve().parent.parent / "qrcode.png"
-DEFAULT_HOMEPAGE_DONATE_QR_ALT = "QR-код для поддержки LetterBot.ru"
+DEFAULT_HOMEPAGE_DONATE_QR_ALT = "QR code to support LetterBot.ru"
 DEFAULT_HOMEPAGE_DONATE_QR_SIZE = 192
 
 
@@ -519,7 +519,7 @@ def _render_stub_html(
                 )
             donate_block = (
                 '<div class="card donate-card" data-testid="homepage-donate">'
-                f'<h2>{html.escape(str(homepage_donate.get("title") or "Поддержать LetterBot.ru"))}</h2>'
+                f'<h2>{html.escape(str(homepage_donate.get("title") or "Support LetterBot.ru"))}</h2>'
                 f"{donate_img}"
                 f'<p><a href="{html.escape(donate_url)}" target="_blank" rel="noopener noreferrer">{html.escape(donate_url)}</a></p>'
                 "</div>"
@@ -752,7 +752,7 @@ def _render_stub_html(
             url = html.escape(str(getattr(method, "url", "") or ""))
             details = html.escape(str(getattr(method, "details", "") or ""))
             rows.append(
-                f'<div class="support-method"><h3>{label}</h3><p>{details}</p><p>{phone}</p><p>{number}</p><p>{url}</p><button>Скопировать</button></div>'
+                f'<div class="support-method"><h3>{label}</h3><p>{details}</p><p>{phone}</p><p>{number}</p><p>{url}</p><button>Copy</button></div>'
             )
         return f"<html><body>{header}{''.join(rows)}</body></html>"
 
@@ -1608,7 +1608,7 @@ def _homepage_donate_context(
             extra={"path": str(resolved_qr_path)},
         )
         fallback_message = (
-            f"QR-код недоступен: {resolved_qr_path.as_posix()} не найден."
+            f"QR unavailable: {resolved_qr_path.as_posix()} was not found."
         )
     elif not resolved_qr_path.is_file():
         logger.warning(
@@ -1616,7 +1616,7 @@ def _homepage_donate_context(
             extra={"path": str(resolved_qr_path)},
         )
         fallback_message = (
-            f"QR-код недоступен: {resolved_qr_path.as_posix()} не является файлом."
+            f"QR unavailable: {resolved_qr_path.as_posix()} is not a file."
         )
     else:
         try:
@@ -1627,14 +1627,14 @@ def _homepage_donate_context(
                 extra={"path": str(resolved_qr_path), "error": str(exc)},
             )
             fallback_message = (
-                f"QR-код недоступен: {resolved_qr_path.as_posix()} не удалось прочитать."
+                f"QR unavailable: {resolved_qr_path.as_posix()} could not be read."
             )
         if not qr_data_uri and not fallback_message:
             fallback_message = (
-                f"QR-код недоступен: {resolved_qr_path.as_posix()} пуст или повреждён."
+                f"QR unavailable: {resolved_qr_path.as_posix()} is empty or corrupted."
             )
     return {
-        "title": "Поддержать LetterBot.ru",
+        "title": "Support LetterBot.ru",
         "url": donate_url,
         "qr_image_data_uri": qr_data_uri,
         "qr_alt": DEFAULT_HOMEPAGE_DONATE_QR_ALT,
@@ -2769,7 +2769,7 @@ def _home_quality_summary(
         "available": False,
         "corrections": "0",
         "surprise_rate": "—",
-        "trust_hint": "Качество стабильно в базовом режиме.",
+        "trust_hint": "Quality is stable in the baseline mode.",
     }
     if not account_email:
         return safe
@@ -2810,7 +2810,7 @@ def _home_quality_summary(
             drift_rate = _safe_float(drift.get("surprise_rate_last_7d"))
             if drift_rate is not None:
                 surprise_rate = f"{drift_rate * 100:.0f}%"
-    trust_hint = "Качество стабильно в базовом режиме."
+    trust_hint = "Quality is stable in the baseline mode."
     try:
         trust_delta = analytics.latest_trust_score_delta(limit=100)
     except Exception:
@@ -2819,9 +2819,9 @@ def _home_quality_summary(
         delta_value = _safe_float(trust_delta.get("delta"))
         if delta_value is not None:
             if delta_value <= -0.1:
-                trust_hint = "Внимание: доверие снижается, проверьте последние правки."
+                trust_hint = "Attention: trust is dropping, review the latest changes."
             elif delta_value >= 0.1:
-                trust_hint = "Доверие растет, текущая автоматизация работает ровнее."
+                trust_hint = "Trust is rising, and the current automation is behaving more consistently."
     return {
         "available": corrections > 0,
         "corrections": str(corrections),
@@ -7733,7 +7733,7 @@ def main() -> None:
     except OSError as exc:
         if "Address already in use" in str(exc):
             print(
-                f"[ERROR] Порт {port} занят. Откройте settings.ini в каталоге конфигурации и измените [web] port = ..."
+                f"[ERROR] Port {port} is already in use. Open settings.ini in the config directory and change [web] port = ..."
             )
             raise SystemExit(1)
         raise

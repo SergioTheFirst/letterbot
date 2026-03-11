@@ -175,4 +175,27 @@ def build_notification_keyboard(
     return {"inline_keyboard": rows}
 
 
+def _priority_row(message_key: str) -> list[dict[str, str]]:
+    return [
+        _safe_button(
+            text="Low",
+            prefix=PRIORITY_PREFIX,
+            action="lo",
+            message_key=message_key,
+        ),
+        _safe_button(
+            text="Medium",
+            prefix=PRIORITY_PREFIX,
+            action="med",
+            message_key=message_key,
+        ),
+        _safe_button(
+            text="High",
+            prefix=PRIORITY_PREFIX,
+            action="hi",
+            message_key=message_key,
+        ),
+    ]
+
+
 __all__ = ["InlineKeyboardMarkup", "build_notification_keyboard"]

@@ -256,7 +256,7 @@ def test_cockpit_home_survives_contacts_analytics_exceptions(tmp_path: Path) -> 
         resp = client.get("/")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "Полезные ссылки" in body
+        assert "Useful links" in body
 
 
 def test_cockpit_home_shows_premium_support_card_when_enabled(tmp_path: Path) -> None:
@@ -278,7 +278,7 @@ def test_cockpit_home_shows_premium_support_card_when_enabled(tmp_path: Path) ->
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
         assert 'href="/support"' in body
-        assert "Поддержка" in body
+        assert "Support" in body
 
 
 def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
@@ -289,22 +289,22 @@ def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
         login_with_csrf(client, "pw")
         body = client.get("/").get_data(as_text=True)
 
-    assert ">Главная<" in body
-    assert ">Архив<" in body
-    assert ">Здоровье<" in body
-    assert ">События<" in body
-    assert ">Диагностика<" in body
-    assert ">Обязательства<" in body
+    assert ">Home<" in body
+    assert ">Archive<" in body
+    assert ">Health<" in body
+    assert ">Events<" in body
+    assert ">Doctor<" in body
+    assert ">Commitments<" in body
     assert ">Latency<" in body
-    assert ">Фокус<" in body
-    assert ">Обучение<" in body
-    assert ">Связи<" in body
-    assert "Telegram-канал" in body
+    assert ">Attention<" in body
+    assert ">Learning<" in body
+    assert ">Relationships<" in body
+    assert "Telegram channel" in body
     assert "https://t.me/+1xHH6NwJONVlZTA6" in body
     assert "LetterBot.ru Observability" not in body
     assert "<span>Commitments&nbsp;</span>" not in body
     assert "&nbsp;" not in body
-    assert 'class="nav-link active">Главная<' in body
+    assert 'class="nav-link active">Home<' in body
     assert "Bridge Cockpit" not in body
 
 
@@ -316,7 +316,7 @@ def test_cockpit_home_quality_summary_safe_empty_state(tmp_path: Path) -> None:
     with app.test_client() as client:
         login_with_csrf(client, "pw")
         body = client.get("/").get_data(as_text=True)
-    assert "Качество автоматизации" in body
+    assert "Automation quality" in body
     assert "Not enough feedback yet." in body
 
 
@@ -345,7 +345,7 @@ def test_cockpit_home_quality_summary_with_data(tmp_path: Path) -> None:
         login_with_csrf(client, "pw")
         body = client.get("/?account_emails=primary@example.com").get_data(as_text=True)
 
-    assert "Качество автоматизации" in body
+    assert "Automation quality" in body
     assert "Corrections" in body
     assert ">4<" in body
     assert "25%" in body
@@ -385,7 +385,7 @@ def test_cockpit_home_renders_initial_live_preview_from_dashboard_payload(
         body = client.get("/?account_emails=primary@example.com").get_data(as_text=True)
 
     assert 'id="preview-emails-today">1<' in body
-    assert "Обновлено:" in body
+    assert "Updated:" in body
     assert 'id="preview-recent-events"' in body
     assert "email processed" in body
 
@@ -402,9 +402,9 @@ def test_cockpit_home_preview_shows_live_payload_and_honest_no_data_state(
         body = client.get("/").get_data(as_text=True)
 
     assert 'id="preview-emails-today">0<' in body
-    assert 'id="preview-dashboard-updated">Обновлено:' in body
+    assert 'id="preview-dashboard-updated">Updated:' in body
     assert 'id="preview-dashboard-detail">' in body
-    assert "Пока нет свежих событий." in body or "Unavailable:" in body
+    assert "No recent events yet." in body or "Unavailable:" in body
     assert 'data-testid="homepage-latency"' in body
     assert "NO LATENCY DATA" in body
     assert 'data-testid="homepage-health"' in body
@@ -561,7 +561,7 @@ def test_cockpit_home_shows_support_qr_preview_when_available(tmp_path: Path) ->
         resp = client.get("/")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "QR для поддержки" in body
+        assert "Support QR" in body
         assert "<img" in body
 
 
@@ -714,7 +714,7 @@ def test_cockpit_home_renders_support_donate_block_with_qr(tmp_path: Path) -> No
 
     assert 'data-testid="homepage-donate"' in body
     assert "https://example.com/donate" in body
-    assert "QR для поддержки" in body
+    assert "Support QR" in body
     assert 'src="data:image/png;base64,abc"' in body
 
 
@@ -751,4 +751,4 @@ def test_cockpit_home_donate_block_gracefully_degrades_without_qr(
 
     assert 'data-testid="homepage-donate"' in body
     assert "https://example.com/donate" in body
-    assert "QR недоступен. Используйте ссылку для доната." in body
+    assert "QR unavailable. Use the donation link." in body

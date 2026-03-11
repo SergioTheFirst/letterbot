@@ -333,7 +333,7 @@ def test_cockpit_renders_flat_text_instead_of_serialized_repr(tmp_path: Path) ->
         page = client.get("/")
         body = page.get_data(as_text=True)
         assert page.status_code == 200
-        assert ">Живая лента<" in body
+        assert ">Live feed<" in body
         assert "[&#39;[" not in body
 
 

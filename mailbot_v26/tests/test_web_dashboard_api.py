@@ -524,7 +524,7 @@ def test_dashboard_template_renders_events_block(tmp_path: Path) -> None:
         body = client.get("/dashboard").get_data(as_text=True)
 
     assert 'data-testid="live-dashboard"' in body
-    assert ">Последние события<" in body
+    assert ">Recent events<" in body
     assert 'id="preview-recent-events"' in body
     assert 'id="processed-table-body"' in body
     assert 'id="top-issuers-list"' in body

@@ -50,7 +50,7 @@ def test_email_actions_keyboard_contains_priority_and_snooze_rows() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🔵 LOW", "🟡 MEDIUM", "🔴 HIGH"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["Low", "Medium", "High"], ["Snooze 2 часа", "Завтра"]]
 
 
 def test_snooze_callbacks_parse() -> None:
@@ -68,7 +68,7 @@ def test_email_actions_keyboard_ignores_trace_toggle_in_main_layout() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🔵 LOW", "🟡 MEDIUM", "🔴 HIGH"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["Low", "Medium", "High"], ["Snooze 2 часа", "Завтра"]]
 
 
 def test_priority_menu_labels_match_user_facing_ux() -> None:
@@ -77,7 +77,7 @@ def test_priority_menu_labels_match_user_facing_ux() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🔵 LOW", "🟡 MEDIUM", "🔴 HIGH"]]
+    ] == [["Low", "Medium", "High"]]
 
 
 def test_initial_keyboard_shows_priority_and_snooze_buttons() -> None:
@@ -86,7 +86,7 @@ def test_initial_keyboard_shows_priority_and_snooze_buttons() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🔵 LOW", "🟡 MEDIUM", "🔴 HIGH"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["Low", "Medium", "High"], ["Snooze 2 часа", "Завтра"]]
 
 
 def test_initial_keyboard_no_back_button() -> None:
@@ -130,7 +130,7 @@ def test_priority_callbacks_always_include_email_id() -> None:
             button.get("callback_data", "")
             for row in keyboard.get("inline_keyboard", [])
             for button in row
-            if button.get("text") in {"🔵 LOW", "🟡 MEDIUM", "🔴 HIGH"}
+            if button.get("text") in {"Low", "Medium", "High"}
         ]
         assert callback_data
         assert all(f":{email_id}:" in item for item in callback_data)
@@ -142,7 +142,7 @@ def test_priority_menu_buttons_are_human_readable() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🔵 LOW", "🟡 MEDIUM", "🔴 HIGH"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["Low", "Medium", "High"], ["Snooze 2 часа", "Завтра"]]
 
 
 def test_priority_menu_does_not_show_confusing_verno_label() -> None:
@@ -157,9 +157,9 @@ def test_back_button_returns_to_main_keyboard() -> None:
     menu = build_email_actions_keyboard(email_id=314, expanded=False, prio_menu=True)
     assert menu["inline_keyboard"] == [
         [
-            {"text": "🔵 LOW", "callback_data": "prio_set:314:B"},
-            {"text": "🟡 MEDIUM", "callback_data": "prio_set:314:Y"},
-            {"text": "🔴 HIGH", "callback_data": "prio_set:314:R"},
+            {"text": "Low", "callback_data": "prio_set:314:B"},
+            {"text": "Medium", "callback_data": "prio_set:314:Y"},
+            {"text": "High", "callback_data": "prio_set:314:R"},
         ]
     ]
 
@@ -168,7 +168,7 @@ def test_back_button_returns_to_main_keyboard() -> None:
     )
     assert [
         [button["text"] for button in row] for row in base["inline_keyboard"]
-    ] == [["🔵 LOW", "🟡 MEDIUM", "🔴 HIGH"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["Low", "Medium", "High"], ["Snooze 2 часа", "Завтра"]]
 
 
 def test_priority_keyboard_renders_direct_priority_buttons() -> None:
@@ -177,4 +177,4 @@ def test_priority_keyboard_renders_direct_priority_buttons() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🔵 LOW", "🟡 MEDIUM", "🔴 HIGH"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["Low", "Medium", "High"], ["Snooze 2 часа", "Завтра"]]

@@ -157,7 +157,7 @@ def test_health_page_component_matrix(tmp_path: Path) -> None:
         )
         assert page.status_code == 200
         body = page.get_data(as_text=True)
-        assert "Здоровье системы" in body
+        assert "System health" in body
         assert 'data-testid="health-component-matrix"' in body
 
 
