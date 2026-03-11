@@ -234,7 +234,7 @@ class StartupHealthChecker:
 class LaunchReportBuilder:
     def __init__(
         self,
-        version_label: str = "Letterbot Premium v26",
+        version_label: str = "LetterBot.ru v26",
         *,
         config_dir: Path | None = None,
     ) -> None:

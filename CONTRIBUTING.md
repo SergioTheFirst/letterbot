@@ -1,4 +1,4 @@
-﻿# Contributing to Letterbot
+# Contributing to LetterBot.ru
 
 ## Before you open a PR
 

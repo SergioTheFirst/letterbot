@@ -75,7 +75,7 @@ if errorlevel 1 echo [WARN] validate-config reported warnings. Continuing.
 
 echo.
 echo ==========================================
-echo  Letterbot is running.
+echo  LetterBot.ru is running.
 echo ==========================================
 echo  Web UI:  %WEB_URL%
 echo  Stop:    Ctrl+C
@@ -92,7 +92,7 @@ echo ==========================================
 echo  First run setup
 echo ==========================================
 echo.
-echo  Letterbot created local config files in this folder.
+echo  LetterBot.ru created local config files in this folder.
 echo  accounts.ini will open in Notepad now.
 echo  Fill in your mail login, password, host, and Telegram values.
 echo  Save the file, close Notepad, and run letterbot.bat again.
@@ -109,10 +109,10 @@ exit /b 2
 :error_repo_root
 echo.
 echo ==========================================
-echo  [ERROR] Could not switch to the Letterbot folder
+echo  [ERROR] Could not switch to the LetterBot.ru folder
 echo ==========================================
 echo.
-echo  Move the extracted Letterbot folder to a local drive and run letterbot.bat again.
+echo  Move the extracted LetterBot.ru folder to a local drive and run letterbot.bat again.
 echo.
 call :pause_if_needed
 exit /b 1
@@ -123,7 +123,7 @@ echo ==========================================
 echo  [ERROR] Python was not found
 echo ==========================================
 echo.
-echo  Letterbot needs Python 3.10 or newer.
+echo  LetterBot.ru needs Python 3.10 or newer.
 echo  Install it from https://www.python.org/downloads/
 echo  During setup, enable: Add Python to PATH
 echo  Then run letterbot.bat again.
@@ -167,7 +167,7 @@ echo ==========================================
 echo  [ERROR] requirements.txt is missing
 echo ==========================================
 echo.
-echo  This archive looks incomplete. Download Letterbot again from GitHub and extract it fully.
+echo  This archive looks incomplete. Download LetterBot.ru again from GitHub and extract it fully.
 echo.
 call :pause_if_needed
 exit /b 1
@@ -222,7 +222,7 @@ exit /b 2
 :error_run_stack
 echo.
 echo ==========================================
-echo  [ERROR] Letterbot stopped unexpectedly
+echo  [ERROR] LetterBot.ru stopped unexpectedly
 echo ==========================================
 echo.
 echo  Exit code: %RUN_EXIT%

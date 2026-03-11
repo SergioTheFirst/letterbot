@@ -413,9 +413,9 @@ host = imap.example.com
     support = load_support_settings(tmp_path)
 
     assert support.enabled is False
-    assert support.text == "Если Letterbot помогает, проект можно поддержать"
+    assert support.text == "Если LetterBot.ru помогает, проект можно поддержать"
     assert support.url == "CHANGE_ME"
-    assert support.label == "Поддержать Letterbot"
+    assert support.label == "Поддержать LetterBot.ru"
     assert support.frequency_days == 30
 
 

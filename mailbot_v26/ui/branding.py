@@ -2,7 +2,7 @@ from functools import lru_cache
 
 from mailbot_v26.config_loader import load_branding_config
 
-PRODUCT_LABEL = "Letterbot Premium"
+PRODUCT_LABEL = "LetterBot.ru"
 WATERMARK_LINE = "🔹 Powered by LetterBot.ru"
 WATERMARK_HTML_LINE = "<i>🔹 Powered by LetterBot.ru</i>"
 _LEGACY_WATERMARK_LINE = "🔹 Powered by Letterbot Premium"

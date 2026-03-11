@@ -40,7 +40,7 @@ enabled = true
 telegram = true
 min_days_between_asks = 30
 url = https://example.com/insider
-message = Поддержать Letterbot → {url}
+message = Поддержать LetterBot.ru → {url}
 """)
 
     cfg = digest_scheduler._load_support_config_from_settings(parser)
@@ -101,7 +101,7 @@ def test_weekly_support_footer_rate_limited_via_runtime_overrides(tmp_path) -> N
         telegram=True,
         min_days_between_asks=30,
         url="https://example.com/insider",
-        message="Поддержать Letterbot → {url}",
+        message="Поддержать LetterBot.ru → {url}",
     )
 
     first = digest_scheduler._resolve_weekly_support_footer(
@@ -132,10 +132,10 @@ def test_weekly_support_footer_rate_limited_via_runtime_overrides(tmp_path) -> N
         support_config=cfg,
     )
 
-    assert first.startswith("💛 Поддержать Letterbot")
+    assert first.startswith("💛 Поддержать LetterBot.ru")
     assert first_saved is not None
     assert second == ""
-    assert third.startswith("💛 Поддержать Letterbot")
+    assert third.startswith("💛 Поддержать LetterBot.ru")
 
 
 def test_support_telegram_config_enabled_when_feature_flag_on(monkeypatch) -> None:
@@ -151,7 +151,7 @@ def test_support_telegram_config_enabled_when_feature_flag_on(monkeypatch) -> No
                 "telegram": {
                     "enabled": True,
                     "frequency_days": 30,
-                    "text": "Letterbot бесплатный. Поддержка: /support",
+                    "text": "LetterBot.ru бесплатный. Поддержка: /support",
                 }
             },
         },
@@ -165,4 +165,4 @@ def test_support_telegram_config_enabled_when_feature_flag_on(monkeypatch) -> No
     cfg = digest_scheduler._load_support_telegram_config()
 
     assert cfg.enabled is True
-    assert cfg.message == "Letterbot бесплатный. Поддержка: /support"
+    assert cfg.message == "LetterBot.ru бесплатный. Поддержка: /support"

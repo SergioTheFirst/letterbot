@@ -301,7 +301,7 @@ def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
     assert ">Связи<" in body
     assert "Telegram-канал" in body
     assert "https://t.me/+1xHH6NwJONVlZTA6" in body
-    assert "Letterbot Observability" not in body
+    assert "LetterBot.ru Observability" not in body
     assert "<span>Commitments&nbsp;</span>" not in body
     assert "&nbsp;" not in body
     assert 'class="nav-link active">Главная<' in body
@@ -545,7 +545,7 @@ def test_cockpit_home_shows_support_qr_preview_when_available(tmp_path: Path) ->
             methods=[
                 SupportMethod(
                     "support",
-                    "Поддержать Letterbot",
+                    "Поддержать LetterBot.ru",
                     "",
                     "",
                     "",
@@ -696,7 +696,7 @@ def test_cockpit_home_renders_support_donate_block_with_qr(tmp_path: Path) -> No
             methods=[
                 SupportMethod(
                     "support",
-                    "Support Letterbot",
+                    "?????????? LetterBot.ru",
                     "",
                     "",
                     "",
@@ -733,7 +733,7 @@ def test_cockpit_home_donate_block_gracefully_degrades_without_qr(
             methods=[
                 SupportMethod(
                     "support",
-                    "Support Letterbot",
+                    "?????????? LetterBot.ru",
                     "",
                     "",
                     "",

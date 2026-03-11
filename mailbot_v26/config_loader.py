@@ -1,4 +1,4 @@
-"""Configuration loading utilities for Letterbot Premium v26."""
+"""Configuration loading utilities for LetterBot.ru v26."""
 
 from __future__ import annotations
 
@@ -482,9 +482,9 @@ def load_maintenance_config(base_dir: Path = CONFIG_DIR) -> MaintenanceConfig:
 def _support_defaults() -> SupportSettings:
     return SupportSettings(
         enabled=False,
-        text="Если Letterbot помогает, проект можно поддержать",
+        text="Если LetterBot.ru помогает, проект можно поддержать",
         url="CHANGE_ME",
-        label="Поддержать Letterbot",
+        label="Поддержать LetterBot.ru",
         frequency_days=30,
     )
 

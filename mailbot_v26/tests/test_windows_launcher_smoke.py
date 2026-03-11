@@ -249,7 +249,7 @@ def test_letterbot_bat_smoke_runs_from_other_cwd_and_reuses_existing_venv(tmp_pa
     first_run = _run_launcher(repo_root, cwd=first_cwd, env=_launcher_env())
 
     assert first_run.returncode == 0
-    assert "Letterbot is running." in first_run.stdout
+    assert "LetterBot.ru is running." in first_run.stdout
     assert (repo_root / "run_stack_called.txt").exists()
 
     second_cwd = tmp_path / "shell two"

@@ -1882,7 +1882,7 @@ class TelegramInboundProcessor:
         account_emails = list(self._account_emails())
         if not account_emails:
             base = (
-                "\U0001f4ca Letterbot \u2014 \u043d\u0435\u0434\u0435\u043b\u044f\n"
+                "\U0001f4ca LetterBot.ru \u2014 \u043d\u0435\u0434\u0435\u043b\u044f\n"
                 "\u041f\u0438\u0441\u0435\u043c: 0 \u00b7 \u0412\u0430\u0436\u043d\u044b\u0445: 0 \u00b7 \u041d\u0438\u0437\u043a\u0438\u0445: 0\n"
                 "\u041a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u0439: 0 \u00b7 \u0422\u043e\u0447\u043d\u043e\u0441\u0442\u044c: \u043d/\u0434\n"
                 "\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u043e: 0"
@@ -1899,7 +1899,7 @@ class TelegramInboundProcessor:
             f"{int(accuracy_pct)}%" if accuracy_pct is not None else "\u043d/\u0434"
         )
         base = (
-            "\U0001f4ca Letterbot \u2014 \u043d\u0435\u0434\u0435\u043b\u044f\n"
+            "\U0001f4ca LetterBot.ru \u2014 \u043d\u0435\u0434\u0435\u043b\u044f\n"
             f"\u041f\u0438\u0441\u0435\u043c: {int(summary.get('emails_total') or 0)} \u00b7 \u0412\u0430\u0436\u043d\u044b\u0445: {int(summary.get('important') or 0)} \u00b7 \u041d\u0438\u0437\u043a\u0438\u0445: {int(summary.get('low') or 0)}\n"
             f"\u041a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u0439: {int(summary.get('corrections') or 0)} \u00b7 \u0422\u043e\u0447\u043d\u043e\u0441\u0442\u044c: {accuracy_text}\n"
             f"\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u043e: {int(summary.get('open_commitments') or 0)}"
@@ -2008,7 +2008,7 @@ class TelegramInboundProcessor:
         return "\n".join(
             [
                 support.label
-                or "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u0430\u0442\u044c Letterbot",
+                or "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u0430\u0442\u044c LetterBot.ru",
                 support.text,
                 support.url,
             ]
@@ -2096,7 +2096,7 @@ class TelegramInboundProcessor:
         ]
         insider_since = self.override_store.get_insider_since(chat_id=chat_id)
         if insider_since:
-            status_lines.append(f"\u2b50 Letterbot Insider since: {insider_since}")
+            status_lines.append(f"\u2b50 LetterBot.ru Insider since: {insider_since}")
         status_lines.append(f"Version: {get_version()}")
         return normalize_mojibake_text("\n".join(status_lines))
 

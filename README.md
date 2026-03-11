@@ -1,6 +1,6 @@
-﻿# Letterbot
+# LetterBot.ru
 
-Letterbot is a self-hosted email triage assistant for long-running personal or small-team setups.
+LetterBot.ru is a self-hosted email triage assistant for long-running personal or small-team setups.
 It polls IMAP mailboxes, extracts facts from messages and attachments, sends short Telegram updates, and keeps a local SQLite history for audit, replay, and the web cockpit.
 
 ## Why use it
@@ -48,7 +48,7 @@ Before first start, run:
 
 These checks explain what is missing without dumping secrets or a raw traceback.
 
-## Running Letterbot
+## Running LetterBot.ru
 
 - Windows launcher: `letterbot.bat`
 - Windows dist helper in the source repo: `run_dist.bat`
@@ -56,7 +56,7 @@ These checks explain what is missing without dumping secrets or a raw traceback.
 - Direct start: `python -m mailbot_v26 --config-dir mailbot_v26/config`
 - Doctor mode: `python -m mailbot_v26 doctor --config-dir mailbot_v26/config`
 
-On successful startup, Letterbot prints a short masked summary with the config directory, database path, and log path.
+On successful startup, LetterBot.ru prints a short masked summary with the config directory, database path, and log path.
 
 ## Tests and quality gates
 
@@ -79,4 +79,4 @@ Optional maintenance status:
 
 ## License
 
-Letterbot is licensed under AGPL-3.0-only. See [LICENSE](LICENSE).
+LetterBot.ru is licensed under AGPL-3.0-only. See [LICENSE](LICENSE).

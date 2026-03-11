@@ -88,7 +88,7 @@ def test_readme_has_installation_section() -> None:
 
     assert "## Installation" in text
     assert "## Configuration" in text
-    assert "## Running Letterbot" in text
+    assert "## Running LetterBot.ru" in text
 
 
 def test_readme_has_no_real_credentials() -> None:

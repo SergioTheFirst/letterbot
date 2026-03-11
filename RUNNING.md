@@ -1,4 +1,4 @@
-# Running Letterbot (one-click)
+# Running LetterBot.ru (one-click)
 
 1. Double-click `run_mailbot.bat` in the repository root.
 2. Optional manual checks: `python -m mailbot_v26.doctor` then `python -m mailbot_v26 validate-config`.
@@ -6,7 +6,7 @@
 
 ## Troubleshooting
 - **Port in use**: stop the process using the port and retry.
-- **DB locked**: close any other Letterbot processes that might be using `data/mailbot.sqlite`.
+- **DB locked**: close any other LetterBot.ru processes that might be using `data/mailbot.sqlite`.
 - **Wrong password**: Update `web_ui.password` in `settings.ini` (section `[web_ui]`) and restart.
 
 ## Проверка перед релизом
@@ -29,7 +29,7 @@ prod_server = true
 - Open from phone/other PC: `http://<PC IPv4>:<port>/`.
 - Do not open `http://0.0.0.0:<port>/` in browser.
 - If needed, allow inbound TCP port in firewall:
-  `netsh advfirewall firewall add rule name="Letterbot Web UI <port>" protocol=TCP dir=in localport=<port> action=allow`
+  `netsh advfirewall firewall add rule name="LetterBot.ru Web UI <port>" protocol=TCP dir=in localport=<port> action=allow`
 - Windows SmartScreen on first run may show “Windows protected your PC” for unsigned builds; click `More info` -> `Run anyway` and follow `docs/SMARTSCREEN.md`.
 - Keep `web_ui.password` strong (10+ chars) and keep `web_ui.prod_server=true` for LAN.
 

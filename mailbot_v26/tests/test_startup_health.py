@@ -111,7 +111,7 @@ def test_gigachat_unavailable_cloudflare_ok(tmp_path, monkeypatch) -> None:
 
 
 def test_launch_report_deterministic() -> None:
-    builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
+    builder = LaunchReportBuilder(version_label="LetterBot.ru v26")
     results = [
         {"component": "Cloudflare", "status": HealthStatus.OK, "details": "active"},
         {
@@ -295,7 +295,7 @@ def test_launch_report_marks_placeholder_llm_credentials_not_configured(tmp_path
 
 def test_startup_report_default_branding_and_watermark() -> None:
     report = LaunchReportBuilder().build(results=[], mode=SimpleNamespace(value="FULL"))
-    assert "Letterbot Premium" in report
+    assert "LetterBot.ru" in report
     assert "MailBot Premium" not in report
     assert WATERMARK_LINE in report
 
@@ -309,7 +309,7 @@ def test_no_mojibake_in_startup_report() -> None:
 
 
 def test_startup_report_includes_mail_account_status_ok() -> None:
-    builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
+    builder = LaunchReportBuilder(version_label="LetterBot.ru v26")
     report = builder.build(
         results=[],
         mode=SimpleNamespace(value="FULL"),
@@ -321,7 +321,7 @@ def test_startup_report_includes_mail_account_status_ok() -> None:
 
 
 def test_startup_report_includes_mail_account_status_failed() -> None:
-    builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
+    builder = LaunchReportBuilder(version_label="LetterBot.ru v26")
     report = builder.build(
         results=[],
         mode=SimpleNamespace(value="FULL"),
@@ -339,7 +339,7 @@ def test_startup_report_includes_mail_account_status_failed() -> None:
 
 
 def test_startup_report_handles_no_accounts() -> None:
-    builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
+    builder = LaunchReportBuilder(version_label="LetterBot.ru v26")
     report = builder.build(
         results=[], mode=SimpleNamespace(value="FULL"), mail_accounts=[]
     )
@@ -349,7 +349,7 @@ def test_startup_report_handles_no_accounts() -> None:
 
 
 def test_startup_report_degrades_if_mail_check_unavailable() -> None:
-    builder = LaunchReportBuilder(version_label="Letterbot Premium v26")
+    builder = LaunchReportBuilder(version_label="LetterBot.ru v26")
     report = builder.build(
         results=[],
         mode=SimpleNamespace(value="FULL"),

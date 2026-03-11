@@ -1,4 +1,4 @@
-"""Letterbot Premium v26 - Runtime orchestrator"""
+"""LetterBot.ru v26 - Runtime orchestrator"""
 
 from __future__ import annotations
 
@@ -1175,11 +1175,11 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         sys.exit(2)
 
     print("\n" + "=" * 60)
-    print(f"LETTERBOT PREMIUM {__version__} - STARTING")
+    print(f"LETTERBOT.RU {__version__} - STARTING")
     print("=" * 60)
     print(f"Log file: {LOG_PATH}\n")
 
-    logger.info("=== Letterbot %s started ===", __version__)
+    logger.info("=== LetterBot.ru %s started ===", __version__)
     _check_build_integrity()
     try:
         processor_module.system_snapshotter.log_startup()
@@ -1280,7 +1280,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             )
             mode = health_checker.evaluate_mode(results)
             report = LaunchReportBuilder(
-                version_label=f"Letterbot Premium {__version__}",
+                version_label=f"LetterBot.ru {__version__}",
                 config_dir=resolved_config_dir,
             ).build(
                 results,
