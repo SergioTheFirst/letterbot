@@ -501,6 +501,7 @@ class ResilientIMAP:
         scoped_uids = sorted(
             int(uid) for uid in (self._with_retries(_search, scoped_criteria) or [])
         )
+        scoped_uids = [uid for uid in scoped_uids if uid >= range_start]
         highest_seen = max(all_uids) if all_uids else None
         self._last_uidvalidity_changed = uidvalidity_changed
         self._last_bootstrap_active = bootstrap_active

@@ -440,6 +440,12 @@
       };
       const refreshStatus = () => fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' }).then((resp) => { if (!resp.ok) throw new Error('status'); return resp.text(); }).then((html) => { if (strip) strip.innerHTML = html; if (offline) offline.classList.remove('active'); }).catch(() => { if (offline) offline.classList.add('active'); });
       const refreshDashboard = () => fetch('/api/dashboard' + window.location.search, { credentials: 'same-origin' }).then((resp) => { if (!resp.ok) throw new Error('dashboard'); return resp.json(); }).then(renderDashboard).catch(() => { setBadge('dashboard-meta-status', 'UNAVAILABLE', 'warn'); setText('preview-dashboard-updated', 'Payload updated: refresh failed'); });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          refreshStatus();
+          refreshDashboard();
+        }
+      });
       refreshStatus();
       refreshDashboard();
       setInterval(refreshStatus, {{ status_refresh_ms }});

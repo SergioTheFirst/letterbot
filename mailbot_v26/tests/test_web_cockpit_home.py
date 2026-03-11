@@ -278,7 +278,7 @@ def test_cockpit_home_shows_premium_support_card_when_enabled(tmp_path: Path) ->
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
         assert 'href="/support"' in body
-        assert "Support" in body
+        assert "Поддержка" in body
 
 
 def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
@@ -289,19 +289,23 @@ def test_cockpit_home_top_nav_is_simplified(tmp_path: Path) -> None:
         login_with_csrf(client, "pw")
         body = client.get("/").get_data(as_text=True)
 
-    assert ">Cockpit<" in body
-    assert ">Archive<" in body
+    assert ">Главная<" in body
+    assert ">Архив<" in body
     assert ">Health<" in body
-    assert ">Events<" in body
+    assert ">События<" in body
     assert ">Doctor<" in body
-    assert ">Commitments<" in body
+    assert ">Обязательства<" in body
     assert ">Latency<" in body
-    assert ">Attention<" in body
+    assert ">Фокус<" in body
     assert ">Learning<" in body
-    assert ">Relationships<" in body
+    assert ">Связи<" in body
+    assert "Telegram-канал" in body
+    assert "https://t.me/+1xHH6NwJONVlZTA6" in body
+    assert "Letterbot Observability" not in body
     assert "<span>Commitments&nbsp;</span>" not in body
     assert "&nbsp;" not in body
-    assert 'class="nav-link active">Cockpit<' in body
+    assert 'class="nav-link active">Главная<' in body
+    assert "Bridge Cockpit" not in body
 
 
 def test_cockpit_home_quality_summary_safe_empty_state(tmp_path: Path) -> None:
@@ -674,6 +678,7 @@ def test_cockpit_donate_surfaces_visible_when_support_enabled_with_url(
         body = client.get("/").get_data(as_text=True)
 
     assert "topbar-donate" in body
+    assert "topbar-donate-qr" in body
     assert 'data-testid="homepage-donate"' in body
     assert 'class="footer-donate-link"' in body
     assert 'href="https://example.com/donate"' in body

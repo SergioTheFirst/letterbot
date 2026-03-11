@@ -781,6 +781,18 @@ h3,
   color: var(--muted);
 }
 
+.community-link {
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(132, 180, 255, 0.28);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.community-link:hover {
+  color: var(--text);
+  border-color: rgba(132, 180, 255, 0.6);
+}
+
 .topbar-donate,
 .topbar-version {
   display: inline-flex;
@@ -799,6 +811,36 @@ h3,
 
 .topbar-donate:hover {
   background: rgba(132, 180, 255, 0.16);
+}
+
+.topbar-donate-qr {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.topbar-donate-qr:hover {
+  background: rgba(132, 180, 255, 0.12);
+}
+
+.topbar-donate-qr img {
+  display: block;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.topbar-donate-qr-caption {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .topbar-donate-icon {
