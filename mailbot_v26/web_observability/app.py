@@ -332,7 +332,6 @@ def _render_stub_html(
         f'<select name="limit">{_options([10, 25, 50], int(limit_val))}</select>'
         f"{account_hidden}"
         f"{lane_hidden}"
-        f'<button id="copy-share-link" data-share-url="{share_url}">Copy share link</button>'
         "</div>"
     )
 
@@ -1759,16 +1758,24 @@ def _dashboard_health_view(payload: Mapping[str, object] | None) -> dict[str, ob
     raw_components = payload.get("components") if isinstance(payload, Mapping) else []
     if not isinstance(raw_components, list):
         raw_components = []
+    core_components = {"imap", "db", "scheduler / digests"}
     components: list[dict[str, object]] = []
     counts: Counter[str] = Counter()
+    core_statuses: list[str] = []
+    auxiliary_down = 0
     for item in raw_components[:5]:
         if not isinstance(item, Mapping):
             continue
+        name = str(item.get("name") or "Component").strip() or "Component"
         status = str(item.get("status") or "unknown").strip().lower() or "unknown"
         counts[status] += 1
+        if name.lower() in core_components:
+            core_statuses.append(status)
+        elif status == "down":
+            auxiliary_down += 1
         components.append(
             {
-                "name": str(item.get("name") or "Component").strip() or "Component",
+                "name": name,
                 "status": status.upper(),
                 "status_class": _status_class_for_label(status),
                 "detail": str(
@@ -1789,14 +1796,15 @@ def _dashboard_health_view(payload: Mapping[str, object] | None) -> dict[str, ob
         for item in raw_components
         if isinstance(item, Mapping)
     ]
-    if any(status == "down" for status in statuses):
+    degraded_count = counts.get("degraded", 0) + auxiliary_down
+    if any(status == "down" for status in core_statuses):
         status = "down"
         status_label = "DOWN"
         detail = "One or more core components are down."
-    elif any(status == "degraded" for status in statuses):
+    elif degraded_count:
         status = "degraded"
         status_label = "DEGRADED"
-        detail = f"{counts.get('degraded', 0)} component(s) are degraded."
+        detail = f"{degraded_count} component(s) need attention."
     elif all(status in {"unknown", "unavailable"} for status in statuses):
         status = "unknown"
         status_label = "UNKNOWN"
@@ -2678,6 +2686,8 @@ def _status_strip_view(
             if isinstance(window_values, Mapping):
                 metrics_window = window_values
                 break
+        if not metrics_window and isinstance(metrics_brief, Mapping):
+            metrics_window = metrics_brief
 
     imap_value = _status_from_mapping(gates_state, keys=["imap", "mail", "inbox"])
     llm_failure_rate = None
@@ -5790,6 +5800,7 @@ def create_app(
             explicit_status: str = "",
             hard_down: bool = False,
             degraded: bool = False,
+            use_age_threshold: bool = True,
         ) -> str:
             normalized_status = str(explicit_status or "").strip().lower()
             if normalized_status in {"unknown", "unavailable", "disabled", "not configured"}:
@@ -5797,6 +5808,11 @@ def create_app(
             parsed = _parse_datetime_value(last_ok)
             if hard_down:
                 return "down"
+            if not use_age_threshold and normalized_status:
+                if normalized_status in {"warn", "degraded", "partial"}:
+                    return "degraded"
+                if normalized_status in {"ok", "live", "success"}:
+                    return "ok"
             if parsed is None:
                 return "unknown"
             age_seconds = max(now_ts - parsed.timestamp(), 0.0)
@@ -5923,6 +5939,7 @@ def create_app(
                 explicit_status=normalized_status_text,
                 hard_down=normalized_status_text == "down",
                 degraded=normalized_status_text in {"warn", "degraded", "partial"},
+                use_age_threshold=False,
             )
             incident = incident_by_component.get(component_name, {})
             raw_detail = str(incident.get("symptom") or "").strip()

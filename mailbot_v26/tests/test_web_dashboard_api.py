@@ -9,7 +9,7 @@ from pathlib import Path
 from mailbot_v26.observability.processing_span import ProcessingSpanRecorder
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.tests._web_helpers import login_with_csrf
-from mailbot_v26.web_observability.app import create_app
+from mailbot_v26.web_observability.app import _dashboard_health_view, create_app
 
 
 def _insert_event(
@@ -370,6 +370,23 @@ def test_api_dashboard_observability_sections_stay_honest_without_data(
     assert data["meta"]["sections"]["latency"]["status"] == "unknown"
     assert data["meta"]["sections"]["health"]["status"] == "unknown"
     assert data["meta"]["sections"]["ai"]["status"] == "unavailable"
+
+
+def test_dashboard_health_view_treats_auxiliary_telegram_down_as_degraded() -> None:
+    payload = {
+        "components": [
+            {"name": "IMAP", "status": "ok"},
+            {"name": "DB", "status": "ok"},
+            {"name": "Scheduler / Digests", "status": "ok"},
+            {"name": "Telegram", "status": "down"},
+            {"name": "LLM", "status": "ok"},
+        ]
+    }
+
+    health = _dashboard_health_view(payload)
+
+    assert health["status"] == "degraded"
+    assert health["status_label"] == "DEGRADED"
 
 
 def test_api_dashboard_survives_empty_db(tmp_path: Path) -> None:
@@ -1342,6 +1359,40 @@ def test_health_status_down_when_no_success_over_60_min(tmp_path: Path) -> None:
 
     components = {row["name"]: row for row in resp.get_json()["components"]}
     assert components["IMAP"]["status"] == "down"
+
+
+def test_health_status_keeps_db_snapshot_signal_without_false_down_on_idle(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "health-status-idle-snapshot.sqlite"
+    KnowledgeDB(db_path)
+    ProcessingSpanRecorder(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_health_snapshot(
+            conn,
+            snapshot_id="snap-idle",
+            ts_utc=(now - timedelta(hours=2)).timestamp(),
+        )
+        _insert_processing_span(
+            conn,
+            span_id="span-idle",
+            ts_start_utc=(now - timedelta(hours=2, minutes=1)).timestamp(),
+            ts_end_utc=(now - timedelta(hours=2)).timestamp(),
+            health_snapshot_id="snap-idle",
+        )
+        conn.commit()
+
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    components = {row["name"]: row for row in resp.get_json()["components"]}
+    assert components["DB"]["status"] == "ok"
 
 
 def test_health_status_shows_human_readable_cause_not_traceback(tmp_path: Path) -> None:

@@ -53,11 +53,12 @@ password = CHANGE_ME
 allow_local_smoke_bypass = false
 
 [llm]
-primary = cloudflare
+primary = gigachat
 
 [gigachat]
 enabled = true
-api_key = CHANGE_ME
+; Runtime credential lives in accounts.ini [gigachat].
+; Legacy-only fallback remains supported in code for old settings.ini files.
 
 [cloudflare]
 enabled = true

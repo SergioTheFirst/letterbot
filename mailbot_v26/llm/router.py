@@ -321,8 +321,10 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         )
 
     if resolved.two_file_mode:
-        # 2-file mode source-of-truth: routing + secrets from accounts.ini.
-        # Compatibility: if a secret is still only in legacy keys.ini, consume it when present.
+        # 2-file mode contract:
+        # - provider routing lives in settings.ini [llm]
+        # - runtime credentials live in accounts.ini
+        # - keys.ini and settings.ini credentials remain legacy-only fallbacks
         llm_section = parser["llm"] if "llm" in parser else parser["DEFAULT"]
         cloudflare_creds_section = (
             accounts_parser["cloudflare"]
@@ -331,15 +333,6 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
                 keys_parser["cloudflare"]
                 if "cloudflare" in keys_parser
                 else accounts_parser["DEFAULT"]
-            )
-        )
-        gigachat_creds_section = (
-            accounts_parser["gigachat"]
-            if "gigachat" in accounts_parser
-            else (
-                keys_parser["gigachat"]
-                if "gigachat" in keys_parser
-                else parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
             )
         )
     else:
@@ -354,11 +347,19 @@ def _load_llm_config(base_dir: Path) -> LLMRouterConfig:
         )
 
     gigachat_section = parser["gigachat"] if "gigachat" in parser else parser["DEFAULT"]
-    gigachat_creds_section = (
-        accounts_parser["gigachat"]
-        if "gigachat" in accounts_parser
-        else gigachat_section
-    )
+    if resolved.two_file_mode:
+        if "gigachat" in accounts_parser and str(
+            accounts_parser["gigachat"].get("api_key", "")
+        ).strip():
+            gigachat_creds_section = accounts_parser["gigachat"]
+        elif "gigachat" in keys_parser and str(
+            keys_parser["gigachat"].get("api_key", "")
+        ).strip():
+            gigachat_creds_section = keys_parser["gigachat"]
+        else:
+            gigachat_creds_section = gigachat_section
+    else:
+        gigachat_creds_section = gigachat_section
     cloudflare_section = (
         parser["cloudflare"] if "cloudflare" in parser else parser["DEFAULT"]
     )
