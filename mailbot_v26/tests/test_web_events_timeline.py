@@ -116,12 +116,11 @@ def _build_app(tmp_path: Path):
     return create_app(db_path=db_path, password="pw", secret_key="secret")
 
 
-def test_events_auth_required(tmp_path: Path) -> None:
+def test_events_page_accessible_without_login(tmp_path: Path) -> None:
     app = _build_app(tmp_path)
     with app.test_client() as client:
         response = client.get("/events")
-        assert response.status_code == 302
-        assert "/login" in response.headers.get("Location", "")
+        assert response.status_code == 200
 
 
 def test_events_api_ordering_and_scope(

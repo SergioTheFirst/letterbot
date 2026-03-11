@@ -132,13 +132,13 @@ def _freeze_now(monkeypatch: pytest.MonkeyPatch, *, ts: float) -> None:
     monkeypatch.setattr("mailbot_v26.web_observability.app.datetime", FrozenDateTime)
 
 
-def test_learning_auth_required(tmp_path: Path) -> None:
+def test_learning_page_and_api_accessible_without_login(tmp_path: Path) -> None:
     app = _prepare_app(tmp_path)
     with app.test_client() as client:
         response = client.get("/learning")
-        assert response.status_code == 302
+        assert response.status_code == 200
         api_response = client.get("/api/v1/intelligence/learning_summary")
-        assert api_response.status_code == 302
+        assert api_response.status_code == 200
 
 
 def test_learning_api_deterministic(

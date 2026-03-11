@@ -18,7 +18,7 @@ def _build_app(tmp_path: Path, support: SupportSettings) -> object:
     )
 
 
-def test_support_page_requires_auth(tmp_path: Path) -> None:
+def test_support_page_accessible_without_login(tmp_path: Path) -> None:
     app = _build_app(
         tmp_path,
         SupportSettings(
@@ -29,7 +29,7 @@ def test_support_page_requires_auth(tmp_path: Path) -> None:
     )
     with app.test_client() as client:
         response = client.get("/support")
-        assert response.status_code in {302, 403}
+        assert response.status_code == 200
 
 
 def test_support_page_renders_methods(tmp_path: Path) -> None:
@@ -139,7 +139,8 @@ def test_support_page_hides_when_disabled(tmp_path: Path) -> None:
 
         home = client.get("/")
         body = home.get_data(as_text=True)
-        assert "Support" not in body
+        assert 'href="/support"' not in body
+        assert "topbar-donate" not in body
 
 
 def test_support_page_renders_from_ini_fallback(tmp_path: Path) -> None:

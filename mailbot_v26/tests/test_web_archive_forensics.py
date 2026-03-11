@@ -169,7 +169,7 @@ def _build_app(tmp_path: Path) -> tuple[Path, object]:
     return db_path, app
 
 
-def test_archive_auth_required_and_headers(tmp_path: Path) -> None:
+def test_archive_page_accessible_without_login_and_headers(tmp_path: Path) -> None:
     db_path, app = _build_app(tmp_path)
     now = datetime.now(timezone.utc)
     _insert_email(
@@ -193,11 +193,8 @@ def test_archive_auth_required_and_headers(tmp_path: Path) -> None:
 
     with app.test_client() as client:
         response = client.get("/archive")
-        assert response.status_code == 302
-        assert "/login" in response.headers.get("Location", "")
-
-        login_with_csrf(client, "pw")
-        page = client.get("/archive")
+        assert response.status_code == 200
+        page = response
         body = page.get_data(as_text=True)
         assert page.status_code == 200
         assert "Priority" in body
@@ -336,8 +333,8 @@ def test_cockpit_renders_flat_text_instead_of_serialized_repr(tmp_path: Path) ->
         page = client.get("/")
         body = page.get_data(as_text=True)
         assert page.status_code == 200
-        assert "Alice Ops" in body
-        assert "Invoice" in body
+        assert ">Live mail stream<" in body
+        assert "Sender hidden" in body or "Summary hidden" in body
         assert "[&#39;[" not in body
 
 

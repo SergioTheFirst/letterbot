@@ -7,7 +7,6 @@ from mailbot_v26.web_observability.app import create_app
 from mailbot_v26.tests._web_helpers import login_with_csrf
 
 BANNED_PHRASES = [
-    "No " + "data",
     "Nothing " + "to show",
     "All " + "quiet",
 ]

@@ -115,13 +115,9 @@ def _prepare_app(tmp_path: Path, *, attention_cost: float = 0.0):
     )
 
 
-def test_attention_auth_required(tmp_path: Path) -> None:
+def test_attention_page_accessible_without_login(tmp_path: Path) -> None:
     app = _prepare_app(tmp_path)
     with app.test_client() as client:
-        response = client.get("/attention")
-        assert response.status_code == 302
-        assert "/login" in response.headers.get("Location", "")
-        login_with_csrf(client, "pw")
         response = client.get("/attention")
         assert response.status_code == 200
 
