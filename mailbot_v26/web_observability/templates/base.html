@@ -11,13 +11,16 @@
   {% set vars = dashboard_vars if dashboard_vars is defined and dashboard_vars else None %}
   {% set donate_url = support_url if support_enabled else '' %}
   {% set donate_cta_url = donate_url or ('/support' if support_enabled and support_nav_enabled else '') %}
+  {% set community_url = "https://t.me/+1xHH6NwJONVlZTA6" %}
+  {% set donate_qr_url = homepage_donate.qr_image_data_uri if homepage_donate and homepage_donate.qr_image_data_uri else '' %}
+  {% set donate_qr_alt = homepage_donate.qr_alt if homepage_donate and homepage_donate.qr_alt else 'QR-код для поддержки Letterbot' %}
   <div class="app-shell">
     <header class="topbar">
       <div class="topbar-primary">
         <a class="brand-mark" href="{{ url_for('index') }}" aria-label="Letterbot observability home">LB</a>
         <div class="brand-stack">
-          <div class="brand">Letterbot Observability</div>
-          <div class="subtitle">{{ scope_hint or "Read-only runtime intelligence from canonical events and persisted state." }}</div>
+          <div class="brand">Letterbot</div>
+          <div class="subtitle"><a class="community-link" href="{{ community_url }}" target="_blank" rel="noopener noreferrer">Telegram-канал</a></div>
         </div>
       </div>
       <div class="topbar-actions">
@@ -29,10 +32,20 @@
           aria-label="Support Letterbot"
         >
           <span class="topbar-donate-icon" aria-hidden="true">◌</span>
-          <span>Support</span>
+          <span>Поддержать</span>
         </a>
         {% endif %}
-        <div class="topbar-version">v{{ app_version }}</div>
+        {% if donate_cta_url and donate_qr_url %}
+        <a
+          class="topbar-donate-qr"
+          href="{{ donate_cta_url }}"
+          {% if donate_cta_url.startswith('http') %}target="_blank" rel="noopener noreferrer"{% endif %}
+          aria-label="Поддержать Letterbot"
+        >
+          <img src="{{ donate_qr_url }}" alt="{{ donate_qr_alt }}" width="44" height="44">
+          <span class="topbar-donate-qr-caption">донат</span>
+        </a>
+        {% endif %}
       </div>
     </header>
 
@@ -40,25 +53,25 @@
     <section class="toolbar-shell">
       <div class="toolbar-main">
         <nav class="nav">
-          <a href="{{ url_for('index') }}" class="nav-link {% if request.path in ['/', '/cockpit', '/dashboard'] %}active{% endif %}">Cockpit</a>
-          <a href="{{ url_for('archive') }}" class="nav-link {% if request.path.startswith('/archive') %}active{% endif %}">Archive</a>
+          <a href="{{ url_for('index') }}" class="nav-link {% if request.path in ['/', '/cockpit', '/dashboard'] %}active{% endif %}">Главная</a>
+          <a href="{{ url_for('archive') }}" class="nav-link {% if request.path.startswith('/archive') %}active{% endif %}">Архив</a>
           <a href="{{ url_for('health') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">Health</a>
-          <a href="{{ url_for('events') }}" class="nav-link {% if request.path == '/events' %}active{% endif %}">Events</a>
+          <a href="{{ url_for('events') }}" class="nav-link {% if request.path == '/events' %}active{% endif %}">События</a>
           <a href="{{ url_for('doctor') }}" class="nav-link {% if request.path.startswith('/doctor') %}active{% endif %}">Doctor</a>
-          <a href="{{ url_for('commitments') }}" class="nav-link {% if request.path.startswith('/commitments') %}active{% endif %}">Commitments</a>
+          <a href="{{ url_for('commitments') }}" class="nav-link {% if request.path.startswith('/commitments') %}active{% endif %}">Обязательства</a>
           <a href="{{ url_for('latency') }}" class="nav-link {% if request.path == '/latency' %}active{% endif %}">Latency</a>
-          <a href="{{ url_for('attention') }}" class="nav-link {% if request.path == '/attention' %}active{% endif %}">Attention</a>
+          <a href="{{ url_for('attention') }}" class="nav-link {% if request.path == '/attention' %}active{% endif %}">Фокус</a>
           <a href="{{ url_for('learning') }}" class="nav-link {% if request.path == '/learning' %}active{% endif %}">Learning</a>
-          <a href="{{ url_for('relationships') }}" class="nav-link {% if request.path.startswith('/relationships') %}active{% endif %}">Relationships</a>
-          {% if cfg.features.donate_enabled and support_nav_enabled %}<a href="{{ url_for('support') }}" class="nav-link {% if request.path.startswith('/support') %}active{% endif %}">Support</a>{% endif %}
+          <a href="{{ url_for('relationships') }}" class="nav-link {% if request.path.startswith('/relationships') %}active{% endif %}">Связи</a>
+          {% if cfg.features.donate_enabled and support_nav_enabled %}<a href="{{ url_for('support') }}" class="nav-link {% if request.path.startswith('/support') %}active{% endif %}">Поддержка</a>{% endif %}
         </nav>
         <form method="get" action="{{ request.path }}" class="dashboard-vars">
           <div class="var-field">
-            <label for="account_emails">Account scope</label>
-            <input id="account_emails" name="account_emails" type="text" value="{{ vars.account_emails|join(',') if vars else '' }}" placeholder="comma-separated">
+            <label for="account_emails">Аккаунты</label>
+            <input id="account_emails" name="account_emails" type="text" value="{{ vars.account_emails|join(',') if vars else '' }}" placeholder="через запятую">
           </div>
           <div class="var-field">
-            <label for="window_days">Window</label>
+            <label for="window_days">Период</label>
             <select id="window_days" name="window_days">
               {% set window_val = vars.window_days if vars else 7 %}
               {% for option in [7, 30, 90] %}
@@ -71,7 +84,7 @@
           </div>
           {% if not hide_limit %}
           <div class="var-field">
-            <label for="limit">Limit</label>
+            <label for="limit">Лимит</label>
             {% set limit_val = vars.limit if vars else 25 %}
             <select id="limit" name="limit">
               {% for option in [10, 25, 50] %}
@@ -95,8 +108,8 @@
           {% if account_email %}<input type="hidden" name="account_email" value="{{ account_email }}">{% endif %}
           {% if cockpit_mode %}<input type="hidden" name="mode" value="{{ cockpit_mode }}">{% endif %}
           <div class="var-actions">
-            <button type="submit">Apply</button>
-            <button type="button" class="ghost" id="copy-share-link" data-share-url="{{ share_url|default('') }}">Copy share link</button>
+            <button type="submit">Применить</button>
+            <button type="button" class="ghost" id="copy-share-link" data-share-url="{{ share_url|default('') }}">Копировать ссылку</button>
           </div>
         </form>
       </div>
@@ -123,13 +136,13 @@
       <div class="footer-links">
         <a href="https://letterbot.ru" target="_blank" rel="noopener noreferrer">LetterBot.ru</a>
         <a href="mailto:master@letterbot.ru">master@letterbot.ru</a>
-        {% if support_nav_enabled %}<a href="/support" class="footer-support-link">Support</a>{% endif %}
+        {% if support_nav_enabled %}<a href="/support" class="footer-support-link">Поддержка</a>{% endif %}
         {% if donate_url %}
         <a
           href="{{ donate_url }}"
           class="footer-donate-link"
           {% if donate_url.startswith('http') %}target="_blank" rel="noopener noreferrer"{% endif %}
-        >Donate</a>
+        >Поддержать</a>
         {% endif %}
       </div>
     </footer>
@@ -141,8 +154,8 @@
         copyBtn.addEventListener('click', function() {
           const url = copyBtn.dataset.shareUrl || window.location.href;
           const onSuccess = () => {
-            copyBtn.textContent = 'Link copied';
-            setTimeout(() => { copyBtn.textContent = 'Copy share link'; }, 2000);
+            copyBtn.textContent = 'Ссылка скопирована';
+            setTimeout(() => { copyBtn.textContent = 'Копировать ссылку'; }, 2000);
           };
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(url).then(onSuccess);

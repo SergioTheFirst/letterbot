@@ -21,7 +21,7 @@ class EventEmitter:
 
     def _init_db(self) -> None:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10) as conn:
                 conn.execute("PRAGMA journal_mode=WAL;")
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS events_v1 (
@@ -85,7 +85,7 @@ class EventEmitter:
         payload = json.dumps(event.payload, ensure_ascii=False)
         payload_json = event.payload_json if event.payload_json is not None else payload
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10) as conn:
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO events_v1 (

@@ -162,6 +162,7 @@
             offline.classList.add('active');
           });
       };
+      document.addEventListener('letterbot:page-visible', refresh);
       setInterval(refresh, {{ status_refresh_ms }});
     })();
 
@@ -183,7 +184,15 @@
             offline.classList.add('active');
           });
       };
+      document.addEventListener('letterbot:page-visible', refresh);
       setInterval(refresh, {{ health_refresh_ms }});
     })();
+  </script>
+  <script>
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        document.dispatchEvent(new Event('letterbot:page-visible'));
+      }
+    });
   </script>
 {% endblock %}

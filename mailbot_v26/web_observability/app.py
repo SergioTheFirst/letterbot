@@ -4060,7 +4060,7 @@ def create_app(
             app,
             "cockpit.html",
             title=app.config["APP_TITLE"],
-            page_title="Bridge Cockpit",
+            page_title="",
             scope_hint=scope_hint,
             dashboard_vars=dashboard_vars,
             account_email=account_email,

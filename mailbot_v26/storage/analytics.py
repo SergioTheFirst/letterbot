@@ -4640,68 +4640,71 @@ class KnowledgeAnalytics:
         account_ids = self._normalize_account_scope(account_email, account_emails)
         if not account_ids or days <= 0 or limit <= 0:
             return []
-        since_dt = (now or datetime.now(timezone.utc)) - timedelta(days=days)
-        email_clause, email_params = self._account_scope_clause(account_ids)
-        if email_clause:
-            email_clause = email_clause.replace("account_id", "account_email")
-        sender_rows = self._execute_select(
-            (
-                "SELECT LOWER(COALESCE(from_email, '')) AS sender_email, COUNT(*) AS emails_count "
-                "FROM emails "
-                "WHERE TRIM(COALESCE(from_email, '')) != '' "
-                "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
-                f"{email_clause} "
-                "GROUP BY LOWER(COALESCE(from_email, '')) "
-                "ORDER BY emails_count DESC "
-                "LIMIT ?"
-            ),
-            [since_dt.timestamp(), *email_params, limit],
-        )
-        now_ts = (now or datetime.now(timezone.utc)).timestamp()
-        grouped_senders: dict[str, dict[str, object]] = {}
-        for row in sender_rows:
-            sender = str(row.get("sender_email") or "").strip().lower()
-            if not sender:
-                continue
-            profile_key = self._sender_profile_key(sender)
-            entry = grouped_senders.setdefault(
-                profile_key,
-                {
-                    "sender_emails": set(),
-                    "emails_count": 0,
-                    "representative_sender": sender,
-                },
+        try:
+            since_dt = (now or datetime.now(timezone.utc)) - timedelta(days=days)
+            email_clause, email_params = self._account_scope_clause(account_ids)
+            if email_clause:
+                email_clause = email_clause.replace("account_id", "account_email")
+            sender_rows = self._execute_select(
+                (
+                    "SELECT LOWER(COALESCE(from_email, '')) AS sender_email, COUNT(*) AS emails_count "
+                    "FROM emails "
+                    "WHERE TRIM(COALESCE(from_email, '')) != '' "
+                    "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                    f"{email_clause} "
+                    "GROUP BY LOWER(COALESCE(from_email, '')) "
+                    "ORDER BY emails_count DESC "
+                    "LIMIT ?"
+                ),
+                [since_dt.timestamp(), *email_params, limit],
             )
-            sender_set = entry["sender_emails"]
-            if isinstance(sender_set, set):
-                sender_set.add(sender)
-            entry["emails_count"] = int(entry.get("emails_count") or 0) + int(
-                row.get("emails_count") or 0
-            )
-            representative = str(entry.get("representative_sender") or "").strip().lower()
-            if not representative or sender < representative:
-                entry["representative_sender"] = sender
+            now_ts = (now or datetime.now(timezone.utc)).timestamp()
+            grouped_senders: dict[str, dict[str, object]] = {}
+            for row in sender_rows:
+                sender = str(row.get("sender_email") or "").strip().lower()
+                if not sender:
+                    continue
+                profile_key = self._sender_profile_key(sender)
+                entry = grouped_senders.setdefault(
+                    profile_key,
+                    {
+                        "sender_emails": set(),
+                        "emails_count": 0,
+                        "representative_sender": sender,
+                    },
+                )
+                sender_set = entry["sender_emails"]
+                if isinstance(sender_set, set):
+                    sender_set.add(sender)
+                entry["emails_count"] = int(entry.get("emails_count") or 0) + int(
+                    row.get("emails_count") or 0
+                )
+                representative = str(entry.get("representative_sender") or "").strip().lower()
+                if not representative or sender < representative:
+                    entry["representative_sender"] = sender
 
-        profiles: list[dict[str, object]] = []
-        ordered_groups = sorted(
-            grouped_senders.items(),
-            key=lambda item: (
-                -int(item[1].get("emails_count") or 0),
-                str(item[1].get("representative_sender") or ""),
-            ),
-        )[:limit]
-        for profile_key, group in ordered_groups:
-            sender = str(group.get("representative_sender") or "").strip().lower()
-            profile = self._build_sender_relationship_profile(
-                account_ids=account_ids,
-                sender_email=sender,
-                now_ts=now_ts,
-                sender_emails=sorted(group.get("sender_emails") or []),
-                sender_profile_key=profile_key,
-            )
-            if profile is not None:
-                profiles.append(profile)
-        return profiles
+            profiles: list[dict[str, object]] = []
+            ordered_groups = sorted(
+                grouped_senders.items(),
+                key=lambda item: (
+                    -int(item[1].get("emails_count") or 0),
+                    str(item[1].get("representative_sender") or ""),
+                ),
+            )[:limit]
+            for profile_key, group in ordered_groups:
+                sender = str(group.get("representative_sender") or "").strip().lower()
+                profile = self._build_sender_relationship_profile(
+                    account_ids=account_ids,
+                    sender_email=sender,
+                    now_ts=now_ts,
+                    sender_emails=sorted(group.get("sender_emails") or []),
+                    sender_profile_key=profile_key,
+                )
+                if profile is not None:
+                    profiles.append(profile)
+            return profiles
+        except sqlite3.OperationalError:
+            return []
 
     def _business_projection_from_interpretations(
         self,
