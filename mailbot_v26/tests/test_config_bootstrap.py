@@ -58,6 +58,36 @@ account_id = CHANGE_ME
     assert run_config_ready(tmp_path, verbose=False) == 0
 
 
+def test_config_ready_rejects_bootstrap_example_account_even_if_fields_are_filled(
+    tmp_path,
+) -> None:
+    (tmp_path / "settings.ini").write_text(
+        "[general]\ncheck_interval = 120\n", encoding="utf-8"
+    )
+    (tmp_path / "accounts.ini").write_text(
+        """
+[example_account]
+login = user@example.com
+password = real-pass
+host = imap.example.com
+port = 993
+use_ssl = true
+telegram_chat_id = 123
+
+[telegram]
+bot_token = tg-token
+chat_id = 123
+""".strip(),
+        encoding="utf-8",
+    )
+
+    ready, critical, warnings = check_config_ready(tmp_path)
+
+    assert ready is False
+    assert any("bootstrap template" in item for item in critical)
+    assert warnings == []
+
+
 def test_validate_config_treats_system_sections_by_own_rules(tmp_path) -> None:
     (tmp_path / "settings.ini").write_text(
         "[general]\ncheck_interval = 120\n", encoding="utf-8"

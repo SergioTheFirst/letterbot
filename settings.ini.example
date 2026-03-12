@@ -1,0 +1,208 @@
+[general]
+check_interval = 120
+max_email_mb = 15
+max_attachment_mb = 15
+max_zip_uncompressed_mb = 80
+max_extracted_chars = 50000
+max_extracted_total_chars = 120000
+admin_chat_id =
+attention_cost_per_hour = 0
+
+[maintenance]
+maintenance_mode = 0
+
+[ingest]
+allow_prestart_emails = false
+first_run_bootstrap_hours = 24
+first_run_bootstrap_max_messages = 20
+
+[storage]
+db_path = data/mailbot.sqlite
+
+[web]
+host = 127.0.0.1
+port = 8787
+
+[telegram_ui]
+; Show engineering DecisionTrace in Telegram action row (false = hidden in normal UX).
+show_decision_trace = false
+
+[web_ui]
+; Password for Web UI login. Empty is allowed only as local fallback and logs a warning.
+password = CHANGE_ME
+; Explicitly allow local smoke bypass for loopback-only/dev-safe checks (default keeps auth/CIDR strict).
+allow_local_smoke_bypass = false
+
+[llm]
+primary = gigachat
+
+[gigachat]
+enabled = true
+; Runtime credential lives in accounts.ini [gigachat].
+; Legacy-only fallback remains supported in code for old settings.ini files.
+
+[cloudflare]
+enabled = true
+
+[llm_safety]
+gigachat_max_consecutive_errors = 3
+gigachat_max_latency_sec = 10
+gigachat_cooldown_sec = 600
+
+[llm_queue]
+llm_request_queue_enabled = false
+max_concurrent_llm_calls = 1
+
+[llm_usage]
+llm_percentile_threshold = 80
+llm_usage_window_days = 7
+force_llm_always = false
+
+[ui]
+locale = ru
+
+[branding]
+show_watermark = true
+
+[features]
+enable_auto_priority = true
+enable_daily_digest = true
+enable_weekly_digest = true
+enable_weekly_accuracy_report = false
+enable_weekly_calibration_report = false
+enable_digest_insights = false
+enable_digest_action_templates = false
+enable_anomaly_alerts = true
+enable_attention_economics = false
+enable_hierarchical_mail_types = false
+enable_quality_metrics = true
+enable_preview_actions = true
+enable_priority_v2 = true
+enable_narrative_binding = true
+enable_narrative_patterns = true
+enable_circadian_delivery = true
+enable_flow_protection = false
+enable_attention_debt = true
+enable_surprise_budget = true
+enable_silence_as_signal = enabled
+enable_deadlock_detection = enabled
+enable_premium_processor = true
+enable_premium_clarity_v1 = true
+enable_behavior_metrics_digest = false
+enable_trust_bootstrap = false
+enable_regret_minimization = false
+enable_uncertainty_queue = false
+enable_commitment_chain_digest = false
+
+[support]
+; Master switch: false disables /support page and all web support surfaces.
+enabled = false
+; Visibility switch: hides nav/footer/cockpit link while keeping /support available when enabled=true.
+show_in_nav = true
+; Card/page title for support block.
+label = ?????????? LetterBot.ru
+; Calm helper text shown on support page hero.
+text = LetterBot.ru остаётся бесплатным. Спасибо за поддержку развития.
+; Optional CTA link (example: Boosty/Donation page).
+url = https://example.com/support
+; Secondary details line (bank, SBP, context).
+details = Например: Boosty / СБП / карта
+; Optional QR image path relative to config folder (png/jpg/svg).
+qr_image = support_qr.png
+; Weekly Telegram support footer switch (existing behavior, rate-limited).
+telegram = true
+; Min days between asks (hard cap: 30 by default).
+min_days_between_asks = 30
+; Short message shown in weekly digest footer.
+message = Поддержать LetterBot.ru → {url}
+
+[premium_clarity]
+premium_clarity_confidence_dots = auto
+premium_clarity_confidence_threshold = 75
+premium_clarity_confidence_dots_scale = 10
+
+[daily_digest]
+enabled = true
+hour = 9
+minute = 0
+
+[weekly_digest]
+weekday = fri
+hour = 19
+minute = 0
+
+[weekly_accuracy_report]
+window_days = 7
+
+[weekly_calibration_report]
+window_days = 7
+top_n = 3
+min_corrections = 10
+
+[digest_insights]
+window_days = 7
+max_items = 3
+
+[commitment_chain_digest]
+window_days = 30
+max_entities = 3
+max_items_per_entity = 2
+
+[behavior_metrics_digest]
+window_days = 7
+
+[uncertainty_queue]
+window_days = 1
+min_confidence = 70
+max_items = 5
+
+[trust_bootstrap]
+learning_days = 14
+min_samples = 10
+max_allowed_surprise_rate = 0.30
+hide_action_templates_until_ready = true
+templates_window_days = 7
+templates_min_corrections = 10
+templates_max_surprise_rate = 0.15
+
+[regret_minimization]
+window_days = 90
+trust_drop_window_days = 7
+min_samples = 5
+
+[delivery_policy]
+immediate_value_threshold = 60
+critical_risk_threshold = 80
+
+[flow_protection]
+focus_hours = 9-12
+
+[auto_priority_gate]
+enabled = true
+window_days = 30
+min_samples = 10
+max_correction_rate = 0.15
+cooldown_hours = 168
+
+[deadlock_policy]
+window_days = 5
+min_messages = 10
+cooldown_hours = 168
+max_per_run = 20
+
+[silence_policy]
+lookback_days = 60
+min_messages = 5
+silence_factor = 3.0
+min_silence_days = 7
+cooldown_hours = 336
+max_per_run = 20
+
+[trust]
+half_life_days = 90
+weight_commitment = 0.5
+weight_response = 0.3
+weight_trend = 0.2
+max_response_stddev_hours = 72
+min_response_samples = 2
+min_trend_samples = 2

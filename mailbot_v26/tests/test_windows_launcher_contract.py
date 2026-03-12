@@ -130,3 +130,21 @@ def test_letterbot_bat_uses_python_launcher_fallback_chain() -> None:
     assert 'fc /b "%REQ_FILE%" "%REQ_STAMP%" >nul' in text
     assert 'copy /Y "%REQ_FILE%" "%REQ_STAMP%" >nul' in text
     assert "Dependencies are up to date." in text
+
+
+def test_letterbot_bat_start_banner_is_truthful() -> None:
+    text = (REPO_ROOT / "letterbot.bat").read_text(encoding="utf-8")
+
+    assert "LetterBot.ru is running." not in text
+    assert "Launching LetterBot.ru..." in text
+    assert "Web UI:  host/port from [web] in settings.ini" in text
+
+
+def test_letterbot_bat_config_not_ready_hint_mentions_bootstrap_example() -> None:
+    text = (REPO_ROOT / "letterbot.bat").read_text(encoding="utf-8")
+
+    assert "Open accounts.ini and replace CHANGE_ME values." in text
+    assert (
+        "Also rename [example_account] and replace example login/host values."
+        in text
+    )

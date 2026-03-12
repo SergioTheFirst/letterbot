@@ -15,6 +15,7 @@ from mailbot_v26.config_yaml import (
 )
 
 SYSTEM_SECTIONS = {"telegram", "cloudflare", "gigachat", "llm"}
+BOOTSTRAP_EXAMPLE_ACCOUNT_ID = "example_account"
 
 
 SETTINGS_TEMPLATE = """[general]
@@ -371,6 +372,10 @@ def _is_imap_section(section_name: str) -> bool:
     return section_name.lower() not in SYSTEM_SECTIONS
 
 
+def _is_bootstrap_example_account(section_name: str) -> bool:
+    return section_name.strip().lower() == BOOTSTRAP_EXAMPLE_ACCOUNT_ID
+
+
 def check_config_ready(
     base_dir: Path = CONFIG_DIR,
 ) -> tuple[bool, list[str], list[str]]:
@@ -398,6 +403,13 @@ def check_config_ready(
         if not ACCOUNT_ID_PATTERN.fullmatch(section_name):
             critical.append(
                 f"Invalid IMAP account section '{section_name}': use lowercase [a-z0-9_], no spaces"
+            )
+            continue
+
+        if _is_bootstrap_example_account(section_name):
+            critical.append(
+                "[example_account] is still the bootstrap template: rename the section "
+                "and replace example login/host values"
             )
             continue
 

@@ -72,7 +72,7 @@ def test_first_run_config_ready_fails_on_placeholder_values(
 
     assert exit_code == 2
     assert "STATUS: NOT_READY" in output
-    assert "password" in output
+    assert "bootstrap template" in output
     assert "No ready IMAP account found" in output
     assert "bot_token" in output
 
@@ -122,7 +122,7 @@ def test_config_ready_output_is_human_readable(
     assert exit_code == 2
     assert "Traceback" not in output
     assert "ConfigParser" not in output
-    assert "password" in output
+    assert "bootstrap template" in output
     assert "bot_token" in output
 
 
@@ -153,6 +153,37 @@ def test_first_run_placeholder_credentials_give_clear_message(
     assert "password" in output
     assert "host" in output
     assert "Traceback" not in output
+
+
+def test_first_run_example_account_requires_rename(tmp_path: Path, capsys) -> None:
+    (tmp_path / "settings.ini").write_text("[general]\ncheck_interval=120\n", encoding="utf-8")
+    (tmp_path / "accounts.ini").write_text(
+        "\n".join(
+            [
+                "[example_account]",
+                "login = user@example.com",
+                "password = secret-pass",
+                "host = imap.example.com",
+                "port = 993",
+                "use_ssl = true",
+                "telegram_chat_id = 123",
+                "",
+                "[telegram]",
+                "bot_token = tg-token",
+                "chat_id = 123",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    ready, critical, warnings = start_module._run_startup_preflight(tmp_path)  # noqa: SLF001
+    start_module._print_startup_preflight_failure(tmp_path, critical, warnings)  # noqa: SLF001
+
+    output = capsys.readouterr().out
+    assert ready is False
+    assert any("bootstrap template" in item for item in critical)
+    assert "rename the section" in output
+    assert warnings == []
 
 
 def test_first_run_valid_config_returns_true(tmp_path: Path) -> None:
