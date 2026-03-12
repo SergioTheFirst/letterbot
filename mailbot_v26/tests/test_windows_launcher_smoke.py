@@ -249,7 +249,7 @@ def test_letterbot_bat_smoke_runs_from_other_cwd_and_reuses_existing_venv(tmp_pa
     first_run = _run_launcher(repo_root, cwd=first_cwd, env=_launcher_env())
 
     assert first_run.returncode == 0
-    assert "LetterBot.ru is running." in first_run.stdout
+    assert "Launching LetterBot.ru..." in first_run.stdout
     assert (repo_root / "run_stack_called.txt").exists()
 
     second_cwd = tmp_path / "shell two"
@@ -282,6 +282,27 @@ def test_letterbot_bat_smoke_reinstalls_deps_when_requirements_change(
     assert second_run.returncode == 0
     assert "[SETUP] Installing dependencies..." in second_run.stdout
     assert "Dependencies are up to date." not in second_run.stdout
+
+
+@WINDOWS_ONLY
+def test_letterbot_bat_smoke_run_stack_failure_does_not_print_fake_success(
+    tmp_path: Path,
+) -> None:
+    repo_root = _build_fake_repo(
+        tmp_path,
+        repo_name="Run stack failure\\Letterbot",
+        filled_config=True,
+    )
+
+    env = _launcher_env()
+    env["LETTERBOT_FAKE_RUN_STACK_EXIT"] = "5"
+
+    result = _run_launcher(repo_root, cwd=repo_root, env=env)
+
+    assert result.returncode == 5
+    assert "LetterBot.ru is running." not in result.stdout
+    assert "Launching LetterBot.ru..." in result.stdout
+    assert "[ERROR] LetterBot.ru stopped unexpectedly" in result.stdout
 
 
 @WINDOWS_ONLY

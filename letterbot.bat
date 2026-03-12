@@ -19,7 +19,6 @@ set "RUN_PY="
 set "RUN_EXIT=0"
 set "WORKER_LOG="
 set "WEB_LOG="
-set "WEB_URL=http://127.0.0.1:8787"
 set "PYTHON_EXE="
 set "PYTHON_VERSION="
 set "PYTHON_COMMAND="
@@ -75,9 +74,9 @@ if errorlevel 1 echo [WARN] validate-config reported warnings. Continuing.
 
 echo.
 echo ==========================================
-echo  LetterBot.ru is running.
+echo  Launching LetterBot.ru...
 echo ==========================================
-echo  Web UI:  %WEB_URL%
+echo  Web UI:  host/port from [web] in settings.ini
 echo  Stop:    Ctrl+C
 echo ==========================================
 echo.
@@ -209,7 +208,8 @@ echo ==========================================
 echo  [ERROR] Config is not ready
 echo ==========================================
 echo.
-echo  Open accounts.ini and replace every CHANGE_ME value.
+echo  Open accounts.ini and replace CHANGE_ME values.
+echo  Also rename [example_account] and replace example login/host values.
 echo  File: %CONFIG_DIR%\accounts.ini
 echo.
 call :open_accounts_ini

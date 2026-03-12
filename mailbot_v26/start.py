@@ -130,6 +130,10 @@ def _looks_like_placeholder(value: str | None) -> bool:
     return not token or token == "CHANGE_ME"
 
 
+def _is_bootstrap_example_account(section_name: str) -> bool:
+    return section_name.strip().lower() == "example_account"
+
+
 def _run_startup_preflight(config_dir: Path) -> tuple[bool, list[str], list[str]]:
     critical: list[str] = []
     warnings: list[str] = []
@@ -155,6 +159,13 @@ def _run_startup_preflight(config_dir: Path) -> tuple[bool, list[str], list[str]
         return False, critical, warnings
 
     for section_name in imap_sections:
+        if _is_bootstrap_example_account(section_name):
+            critical.append(
+                "[example_account] is still the bootstrap template: rename the section "
+                "and replace example login/host values"
+            )
+            continue
+
         section = parser[section_name]
         missing = [
             key
