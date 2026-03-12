@@ -22,16 +22,17 @@ class StackCommand:
     args: list[str]
 
 
-def _build_worker_command(python_exe: str, config_dir: Path | None) -> StackCommand:
+def _config_dir_args(config_dir: Path | None) -> list[str]:
     if config_dir is None:
-        return StackCommand("worker", [python_exe, "-m", "mailbot_v26"])
-    config_value = str(Path(config_dir).resolve())
-    script = (
-        "from pathlib import Path; "
-        "from mailbot_v26.start import main; "
-        f"main(config_dir=Path({config_value!r}))"
+        return []
+    return ["--config-dir", str(Path(config_dir).resolve())]
+
+
+def _build_worker_command(python_exe: str, config_dir: Path | None) -> StackCommand:
+    return StackCommand(
+        "worker",
+        [python_exe, "-m", "mailbot_v26", *_config_dir_args(config_dir)],
     )
-    return StackCommand("worker", [python_exe, "-c", script])
 
 
 def _build_web_command(
@@ -59,16 +60,10 @@ def _build_web_command(
 
 
 def _build_doctor_command(python_exe: str, config_dir: Path | None) -> StackCommand:
-    if config_dir is None:
-        return StackCommand("doctor", [python_exe, "-m", "mailbot_v26", "doctor"])
-    config_value = str(Path(config_dir).resolve())
-    script = (
-        "from pathlib import Path; "
-        "from mailbot_v26.doctor import report_exit_code, run_doctor; "
-        f"report = run_doctor(Path({config_value!r})); "
-        "raise SystemExit(report_exit_code(report))"
+    return StackCommand(
+        "doctor",
+        [python_exe, "-m", "mailbot_v26", "doctor", *_config_dir_args(config_dir)],
     )
-    return StackCommand("doctor", [python_exe, "-c", script])
 
 
 def _format_command(args: Iterable[str]) -> str:

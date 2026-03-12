@@ -28,6 +28,7 @@ def _base_context(**overrides):
         "insights": [],
         "insight_digest": None,
         "commitments_present": False,
+        "metadata": {"account_email": "master@example.com"},
     }
     data.update(overrides)
     return processor.TelegramBuildContext(**data)
@@ -50,9 +51,23 @@ def test_full_render_contains_priority_circle() -> None:
 
 
 def test_full_render_contains_watermark() -> None:
-    payload, _, _ = processor.build_telegram_payload(_base_context())
+    payload, _, _ = processor.build_telegram_payload(_base_context(priority="🔴"))
 
     assert "Powered by" in payload.html_text
+
+
+def test_message_includes_account_name() -> None:
+    payload, _, _ = processor.build_telegram_payload(_base_context())
+
+    assert "Аккаунт: master@example.com" in payload.html_text
+
+
+def test_powered_line_only_for_high_priority() -> None:
+    medium_payload, _, _ = processor.build_telegram_payload(_base_context(priority="🟡"))
+    high_payload, _, _ = processor.build_telegram_payload(_base_context(priority="🔴"))
+
+    assert "Powered by LetterBot.ru" not in medium_payload.html_text
+    assert "Powered by LetterBot.ru" in high_payload.html_text
 
 
 def test_full_render_contains_attachment_line() -> None:
@@ -69,9 +84,9 @@ def test_initial_keyboard_priority_buttons() -> None:
     )
 
     assert [button["text"] for button in keyboard["inline_keyboard"][0]] == [
-        "🔵 Low",
-        "🟡 Medium",
-        "🔴 High",
+        "🟦▌Low",
+        "🟨▌Medium",
+        "🟥▌High",
     ]
     assert [button["text"] for button in keyboard["inline_keyboard"][1]] == [
         "Snooze 2 часа",
@@ -118,9 +133,9 @@ def test_initial_keyboard_shows_human_readable_actions_and_no_trace() -> None:
     assert len(rows) == 2
     labels = [button["text"] for row in rows for button in row]
     assert [button["text"] for button in rows[0]] == [
-        "🔵 Low",
-        "🟡 Medium",
-        "🔴 High",
+        "🟦▌Low",
+        "🟨▌Medium",
+        "🟥▌High",
     ]
     assert [button["text"] for button in rows[1]] == ["Snooze 2 часа", "Завтра"]
     assert "Почему так?" not in labels

@@ -67,6 +67,7 @@ _INTERNAL_NOISE_MARKERS = (
     "Контрфакты",
 )
 _WATERMARK_LINE = "<i>Powered by LetterBot.ru</i>"
+_HIGH_PRIORITY_TOKENS = {"🔴", "high", "red", "r"}
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,31 @@ def _escape_dynamic(text: str | None) -> str:
     normalized = normalize_mojibake_text(str(text or ""))
     cleaned = strip_disallowed_emojis(normalized)
     return escape_tg_html(cleaned)
+
+
+def _is_high_priority(priority: str | None) -> bool:
+    normalized = normalize_mojibake_text(str(priority or "")).strip().casefold()
+    return normalized in _HIGH_PRIORITY_TOKENS
+
+
+def format_account_footer(account_email: str | None) -> str:
+    safe_account = _escape_dynamic(account_email)
+    if not safe_account:
+        return ""
+    return f"<i>Аккаунт: {safe_account}</i>"
+
+
+def finalize_telegram_message(
+    *, text: str, priority: str, account_email: str | None = None
+) -> str:
+    rendered = str(text or "").strip()
+    lines = [rendered]
+    account_footer = format_account_footer(account_email)
+    if account_footer and account_footer not in rendered:
+        lines.append(account_footer)
+    if _is_high_priority(priority) and _WATERMARK_LINE not in rendered:
+        lines.append(_WATERMARK_LINE)
+    return "\n".join(line for line in lines if line)
 
 
 def _strip_internal_noise(text: str | None) -> str:
@@ -781,7 +807,7 @@ def render_telegram_message(
         message_facts=message_facts,
         relationship_profile=relationship_profile,
     )
-    return dedup_rendered_text(f"{base_text}\n{_WATERMARK_LINE}")
+    return dedup_rendered_text(base_text)
 
 
 def _build_decision_explanation(

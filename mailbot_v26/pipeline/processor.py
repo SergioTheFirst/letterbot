@@ -2525,7 +2525,7 @@ def _build_telegram_text(
             message_facts=message_facts,
             relationship_profile=relationship_profile,
         )
-        return append_watermark(_normalize_mojibake_text(rendered), html=True)
+        return _normalize_mojibake_text(rendered)
     fields = tg_renderer.apply_semantic_gates(
         action_line=resolved_action,
         summary=body_summary,
@@ -2552,10 +2552,7 @@ def _build_telegram_text(
         )
     if attachment_summary:
         lines.append(attachment_summary)
-    return append_watermark(
-        _normalize_mojibake_text(tg_renderer.dedup_rendered_text("\n".join(lines))),
-        html=True,
-    )
+    return _normalize_mojibake_text(tg_renderer.dedup_rendered_text("\n".join(lines)))
 
 
 def _build_progressive_telegram_payload(
@@ -4416,7 +4413,7 @@ def _build_tg_fallback(
     )
     if attachment_summary:
         rendered = f"{rendered}\n{escape_tg_html(attachment_summary)}"
-    return append_watermark(rendered, html=True)
+    return rendered
 
 
 def _build_tg_short_template(*, priority: str, subject: str, from_email: str) -> str:
@@ -4754,6 +4751,11 @@ def build_telegram_payload(
             telegram_text = f"{telegram_text}{escape_tg_html(insights_section)}"
     if context.preview_hint:
         telegram_text = f"{telegram_text}\n💡 {escape_tg_html(_sanitize_preview_line(context.preview_hint))}"
+    telegram_text = tg_renderer.finalize_telegram_message(
+        text=telegram_text,
+        priority=context.priority,
+        account_email=str(context.metadata.get("account_email") or ""),
+    )
     if render_mode != TelegramRenderMode.FULL or payload_invalid:
         fallback_reason = (
             ",".join(fallback_reasons)

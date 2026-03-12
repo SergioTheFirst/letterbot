@@ -7,4 +7,4 @@
 Почему:
 • срок 2026-05-01
 • найден договор
-<i>Powered by LetterBot.ru</i>
+<i>Аккаунт: render-contract@example.com</i>

@@ -560,6 +560,11 @@ def _render_tier1_message(snapshot: dict[str, object]) -> str:
         summary=body_summary,
         attachments=attachments if isinstance(attachments, list) else [],
     )
+    base_text = tg_renderer.finalize_telegram_message(
+        text=base_text,
+        priority=priority,
+        account_email=str(snapshot.get("account_email") or ""),
+    )
     priority_source = str(snapshot.get("priority_source") or "").strip().lower()
     if priority_source == "user_override":
         base_text = f"{base_text}\n\u041f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442: {priority} \u0432\u0440\u0443\u0447\u043d\u0443\u044e"

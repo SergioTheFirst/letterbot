@@ -13,7 +13,7 @@ echo =============================================
 
 echo Checking virtual environment...
 if not exist "%REPO_ROOT%\.venv\Scripts\python.exe" (
-    echo ERROR: .venv not found. Please run install_and_run.bat first.
+    echo ERROR: .venv not found. Please run letterbot.bat first.
     exit /b 1
 )
 

@@ -27,19 +27,19 @@ def _safe_button(*, text: str, prefix: str, action: str, message_key: str) -> di
 def _priority_row(message_key: str) -> list[dict[str, str]]:
     return [
         _safe_button(
-            text="🔵 LOW",
+            text="🟦▌Low",
             prefix=PRIORITY_PREFIX,
             action="lo",
             message_key=message_key,
         ),
         _safe_button(
-            text="🟡 MEDIUM",
+            text="🟨▌Medium",
             prefix=PRIORITY_PREFIX,
             action="med",
             message_key=message_key,
         ),
         _safe_button(
-            text="🔴 HIGH",
+            text="🟥▌High",
             prefix=PRIORITY_PREFIX,
             action="hi",
             message_key=message_key,
@@ -178,19 +178,19 @@ def build_notification_keyboard(
 def _priority_row(message_key: str) -> list[dict[str, str]]:
     return [
         _safe_button(
-            text="🔵 Low",
+            text="🟦▌Low",
             prefix=PRIORITY_PREFIX,
             action="lo",
             message_key=message_key,
         ),
         _safe_button(
-            text="🟡 Medium",
+            text="🟨▌Medium",
             prefix=PRIORITY_PREFIX,
             action="med",
             message_key=message_key,
         ),
         _safe_button(
-            text="🔴 High",
+            text="🟥▌High",
             prefix=PRIORITY_PREFIX,
             action="hi",
             message_key=message_key,

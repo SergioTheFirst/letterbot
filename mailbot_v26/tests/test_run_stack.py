@@ -35,6 +35,36 @@ def test_run_stack_dry_run_worker_only() -> None:
     combined = result.stdout + result.stderr
     assert "worker:" in combined
     assert "web:" not in combined
+    assert "-m mailbot_v26" in combined
+
+
+def test_build_worker_command_uses_canonical_module_entrypoint(tmp_path: Path) -> None:
+    from mailbot_v26.tools.run_stack import _build_worker_command
+
+    cmd = _build_worker_command(sys.executable, tmp_path)
+
+    assert cmd.args == [
+        sys.executable,
+        "-m",
+        "mailbot_v26",
+        "--config-dir",
+        str(tmp_path.resolve()),
+    ]
+
+
+def test_build_doctor_command_uses_canonical_module_entrypoint(tmp_path: Path) -> None:
+    from mailbot_v26.tools.run_stack import _build_doctor_command
+
+    cmd = _build_doctor_command(sys.executable, tmp_path)
+
+    assert cmd.args == [
+        sys.executable,
+        "-m",
+        "mailbot_v26",
+        "doctor",
+        "--config-dir",
+        str(tmp_path.resolve()),
+    ]
 
 
 def test_run_stack_dry_run_web_only() -> None:

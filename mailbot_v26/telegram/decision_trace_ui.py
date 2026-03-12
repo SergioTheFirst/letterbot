@@ -50,15 +50,15 @@ def _fallback_keyboard(*, email_id: int, expanded: bool) -> dict[str, Any]:
 def _priority_row(email_id: int) -> list[dict[str, str]]:
     return [
         {
-            "text": "🔵 LOW",
+            "text": "🟦▌Low",
             "callback_data": _safe_callback(f"{PRIO_SET_PREFIX}{email_id}:B"),
         },
         {
-            "text": "🟡 MEDIUM",
+            "text": "🟨▌Medium",
             "callback_data": _safe_callback(f"{PRIO_SET_PREFIX}{email_id}:Y"),
         },
         {
-            "text": "🔴 HIGH",
+            "text": "🟥▌High",
             "callback_data": _safe_callback(f"{PRIO_SET_PREFIX}{email_id}:R"),
         },
     ]
@@ -119,15 +119,15 @@ def build_email_actions_keyboard(
 def _priority_row(email_id: int) -> list[dict[str, str]]:
     return [
         {
-            "text": "🔵 Low",
+            "text": "🟦▌Low",
             "callback_data": _safe_callback(f"{PRIO_SET_PREFIX}{email_id}:B"),
         },
         {
-            "text": "🟡 Medium",
+            "text": "🟨▌Medium",
             "callback_data": _safe_callback(f"{PRIO_SET_PREFIX}{email_id}:Y"),
         },
         {
-            "text": "🔴 High",
+            "text": "🟥▌High",
             "callback_data": _safe_callback(f"{PRIO_SET_PREFIX}{email_id}:R"),
         },
     ]

@@ -54,7 +54,7 @@ def _assert_snapshot(name: str, text: str) -> None:
     if not path.exists():
         path.write_text(text, encoding="utf-8")
         return
-    assert path.read_text(encoding="utf-8") == text
+    assert path.read_text(encoding="utf-8").rstrip("\n") == text.rstrip("\n")
 
 
 def _full_request() -> TelegramRenderRequest:

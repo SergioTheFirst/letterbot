@@ -262,6 +262,29 @@ def test_letterbot_bat_smoke_runs_from_other_cwd_and_reuses_existing_venv(tmp_pa
 
 
 @WINDOWS_ONLY
+def test_letterbot_bat_smoke_reinstalls_deps_when_requirements_change(
+    tmp_path: Path,
+) -> None:
+    repo_root = _build_fake_repo(
+        tmp_path,
+        repo_name="Changed requirements\\Letterbot",
+        filled_config=True,
+        requirements_text="\n",
+    )
+
+    first_run = _run_launcher(repo_root, cwd=repo_root, env=_launcher_env())
+    assert first_run.returncode == 0
+
+    (repo_root / "requirements.txt").write_text("# changed\n", encoding="utf-8")
+
+    second_run = _run_launcher(repo_root, cwd=repo_root, env=_launcher_env())
+
+    assert second_run.returncode == 0
+    assert "[SETUP] Installing dependencies..." in second_run.stdout
+    assert "Dependencies are up to date." not in second_run.stdout
+
+
+@WINDOWS_ONLY
 def test_letterbot_bat_smoke_missing_python_is_actionable(tmp_path: Path) -> None:
     repo_root = _build_fake_repo(
         tmp_path,

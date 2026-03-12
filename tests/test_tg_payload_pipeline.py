@@ -4,9 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 from mailbot_v26.pipeline import processor as processor_module
-from mailbot_v26.ui.branding import WATERMARK_LINE
-
-
 def test_tg_payload_with_attachments():
     attachments = [
         {
@@ -51,7 +48,7 @@ def test_tg_payload_with_attachments():
     assert "- XLS: 1608 chars" in validated
     assert "- PDF: 746 chars" in validated
     assert "- XLS: 2234 chars" in validated
-    assert WATERMARK_LINE in validated
+    assert "Powered by LetterBot.ru" not in validated
 
 
 def test_tg_payload_never_subject_only():
@@ -76,7 +73,7 @@ def test_tg_payload_never_subject_only():
     assert "от hq@example.com" in fallback
     assert subject in fallback
     assert "Действий не требуется" in fallback
-    assert WATERMARK_LINE in fallback
+    assert "Powered by LetterBot.ru" not in fallback
 
 
 def test_tg_payload_validator_blocks_empty():

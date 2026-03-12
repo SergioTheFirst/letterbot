@@ -745,7 +745,8 @@ def test_stage_tg_initial_delivery_uses_pretty_formatter_without_account_prefix(
 
     payload = captured["payload"]
     assert "[account@example.com]" not in payload.html_text
-    assert "Powered by LetterBot.ru" in payload.html_text
+    assert "Аккаунт: account@example.com" in payload.html_text
+    assert "Powered by LetterBot.ru" not in payload.html_text
     assert "🔵 от sender@example.com:" in payload.html_text
     assert payload.reply_markup
     _cleanup_pipeline(email_id)

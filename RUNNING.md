@@ -1,8 +1,8 @@
 # Running LetterBot.ru (one-click)
 
-1. Double-click `run_mailbot.bat` in the repository root.
-2. Optional manual checks: `python -m mailbot_v26.doctor` then `python -m mailbot_v26 validate-config`.
-3. Manual startup (if needed): `python -m mailbot_v26.start`.
+1. Double-click `letterbot.bat` in the repository root.
+2. Optional manual checks: `python -m mailbot_v26 doctor --config-dir .` then `python -m mailbot_v26 validate-config --config-dir .`.
+3. Manual startup (if needed): `python -m mailbot_v26 --config-dir .`.
 
 ## Troubleshooting
 - **Port in use**: stop the process using the port and retry.
@@ -44,4 +44,3 @@ prod_server = true
 - Follow `docs/UPGRADE.md` for the safe new-folder upgrade flow. Review `CHANGELOG.md` before each upgrade.
 - Keep your old `settings.ini` and `accounts.ini` and copy them into the new folder.
 - Run `python -m mailbot_v26 validate-config` before normal start.
-

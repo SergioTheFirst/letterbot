@@ -24,6 +24,7 @@ from mailbot_v26.constants import (
 )
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
 from mailbot_v26.pipeline.tg_renderer import build_attachment_insight
+from mailbot_v26.pipeline.tg_renderer import finalize_telegram_message
 from mailbot_v26.pipeline.tg_renderer import render_telegram_message
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
@@ -701,6 +702,11 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
     )
     if attachment_insight and attachment_insight not in telegram_text:
         telegram_text = f"{telegram_text}\n{attachment_insight}"
+    telegram_text = finalize_telegram_message(
+        text=telegram_text,
+        priority=priority,
+        account_email=ctx.account_email,
+    )
 
     payload = TelegramPayload(
         html_text=telegram_safe(telegram_text.strip()),

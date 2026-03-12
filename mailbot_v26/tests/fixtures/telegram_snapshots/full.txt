@@ -8,4 +8,5 @@
 • найден счет
 • сумма 87 500
 • срок 2026-04-15
+<i>Аккаунт: render-contract@example.com</i>
 <i>Powered by LetterBot.ru</i>

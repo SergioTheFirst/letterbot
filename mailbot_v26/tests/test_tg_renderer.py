@@ -392,7 +392,7 @@ def test_tg_render_premium_human_first_layout() -> None:
     assert "<b><i>Ответить</i></b>" in rendered
     assert "📎 1 вложение: invoice.pdf" in rendered
     assert "Первая строка" in rendered and "Четвертая строка" not in rendered
-    assert "<i>Powered by LetterBot.ru</i>" in rendered
+    assert "Powered by LetterBot.ru" not in rendered
 
 
 def test_tg_render_hides_internal_trace_noise_in_default_ux() -> None:
