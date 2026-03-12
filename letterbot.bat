@@ -40,13 +40,13 @@ if exist "%VENV_PY%" (
 )
 
 call :find_python
-if defined PYTHON_COMMAND goto :create_venv
+if defined PYTHON_EXE goto :create_venv
 if defined OLD_PYTHON_VERSION goto :error_python_version
 goto :error_python_missing
 
 :create_venv
 echo [SETUP] Creating .venv...
-call :run_python_command %PYTHON_COMMAND% -m venv "%VENV_DIR%" >>"%BOOT_LOG%" 2>&1
+"%PYTHON_EXE%" -m venv "%VENV_DIR%" >>"%BOOT_LOG%" 2>&1
 if errorlevel 1 goto :error_venv_create
 if not exist "%VENV_PY%" goto :error_venv_create
 set "RUN_PY=%VENV_PY%"
@@ -268,7 +268,7 @@ if not defined OLD_PYTHON_COMMAND set "OLD_PYTHON_COMMAND=%PROBE_CMD%"
 exit /b 0
 
 :probe_python_accept
-set "PYTHON_EXE=%PROBE_EXE%"
+set "PYTHON_EXE=%PROBE_EXE:^=%"
 set "PYTHON_VERSION=%PROBE_VER%"
 set "PYTHON_COMMAND=%PROBE_CMD%"
 exit /b 0

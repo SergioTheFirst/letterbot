@@ -126,6 +126,9 @@ def test_letterbot_bat_uses_python_launcher_fallback_chain() -> None:
     assert "call :probe_python py -3" in text
     assert "call :probe_python py" in text
     assert "call :probe_python python" in text
+    assert "if defined PYTHON_EXE goto :create_venv" in text
+    assert 'set "PYTHON_EXE=%PROBE_EXE:^=%"' in text
+    assert '"%PYTHON_EXE%" -m venv "%VENV_DIR%"' in text
     assert 'set "REQ_STAMP=%VENV_DIR%\\.deps_ready"' in text
     assert 'fc /b "%REQ_FILE%" "%REQ_STAMP%" >nul' in text
     assert 'copy /Y "%REQ_FILE%" "%REQ_STAMP%" >nul' in text
