@@ -127,4 +127,6 @@ def test_letterbot_bat_uses_python_launcher_fallback_chain() -> None:
     assert "call :probe_python py" in text
     assert "call :probe_python python" in text
     assert 'set "REQ_STAMP=%VENV_DIR%\\.deps_ready"' in text
+    assert 'fc /b "%REQ_FILE%" "%REQ_STAMP%" >nul' in text
+    assert 'copy /Y "%REQ_FILE%" "%REQ_STAMP%" >nul' in text
     assert "Dependencies are up to date." in text

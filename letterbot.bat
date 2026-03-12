@@ -275,13 +275,17 @@ exit /b 0
 
 :install_requirements_if_needed
 if exist "%REQ_STAMP%" (
-    echo [SETUP] Dependencies are up to date.
-    exit /b 0
+    fc /b "%REQ_FILE%" "%REQ_STAMP%" >nul
+    if not errorlevel 1 (
+        echo [SETUP] Dependencies are up to date.
+        exit /b 0
+    )
 )
 echo [SETUP] Installing dependencies...
 "%RUN_PY%" -m pip install -r "%REQ_FILE%" >>"%BOOT_LOG%" 2>&1
 if errorlevel 1 exit /b 1
-> "%REQ_STAMP%" echo ready
+copy /Y "%REQ_FILE%" "%REQ_STAMP%" >nul
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :open_accounts_ini

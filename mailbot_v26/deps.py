@@ -42,7 +42,7 @@ def has(module: str) -> bool:
 def _windows_next_step() -> str:
     return (
         "Windows: активируйте .venv и ставьте пакеты через '\\.venv\\Scripts\\python -m pip install -r requirements.txt' "
-        "или запустите install_and_run.bat."
+        "или запустите letterbot.bat."
     )
 
 

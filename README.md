@@ -36,7 +36,7 @@ Suggested action: pay the invoice
 | **Local web UI** | Cockpit, archive, health, events — observability dashboard on your machine |
 | **Open source** | Code is open. No black boxes |
 
-### Installation
+## Installation
 
 **Requirements:**
 - Python 3.10+
@@ -59,14 +59,19 @@ python -m mailbot_v26 init-config --config-dir mailbot_v26/config
 ```
 
 Fill in the generated files:
+
+## Configuration
 - `mailbot_v26/config/settings.ini` — general settings (Telegram, LLM, operational modes)
 - `mailbot_v26/config/accounts.ini` — IMAP parameters for your mailboxes
 
-### Running
+## Running LetterBot.ru
 
 ```bash
 # Windows
 letterbot.bat
+
+# Built distribution
+run_dist.bat
 
 # Or directly
 python -m mailbot_v26 --config-dir mailbot_v26/config
@@ -129,7 +134,7 @@ See the [LICENSE](LICENSE) file for details.
 |---|---|
 | 🌐 Website | [letterbot.ru](https://letterbot.ru) |
 | 💬 Telegram community | [t.me/+1xHH6NwJONVlZTA6](https://t.me/+1xHH6NwJONVlZTA6) |
-| 📧 Email | [master@letterbot.ru](mailto:master@letterbot.ru) |
+| 📧 Email | [support@example.com](mailto:support@example.com) |
 | ☕ Donate | [Boosty](https://boosty.to/personalbot/donate?qr=true) · [CloudTips](https://pay.cloudtips.ru/p/00d77c6a) |
 
 ---

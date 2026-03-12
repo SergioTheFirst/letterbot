@@ -19,7 +19,7 @@ def test_require_runtime_for_reports_single_clean_error(
     message = str(exc_info.value)
     assert message.startswith("Missing dependency: yaml")
     assert "Install: python -m pip install PyYAML" in message
-    assert "install_and_run.bat" in message
+    assert "letterbot.bat" in message
 
 
 def test_entrypoint_validate_config_fails_cleanly_without_yaml() -> None:

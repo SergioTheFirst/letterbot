@@ -138,6 +138,7 @@ def render_email_notification(request: TelegramRenderRequest) -> TelegramRenderR
             relationship_profile=request.relationship_profile,
             interpretation=request.interpretation,
             preview_hint=request.preview_hint,
+            metadata={"account_email": request.account_email},
         )
         payload, render_mode, payload_invalid = processor.build_telegram_payload(
             build_context

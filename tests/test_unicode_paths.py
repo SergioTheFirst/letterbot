@@ -101,5 +101,10 @@ def test_run_stack_build_worker_command_with_cyrillic_path(tmp_path: Path) -> No
     cyrillic_path.mkdir(parents=True)
 
     cmd = _build_worker_command("python", cyrillic_path)
-    script = cmd.args[2]
-    assert repr(str(cyrillic_path.resolve())) in script
+    assert cmd.args == [
+        "python",
+        "-m",
+        "mailbot_v26",
+        "--config-dir",
+        str(cyrillic_path.resolve()),
+    ]
