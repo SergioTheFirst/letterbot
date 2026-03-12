@@ -20,7 +20,7 @@ jobs:
       actions: read
     steps:
       - name: Run OpenSSF Scorecards
-        uses: ossf/scorecard-action@v2.3.3
+        uses: ossf/scorecard-action@v2.4.3
         with:
           results_file: scorecards.sarif
           results_format: sarif
