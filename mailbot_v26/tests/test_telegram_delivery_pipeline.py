@@ -24,6 +24,7 @@ from mailbot_v26.config_loader import (
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline.processor import InboundMessage, MessageProcessor
+from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.start import (
     _build_telegram_delivery_key,
     _persist_inbound_and_enqueue_parse,
@@ -65,11 +66,11 @@ def _make_config(tmp_path) -> BotConfig:
     )
 
 
-def _seed_queue(storage: Storage, account_email: str) -> int:
+def _seed_queue(storage: Storage, account_email: str, *, uid: int = 1) -> int:
     email_id = storage.upsert_email(
         account_email=account_email,
-        uid=1,
-        message_id="msg-1",
+        uid=uid,
+        message_id=f"msg-{uid}",
         from_email="sender@example.com",
         from_name="Sender",
         subject="Subject",
@@ -745,8 +746,66 @@ def test_stage_tg_initial_delivery_uses_pretty_formatter_without_account_prefix(
 
     payload = captured["payload"]
     assert "[account@example.com]" not in payload.html_text
-    assert "Аккаунт: account@example.com" in payload.html_text
+    assert "Account: account@example.com" in payload.html_text
     assert "Powered by LetterBot.ru" not in payload.html_text
-    assert "🔵 от sender@example.com:" in payload.html_text
+    assert "🔵 from sender@example.com:" in payload.html_text
     assert payload.reply_markup
     _cleanup_pipeline(email_id)
+
+
+def test_stage_tg_respects_persisted_ui_locale_for_subsequent_notifications(
+    monkeypatch, tmp_path
+) -> None:
+    config = _make_config(tmp_path)
+    storage = Storage(config.storage.db_path)
+    processor = _configure_pipeline(config)
+    override_store = RuntimeOverrideStore(config.storage.db_path)
+    captured: list[object] = []
+
+    def fake_send(payload):
+        captured.append(payload)
+        return DeliveryResult(delivered=True, retryable=False)
+
+    monkeypatch.setattr(core_pipeline, "send_telegram", fake_send)
+    monkeypatch.setattr("mailbot_v26.start.send_telegram", fake_send)
+
+    flags = FeatureFlags(base_dir=tmp_path)
+
+    email_id_en = _seed_queue(storage, config.accounts[0].login, uid=1)
+    ctx_en = _seed_pipeline_context(email_id_en, config.accounts[0].login)
+    ctx_en.llm_result = {
+        "text": "Telegram message",
+        "sender": "sender@example.com",
+        "subject": "Subject",
+        "action_line": "Ответить",
+        "summary": "",
+        "attachments": [],
+    }
+    override_store.set_value("ui_locale", "en")
+    _process_queue(storage, config, processor, flags)
+
+    email_id_ru = _seed_queue(storage, config.accounts[0].login, uid=2)
+    ctx_ru = _seed_pipeline_context(email_id_ru, config.accounts[0].login)
+    ctx_ru.llm_result = {
+        "text": "Telegram message",
+        "sender": "sender@example.com",
+        "subject": "Subject",
+        "action_line": "Ответить",
+        "summary": "",
+        "attachments": [],
+    }
+    override_store.set_value("ui_locale", "ru")
+    _process_queue(storage, config, processor, flags)
+
+    assert captured[0].html_text.startswith("🔵 from sender@example.com:")
+    assert "<b><i>Reply</i></b>" in captured[0].html_text
+    assert "<i>Account: account@example.com</i>" in captured[0].html_text
+    assert "Ответить" not in captured[0].html_text
+    assert "Аккаунт:" not in captured[0].html_text
+
+    assert captured[1].html_text.startswith("🔵 от sender@example.com:")
+    assert "<b><i>Ответить</i></b>" in captured[1].html_text
+    assert "<i>Аккаунт: account@example.com</i>" in captured[1].html_text
+
+    _cleanup_pipeline(email_id_en)
+    _cleanup_pipeline(email_id_ru)

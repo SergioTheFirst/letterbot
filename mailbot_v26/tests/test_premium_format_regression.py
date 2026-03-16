@@ -59,7 +59,7 @@ def test_full_render_contains_watermark() -> None:
 def test_message_includes_account_name() -> None:
     payload, _, _ = processor.build_telegram_payload(_base_context())
 
-    assert "Аккаунт: master@example.com" in payload.html_text
+    assert "Account: master@example.com" in payload.html_text
 
 
 def test_powered_line_only_for_high_priority() -> None:

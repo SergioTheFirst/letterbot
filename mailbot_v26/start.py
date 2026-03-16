@@ -1241,10 +1241,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 ],
                 encoding="utf-8",
             )
-            if _p.has_option("ui", "locale"):
-                processor_module.configure_processor_locale(_get_locale(_p))
-            else:
-                processor_module.configure_processor_locale("ru")
+            processor_module.configure_processor_locale(_get_locale(_p))
         except Exception:
             pass
         processor_module.configure_processor_db_path(config.storage.db_path)

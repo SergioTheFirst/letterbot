@@ -126,9 +126,9 @@ def test_action_rendered_in_tg(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert html_text.startswith("🔵 от sender@example.com:")
-    assert "<b><i>Оплатить</i></b>" in html_text
-    assert "<i>Аккаунт: account@example.com</i>" in html_text
+    assert html_text.startswith("🔵 from sender@example.com:")
+    assert "<b><i>Pay</i></b>" in html_text
+    assert "<i>Account: account@example.com</i>" in html_text
     assert "Powered by LetterBot.ru" not in html_text
 
 
@@ -225,7 +225,7 @@ def test_empty_body_with_attachments_keeps_attachment_visibility(monkeypatch) ->
 
     html_text = captured["payload"].html_text
     assert html_text.startswith("📩 Письмо получено") or (
-        html_text.startswith("🔵 от sender@example.com:")
+        html_text.startswith("🔵 from sender@example.com:")
         and "📎" in html_text
         and "3 влож" in html_text
     )
@@ -285,7 +285,7 @@ def test_empty_summary_uses_fallback(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert html_text.startswith("🔵 от sender@example.com:")
+    assert html_text.startswith("🔵 from sender@example.com:")
 
 
 def test_narrative_block_keeps_payload_safe(monkeypatch) -> None:
