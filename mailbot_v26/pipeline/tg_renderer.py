@@ -37,15 +37,22 @@ _CONTEXT_KEYWORDS = (
     "эскалац",
     "просроч",
     "задерж",
+    "due",
+    "deadline",
+    "urgent",
+    "outstanding",
+    "balance due",
+    "payment due",
+    "pay by",
 )
 _SUBJECT_PREFIX_RE = re.compile(r"^(?:(?:re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
 _RUB_AMOUNT_RE = re.compile(
-    r"(\d{1,3}(?:[ \u00a0]\d{3})+|\d{4,})(?:[\.,]\d{1,2})?\s*(?:₽|руб\.?|рублей|rur)?",
+    r"(\d{1,3}(?:[ ,\u00a0]\d{3})+|\d{4,})(?:[\.,]\d{1,2})?\s*(?:₽|руб\.?|рублей|rur|usd|\$|eur|€)?",
     re.IGNORECASE,
 )
 _DATE_RE = re.compile(r"\b(\d{2})\.(\d{2})(?:\.(\d{2,4}))?\b")
 _PAYMENT_DUE_CONTEXT_RE = re.compile(
-    r"(?:оплат(?:ить|а|е)?\s*до|срок\s*оплат[ыы]?|до)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
+    r"(?:оплат(?:ить|а|е)?\s*до|срок\s*оплат[ыы]?|pay\s*by|payment\s*due|due\s*date|до)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
     re.IGNORECASE,
 )
 _INVOICE_NUMBER_RE = re.compile(
@@ -389,6 +396,18 @@ def _compact_date(date_value: str) -> str:
     return f"{day}.{month}"
 
 
+def _is_dotted_numeric_fragment(text: str, match: re.Match[str]) -> bool:
+    prev_char = text[match.start() - 1] if match.start() > 0 else ""
+    next_char = text[match.end()] if match.end() < len(text) else ""
+    prev_prev = text[match.start() - 2] if match.start() > 1 else ""
+    next_next = text[match.end() + 1] if match.end() + 1 < len(text) else ""
+    if prev_char == "." and (prev_prev.isdigit() or text[match.start()].isdigit()):
+        return True
+    if next_char == "." and next_next.isdigit():
+        return True
+    return False
+
+
 def _invoice_attachment_insight(
     mail_type: str,
     text: str,
@@ -405,6 +424,22 @@ def _invoice_attachment_insight(
     invoice_text_signal = any(
         marker in lowered
         for marker in ("счет", "счёт", "invoice", "к оплате", "итого", "оплатить до")
+    )
+    invoice_text_signal = invoice_text_signal or any(
+        marker in lowered
+        for marker in (
+            "balance due",
+            "outstanding balance",
+            "invoice total",
+            "amount payable",
+            "amount due",
+            "payment due",
+            "please pay",
+            "pay by",
+            "net 7",
+            "net 15",
+            "net 30",
+        )
     )
     incident_text_signal = any(
         marker in lowered
@@ -435,9 +470,7 @@ def _invoice_attachment_insight(
             invoice_number = f"Счет №{candidate}"
     amount = _normalize_amount(str(facts.get("amount") or ""))
     for match in _RUB_AMOUNT_RE.finditer(text):
-        if (match.start() > 0 and text[match.start() - 1] == ".") or (
-            match.end() < len(text) and text[match.end() : match.end() + 1] == "."
-        ):
+        if _is_dotted_numeric_fragment(text, match):
             continue
         chunk = match.group(0)
         start = max(0, match.start() - 28)
@@ -449,9 +482,29 @@ def _invoice_attachment_insight(
             break
     if not amount:
         for match in _RUB_AMOUNT_RE.finditer(text):
-            if (match.start() > 0 and text[match.start() - 1] == ".") or (
-                match.end() < len(text) and text[match.end() : match.end() + 1] == "."
+            if _is_dotted_numeric_fragment(text, match):
+                continue
+            chunk = match.group(0)
+            start = max(0, match.start() - 28)
+            context = lowered[start : match.end() + 6]
+            if any(
+                token in context
+                for token in (
+                    "balance due",
+                    "outstanding balance",
+                    "invoice total",
+                    "amount payable",
+                    "amount due",
+                    "payment due",
+                    "please pay",
+                    "pay by",
+                )
             ):
+                amount = _normalize_amount(chunk)
+                break
+    if not amount:
+        for match in _RUB_AMOUNT_RE.finditer(text):
+            if _is_dotted_numeric_fragment(text, match):
                 continue
             chunk = match.group(0)
             start = max(0, match.start() - 16)
@@ -467,7 +520,17 @@ def _invoice_attachment_insight(
         for match in _DATE_RE.finditer(text):
             start = max(0, match.start() - 24)
             context = lowered[start : match.end() + 8]
-            if any(token in context for token in ("до", "срок", "оплат")):
+            if any(
+                token in context
+                for token in (
+                    "до",
+                    "срок",
+                    "оплат",
+                    "pay by",
+                    "payment due",
+                    "due date",
+                )
+            ):
                 due_date = _compact_date(match.group(0))
                 break
     parts: list[str] = []

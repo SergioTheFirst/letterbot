@@ -24,7 +24,7 @@ def test_dry_run_invoice_produces_correct_render(tmp_path: Path) -> None:
     )
 
     assert result.render.render_mode == "full"
-    assert "12925" in result.render.text
+    assert "12 925" in result.render.text
     assert "INV-DRY-01" in result.render.text
     assert result.artifacts.interpretation.doc_kind == "invoice"
 

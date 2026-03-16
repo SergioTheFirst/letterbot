@@ -4,15 +4,15 @@ To: receiver@example.com
 Date: Tue, 02 Jan 2024 10:00:00 +0000
 Message-ID: <invoice_with_attachment.eml@letterbot.test>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============4440948332494049099=="
+Content-Type: multipart/mixed; boundary="===============6426767715788937788=="
 
---===============4440948332494049099==
+--===============6426767715788937788==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 Please review the attached invoice packet and payable total.
 
---===============4440948332494049099==
+--===============6426767715788937788==
 Content-Type: text/csv
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="invoice_table.csv"
@@ -23,4 +23,4 @@ MDAwIFVTRCw1MDAwIFVTRApJbnRlZ3JhdGlvbiB3b3JrLDEsMTUwMCBVU0QsMTUwMCBVU0QKU3Vi
 dG90YWwsNjUwMCBVU0QKVGF4LDEzMDAgVVNEClRvdGFsIHBheWFibGUsNzgwMCBVU0QKQW1vdW50
 IGR1ZSw3ODAwIFVTRApQYXltZW50IGR1ZSwyMDI1LTA2LTI2Cg==
 
---===============4440948332494049099==--
+--===============6426767715788937788==--

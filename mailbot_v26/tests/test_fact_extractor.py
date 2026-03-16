@@ -25,6 +25,21 @@ def test_validate_summary_rejects_new_number():
     assert extractor.validate_summary(summary, facts) is False
 
 
+def test_extracts_english_action_markers() -> None:
+    extractor = FactExtractor()
+    text = (
+        "Please review the contract attachment and confirm receipt. "
+        "Let us know by Friday whether payment can be completed."
+    )
+
+    facts = extractor.extract_facts(text)
+
+    assert "please" in facts.actions
+    assert "please review" in facts.actions
+    assert "confirm receipt" in facts.actions
+    assert "let us know" in facts.actions
+
+
 def test_validate_summary_rejects_template_phrase():
     extractor = FactExtractor()
     facts = FactBundle(keywords=["итоги", "проект"])

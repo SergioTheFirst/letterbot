@@ -296,6 +296,30 @@ def test_attachment_insight_invoice_from_attachment_text_without_mail_type() -> 
     assert "📎 Счет №123 · 87 500 ₽ · до 15.04" in rendered
 
 
+def test_attachment_insight_english_invoice_markers() -> None:
+    attachments = [
+        {
+            "filename": "invoice.pdf",
+            "text": (
+                "Invoice total 5,480 USD. "
+                "Balance due 5,480 USD. "
+                "Pay by 28.03.2026."
+            ),
+        }
+    ]
+
+    rendered = tg_renderer.build_telegram_text(
+        priority="🟡",
+        from_email="sender@example.com",
+        subject="Invoice INV-4100",
+        action_line="Оплатить",
+        attachments=attachments,
+        mail_type="INVOICE",
+    )
+
+    assert "📎 5 480 ₽ · до 28.03" in rendered
+
+
 def test_attachment_insight_act_reconciliation_period() -> None:
     attachments = [
         {

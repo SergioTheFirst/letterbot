@@ -39,7 +39,7 @@ FIXTURE_SPECS: tuple[EmlFixtureSpec, ...] = (
             "Payment due 2025-06-06.\n"
             "Please review the invoice details."
         ),
-        expected_contains=("12925", "billing", "INV-DRY-01"),
+        expected_contains=("12 925", "billing", "INV-DRY-01"),
     ),
     EmlFixtureSpec(
         filename="invoice_with_attachment.eml",
@@ -47,7 +47,7 @@ FIXTURE_SPECS: tuple[EmlFixtureSpec, ...] = (
         sender="AP Team <ap@billing.vendor.test>",
         subject="Invoice packet INV-ATT-01",
         body="Please review the attached invoice packet and payable total.",
-        expected_contains=("7800", "invoice", "INV-ATT-01"),
+        expected_contains=("7 800", "invoice", "INV-ATT-01"),
         attachments=(
             AttachmentSpec(
                 filename="invoice_table.csv",
@@ -65,6 +65,47 @@ FIXTURE_SPECS: tuple[EmlFixtureSpec, ...] = (
                 ),
             ),
         ),
+    ),
+    EmlFixtureSpec(
+        filename="en_invoice_balance_due.eml",
+        category="invoice",
+        sender="Stripe-style Billing <billing@stripe-style.vendor.test>",
+        subject="Invoice INV-4100 from Stripe-style billing",
+        body=(
+            "Invoice total 5,480 USD.\n"
+            "Balance due 5,480 USD.\n"
+            "Net 15.\n"
+            "Pay by 28.03.2026."
+        ),
+        expected_contains=("5 480", "28.03.2026", "Оплатить"),
+        expected_not_contains=("Проверить",),
+    ),
+    EmlFixtureSpec(
+        filename="en_payment_reminder_overdue.eml",
+        category="payment reminder",
+        sender="Accounts Receivable <ar@collections.vendor.test>",
+        subject="Second notice: invoice INV-9001 is overdue",
+        body=(
+            "Please pay the outstanding balance.\n"
+            "Amount due 4,820 USD.\n"
+            "Pay by 15.03.2026.\n"
+            "Second notice."
+        ),
+        expected_contains=("4 820", "15.03.2026", "Оплатить"),
+        expected_not_contains=("Проверить",),
+    ),
+    EmlFixtureSpec(
+        filename="en_payment_reminder_final_notice.eml",
+        category="payment reminder",
+        sender="Billing Team <billing@xero-style.vendor.test>",
+        subject="Final notice for invoice INV-9002",
+        body=(
+            "Outstanding balance 9,120 USD remains unpaid.\n"
+            "Please pay by March 18, 2026.\n"
+            "Final notice."
+        ),
+        expected_contains=("9 120", "18.03.2026", "Оплатить"),
+        expected_not_contains=("Проверить",),
     ),
     EmlFixtureSpec(
         filename="payroll_standard.eml",
@@ -151,7 +192,7 @@ FIXTURE_SPECS: tuple[EmlFixtureSpec, ...] = (
             "From: payroll@example.com\n"
             "Расчетный листок: начислено 999999 RUB.\n"
         ),
-        expected_contains=("21750", "POL-DRY-01"),
+        expected_contains=("21 750", "POL-DRY-01"),
         expected_not_contains=("999999",),
     ),
     EmlFixtureSpec(
@@ -165,7 +206,7 @@ FIXTURE_SPECS: tuple[EmlFixtureSpec, ...] = (
             "Payment due 2025-08-25.\n"
             "Please review according to the payment terms."
         ),
-        expected_contains=("23500", "GEN-DRY-01"),
+        expected_contains=("23 500", "GEN-DRY-01"),
     ),
     EmlFixtureSpec(
         filename="sender_clear_content_weak.eml",
@@ -187,7 +228,7 @@ FIXTURE_SPECS: tuple[EmlFixtureSpec, ...] = (
         sender="Billing Attachments <tables@billing.vendor.test>",
         subject="Invoice table INV-TBL-DRY-01",
         body="See attached invoice table with payable total.",
-        expected_contains=("7800", "INV-TBL-DRY-01"),
+        expected_contains=("7 800", "INV-TBL-DRY-01"),
         attachments=(
             AttachmentSpec(
                 filename="invoice_table_heavy.csv",

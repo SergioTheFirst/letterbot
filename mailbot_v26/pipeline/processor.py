@@ -1455,6 +1455,16 @@ class MessageProcessor:
             return _out("Проверить")
         if _contains_any(lowered, _FACT_PAYROLL_MARKERS):
             return _out("Ознакомиться")
+        if _contains_any(lowered, _NO_ACTION_INFO_MARKERS):
+            return _out("Проверить")
+        if _contains_any(lowered, _FACT_NO_PAYMENT_MARKERS) or _contains_any(
+            lowered, _FACT_NON_PAYMENT_INVOICE_REFERENCE_MARKERS
+        ):
+            return _out("Проверить")
+        if _contains_any(lowered, _RESPONSE_REQUEST_MARKERS) and not _contains_any(
+            lowered, ("счет", "счёт", "invoice", "оплат", "договор", "contract", "agreement")
+        ):
+            return _out("Ответить")
         if _contains_any(lowered, ("счет", "счёт", "invoice", "оплат")):
             return _out("Оплатить счёт")
         if _contains_any(lowered, ("договор", "contract", "соглашени")):
@@ -2163,6 +2173,22 @@ def _select_premium_short_action(
         "акция",
     )
     payroll_markers = _FACT_PAYROLL_MARKERS
+    no_payment_markers = _FACT_NO_PAYMENT_MARKERS
+    no_action_markers = _NO_ACTION_INFO_MARKERS
+    response_markers = _RESPONSE_REQUEST_MARKERS
+    direct_payment_markers = (
+        "оплатить",
+        "please pay",
+        "pay by",
+        "complete payment",
+        "payment reminder",
+        "second notice",
+        "final notice",
+        "просроченный счет",
+        "просроченный счёт",
+        "задолженность",
+        "outstanding balance",
+    )
     invoice_markers = (
         "invoice",
         "счет",
@@ -2203,6 +2229,10 @@ def _select_premium_short_action(
         return "Зафиксировать"
     if any(marker in normalized_evidence for marker in signed_markers):
         return "Зафиксировать"
+    if any(marker in normalized_evidence for marker in no_action_markers):
+        return "Проверить"
+    if any(marker in normalized_evidence for marker in no_payment_markers):
+        return "Проверить"
     if any(marker in normalized_evidence for marker in promo_markers):
         return "Ознакомиться"
     if any(marker in normalized_evidence for marker in payroll_markers):
@@ -2232,8 +2262,15 @@ def _select_premium_short_action(
             phrase in normalized_action for phrase in strong_invoice_phrases
         )
     if invoice_signal:
-        return "Оплатить"
+        if (
+            normalized_mail_type.startswith("PAYMENT_REMINDER")
+            or any(marker in normalized_evidence for marker in direct_payment_markers)
+        ):
+            return "Оплатить"
+        return "Проверить"
 
+    if any(marker in normalized_evidence for marker in response_markers):
+        return "Ответить"
     if any(token in normalized_action for token in ("ответ", "reply", "напис")):
         return "Ответить"
     return "Проверить"
@@ -2709,11 +2746,11 @@ def _build_priority_signal_text(
 
 
 _FACT_AMOUNT_RE = re.compile(
-    r"(\d{1,3}(?:[ \u00a0]\d{3})+|\d{4,})(?:[\.,]\d{1,2})?\s*(?:\u20bd|\u0440\u0443\u0431\.?|rub|rur|usd|\$|eur|\u20ac)?",
+    r"(\d{1,3}(?:[ ,\u00a0]\d{3})+|\d{4,})(?:[\.,]\d{1,2})?\s*(?:\u20bd|\u0440\u0443\u0431\.?|rub|rur|usd|\$|eur|\u20ac)?",
     re.IGNORECASE,
 )
 _FACT_DUE_RE = re.compile(
-    r"(?:\u043e\u043f\u043b\u0430\u0442(?:\u0438\u0442\u044c|\u0430|\u0435)?\s*\u0434\u043e|\u0443\u043f\u043b\u0430\u0442\u0438\u0442\u044c\s*\u0434\u043e|\u0441\u0440\u043e\u043a\s*\u043e\u043f\u043b\u0430\u0442[\u044b\u0438]?|due\s*date|payment\s*due)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
+    r"(?:\u043e\u043f\u043b\u0430\u0442(?:\u0438\u0442\u044c|\u0430|\u0435)?\s*\u0434\u043e|\u0443\u043f\u043b\u0430\u0442\u0438\u0442\u044c\s*\u0434\u043e|\u0441\u0440\u043e\u043a\s*\u043e\u043f\u043b\u0430\u0442[\u044b\u0438]?|pay\s*by|due\s*date|payment\s*due)\s*[:\-]?\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
     re.IGNORECASE,
 )
 _FACT_DATE_RE = re.compile(r"\b\d{2}\.\d{2}(?:\.\d{2,4})?\b")
@@ -2800,9 +2837,103 @@ _CONTEXT_DISCUSSION_MARKERS = (
     "правки",
 )
 _PAYMENT_ACTION_MARKERS = ("оплат", "payment", "pay")
+_DIRECT_PAYMENT_INTENT_MARKERS = (
+    "оплатить",
+    "please pay",
+    "pay by",
+    "complete payment",
+    "final notice",
+    "second notice",
+    "payment reminder",
+    "overdue payment",
+    "outstanding balance",
+)
 _CONTRACT_FINAL_ACTION_MARKERS = ("подпис", "соглас", "утверд", "заключ")
 _FACT_CURRENCY_RE = re.compile(r"(руб\.?|₽|usd|\$|eur|€)", re.IGNORECASE)
 _FACT_MAX_AMOUNT = 10_000_000_000
+_FACT_ENGLISH_MONTH_DATE_RE = re.compile(
+    r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+    r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|"
+    r"dec(?:ember)?)\s+\d{1,2},\s+\d{4}\b",
+    re.IGNORECASE,
+)
+_ENGLISH_MONTH_TO_NUMBER = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+_FACT_NO_PAYMENT_MARKERS = (
+    "no payment is needed",
+    "nothing to pay",
+    "payment is not needed",
+    "оплачивать ничего не нужно",
+    "оплата не требуется",
+    "не нужно оплачивать",
+)
+_FACT_NON_PAYMENT_INVOICE_REFERENCE_MARKERS = (
+    "historic invoice",
+    "invoice copy",
+    "old invoice",
+    "старый счет",
+    "старый счёт",
+    "копия счета",
+    "копия счёта",
+    "отправим счет",
+    "отправим счёт",
+    "send invoice later",
+    "for reference",
+)
+_RESPONSE_REQUEST_MARKERS = (
+    "please confirm",
+    "confirm receipt",
+    "confirm whether",
+    "let us know",
+    "respond by",
+    "reply",
+    "подтверд",
+    "сможете ли",
+    "можете ли",
+    "сообщить",
+)
+_NO_ACTION_INFO_MARKERS = (
+    "действий не требуется",
+    "действие не требуется",
+    "no action needed",
+    "for reference",
+)
+_CONTRACT_DEADLINE_RE = re.compile(
+    r"(?:подписать|подписание|sign|signature|review and sign|approve|agreement|contract|договор)"
+    r"[^.\n]{0,80}?(?:by|до)\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)",
+    re.IGNORECASE,
+)
+_CONTRACT_DEADLINE_EN_RE = re.compile(
+    r"(?:sign|signature|review and sign|approve|agreement|contract)"
+    r"[^.\n]{0,80}?(?:by)\s*"
+    r"((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+    r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|"
+    r"dec(?:ember)?)\s+\d{1,2},\s+\d{4})",
+    re.IGNORECASE,
+)
 
 
 _AMOUNT_POSITIVE_CONTEXT_MARKERS = tuple(
@@ -2839,6 +2970,7 @@ _DUE_DATE_EVIDENCE_KEYWORDS = (
     "\u043e\u043f\u043b\u0430\u0442\u0438\u0442\u044c \u0434\u043e",
     "\u0441\u0440\u043e\u043a \u043e\u043f\u043b\u0430\u0442\u044b",
     "\u0443\u043f\u043b\u0430\u0442\u0438\u0442\u044c \u0434\u043e",
+    "pay by",
     "due date",
     "payment due",
 )
@@ -3143,10 +3275,18 @@ def _extract_numbers_in_evidence_window(
                 dedupe_key = (global_start, global_end, amount_value)
                 if dedupe_key in seen:
                     continue
-                seen.add(dedupe_key)
                 context = lowered[
                     max(0, global_start - 36) : min(len(lowered), global_end + 36)
                 ]
+                if _is_noise_amount_candidate(
+                    source=source,
+                    start=global_start,
+                    end=global_end,
+                    amount_value=amount_value,
+                    context=context,
+                ):
+                    continue
+                seen.add(dedupe_key)
                 candidates.append(
                     {
                         "amount": amount_value,
@@ -3169,6 +3309,14 @@ def _extract_numbers_in_evidence_window(
         context = lowered[
             max(0, global_start - 36) : min(len(lowered), global_end + 36)
         ]
+        if _is_noise_amount_candidate(
+            source=source,
+            start=global_start,
+            end=global_end,
+            amount_value=amount_value,
+            context=context,
+        ):
+            continue
         candidates.append(
             {
                 "amount": amount_value,
@@ -3188,6 +3336,7 @@ def _extract_pattern_candidates_in_window(
     pattern: re.Pattern[str],
     window: int = 120,
     group: int = 0,
+    allow_fallback: bool = True,
 ) -> list[dict[str, Any]]:
     source = _normalize_mojibake_text(str(text or ""))
     if not source.strip():
@@ -3238,6 +3387,9 @@ def _extract_pattern_candidates_in_window(
         candidates.sort(key=lambda item: (int(item["start"]), int(item["end"])))
         return candidates
 
+    if not allow_fallback:
+        return []
+
     for match in pattern.finditer(source):
         value = str(match.group(group) or "").strip()
         if not value:
@@ -3255,6 +3407,42 @@ def _extract_pattern_candidates_in_window(
             }
         )
     return candidates
+
+
+def _is_noise_amount_candidate(
+    *,
+    source: str,
+    start: int,
+    end: int,
+    amount_value: str,
+    context: str,
+) -> bool:
+    digits = re.sub(r"[^0-9]", "", str(amount_value or ""))
+    if not digits:
+        return True
+    if any(
+        start >= match.start() and end <= match.end()
+        for match in _FACT_DATE_RE.finditer(source)
+    ):
+        return True
+    if any(
+        start >= match.start() and end <= match.end()
+        for match in _FACT_ENGLISH_MONTH_DATE_RE.finditer(source)
+    ):
+        return True
+    has_currency = bool(_FACT_CURRENCY_RE.search(str(amount_value or "")))
+    prefix = source[max(0, start - 12) : start]
+    if re.search(r"[A-Za-zА-Яа-я]{2,}[-_/]?$", prefix) and not has_currency:
+        return True
+    try:
+        numeric_value = int(digits)
+    except ValueError:
+        return False
+    if 2000 <= numeric_value <= 2100 and not has_currency:
+        normalized_context = _normalized_lower(context)
+        if not _contains_any(normalized_context, _AMOUNT_POSITIVE_CONTEXT_MARKERS):
+            return True
+    return False
 
 
 def _compute_decision_confidence(
@@ -3674,19 +3862,37 @@ def _to_float_amount(value: str) -> float | None:
     raw = str(value or "").replace("\u00a0", " ").strip()
     if not raw:
         return None
-    match = re.search(r"\d[\d\s]*(?:[\.,]\d{1,2})?", raw)
+    match = re.search(r"\d[\d\s,\.]*", raw)
     if not match:
         return None
-    token = match.group(0).replace(" ", "")
-    if token.count(",") == 1 and token.count(".") == 0:
-        frac = token.split(",", 1)[1]
-        token = token.replace(",", ".") if len(frac) <= 2 else token.replace(",", "")
-    elif token.count(".") == 1 and token.count(",") == 0:
-        frac = token.split(".", 1)[1]
-        if len(frac) > 2:
-            token = token.replace(".", "")
-    else:
-        token = token.replace(",", "").replace(".", "")
+    token = match.group(0).replace(" ", "").strip(".,")
+    if not token:
+        return None
+    if "," in token and "." in token:
+        last_comma = token.rfind(",")
+        last_dot = token.rfind(".")
+        if last_comma > last_dot and len(token) - last_comma - 1 <= 2:
+            token = token.replace(".", "").replace(",", ".")
+        elif len(token) - last_dot - 1 <= 2:
+            token = token.replace(",", "")
+        else:
+            token = token.replace(",", "").replace(".", "")
+    elif "," in token:
+        parts = token.split(",")
+        if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]):
+            token = "".join(parts)
+        elif len(parts) == 2 and len(parts[1]) <= 2:
+            token = f"{parts[0]}.{parts[1]}"
+        else:
+            token = "".join(parts)
+    elif "." in token:
+        parts = token.split(".")
+        if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]):
+            token = "".join(parts)
+        elif len(parts) == 2 and len(parts[1]) <= 2:
+            token = f"{parts[0]}.{parts[1]}"
+        else:
+            token = "".join(parts)
     try:
         return float(token)
     except ValueError:
@@ -3701,6 +3907,8 @@ def _extract_amount_for_keywords(text: str, keywords: tuple[str, ...]) -> float 
     ]
     keyword_amount_re = re.compile(r"\d+(?:[  ]\d{3})*(?:[\.,]\d+)?", re.IGNORECASE)
 
+    saw_keyword_anchor = False
+
     for keyword in normalized_keywords:
         if not keyword:
             continue
@@ -3708,12 +3916,16 @@ def _extract_amount_for_keywords(text: str, keywords: tuple[str, ...]) -> float 
             rf"(?<![a-zа-я0-9]){re.escape(keyword)}(?![a-zа-я0-9])", re.IGNORECASE
         )
         for keyword_match in keyword_pattern.finditer(lowered):
+            saw_keyword_anchor = True
             index = keyword_match.start()
             segment = source[index : min(len(source), index + 48)]
             for amount_match in keyword_amount_re.finditer(segment):
                 parsed = _to_float_amount(amount_match.group(0))
                 if parsed is not None:
                     return parsed
+
+    if not saw_keyword_anchor:
+        return None
 
     for item in _extract_numbers_in_evidence_window(source, keywords, window=120):
         parsed = _to_float_amount(item.get("amount"))
@@ -3743,6 +3955,31 @@ def _parse_ddmmyyyy(value: str) -> datetime | None:
         return datetime(year=year, month=month, day=day)
     except ValueError:
         return None
+
+
+def _normalize_fact_due_date(value: str) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return ""
+    numeric_match = _FACT_DATE_RE.search(token)
+    if numeric_match:
+        return numeric_match.group(0)
+    english_match = _FACT_ENGLISH_MONTH_DATE_RE.search(token)
+    if not english_match:
+        return ""
+    cleaned = english_match.group(0).replace(",", "")
+    parts = cleaned.split()
+    if len(parts) != 3:
+        return ""
+    month = _ENGLISH_MONTH_TO_NUMBER.get(parts[0].lower())
+    if month is None:
+        return ""
+    try:
+        day = int(parts[1])
+        year = int(parts[2])
+        return f"{day:02d}.{month:02d}.{year:04d}"
+    except ValueError:
+        return ""
 
 
 def _consistency_check_message_facts(
@@ -4010,6 +4247,15 @@ def _collect_message_facts(
     normalized_mail_type = _normalized_lower(mail_type).replace("_", "")
     explicit_invoice = normalized_mail_type.startswith("invoice")
     explicit_payroll = normalized_mail_type.startswith("payroll")
+    contract_context_signal = (
+        normalized_mail_type.startswith("contract")
+        or "agreement" in normalized_mail_type
+        or _contains_any(lowered, _FACT_CONTRACT_MARKERS)
+    )
+    no_payment_needed = _contains_any(lowered, _FACT_NO_PAYMENT_MARKERS)
+    invoice_reference_only = _contains_any(
+        lowered, _FACT_NON_PAYMENT_INVOICE_REFERENCE_MARKERS
+    )
 
     amount = ""
     amount_window_hit = False
@@ -4055,20 +4301,53 @@ def _collect_message_facts(
     due_date_window_hit = False
     due_match = _FACT_DUE_RE.search(evidence_text)
     if due_match:
-        due_date = due_match.group(1)
-        due_date_window_hit = True
-    else:
+        due_date = _normalize_fact_due_date(due_match.group(1))
+        due_date_window_hit = bool(due_date)
+    if not due_date:
+        english_due_match = re.search(
+            r"(?:please\s+pay\s+by|pay\s+by|payment\s*due|due\s*date)\s*[:\-]?\s*"
+            r"((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+            r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|"
+            r"dec(?:ember)?)\s+\d{1,2},\s+\d{4})",
+            evidence_text,
+            flags=re.IGNORECASE,
+        )
+        if english_due_match:
+            due_date = _normalize_fact_due_date(english_due_match.group(1))
+            due_date_window_hit = bool(due_date)
+    if not due_date:
         due_candidates = _extract_pattern_candidates_in_window(
             evidence_text,
             anchors=_DUE_DATE_EVIDENCE_KEYWORDS,
             pattern=_FACT_DATE_RE,
             window=120,
             group=0,
+            allow_fallback=False,
         )
         if due_candidates:
-            due_date = str(due_candidates[0].get("value") or "").strip()
-            due_date_window_hit = bool(due_candidates[0].get("window_hit"))
-    if not due_date and _contains_any(lowered, _FACT_INVOICE_MARKERS):
+            due_date = _normalize_fact_due_date(
+                str(due_candidates[0].get("value") or "").strip()
+            )
+            due_date_window_hit = bool(due_date) and bool(
+                due_candidates[0].get("window_hit")
+            )
+    if not due_date and contract_context_signal:
+        contract_due_match = _CONTRACT_DEADLINE_RE.search(evidence_text)
+        if contract_due_match:
+            due_date = _normalize_fact_due_date(contract_due_match.group(1))
+            due_date_window_hit = bool(due_date)
+    if not due_date and contract_context_signal:
+        contract_due_match = _CONTRACT_DEADLINE_EN_RE.search(evidence_text)
+        if contract_due_match:
+            due_date = _normalize_fact_due_date(contract_due_match.group(1))
+            due_date_window_hit = bool(due_date)
+    if not due_date and (
+        explicit_invoice
+        or (
+            _contains_any(lowered, _FACT_INVOICE_MARKERS)
+            and not (no_payment_needed or invoice_reference_only)
+        )
+    ):
         generic_date = _FACT_DATE_RE.search(evidence_text)
         due_date = generic_date.group(0) if generic_date else ""
         due_date_window_hit = False
@@ -4085,17 +4364,37 @@ def _collect_message_facts(
     if doc_number_candidates:
         doc_number = str(doc_number_candidates[0].get("value") or "").strip()
         doc_number_window_hit = bool(doc_number_candidates[0].get("window_hit"))
+    payment_intent_signal = (
+        not no_payment_needed
+        and not invoice_reference_only
+        and _contains_any(lowered, _DIRECT_PAYMENT_INTENT_MARKERS)
+    )
     payroll_signal = explicit_payroll or (
         not explicit_invoice and _contains_any(lowered, _FACT_PAYROLL_MARKERS)
     )
     invoice_signal = (
         explicit_invoice or _contains_any(lowered, _FACT_INVOICE_MARKERS)
     ) and not payroll_signal
-    contract_signal = (
-        normalized_mail_type.startswith("contract")
-        or "agreement" in normalized_mail_type
-        or _contains_any(lowered, _FACT_CONTRACT_MARKERS)
-    )
+    if invoice_signal and not explicit_invoice and (
+        no_payment_needed or invoice_reference_only
+    ):
+        invoice_signal = False
+    contract_signal = contract_context_signal
+    if contract_signal and not normalized_mail_type.startswith("contract") and (
+        no_payment_needed or invoice_reference_only
+    ) and not _contains_any(
+        lowered,
+        (
+            "подпис",
+            "signature",
+            "sign",
+            "approve",
+            "amendment",
+            "addendum",
+            "допсоглаш",
+        ),
+    ):
+        contract_signal = False
     incident_signal = normalized_mail_type in {
         "incident",
         "securityalert",
@@ -4124,6 +4423,7 @@ def _collect_message_facts(
         "doc_number_window_hit": doc_number_window_hit,
         "doc_kind": doc_kind,
         "invoice_signal": invoice_signal,
+        "payment_intent_signal": payment_intent_signal,
         "payroll_signal": payroll_signal,
         "contract_signal": contract_signal,
         "incident_signal": incident_signal,
@@ -4265,16 +4565,7 @@ def _soften_duplicate_action(action_line: str) -> str:
 def _parse_interpretation_amount(raw_amount: Any) -> float | None:
     if raw_amount is None:
         return None
-    cleaned = re.sub(r"[^0-9.,]", "", str(raw_amount)).replace(",", ".")
-    if not cleaned:
-        return None
-    if cleaned.count(".") > 1:
-        head, tail = cleaned.rsplit(".", 1)
-        cleaned = head.replace(".", "") + "." + tail
-    try:
-        return float(cleaned)
-    except ValueError:
-        return None
+    return _to_float_amount(str(raw_amount))
 
 
 def _build_message_interpretation(
@@ -5157,6 +5448,18 @@ def _apply_document_template_layer(
             if part
         )
     )
+    direct_payment_hint_markers = (
+        "оплатить",
+        "please pay",
+        "pay by",
+        "complete payment",
+        "final notice",
+        "second notice",
+        "просроченный счет",
+        "просроченный счёт",
+        "задолженность",
+        "outstanding balance",
+    )
     match = select_document_template(
         sender_email=sender_email,
         subject=subject,
@@ -5185,7 +5488,18 @@ def _apply_document_template_layer(
                 facts["template_confidence_boost"] = min(confidence_boost, 0.04)
 
         if template.doc_kind_override and match.strong_match:
-            _set_message_doc_kind(facts, doc_kind=template.doc_kind_override)
+            if str(template.doc_kind_override).strip().lower() == "invoice":
+                if (
+                    bool(facts.get("invoice_signal"))
+                    or str(facts.get("amount") or "").strip()
+                    or str(facts.get("due_date") or "").strip()
+                    or _contains_any(
+                        normalized_template_text, direct_payment_hint_markers
+                    )
+                ):
+                    _set_message_doc_kind(facts, doc_kind=template.doc_kind_override)
+            else:
+                _set_message_doc_kind(facts, doc_kind=template.doc_kind_override)
 
         if template.action_override and match.strong_match:
             resolved_action = template.action_override
@@ -5200,7 +5514,15 @@ def _apply_document_template_layer(
                     "review",
                 ),
             ):
-                resolved_action = template.action_hint
+                if (
+                    str(template.doc_kind_override or "").strip().lower() == "invoice"
+                    and not _contains_any(
+                        normalized_template_text, direct_payment_hint_markers
+                    )
+                ):
+                    pass
+                else:
+                    resolved_action = template.action_hint
 
         suppression_flags = {
             str(flag).strip()
@@ -5406,6 +5728,11 @@ def _build_message_decision(
     priority_locked_by_user: bool = False,
 ) -> MessageDecision:
     attachment_items = attachments or []
+    direct_payment_markers = _DIRECT_PAYMENT_INTENT_MARKERS + (
+        "просроченный счет",
+        "просроченный счёт",
+        "задолженность",
+    )
     message_facts, action_line = _apply_document_template_layer(
         message_facts=message_facts,
         account_id=account_id,
@@ -5430,6 +5757,27 @@ def _build_message_decision(
         message_facts=message_facts,
     )
     resolved_action_lower = _normalized_lower(resolved_action)
+    invoice_spreadsheet_attachment = any(
+        str(item.get("filename") or "").lower().endswith(
+            (".xls", ".xlsx", ".xlsm", ".xlsb")
+        )
+        for item in attachment_items
+    )
+    decision_evidence = _normalized_lower(
+        " ".join(
+            part
+            for part in (
+                subject,
+                body_text,
+                str(action_line or ""),
+                " ".join(
+                    str(item.get("filename") or "") for item in attachment_items
+                ),
+                " ".join(str(item.get("text") or "")[:180] for item in attachment_items),
+            )
+            if part
+        )
+    )
     consistency_issues = {
         str(item) for item in (message_facts.get("consistency_issues") or []) if item
     }
@@ -5445,6 +5793,16 @@ def _build_message_decision(
         doc_kind == "invoice"
         and resolved_action_lower in {"проверить", "проверить письмо"}
         and not any(issue in consistency_issues for issue in _STRONG_CONSISTENCY_ISSUES)
+        and (
+            bool(message_facts.get("payment_intent_signal"))
+            or _contains_any(decision_evidence, direct_payment_markers)
+            or invoice_spreadsheet_attachment
+            or (
+                bool(message_facts.get("attachment_table_has_consistent_total"))
+                and bool(str(message_facts.get("due_date") or "").strip())
+                and bool(message_facts.get("attachment_facts"))
+            )
+        )
     ):
         resolved_action = "Оплатить"
     if doc_kind == "contract" and resolved_action_lower in {
@@ -5466,6 +5824,10 @@ def _build_message_decision(
         and confidence < 0.45
         and _normalized_lower(resolved_action) == "оплатить"
         and payment_action_hits < 2
+        and not (
+            str(message_facts.get("amount") or "").strip()
+            and str(message_facts.get("due_date") or "").strip()
+        )
     ):
         resolved_action = "Проверить"
 
@@ -5486,9 +5848,14 @@ def _build_message_decision(
 
     resolved_summary = _normalize_mojibake_text(summary)
     if doc_kind == "invoice":
+        amount_text = str(message_facts.get("amount") or "").strip()
+        formatted_amount = amount_text
+        parsed_amount = _to_float_amount(amount_text)
+        if parsed_amount is not None:
+            formatted_amount = _format_amount_value(int(round(parsed_amount)))
         tokens = " ".join(
             str(value)
-            for value in (message_facts.get("amount"), message_facts.get("due_date"))
+            for value in (formatted_amount, message_facts.get("due_date"))
             if value
         )
         if tokens and not resolved_summary:
