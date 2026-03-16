@@ -172,6 +172,30 @@ def _build_processor(
     )
 
 
+def test_lang_command_persists_ui_locale_override(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="test",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_update(
+        {"update_id": 1, "message": {"chat": {"id": "chat"}, "text": "/lang en"}}
+    )
+    assert processor.override_store.get_value("ui_locale") == "en"
+
+    processor.handle_update(
+        {"update_id": 2, "message": {"chat": {"id": "chat"}, "text": "/lang ru"}}
+    )
+    assert processor.override_store.get_value("ui_locale") == "ru"
+
+
 def test_parse_callback_data_priority() -> None:
     parsed = parse_callback_data("mb:prio:123:R")
     assert parsed == ("priority", {"email_id": "123", "priority": "🔴"})

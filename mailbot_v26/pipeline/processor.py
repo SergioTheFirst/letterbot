@@ -173,6 +173,7 @@ from .tg_renderer import (
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.context_layer import ContextStore
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
+from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
@@ -328,6 +329,7 @@ priority_engine_v2 = PriorityEngineV2(
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
 _UI_LOCALE = "ru"
+_UI_LOCALE_CONFIGURED = False
 auto_priority_gates = AutoPriorityGates(analytics)
 auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
 auto_priority_gate_config: AutoPriorityGateConfig | None = None
@@ -341,6 +343,7 @@ auto_priority_quality_gate = AutoPriorityQualityGate(
     analytics=analytics,
     state_store=auto_priority_gate_state_store,
 )
+runtime_override_store = RuntimeOverrideStore(DB_PATH)
 metrics_aggregator = MetricsAggregator(DB_PATH)
 system_gates = SystemGates()
 system_snapshotter = SystemHealthSnapshotter(metrics_aggregator, system_gates)
@@ -413,10 +416,7 @@ def configure_processor_config_dir(config_dir: Path) -> None:
             ],
             encoding="utf-8",
         )
-        if _parser.has_option("ui", "locale"):
-            configure_processor_locale(get_locale(_parser))
-        else:
-            configure_processor_locale("ru")
+        configure_processor_locale(get_locale(_parser))
     except Exception:
         pass
 
@@ -424,7 +424,22 @@ def configure_processor_config_dir(config_dir: Path) -> None:
 def configure_processor_locale(locale: str) -> None:
     """Set the UI locale used for all Telegram-facing text."""
     global _UI_LOCALE
-    _UI_LOCALE = str(locale).strip() or "ru"
+    global _UI_LOCALE_CONFIGURED
+    _UI_LOCALE = str(locale).strip() or DEFAULT_LOCALE
+    _UI_LOCALE_CONFIGURED = True
+
+
+def _resolve_outbound_ui_locale() -> str:
+    try:
+        override = str(runtime_override_store.get_value("ui_locale") or "").strip()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("processor_ui_locale_override_failed", error=str(exc))
+        override = ""
+    if override:
+        return override
+    if _UI_LOCALE_CONFIGURED:
+        return str(_UI_LOCALE or "").strip() or DEFAULT_LOCALE
+    return DEFAULT_LOCALE
 
 
 def configure_processor_db_path(db_path: Path) -> None:
@@ -438,6 +453,7 @@ def configure_processor_db_path(db_path: Path) -> None:
     global trust_score_calculator, relationship_health_calculator
     global relationship_anomaly_detector, temporal_reasoning_engine
     global auto_priority_engine, notification_alert_store, budget_gate, budget_consumer
+    global runtime_override_store
 
     resolved_db_path = Path(db_path)
     if resolved_db_path == DB_PATH:
@@ -466,6 +482,7 @@ def configure_processor_db_path(db_path: Path) -> None:
         analytics=analytics,
         state_store=auto_priority_gate_state_store,
     )
+    runtime_override_store = RuntimeOverrideStore(DB_PATH)
     metrics_aggregator = MetricsAggregator(DB_PATH)
     system_snapshotter = SystemHealthSnapshotter(metrics_aggregator, system_gates)
     processing_span_recorder = ProcessingSpanRecorder(DB_PATH)
@@ -2483,6 +2500,7 @@ def _build_minimal_telegram_payload(
         from_email=from_email,
         subject=subject,
         attachments=minimal_attachments,
+        locale=_UI_LOCALE,
     )
     trimmed_text = _trim_telegram_body(minimal_text)
     return TelegramPayload(
@@ -2585,6 +2603,7 @@ def _build_telegram_text(
             mail_type=mail_type_for_render,
             message_facts=message_facts,
             relationship_profile=relationship_profile,
+            locale=_UI_LOCALE,
         )
         return _normalize_mojibake_text(rendered)
     fields = tg_renderer.apply_semantic_gates(
@@ -5080,6 +5099,7 @@ def build_telegram_payload(
         text=telegram_text,
         priority=context.priority,
         account_email=str(context.metadata.get("account_email") or ""),
+        locale=_UI_LOCALE,
     )
     if render_mode != TelegramRenderMode.FULL or payload_invalid:
         fallback_reason = (
@@ -7526,6 +7546,7 @@ def process_message(
         logger.warning("received_at_missing_fallback", email_id=message_id)
         received_at = datetime.now(timezone.utc)
         anchor_received_at = None
+    configure_processor_locale(_resolve_outbound_ui_locale())
 
     span = processing_span_recorder.start(account_id=account_email, email_id=message_id)
     processing_started_at = time.monotonic()

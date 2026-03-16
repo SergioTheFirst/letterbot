@@ -23,14 +23,17 @@ from mailbot_v26.constants import (
     MAX_TOTAL_MAIL_BYTES,
 )
 from mailbot_v26.pipeline.processor import Attachment, InboundMessage, MessageProcessor
+from mailbot_v26.pipeline import processor as processor_module
 from mailbot_v26.pipeline.tg_renderer import build_attachment_insight
 from mailbot_v26.pipeline.tg_renderer import finalize_telegram_message
 from mailbot_v26.pipeline.tg_renderer import render_telegram_message
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
+from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.mime_utils import decode_bytes, decode_mime_header
 from mailbot_v26.text.sanitize import sanitize_text
 from mailbot_v26.telegram_utils import telegram_safe
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE
 from mailbot_v26.worker.telegram_sender import DeliveryResult, send_telegram
 
 try:  # local import to avoid circular typing issues
@@ -76,6 +79,18 @@ _PIPELINE_CONFIG: BotConfig | None = None
 _PIPELINE_PROCESSOR: MessageProcessor | None = None
 _ACCOUNT_MAP: Dict[str, AccountConfig] = {}
 _ENABLE_PREMIUM_PROCESSOR: bool = False
+
+
+def _resolve_outbound_ui_locale(db_path: Path) -> str:
+    try:
+        override = str(RuntimeOverrideStore(db_path).get_value("ui_locale") or "").strip()
+    except Exception:
+        override = ""
+    if override:
+        return override
+    if bool(getattr(processor_module, "_UI_LOCALE_CONFIGURED", False)):
+        return str(getattr(processor_module, "_UI_LOCALE", "") or "").strip() or DEFAULT_LOCALE
+    return DEFAULT_LOCALE
 
 
 def configure_pipeline(
@@ -644,6 +659,7 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
     account = _ACCOUNT_MAP.get(normalize_login(ctx.account_email))
     if not account:
         raise RuntimeError(f"Account config missing for {ctx.account_email}")
+    locale = _resolve_outbound_ui_locale(_PIPELINE_CONFIG.storage.db_path)
 
     telegram_text = ""
     if ctx.llm_result:
@@ -690,6 +706,7 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
                 summary=pretty_summary,
                 attachments=attachments,
                 mail_type=inbound.mail_type,
+                locale=locale,
             )
         except Exception:
             telegram_text = telegram_text or ""
@@ -706,6 +723,7 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
         text=telegram_text,
         priority=priority,
         account_email=ctx.account_email,
+        locale=locale,
     )
 
     payload = TelegramPayload(

@@ -565,11 +565,13 @@ def _render_tier1_message(snapshot: dict[str, object]) -> str:
         action_line=action_line,
         summary=body_summary,
         attachments=attachments if isinstance(attachments, list) else [],
+        locale=_UI_LOCALE,
     )
     base_text = tg_renderer.finalize_telegram_message(
         text=base_text,
         priority=priority,
         account_email=str(snapshot.get("account_email") or ""),
+        locale=_UI_LOCALE,
     )
     priority_source = str(snapshot.get("priority_source") or "").strip().lower()
     if priority_source == "user_override":

@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from mailbot_v26.text.clean_email import clean_email_body
 from mailbot_v26.text.mojibake import normalize_mojibake_text
 from mailbot_v26.telegram_utils import escape_tg_html
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.text.sanitize import is_binaryish
 
@@ -75,6 +76,26 @@ _INTERNAL_NOISE_MARKERS = (
 )
 _WATERMARK_LINE = "<i>Powered by LetterBot.ru</i>"
 _HIGH_PRIORITY_TOKENS = {"🔴", "high", "red", "r"}
+_RU_OUTBOUND_ACTIONS = {
+    "ответить": "Reply",
+    "ответить на письмо": "Reply",
+    "проверить": "Review",
+    "проверить письмо": "Review email",
+    "проверить договор": "Review contract",
+    "проверить акт": "Review reconciliation",
+    "проверить таблицу": "Review spreadsheet",
+    "проверить цены": "Review prices",
+    "оплатить": "Pay",
+    "оплатить счёт": "Pay invoice",
+    "оплатить счет": "Pay invoice",
+    "ознакомиться": "Review",
+    "зафиксировать": "Record",
+    "сверить": "Reconcile",
+    "действий не требуется": "No action needed",
+}
+_EN_OUTBOUND_ACTIONS = {
+    value.casefold(): key for key, value in _RU_OUTBOUND_ACTIONS.items()
+}
 
 
 @dataclass(frozen=True)
@@ -91,24 +112,44 @@ def _escape_dynamic(text: str | None) -> str:
     return escape_tg_html(cleaned)
 
 
+def _is_english_locale(locale: str | None) -> bool:
+    cleaned = str(locale or "").strip() or DEFAULT_LOCALE
+    return cleaned.casefold().startswith("en")
+
+
+def _localize_outbound_action(action_line: str | None, *, locale: str) -> str:
+    cleaned = _strip_internal_noise(action_line).strip()
+    if not cleaned:
+        return ""
+    normalized = normalize_mojibake_text(cleaned).strip().casefold()
+    if _is_english_locale(locale):
+        return _RU_OUTBOUND_ACTIONS.get(normalized, cleaned)
+    return _EN_OUTBOUND_ACTIONS.get(normalized, cleaned)
+
+
 def _is_high_priority(priority: str | None) -> bool:
     normalized = normalize_mojibake_text(str(priority or "")).strip().casefold()
     return normalized in _HIGH_PRIORITY_TOKENS
 
 
-def format_account_footer(account_email: str | None) -> str:
+def format_account_footer(account_email: str | None, *, locale: str = "ru") -> str:
     safe_account = _escape_dynamic(account_email)
     if not safe_account:
         return ""
-    return f"<i>Аккаунт: {safe_account}</i>"
+    label = "Account" if _is_english_locale(locale) else "Аккаунт"
+    return f"<i>{label}: {safe_account}</i>"
 
 
 def finalize_telegram_message(
-    *, text: str, priority: str, account_email: str | None = None
+    *,
+    text: str,
+    priority: str,
+    account_email: str | None = None,
+    locale: str = "ru",
 ) -> str:
     rendered = str(text or "").strip()
     lines = [rendered]
-    account_footer = format_account_footer(account_email)
+    account_footer = format_account_footer(account_email, locale=locale)
     if account_footer and account_footer not in rendered:
         lines.append(account_footer)
     if _is_high_priority(priority) and _WATERMARK_LINE not in rendered:
@@ -716,23 +757,26 @@ def _attachment_type_summary(attachments: list[dict[str, Any]]) -> str:
     return f"Вложения: {len(attachments)}"
 
 
-def format_priority_line(priority: str, from_email: str) -> str:
+def format_priority_line(priority: str, from_email: str, *, locale: str = "ru") -> str:
     normalized_priority = normalize_mojibake_text(priority)
     if normalized_priority not in {"🔴", "🟡", "🔵"}:
         normalized_priority = "🔵"
-    safe_sender = _escape_dynamic(from_email or "неизвестно")
-    return f"{normalized_priority} от {safe_sender}:"
+    unknown_sender = "unknown" if _is_english_locale(locale) else "неизвестно"
+    sender_prefix = "from" if _is_english_locale(locale) else "от"
+    safe_sender = _escape_dynamic(from_email or unknown_sender)
+    return f"{normalized_priority} {sender_prefix} {safe_sender}:"
 
 
-def format_subject(subject: str) -> str:
-    safe_subject = _escape_dynamic(subject or "(без темы)")
+def format_subject(subject: str, *, locale: str = "ru") -> str:
+    default_subject = "(no subject)" if _is_english_locale(locale) else "(без темы)"
+    safe_subject = _escape_dynamic(subject or default_subject)
     return f"<b>{safe_subject}</b>"
 
 
-def format_main_action(action_line: str | None) -> str:
-    cleaned = _strip_internal_noise(action_line)
+def format_main_action(action_line: str | None, *, locale: str = "ru") -> str:
+    cleaned = _localize_outbound_action(action_line, locale=locale)
     if not cleaned:
-        cleaned = "Действий не требуется"
+        cleaned = "No action needed" if _is_english_locale(locale) else "Действий не требуется"
     safe_action = _escape_dynamic(cleaned)
     return f"<b><i>{safe_action}</i></b>"
 
@@ -793,13 +837,14 @@ def build_telegram_text(
     summary: str = "",
     message_facts: dict[str, Any] | None = None,
     relationship_profile: dict[str, Any] | None = None,
+    locale: str = "ru",
 ) -> str:
     body_lines = _maybe_drop_duplicate_subject_line(
-        subject, [format_main_action(action_line)]
+        subject, [format_main_action(action_line, locale=locale)]
     )
     lines = [
-        format_priority_line(priority, from_email),
-        format_subject(subject),
+        format_priority_line(priority, from_email, locale=locale),
+        format_subject(subject, locale=locale),
         *body_lines,
     ]
     attachment_line = build_attachment_insight(
@@ -852,6 +897,7 @@ def render_telegram_message(
     mail_type: str | None = None,
     message_facts: dict[str, Any] | None = None,
     relationship_profile: dict[str, Any] | None = None,
+    locale: str = "ru",
 ) -> str:
     fields = apply_semantic_gates(
         action_line=action_line,
@@ -869,6 +915,7 @@ def render_telegram_message(
         summary=summary,
         message_facts=message_facts,
         relationship_profile=relationship_profile,
+        locale=locale,
     )
     return dedup_rendered_text(base_text)
 
@@ -906,11 +953,12 @@ def build_tg_fallback(
     subject: str,
     from_email: str,
     attachments: list[dict[str, Any]],
+    locale: str = "ru",
 ) -> str:
     lines = [
-        format_priority_line(priority, from_email),
-        format_subject(subject),
-        format_main_action(None),
+        format_priority_line(priority, from_email, locale=locale),
+        format_subject(subject, locale=locale),
+        format_main_action(None, locale=locale),
     ]
     attachments_block = format_attachments_block(attachments)
     if attachments_block:
@@ -919,12 +967,14 @@ def build_tg_fallback(
     return dedup_rendered_text("\n".join(lines))
 
 
-def build_tg_short_template(*, priority: str, subject: str, from_email: str) -> str:
+def build_tg_short_template(
+    *, priority: str, subject: str, from_email: str, locale: str = "ru"
+) -> str:
     return "\n".join(
         [
-            format_priority_line(priority, from_email),
-            format_subject(subject),
-            format_main_action(None),
+            format_priority_line(priority, from_email, locale=locale),
+            format_subject(subject, locale=locale),
+            format_main_action(None, locale=locale),
         ]
     )
 
@@ -936,9 +986,13 @@ def build_minimal_telegram_text(
     subject: str,
     attachments: list[dict[str, Any]],
     max_attachment_names: int = 3,
+    locale: str = "ru",
 ) -> str:
     base_text = build_tg_short_template(
-        priority=priority, subject=subject, from_email=from_email
+        priority=priority,
+        subject=subject,
+        from_email=from_email,
+        locale=locale,
     )
     if not attachments:
         return base_text

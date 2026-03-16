@@ -38,6 +38,23 @@ from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter
 from mailbot_v26.config.learning import configure_learning_config, reset_learning_config
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
+
+
+def test_configure_processor_config_dir_defaults_locale_to_english(
+    tmp_path,
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.ini").write_text("[general]\n", encoding="utf-8")
+    (config_dir / "config.ini").write_text("", encoding="utf-8")
+    previous_locale = pipeline_processor._UI_LOCALE
+
+    try:
+        pipeline_processor.configure_processor_locale("ru")
+        pipeline_processor.configure_processor_config_dir(config_dir)
+        assert pipeline_processor._UI_LOCALE == "en"
+    finally:
+        pipeline_processor.configure_processor_locale(previous_locale)
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.feedback import record_priority_correction
 

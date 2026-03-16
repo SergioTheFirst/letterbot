@@ -419,6 +419,29 @@ def test_tg_render_premium_human_first_layout() -> None:
     assert "Powered by LetterBot.ru" not in rendered
 
 
+def test_tg_render_uses_english_outbound_labels_when_locale_en() -> None:
+    rendered = tg_renderer.render_telegram_message(
+        priority="🟡",
+        from_email="sender@example.com",
+        subject="Subject",
+        action_line="Ответить",
+        attachments=[],
+        locale="en",
+    )
+    rendered = tg_renderer.finalize_telegram_message(
+        text=rendered,
+        priority="🟡",
+        account_email="account@example.com",
+        locale="en",
+    )
+
+    assert rendered.splitlines()[0] == "🟡 from sender@example.com:"
+    assert "<b><i>Reply</i></b>" in rendered
+    assert "<i>Account: account@example.com</i>" in rendered
+    assert "Ответить" not in rendered
+    assert "Аккаунт:" not in rendered
+
+
 def test_tg_render_hides_internal_trace_noise_in_default_ux() -> None:
     rendered = tg_renderer.render_telegram_message(
         priority="🔵",
