@@ -26,6 +26,7 @@ def test_humanize_mail_type_known_and_unknown() -> None:
 
 
 def test_priority_explain_lines_hide_internal_codes() -> None:
+    processor.configure_processor_locale("ru")
     lines = processor._build_priority_explain_lines(  # type: ignore[attr-defined]
         mail_type="INVOICE_FINAL",
         mail_type_reasons=["mt.invoice.final.keyword=финальн"],
@@ -128,7 +129,18 @@ def test_weekly_digest_ru_labels() -> None:
 
 
 def test_i18n_missing_key_returns_empty_string() -> None:
-    assert t("missing.key", locale="ru") == ""
+    assert t("missing.key", locale="ru") == "missing.key"
+
+
+def test_i18n_en_locale_catalogs() -> None:
+    assert t("inbound.ok", locale="en") == "Done."
+    assert t("inbound.ok", locale="ru") == "Готово."
+    assert humanize_mail_type("invoice", locale="en") == "Invoice"
+    assert humanize_mail_type("invoice", locale="ru") == "Счёт"
+    assert humanize_mode("full", locale="en") == "Full mode"
+    assert humanize_mode("full", locale="ru") == "Полный режим"
+    assert t("preview.title", locale="en") == "AI Preview"
+    assert t("nonexistent.key", locale="en") == "nonexistent.key"
 
 
 def test_doctor_ru_report_has_ru_context() -> None:

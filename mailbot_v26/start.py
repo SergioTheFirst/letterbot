@@ -1229,6 +1229,24 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             raw_config = {}
             config = config_result
         processor_module.configure_processor_config_dir(resolved_config_dir)
+        try:
+            from mailbot_v26.ui.i18n import get_locale as _get_locale
+            import configparser as _cp2
+
+            _p = _cp2.ConfigParser()
+            _p.read(
+                [
+                    str(resolved_config_dir / "settings.ini"),
+                    str(resolved_config_dir / "config.ini"),
+                ],
+                encoding="utf-8",
+            )
+            if _p.has_option("ui", "locale"):
+                processor_module.configure_processor_locale(_get_locale(_p))
+            else:
+                processor_module.configure_processor_locale("ru")
+        except Exception:
+            pass
         processor_module.configure_processor_db_path(config.storage.db_path)
         configure_digest_config_dir(resolved_config_dir)
         flags = FeatureFlags(base_dir=resolved_config_dir)
@@ -1391,6 +1409,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 feature_flags=processor_module.feature_flags,
                 allowed_chat_ids=frozenset(allowed_ids),
                 bot_token=current_config.keys.telegram_bot_token,
+                locale=processor_module._UI_LOCALE,
                 show_decision_trace=load_telegram_ui_config().show_decision_trace,
             )
             return client, processor, frozenset(allowed_ids)
