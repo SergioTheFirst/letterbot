@@ -24,7 +24,9 @@ from mailbot_v26.pipeline.processor import (
     _detect_conversation_context,
     _maybe_drop_duplicate_subject_line,
     _soften_duplicate_action,
+    _select_premium_short_action,
     _score_message_facts,
+    _to_float_amount,
     _validate_message_facts,
 )
 from mailbot_v26.domain.document_templates import (
@@ -3093,3 +3095,160 @@ def test_template_forbidden_anchors_block_wrong_classification() -> None:
 
     assert match is not None
     assert match.template.id == "russian_payroll_common"
+
+
+def test_collect_message_facts_skips_date_and_invoice_id_as_amounts() -> None:
+    subject = "Invoice INV-4100 from Stripe-style billing"
+    body = "Invoice total 5,480 USD. Balance due 5,480 USD. Net 15. Pay by 28.03.2026."
+
+    facts = _collect_message_facts(
+        subject=subject,
+        body_text=body,
+        attachments=[],
+        mail_type="INVOICE",
+    )
+    facts = _validate_message_facts(facts, evidence_text=f"{subject} {body}")
+    facts = _score_message_facts(
+        facts,
+        evidence_text=f"{subject} {body}",
+        attachment_text="",
+    )
+
+    assert facts["amount"] == "5,480"
+    assert facts["due_date"] == "28.03.2026"
+
+
+def test_collect_message_facts_does_not_invent_amount_or_due_date_for_meeting() -> None:
+    facts = _collect_message_facts(
+        subject="Meeting rescheduled to Thursday",
+        body_text=(
+            "The budget review meeting was moved to Thursday 21.03.2026 at 15:00. "
+            "Please use the updated invite."
+        ),
+        attachments=[],
+        mail_type="",
+    )
+
+    assert facts["amount"] == ""
+    assert facts["due_date"] == ""
+
+
+def test_collect_message_facts_extracts_contract_deadline_without_payment_signal() -> None:
+    facts = _collect_message_facts(
+        subject="DocuSign: Please sign MSA-44",
+        body_text=(
+            "Please review and sign the agreement by 21.03.2026. "
+            "Attached is the final contract version."
+        ),
+        attachments=[],
+        mail_type="CONTRACT_APPROVAL",
+    )
+
+    assert facts["doc_kind"] == "contract"
+    assert facts["due_date"] == "21.03.2026"
+
+
+def test_to_float_amount_supports_comma_thousands_separator() -> None:
+    assert _to_float_amount("5,480 USD") == 5480.0
+    assert _to_float_amount("9,120") == 9120.0
+
+
+def test_consistency_check_does_not_invent_subtotal_tax_mismatch_from_total_only_invoice() -> None:
+    source_text = (
+        "Invoice total 5,480 USD. Balance due 5,480 USD. Pay by 28.03.2026."
+    )
+
+    checked = _consistency_check_message_facts(
+        {
+            "amount": "5,480",
+            "amount_window_hit": True,
+            "due_date": "28.03.2026",
+            "due_date_window_hit": True,
+            "doc_number": "",
+            "doc_number_window_hit": False,
+            "doc_kind": "invoice",
+            "invoice_signal": True,
+            "payroll_signal": False,
+            "contract_signal": False,
+            "incident_signal": False,
+            "attachment_facts": [],
+            "amount_context_missing": False,
+        },
+        evidence_text=source_text,
+        attachment_text="",
+    )
+
+    assert "subtotal_tax_total_mismatch" not in checked["consistency_issues"]
+
+
+def test_build_message_decision_keeps_generic_invoice_review_without_direct_payment_intent() -> None:
+    decision = _build_message_decision(
+        priority="🟡",
+        action_line="Проверить",
+        summary="",
+        message_facts={
+            "amount": "12 925 USD",
+            "amount_window_hit": True,
+            "due_date": "06.06.2025",
+            "due_date_window_hit": True,
+            "doc_number": "",
+            "doc_number_window_hit": False,
+            "doc_kind": "invoice",
+            "invoice_signal": True,
+            "payroll_signal": False,
+            "contract_signal": False,
+            "incident_signal": False,
+            "attachment_facts": [],
+            "consistency_issues": [],
+            "consistency_penalty": 0.0,
+            "consistency_boost": 0.0,
+        },
+        sender_email="billing@example.test",
+        subject="Invoice INV-BODY-01 for support services",
+        body_text=(
+            "Invoice INV-BODY-01. Amount due 12925 USD. Total payable 12925 USD. "
+            "Payment due 06.06.2025. Please review the invoice details."
+        ),
+        attachments=[],
+        context="NEW_MESSAGE",
+    )
+
+    assert decision.action == "Проверить"
+
+
+def test_select_premium_short_action_picks_reply_for_support_request() -> None:
+    evidence = pipeline_processor._normalized_lower(
+        "Please confirm whether your team can join the onboarding call on 22.03.2026. "
+        "Let us know by tomorrow so we can lock the schedule."
+    )
+
+    action = _select_premium_short_action(
+        normalized_mail_type="unknown",
+        normalized_subject=pipeline_processor._normalized_lower(
+            "Need confirmation on onboarding slot"
+        ),
+        normalized_body=evidence,
+        normalized_action=pipeline_processor._normalized_lower("Проверить"),
+        normalized_evidence=evidence,
+    )
+
+    assert action == "Ответить"
+
+
+def test_select_premium_short_action_does_not_force_payment_for_reference_invoice() -> None:
+    evidence = pipeline_processor._normalized_lower(
+        "For your information, we attached the revised appendix and the historic invoice copy. "
+        "No payment is needed today; please just keep the thread for reference."
+    )
+
+    action = _select_premium_short_action(
+        normalized_mail_type="unknown",
+        normalized_subject=pipeline_processor._normalized_lower(
+            "Update on invoice thread and contract appendix"
+        ),
+        normalized_body=evidence,
+        normalized_action=pipeline_processor._normalized_lower("Проверить"),
+        normalized_evidence=evidence,
+    )
+
+    assert action == "Проверить"

@@ -5,9 +5,9 @@ To: receiver@example.com
 Date: Tue, 02 Jan 2024 10:00:00 +0000
 Message-ID: <payroll_standard.eml@letterbot.test>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============0067083787572937514=="
+Content-Type: multipart/mixed; boundary="===============2749060748514005353=="
 
---===============0067083787572937514==
+--===============2749060748514005353==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: base64
 
@@ -15,7 +15,7 @@ Content-Transfer-Encoding: base64
 sCDQvNCw0LkuINCf0L7QttCw0LvRg9C50YHRgtCwLCDQvtC30L3QsNC60L7QvNGM0YLQtdGB0Ywu
 Cg==
 
---===============0067083787572937514==
+--===============2749060748514005353==
 Content-Type: text/plain
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="payroll.txt"
@@ -25,4 +25,4 @@ MIME-Version: 1.0
 tdC90L4gOTM1MDAgUlVCCtCj0LTQtdGA0LbQsNC90L4gMTU1MDAgUlVCCtCaINCy0YvQv9C70LDR
 gtC1IDc4MDAwIFJVQgo=
 
---===============0067083787572937514==--
+--===============2749060748514005353==--

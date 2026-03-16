@@ -3108,7 +3108,7 @@
     "eml_fixture": "invoice_simple.eml",
     "expected_render_mode": "full",
     "expected_render_contains": [
-      "12925",
+      "12 925",
       "billing",
       "INV-DRY-01"
     ],
@@ -3141,7 +3141,7 @@
     "eml_fixture": "invoice_with_attachment.eml",
     "expected_render_mode": "full",
     "expected_render_contains": [
-      "7800",
+      "7 800",
       "invoice",
       "INV-ATT-01"
     ],
@@ -3294,7 +3294,7 @@
     "eml_fixture": "reply_forward_polluted.eml",
     "expected_render_mode": "full",
     "expected_render_contains": [
-      "21750",
+      "21 750",
       "POL-DRY-01"
     ],
     "expected_render_not_contains": [
@@ -3323,7 +3323,7 @@
     "eml_fixture": "sender_ambiguous_content_clear.eml",
     "expected_render_mode": "full",
     "expected_render_contains": [
-      "23500",
+      "23 500",
       "GEN-DRY-01"
     ],
     "expected_render_not_contains": []
@@ -3386,7 +3386,7 @@
     "eml_fixture": "table_heavy_attachment.eml",
     "expected_render_mode": "full",
     "expected_render_contains": [
-      "7800",
+      "7 800",
       "INV-TBL-DRY-01"
     ],
     "expected_render_not_contains": []

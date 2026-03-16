@@ -42,6 +42,7 @@ class GoldenExpected:
     due_date: str | None
     doc_number: str | None
     action: str
+    mail_type: str | None = None
     priority: str | None = None
     template_id: str | None = None
     must_not_flags: tuple[str, ...] = ()
@@ -51,6 +52,7 @@ class GoldenExpected:
 class GoldenCase:
     case_id: str
     category: str
+    language: str
     sender_email: str
     subject: str
     body_text: str
@@ -83,6 +85,7 @@ class GoldenFailureSummary:
 @dataclass(frozen=True, slots=True)
 class GoldenCaseResult:
     case: GoldenCase
+    mail_type_ok: bool
     doc_kind_ok: bool
     amount_exact_ok: bool
     amount_tolerant_ok: bool
@@ -97,6 +100,7 @@ class GoldenCaseResult:
     render_contains_ok: bool
     render_not_contains_ok: bool
     passed: bool
+    actual_mail_type: str
     actual_doc_kind: str | None
     actual_amount: float | None
     actual_due_date: str | None
@@ -113,6 +117,8 @@ class GoldenEvaluationSummary:
     total_cases: int
     passed_cases: int
     failed_cases: int
+    mail_type_correct: int
+    mail_type_total: int
     doc_kind_correct: int
     doc_kind_total: int
     amount_exact_correct: int
@@ -129,6 +135,7 @@ class GoldenEvaluationSummary:
     e2e_failed: int
     e2e_render_mode_correct: int
     e2e_render_mode_total: int
+    language_summaries: tuple[GoldenBucketSummary, ...]
     category_summaries: tuple[GoldenBucketSummary, ...]
     subset_summaries: tuple[GoldenBucketSummary, ...]
     failure_summaries: tuple[GoldenFailureSummary, ...]
@@ -390,8 +397,8 @@ def build_offline_artifacts(
     )
 
 
-def _build_case_artifacts(case: GoldenCase) -> tuple[dict[str, Any], Any]:
-    artifacts = build_offline_artifacts(
+def _build_case_artifacts(case: GoldenCase) -> OfflinePipelineArtifacts:
+    return build_offline_artifacts(
         sender_email=case.sender_email,
         subject=case.subject,
         body_text=case.body_text,
@@ -402,7 +409,6 @@ def _build_case_artifacts(case: GoldenCase) -> tuple[dict[str, Any], Any]:
         email_id=1,
         document_id=f"golden-{case.case_id}",
     )
-    return artifacts.final_facts, artifacts.interpretation
 
 
 def _normalize_render_text(value: str | None) -> str:
@@ -471,8 +477,11 @@ def _evaluate_dry_run_case(
 
 
 def evaluate_case(case: GoldenCase) -> GoldenCaseResult:
-    facts, interpretation = _build_case_artifacts(case)
+    artifacts = _build_case_artifacts(case)
+    facts = artifacts.final_facts
+    interpretation = artifacts.interpretation
     expected = case.expected
+    actual_mail_type = _normalize_optional_text(artifacts.mail_type) or ""
     actual_doc_kind = _normalize_optional_text(interpretation.doc_kind)
     actual_amount = interpretation.amount
     actual_due_date = _normalize_optional_text(interpretation.due_date)
@@ -481,6 +490,7 @@ def evaluate_case(case: GoldenCase) -> GoldenCaseResult:
     actual_priority = " ".join(str(interpretation.priority or "").split()).strip()
     actual_template_id = _normalize_optional_text(str(facts.get("template_id") or ""))
 
+    expected_mail_type = _normalize_optional_text(expected.mail_type)
     expected_doc_kind = _normalize_optional_text(expected.doc_kind)
     expected_due_date = _normalize_optional_text(expected.due_date)
     expected_doc_number = _normalize_optional_text(expected.doc_number)
@@ -489,6 +499,9 @@ def evaluate_case(case: GoldenCase) -> GoldenCaseResult:
     expected_template_id = _normalize_optional_text(expected.template_id)
     expected_amount = _parse_amount(expected.amount)
 
+    mail_type_ok = (
+        True if expected_mail_type is None else actual_mail_type == expected_mail_type
+    )
     doc_kind_ok = actual_doc_kind == expected_doc_kind
     amount_exact_ok = _amount_exact_match(expected_amount, actual_amount)
     amount_tolerant_ok = _amount_tolerant_match(expected_amount, actual_amount)
@@ -503,6 +516,8 @@ def evaluate_case(case: GoldenCase) -> GoldenCaseResult:
     )
 
     failures: list[str] = []
+    if not mail_type_ok:
+        failures.append("mail_type")
     if not doc_kind_ok:
         failures.append("doc_kind")
     if not amount_tolerant_ok:
@@ -543,6 +558,8 @@ def evaluate_case(case: GoldenCase) -> GoldenCaseResult:
             forbidden_flags_ok = False
             failures.append(f"must_not:{normalized_flag}")
     passed = (
+        mail_type_ok
+        and
         doc_kind_ok
         and amount_tolerant_ok
         and due_date_ok
@@ -555,6 +572,7 @@ def evaluate_case(case: GoldenCase) -> GoldenCaseResult:
     )
     return GoldenCaseResult(
         case=case,
+        mail_type_ok=mail_type_ok,
         doc_kind_ok=doc_kind_ok,
         amount_exact_ok=amount_exact_ok,
         amount_tolerant_ok=amount_tolerant_ok,
@@ -569,6 +587,7 @@ def evaluate_case(case: GoldenCase) -> GoldenCaseResult:
         render_contains_ok=render_contains_ok,
         render_not_contains_ok=render_not_contains_ok,
         passed=passed,
+        actual_mail_type=actual_mail_type,
         actual_doc_kind=actual_doc_kind,
         actual_amount=actual_amount,
         actual_due_date=actual_due_date,
@@ -595,10 +614,17 @@ def evaluate_golden_corpus(cases: list[GoldenCase]) -> GoldenEvaluationSummary:
         1 for item in results if item.case.dry_run_validated and item.dry_run_ok
     )
 
+    language_stats: dict[str, list[int]] = {}
     category_stats: dict[str, list[int]] = {}
     subset_stats: dict[str, list[int]] = {}
     failure_type_totals: dict[str, int] = {}
     for item in results:
+        language_entry = language_stats.setdefault(
+            _normalize_optional_text(item.case.language) or "unknown",
+            [0, 0],
+        )
+        language_entry[0] += 1
+        language_entry[1] += 1 if item.passed else 0
         category_entry = category_stats.setdefault(item.case.category, [0, 0])
         category_entry[0] += 1
         category_entry[1] += 1 if item.passed else 0
@@ -613,6 +639,10 @@ def evaluate_golden_corpus(cases: list[GoldenCase]) -> GoldenEvaluationSummary:
         total_cases=total_cases,
         passed_cases=passed_cases,
         failed_cases=failed_cases,
+        mail_type_correct=sum(1 for item in results if item.mail_type_ok),
+        mail_type_total=sum(
+            1 for item in results if item.case.expected.mail_type is not None
+        ),
         doc_kind_correct=sum(1 for item in results if item.doc_kind_ok),
         doc_kind_total=total_cases,
         amount_exact_correct=sum(1 for item in results if item.amount_exact_ok),
@@ -631,6 +661,15 @@ def evaluate_golden_corpus(cases: list[GoldenCase]) -> GoldenEvaluationSummary:
             1 for item in results if item.case.dry_run_validated and item.render_mode_ok
         ),
         e2e_render_mode_total=e2e_total,
+        language_summaries=tuple(
+            GoldenBucketSummary(
+                name=name,
+                total=stats[0],
+                passed=stats[1],
+                failed=stats[0] - stats[1],
+            )
+            for name, stats in sorted(language_stats.items())
+        ),
         category_summaries=tuple(
             GoldenBucketSummary(
                 name=name,
@@ -667,6 +706,7 @@ def render_summary(summary: GoldenEvaluationSummary) -> str:
         f"Passed: {summary.passed_cases}",
         f"Failed: {summary.failed_cases}",
         f"Critical safety: {summary.critical_passed}/{summary.critical_total}",
+        f"Mail type accuracy: {summary.mail_type_correct}/{summary.mail_type_total}",
         f"Doc kind accuracy: {summary.doc_kind_correct}/{summary.doc_kind_total}",
         f"Amount exact match: {summary.amount_exact_correct}/{summary.amount_total}",
         f"Amount tolerant match: {summary.amount_tolerant_correct}/{summary.amount_total}",
@@ -677,8 +717,20 @@ def render_summary(summary: GoldenEvaluationSummary) -> str:
             f"E2E render mode accuracy: "
             f"{summary.e2e_render_mode_correct}/{summary.e2e_render_mode_total}"
         ),
-        "Categories:",
+        "Languages:",
     ]
+    if not summary.language_summaries:
+        lines.append("- none")
+    else:
+        for item in summary.language_summaries:
+            lines.append(
+                f"- {item.name}: {item.passed}/{item.total} passed ({item.failed} failed)"
+            )
+    lines.extend(
+        [
+        "Categories:",
+        ]
+    )
     if not summary.category_summaries:
         lines.append("- none")
     else:
@@ -728,6 +780,9 @@ def render_report(
     critical_failed = [
         item for item in summary.case_results if item.case.critical and not item.passed
     ]
+    weak_languages = [
+        item for item in summary.language_summaries if item.failed > 0
+    ]
     weak_categories = [
         item for item in summary.category_summaries if item.failed > 0
     ]
@@ -751,6 +806,34 @@ def render_report(
         if item.passed and str(item.actual_template_id or "").strip()
     )
     blocked = max(0, len(promotion_cases) - would_promote)
+    missing_action_line = sum(
+        1
+        for item in summary.case_results
+        if item.case.expected.action and not item.actual_action
+    )
+    missing_amount = sum(
+        1
+        for item in summary.case_results
+        if item.case.expected.amount is not None and item.actual_amount is None
+    )
+    missing_due_date = sum(
+        1
+        for item in summary.case_results
+        if item.case.expected.due_date and not item.actual_due_date
+    )
+    wrong_payment_reminder = sum(
+        1
+        for item in summary.case_results
+        if str(item.case.expected.mail_type or "").upper().startswith("PAYMENT_REMINDER")
+        and not item.mail_type_ok
+    )
+    wrong_invoice_summary = sum(
+        1
+        for item in summary.case_results
+        if item.case.category in {"invoice", "payment reminder"}
+        and item.case.dry_run_validated
+        and (not item.render_contains_ok or not item.render_mode_ok)
+    )
     lines = [
         "=== LETTERBOT GOLDEN CORPUS REPORT ===",
         f"Date: {generated_at}",
@@ -760,6 +843,7 @@ def render_report(
         ),
         "",
         f"CRITICAL CASES: {summary.critical_passed}/{summary.critical_total} passed",
+        f"MAIL TYPE ACCURACY: {summary.mail_type_correct}/{summary.mail_type_total}",
         "DANGEROUS FAILURES:",
     ]
     if not critical_failed:
@@ -767,6 +851,10 @@ def render_report(
     else:
         for item in critical_failed:
             lines.append(f"- {item.case.case_id}: {', '.join(item.failures)}")
+    lines.extend(["", "LANGUAGE BREAKDOWN:"])
+    for bucket in summary.language_summaries:
+        pct = (float(bucket.passed) / float(max(1, bucket.total))) * 100.0
+        lines.append(f"{bucket.name:<32}: {bucket.passed}/{bucket.total}  ({pct:.0f}%)")
     lines.extend(["", "CATEGORY BREAKDOWN:"])
     for bucket in summary.category_summaries:
         pct = (float(bucket.passed) / float(max(1, bucket.total))) * 100.0
@@ -803,6 +891,23 @@ def render_report(
                 lines.append(
                     f"  - {item.case.case_id}: expected {item.case.expected.action}, got {item.actual_action}"
                 )
+    lines.extend(["", "WEAK LANGUAGES (< 100%):"])
+    if not weak_languages:
+        lines.append("none")
+    else:
+        for bucket in weak_languages:
+            lines.append(f"{bucket.name}: {bucket.failed} failed")
+    lines.extend(
+        [
+            "",
+            "FOCUSED FAILURES:",
+            f"Missing action line: {missing_action_line}",
+            f"Missing amount: {missing_amount}",
+            f"Missing due date: {missing_due_date}",
+            f"Wrong payment-reminder classification: {wrong_payment_reminder}",
+            f"Wrong invoice summary rendering: {wrong_invoice_summary}",
+        ]
+    )
     lines.extend(
         [
             "",
@@ -833,6 +938,7 @@ def load_golden_corpus(path_str: str | None = None) -> tuple[GoldenCase, ...]:
             due_date=_normalize_optional_text(expected_payload.get("due_date")),
             doc_number=_normalize_optional_text(expected_payload.get("doc_number")),
             action=str(expected_payload.get("action") or "").strip(),
+            mail_type=_normalize_optional_text(expected_payload.get("mail_type")),
             priority=_normalize_optional_text(expected_payload.get("priority")),
             template_id=_normalize_optional_text(expected_payload.get("template_id")),
             must_not_flags=tuple(
@@ -845,6 +951,7 @@ def load_golden_corpus(path_str: str | None = None) -> tuple[GoldenCase, ...]:
             GoldenCase(
                 case_id=str(raw_case.get("case_id") or ""),
                 category=str(raw_case.get("category") or "uncategorized"),
+                language=_normalize_optional_text(raw_case.get("language")) or "",
                 sender_email=str(raw_case.get("sender_email") or ""),
                 subject=str(raw_case.get("subject") or ""),
                 body_text=str(raw_case.get("body_text") or ""),

@@ -1,0 +1,12 @@
+Subject: Final notice for invoice INV-9002
+From: Billing Team <billing@xero-style.vendor.test>
+To: receiver@example.com
+Date: Tue, 02 Jan 2024 10:00:00 +0000
+Message-ID: <en_payment_reminder_final_notice.eml@letterbot.test>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Outstanding balance 9,120 USD remains unpaid.
+Please pay by March 18, 2026.
+Final notice.

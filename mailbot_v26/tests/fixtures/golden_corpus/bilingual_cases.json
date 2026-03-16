@@ -1,0 +1,2774 @@
+[
+  {
+    "case_id": "en-contract-signature-01",
+    "language": "en",
+    "category": "contract / signature request",
+    "sender_email": "noreply@docusign.vendor.test",
+    "subject": "DocuSign: Please sign MSA-44",
+    "body_text": "Please review and sign the agreement by 21.03.2026. Attached is the final contract version.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "CONTRACT_APPROVAL",
+      "doc_kind": "contract",
+      "amount": null,
+      "due_date": "21.03.2026",
+      "doc_number": null,
+      "action": "Проверить договор"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "critical_safety"
+    ]
+  },
+  {
+    "case_id": "contract-02",
+    "category": "contract/amendment",
+    "sender_email": "legal02@legal.vendor.test",
+    "subject": "Amendment CTR-02 for review",
+    "body_text": "Please review the contract amendment and confirm the wording.",
+    "attachments": [
+      {
+        "filename": "contract_02.docx",
+        "text": "Contract CTR-02\nAmendment to the service agreement.\nPlease review the revised clauses and share comments.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract",
+      "template_id": "contract_or_amendment_common"
+    },
+    "critical": true,
+    "mail_type": "CONTRACT",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "contract-04",
+    "category": "contract/amendment",
+    "sender_email": "legal04@legal.vendor.test",
+    "subject": "Amendment CTR-04 for review",
+    "body_text": "Please review the contract amendment and confirm the wording.",
+    "attachments": [
+      {
+        "filename": "contract_04.docx",
+        "text": "Contract CTR-04\nAmendment to the service agreement.\nPlease review the revised clauses and share comments.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract",
+      "template_id": "contract_or_amendment_common"
+    },
+    "critical": true,
+    "mail_type": "CONTRACT",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "contract-06",
+    "category": "contract/amendment",
+    "sender_email": "legal06@legal.vendor.test",
+    "subject": "Amendment CTR-06 for review",
+    "body_text": "Please review the contract amendment and confirm the wording.",
+    "attachments": [
+      {
+        "filename": "contract_06.docx",
+        "text": "Contract CTR-06\nAmendment to the service agreement.\nPlease review the revised clauses and share comments.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract",
+      "template_id": "contract_or_amendment_common"
+    },
+    "critical": true,
+    "mail_type": "CONTRACT",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "contract-08",
+    "category": "contract/amendment",
+    "sender_email": "legal08@legal.vendor.test",
+    "subject": "Amendment CTR-08 for review",
+    "body_text": "Please review the contract amendment and confirm the wording.",
+    "attachments": [
+      {
+        "filename": "contract_08.docx",
+        "text": "Contract CTR-08\nAmendment to the service agreement.\nPlease review the revised clauses and share comments.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract",
+      "template_id": "contract_or_amendment_common"
+    },
+    "critical": false,
+    "mail_type": "CONTRACT",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "generic-notice-01",
+    "category": "generic notification",
+    "sender_email": "notify01@updates.vendor.test",
+    "subject": "Service update NOTICE-01",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
+    "attachments": [
+      {
+        "filename": "notice_01.txt",
+        "text": "Internal update memo with agenda and logistics only."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "generic-notice-02",
+    "category": "generic notification",
+    "sender_email": "notify02@updates.vendor.test",
+    "subject": "Service update NOTICE-02",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
+    "attachments": [
+      {
+        "filename": "notice_02.txt",
+        "text": "Internal update memo with agenda and logistics only."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "generic-notice-03",
+    "category": "generic notification",
+    "sender_email": "notify03@updates.vendor.test",
+    "subject": "Service update NOTICE-03",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
+    "attachments": [
+      {
+        "filename": "notice_03.txt",
+        "text": "Internal update memo with agenda and logistics only."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "generic-notice-04",
+    "category": "generic notification",
+    "sender_email": "notify04@updates.vendor.test",
+    "subject": "Service update NOTICE-04",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
+    "attachments": [
+      {
+        "filename": "notice_04.txt",
+        "text": "Internal update memo with agenda and logistics only."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "generic-notice-05",
+    "category": "generic notification",
+    "sender_email": "notify05@updates.vendor.test",
+    "subject": "Service update NOTICE-05",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
+    "attachments": [
+      {
+        "filename": "notice_05.txt",
+        "text": "Internal update memo with agenda and logistics only."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "generic-notice-06",
+    "category": "generic notification",
+    "sender_email": "notify06@updates.vendor.test",
+    "subject": "Service update NOTICE-06",
+    "body_text": "Status update for the shared workspace. Meeting moved to next week. Please note the new calendar details and updated meeting window.",
+    "attachments": [
+      {
+        "filename": "notice_06.txt",
+        "text": "Internal update memo with agenda and logistics only."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "en-invoice-balance-due-01",
+    "language": "en",
+    "category": "invoice",
+    "sender_email": "billing@stripe-style.vendor.test",
+    "subject": "Invoice INV-4100 from Stripe-style billing",
+    "body_text": "Invoice total 5,480 USD. Balance due 5,480 USD. Net 15. Pay by 28.03.2026.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "INVOICE",
+      "doc_kind": "invoice",
+      "amount": 5480,
+      "due_date": "28.03.2026",
+      "doc_number": null,
+      "action": "Оплатить",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "critical_safety",
+      "e2e_dry_run"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "en_invoice_balance_due.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "5 480",
+      "28.03.2026",
+      "Оплатить"
+    ],
+    "expected_render_not_contains": [
+      "Проверить"
+    ]
+  },
+  {
+    "case_id": "invoice-body-01",
+    "category": "invoice",
+    "sender_email": "billing01@billing.vendor.test",
+    "subject": "Invoice INV-BODY-01 for support services",
+    "body_text": "Invoice INV-BODY-01.\nAmount due 12925 USD.\nTotal payable 12925 USD.\nPayment due 06.06.2025.\nService period: monthly support and monitoring.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 12925,
+      "due_date": "06.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "invoice-body-02",
+    "category": "invoice",
+    "sender_email": "billing02@billing.vendor.test",
+    "subject": "Invoice INV-BODY-02 for support services",
+    "body_text": "Invoice INV-BODY-02.\nAmount due 13850 USD.\nTotal payable 13850 USD.\nPayment due 07.06.2025.\nService period: monthly support and monitoring.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 13850,
+      "due_date": "07.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "invoice-body-03",
+    "category": "invoice",
+    "sender_email": "billing03@billing.vendor.test",
+    "subject": "Invoice INV-BODY-03 for support services",
+    "body_text": "Invoice INV-BODY-03.\nAmount due 14775 USD.\nTotal payable 14775 USD.\nPayment due 08.06.2025.\nService period: monthly support and monitoring.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 14775,
+      "due_date": "08.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "invoice-body-04",
+    "category": "invoice",
+    "sender_email": "billing04@billing.vendor.test",
+    "subject": "Invoice INV-BODY-04 for support services",
+    "body_text": "Invoice INV-BODY-04.\nAmount due 15700 USD.\nTotal payable 15700 USD.\nPayment due 09.06.2025.\nService period: monthly support and monitoring.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 15700,
+      "due_date": "09.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "invoice-body-05",
+    "category": "invoice",
+    "sender_email": "billing05@billing.vendor.test",
+    "subject": "Invoice INV-BODY-05 for support services",
+    "body_text": "Invoice INV-BODY-05.\nAmount due 16625 USD.\nTotal payable 16625 USD.\nPayment due 10.06.2025.\nService period: monthly support and monitoring.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 16625,
+      "due_date": "10.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "invoice-body-06",
+    "category": "invoice",
+    "sender_email": "billing06@billing.vendor.test",
+    "subject": "Invoice INV-BODY-06 for support services",
+    "body_text": "Invoice INV-BODY-06.\nAmount due 17550 USD.\nTotal payable 17550 USD.\nPayment due 11.06.2025.\nService period: monthly support and monitoring.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 17550,
+      "due_date": "11.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "invoice-body-07",
+    "category": "invoice",
+    "sender_email": "billing07@billing.vendor.test",
+    "subject": "Invoice INV-BODY-07 for support services",
+    "body_text": "Invoice INV-BODY-07.\nAmount due 18475 USD.\nTotal payable 18475 USD.\nPayment due 12.06.2025.\nService period: monthly support and monitoring.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 18475,
+      "due_date": "12.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "invoice-body-08",
+    "category": "invoice",
+    "sender_email": "billing08@billing.vendor.test",
+    "subject": "Invoice INV-BODY-08 for support services",
+    "body_text": "Invoice INV-BODY-08.\nAmount due 19400 USD.\nTotal payable 19400 USD.\nPayment due 13.06.2025.\nService period: monthly support and monitoring.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 19400,
+      "due_date": "13.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "en-marketing-newsletter-01",
+    "language": "en",
+    "category": "marketing / newsletter / promotional noise",
+    "sender_email": "newsletter@promo.vendor.test",
+    "subject": "Weekly growth webinar and promo bundle",
+    "body_text": "For your information: our weekly webinar starts Friday. Promo pricing and campaign updates are inside this newsletter.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Ознакомиться"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "en-meeting-reschedule-01",
+    "language": "en",
+    "category": "meeting / scheduling",
+    "sender_email": "pm@client.vendor.test",
+    "subject": "Meeting rescheduled to Thursday",
+    "body_text": "The budget review meeting was moved to Thursday 21.03.2026 at 15:00. Please use the updated invite.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "en-ambiguous-business-01",
+    "language": "en",
+    "category": "mixed-signal ambiguous business email",
+    "sender_email": "ops@partner.vendor.test",
+    "subject": "Update on invoice thread and contract appendix",
+    "body_text": "For your information, we attached the revised appendix and the historic invoice copy. No payment is needed today; please just keep the thread for reference.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "attachment-noisy-pdf-01",
+    "category": "noisy PDF-like attachment with repeated headers",
+    "sender_email": "pdf01@billing.vendor.test",
+    "subject": "Invoice packet INV-PDF-01",
+    "body_text": "Please review the attached PDF invoice packet.",
+    "attachments": [
+      {
+        "filename": "invoice_packet_01.pdf",
+        "text": "Invoice packet INV-PDF-01\nBilling Department | letterbot synthetic statement\nPage 1/2\nInvoice INV-PDF-01\nSubtotal 14650 USD\nTax 2930 USD\nInvoice packet INV-PDF-01\nBilling Department | letterbot synthetic statement\nPage 2/2\nTotal payable 17580 USD\nAmount due 17580 USD\nPayment due 16.07.2025\nBilling Department | letterbot synthetic statement\n"
+      }
+    ],
+    "expected": {
+      "action": "Оплатить",
+      "doc_kind": "invoice",
+      "amount": 17580,
+      "due_date": "16.07.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "attachment-noisy-pdf-02",
+    "category": "noisy PDF-like attachment with repeated headers",
+    "sender_email": "pdf02@billing.vendor.test",
+    "subject": "Invoice packet INV-PDF-02",
+    "body_text": "Please review the attached PDF invoice packet.",
+    "attachments": [
+      {
+        "filename": "invoice_packet_02.pdf",
+        "text": "Invoice packet INV-PDF-02\nBilling Department | letterbot synthetic statement\nPage 1/2\nInvoice INV-PDF-02\nSubtotal 15300 USD\nTax 3060 USD\nInvoice packet INV-PDF-02\nBilling Department | letterbot synthetic statement\nPage 2/2\nTotal payable 18360 USD\nAmount due 18360 USD\nPayment due 17.07.2025\nBilling Department | letterbot synthetic statement\n"
+      }
+    ],
+    "expected": {
+      "action": "Оплатить",
+      "doc_kind": "invoice",
+      "amount": 18360,
+      "due_date": "17.07.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "attachment-noisy-pdf-03",
+    "category": "noisy PDF-like attachment with repeated headers",
+    "sender_email": "pdf03@billing.vendor.test",
+    "subject": "Invoice packet INV-PDF-03",
+    "body_text": "Please review the attached PDF invoice packet.",
+    "attachments": [
+      {
+        "filename": "invoice_packet_03.pdf",
+        "text": "Invoice packet INV-PDF-03\nBilling Department | letterbot synthetic statement\nPage 1/2\nInvoice INV-PDF-03\nSubtotal 15950 USD\nTax 3190 USD\nInvoice packet INV-PDF-03\nBilling Department | letterbot synthetic statement\nPage 2/2\nTotal payable 19140 USD\nAmount due 19140 USD\nPayment due 18.07.2025\nBilling Department | letterbot synthetic statement\n"
+      }
+    ],
+    "expected": {
+      "action": "Оплатить",
+      "doc_kind": "invoice",
+      "amount": 19140,
+      "due_date": "18.07.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "attachment-noisy-pdf-04",
+    "category": "noisy PDF-like attachment with repeated headers",
+    "sender_email": "pdf04@billing.vendor.test",
+    "subject": "Invoice packet INV-PDF-04",
+    "body_text": "Please review the attached PDF invoice packet.",
+    "attachments": [
+      {
+        "filename": "invoice_packet_04.pdf",
+        "text": "Invoice packet INV-PDF-04\nBilling Department | letterbot synthetic statement\nPage 1/2\nInvoice INV-PDF-04\nSubtotal 16600 USD\nTax 3320 USD\nInvoice packet INV-PDF-04\nBilling Department | letterbot synthetic statement\nPage 2/2\nTotal payable 19920 USD\nAmount due 19920 USD\nPayment due 19.07.2025\nBilling Department | letterbot synthetic statement\n"
+      }
+    ],
+    "expected": {
+      "action": "Оплатить",
+      "doc_kind": "invoice",
+      "amount": 19920,
+      "due_date": "19.07.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "attachment-noisy-pdf-05",
+    "category": "noisy PDF-like attachment with repeated headers",
+    "sender_email": "pdf05@billing.vendor.test",
+    "subject": "Invoice packet INV-PDF-05",
+    "body_text": "Please review the attached PDF invoice packet.",
+    "attachments": [
+      {
+        "filename": "invoice_packet_05.pdf",
+        "text": "Invoice packet INV-PDF-05\nBilling Department | letterbot synthetic statement\nPage 1/2\nInvoice INV-PDF-05\nSubtotal 17250 USD\nTax 3450 USD\nInvoice packet INV-PDF-05\nBilling Department | letterbot synthetic statement\nPage 2/2\nTotal payable 20700 USD\nAmount due 20700 USD\nPayment due 20.07.2025\nBilling Department | letterbot synthetic statement\n"
+      }
+    ],
+    "expected": {
+      "action": "Оплатить",
+      "doc_kind": "invoice",
+      "amount": 20700,
+      "due_date": "20.07.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "en-payment-reminder-final-notice-01",
+    "language": "en",
+    "category": "payment reminder",
+    "sender_email": "billing@xero-style.vendor.test",
+    "subject": "Final notice for invoice INV-9002",
+    "body_text": "Outstanding balance 9,120 USD remains unpaid. Please pay by March 18, 2026. Final notice.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "PAYMENT_REMINDER",
+      "doc_kind": "invoice",
+      "amount": 9120,
+      "due_date": "18.03.2026",
+      "doc_number": null,
+      "action": "Оплатить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "critical_safety",
+      "e2e_dry_run"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "en_payment_reminder_final_notice.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "9 120",
+      "18.03.2026",
+      "Оплатить"
+    ],
+    "expected_render_not_contains": [
+      "Проверить"
+    ]
+  },
+  {
+    "case_id": "en-payment-reminder-overdue-01",
+    "language": "en",
+    "category": "payment reminder",
+    "sender_email": "ar@collections.vendor.test",
+    "subject": "Second notice: invoice INV-9001 is overdue",
+    "body_text": "Please pay the outstanding balance. Amount due 4,820 USD. Pay by 15.03.2026. Second notice.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "PAYMENT_REMINDER",
+      "doc_kind": "invoice",
+      "amount": 4820,
+      "due_date": "15.03.2026",
+      "doc_number": null,
+      "action": "Оплатить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "critical_safety",
+      "e2e_dry_run"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "en_payment_reminder_overdue.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "4 820",
+      "15.03.2026",
+      "Оплатить"
+    ],
+    "expected_render_not_contains": [
+      "Проверить"
+    ]
+  },
+  {
+    "case_id": "en-personal-low-priority-01",
+    "language": "en",
+    "category": "personal / low-priority chatter",
+    "sender_email": "friend@personal.test",
+    "subject": "Coffee next week?",
+    "body_text": "Hi, are you around for coffee next Thursday? No rush, just checking in.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "e2e-reply-forward-polluted-01",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup@generic-mail.test",
+    "subject": "Re: Invoice POL-DRY-01 follow-up",
+    "body_text": "Invoice POL-DRY-01.\nAmount due 21750 USD.\nPayment due 2025-08-05.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\nРасчетный листок: начислено 999999 RUB.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 21750
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "e2e_dry_run",
+      "critical_safety",
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "dry_run_validated": true,
+    "eml_fixture": "reply_forward_polluted.eml",
+    "expected_render_mode": "full",
+    "expected_render_contains": [
+      "21 750",
+      "POL-DRY-01"
+    ],
+    "expected_render_not_contains": [
+      "999999"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "en-security-alert-01",
+    "language": "en",
+    "category": "security alert",
+    "sender_email": "noreply@github-security.test",
+    "subject": "GitHub security alert for repository access",
+    "body_text": "Security alert: suspicious sign-in blocked for your organisation. Review the audit log and confirm the device.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "SECURITY_ALERT",
+      "doc_kind": "incident",
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "critical_safety"
+    ]
+  },
+  {
+    "case_id": "ambiguous-sender-01",
+    "category": "sender ambiguous but content clear",
+    "sender_email": "contact01@generic-mail.test",
+    "subject": "Invoice GEN-01 for review",
+    "body_text": "Invoice GEN-01.\nAmount due 23500 USD.\nPayment due 25.08.2025.\nPlease review and pay according to the terms.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 23500,
+      "due_date": "25.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "ambiguous-sender-02",
+    "category": "sender ambiguous but content clear",
+    "sender_email": "contact02@generic-mail.test",
+    "subject": "Invoice GEN-02 for review",
+    "body_text": "Invoice GEN-02.\nAmount due 24000 USD.\nPayment due 26.08.2025.\nPlease review and pay according to the terms.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 24000,
+      "due_date": "26.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "ambiguous-sender-03",
+    "category": "sender ambiguous but content clear",
+    "sender_email": "contact03@generic-mail.test",
+    "subject": "Invoice GEN-03 for review",
+    "body_text": "Invoice GEN-03.\nAmount due 24500 USD.\nPayment due 27.08.2025.\nPlease review and pay according to the terms.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 24500,
+      "due_date": "27.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "ambiguous-sender-04",
+    "category": "sender ambiguous but content clear",
+    "sender_email": "contact04@generic-mail.test",
+    "subject": "Invoice GEN-04 for review",
+    "body_text": "Invoice GEN-04.\nAmount due 25000 USD.\nPayment due 28.08.2025.\nPlease review and pay according to the terms.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 25000,
+      "due_date": "28.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "ambiguous-sender-05",
+    "category": "sender ambiguous but content clear",
+    "sender_email": "contact05@generic-mail.test",
+    "subject": "Invoice GEN-05 for review",
+    "body_text": "Invoice GEN-05.\nAmount due 25500 USD.\nPayment due 29.08.2025.\nPlease review and pay according to the terms.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 25500,
+      "due_date": "29.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "ambiguous-sender-06",
+    "category": "sender ambiguous but content clear",
+    "sender_email": "contact06@generic-mail.test",
+    "subject": "Invoice GEN-06 for review",
+    "body_text": "Invoice GEN-06.\nAmount due 26000 USD.\nPayment due 30.08.2025.\nPlease review and pay according to the terms.",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 26000,
+      "due_date": "30.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "clear-sender-weak-content-01",
+    "category": "sender clear but content weak",
+    "sender_email": "weak01@legal.vendor.test",
+    "subject": "Document packet WK-01",
+    "body_text": "Please review the packet when convenient. Reference materials only.",
+    "attachments": [
+      {
+        "filename": "packet_01.txt",
+        "text": "Reference packet with meeting notes and generic background materials."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "correction_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "clear-sender-weak-content-02",
+    "category": "sender clear but content weak",
+    "sender_email": "weak02@hr.vendor.test",
+    "subject": "Document packet WK-02",
+    "body_text": "Please review the packet when convenient. Reference materials only.",
+    "attachments": [
+      {
+        "filename": "packet_02.txt",
+        "text": "Reference packet with meeting notes and generic background materials."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "correction_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "clear-sender-weak-content-03",
+    "category": "sender clear but content weak",
+    "sender_email": "weak03@billing.vendor.test",
+    "subject": "Document packet WK-03",
+    "body_text": "Please review the packet when convenient. Reference materials only.",
+    "attachments": [
+      {
+        "filename": "packet_03.txt",
+        "text": "Reference packet with meeting notes and generic background materials."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "correction_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "clear-sender-weak-content-04",
+    "category": "sender clear but content weak",
+    "sender_email": "weak04@legal.vendor.test",
+    "subject": "Document packet WK-04",
+    "body_text": "Please review the packet when convenient. Reference materials only.",
+    "attachments": [
+      {
+        "filename": "packet_04.txt",
+        "text": "Reference packet with meeting notes and generic background materials."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "correction_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "clear-sender-weak-content-05",
+    "category": "sender clear but content weak",
+    "sender_email": "weak05@hr.vendor.test",
+    "subject": "Document packet WK-05",
+    "body_text": "Please review the packet when convenient. Reference materials only.",
+    "attachments": [
+      {
+        "filename": "packet_05.txt",
+        "text": "Reference packet with meeting notes and generic background materials."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "weak_signal",
+      "correction_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "clear-sender-weak-content-06",
+    "category": "sender clear but content weak",
+    "sender_email": "weak06@billing.vendor.test",
+    "subject": "Document packet WK-06",
+    "body_text": "Please review the packet when convenient. Reference materials only.",
+    "attachments": [
+      {
+        "filename": "packet_06.txt",
+        "text": "Reference packet with meeting notes and generic background materials."
+      }
+    ],
+    "expected": {
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "weak_signal",
+      "correction_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "en-service-notification-01",
+    "language": "en",
+    "category": "service/system notification",
+    "sender_email": "notify@aws-status.vendor.test",
+    "subject": "Service maintenance window for analytics workspace",
+    "body_text": "Status update: the analytics workspace will be restarted tonight. No action is required unless you see failed jobs tomorrow.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "en-shipping-update-01",
+    "language": "en",
+    "category": "shipping / logistics update",
+    "sender_email": "dispatch@logistics.vendor.test",
+    "subject": "Shipment delayed for PO-7781",
+    "body_text": "Shipment update: the pallet left the warehouse late and delivery moved to 24.03.2026. Tracking will refresh in two hours.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "DELIVERY_NOTICE",
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "en-support-request-01",
+    "language": "en",
+    "category": "support / client request",
+    "sender_email": "client@support.vendor.test",
+    "subject": "Need confirmation on onboarding slot",
+    "body_text": "Please confirm whether your team can join the onboarding call on 22.03.2026. Let us know by tomorrow so we can lock the schedule.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Ответить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "attachment-table-01",
+    "category": "table-heavy attachment",
+    "sender_email": "ap01@billing.vendor.test",
+    "subject": "Invoice table INV-TBL-01",
+    "body_text": "See attached invoice table with payable total.",
+    "attachments": [
+      {
+        "filename": "invoice_table_01.pdf",
+        "text": "Invoice INV-TBL-01\nItem | Qty | Price | Amount\nSupport plan | 1 | 5000 USD | 5000 USD\nIntegration work | 1 | 1500 USD | 1500 USD\nSubtotal 6500 USD\nTax 1300 USD\nTotal payable 7800 USD\nAmount due 7800 USD\nPayment due 26.06.2025\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 7800,
+      "due_date": "26.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "attachment-table-02",
+    "category": "table-heavy attachment",
+    "sender_email": "ap02@billing.vendor.test",
+    "subject": "Invoice table INV-TBL-02",
+    "body_text": "See attached invoice table with payable total.",
+    "attachments": [
+      {
+        "filename": "invoice_table_02.pdf",
+        "text": "Invoice INV-TBL-02\nItem | Qty | Price | Amount\nSupport plan | 1 | 5500 USD | 5500 USD\nIntegration work | 1 | 1500 USD | 1500 USD\nSubtotal 7000 USD\nTax 1400 USD\nTotal payable 8400 USD\nAmount due 8400 USD\nPayment due 27.06.2025\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 8400,
+      "due_date": "27.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "attachment-table-03",
+    "category": "table-heavy attachment",
+    "sender_email": "ap03@billing.vendor.test",
+    "subject": "Invoice table INV-TBL-03",
+    "body_text": "See attached invoice table with payable total.",
+    "attachments": [
+      {
+        "filename": "invoice_table_03.pdf",
+        "text": "Invoice INV-TBL-03\nItem | Qty | Price | Amount\nSupport plan | 1 | 6000 USD | 6000 USD\nIntegration work | 1 | 1500 USD | 1500 USD\nSubtotal 7500 USD\nTax 1500 USD\nTotal payable 9000 USD\nAmount due 9000 USD\nPayment due 28.06.2025\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 9000,
+      "due_date": "28.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "attachment-table-04",
+    "category": "table-heavy attachment",
+    "sender_email": "ap04@billing.vendor.test",
+    "subject": "Invoice table INV-TBL-04",
+    "body_text": "See attached invoice table with payable total.",
+    "attachments": [
+      {
+        "filename": "invoice_table_04.pdf",
+        "text": "Invoice INV-TBL-04\nItem | Qty | Price | Amount\nSupport plan | 1 | 6500 USD | 6500 USD\nIntegration work | 1 | 1500 USD | 1500 USD\nSubtotal 8000 USD\nTax 1600 USD\nTotal payable 9600 USD\nAmount due 9600 USD\nPayment due 29.06.2025\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 9600,
+      "due_date": "29.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "attachment-table-05",
+    "category": "table-heavy attachment",
+    "sender_email": "ap05@billing.vendor.test",
+    "subject": "Invoice table INV-TBL-05",
+    "body_text": "See attached invoice table with payable total.",
+    "attachments": [
+      {
+        "filename": "invoice_table_05.pdf",
+        "text": "Invoice INV-TBL-05\nItem | Qty | Price | Amount\nSupport plan | 1 | 7000 USD | 7000 USD\nIntegration work | 1 | 1500 USD | 1500 USD\nSubtotal 8500 USD\nTax 1700 USD\nTotal payable 10200 USD\nAmount due 10200 USD\nPayment due 30.06.2025\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 10200,
+      "due_date": "30.06.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "attachment-table-06",
+    "category": "table-heavy attachment",
+    "sender_email": "ap06@billing.vendor.test",
+    "subject": "Invoice table INV-TBL-06",
+    "body_text": "See attached invoice table with payable total.",
+    "attachments": [
+      {
+        "filename": "invoice_table_06.pdf",
+        "text": "Invoice INV-TBL-06\nItem | Qty | Price | Amount\nSupport plan | 1 | 7500 USD | 7500 USD\nIntegration work | 1 | 1500 USD | 1500 USD\nSubtotal 9000 USD\nTax 1800 USD\nTotal payable 10800 USD\nAmount due 10800 USD\nPayment due 01.07.2025\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 10800,
+      "due_date": "01.07.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "attachment_heavy",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "en"
+  },
+  {
+    "case_id": "ru-approval-request-01",
+    "language": "ru",
+    "category": "approval / request",
+    "sender_email": "ops@approval-ru.test",
+    "subject": "Нужно согласование закупки до 20.03.2026",
+    "body_text": "Просим согласовать закупку лицензий до 20.03.2026. После подтверждения отправим счет поставщику.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "ru-contract-signature-01",
+    "language": "ru",
+    "category": "contract / signature request",
+    "sender_email": "legal@vendor-ru.test",
+    "subject": "Просьба подписать договор CTR-RU-01",
+    "body_text": "Просим проверить и подписать договор до 21.03.2026. Финальная версия во вложении.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "CONTRACT_APPROVAL",
+      "doc_kind": "contract",
+      "amount": null,
+      "due_date": "21.03.2026",
+      "doc_number": null,
+      "action": "Проверить договор"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "critical_safety"
+    ]
+  },
+  {
+    "case_id": "contract-01",
+    "category": "contract/amendment",
+    "sender_email": "legal01@legal.vendor.test",
+    "subject": "??????? CTR-01 ?? ????????????",
+    "body_text": "?????????? ??????? ? ?????? ????????? ???????? ? ???? ????????.",
+    "attachments": [
+      {
+        "filename": "contract_01.docx",
+        "text": "??????? CTR-01\n?????????? ? ???????? ?????.\n?????? ??????????? ??????? ? ??????? ?????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract",
+      "template_id": "contract_or_amendment_common"
+    },
+    "critical": true,
+    "mail_type": "CONTRACT",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "contract-03",
+    "category": "contract/amendment",
+    "sender_email": "legal03@legal.vendor.test",
+    "subject": "??????? CTR-03 ?? ????????????",
+    "body_text": "?????????? ??????? ? ?????? ????????? ???????? ? ???? ????????.",
+    "attachments": [
+      {
+        "filename": "contract_03.docx",
+        "text": "??????? CTR-03\n?????????? ? ???????? ?????.\n?????? ??????????? ??????? ? ??????? ?????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract",
+      "template_id": "contract_or_amendment_common"
+    },
+    "critical": true,
+    "mail_type": "CONTRACT",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "contract-05",
+    "category": "contract/amendment",
+    "sender_email": "legal05@legal.vendor.test",
+    "subject": "??????? CTR-05 ?? ????????????",
+    "body_text": "?????????? ??????? ? ?????? ????????? ???????? ? ???? ????????.",
+    "attachments": [
+      {
+        "filename": "contract_05.docx",
+        "text": "??????? CTR-05\n?????????? ? ???????? ?????.\n?????? ??????????? ??????? ? ??????? ?????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract",
+      "template_id": "contract_or_amendment_common"
+    },
+    "critical": true,
+    "mail_type": "CONTRACT",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "contract-07",
+    "category": "contract/amendment",
+    "sender_email": "legal07@legal.vendor.test",
+    "subject": "??????? CTR-07 ?? ????????????",
+    "body_text": "?????????? ??????? ? ?????? ????????? ???????? ? ???? ????????.",
+    "attachments": [
+      {
+        "filename": "contract_07.docx",
+        "text": "??????? CTR-07\n?????????? ? ???????? ?????.\n?????? ??????????? ??????? ? ??????? ?????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract",
+      "template_id": "contract_or_amendment_common"
+    },
+    "critical": false,
+    "mail_type": "CONTRACT",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "contract-09",
+    "category": "contract/amendment",
+    "sender_email": "legal09@legal.vendor.test",
+    "subject": "??????? CTR-09 ?? ????????????",
+    "body_text": "?????????? ??????? ? ?????? ????????? ???????? ? ???? ????????.",
+    "attachments": [
+      {
+        "filename": "contract_09.docx",
+        "text": "??????? CTR-09\n?????????? ? ???????? ?????.\n?????? ??????????? ??????? ? ??????? ?????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract",
+      "template_id": "contract_or_amendment_common"
+    },
+    "critical": false,
+    "mail_type": "CONTRACT",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "contract-11",
+    "category": "contract/amendment",
+    "sender_email": "legal11@legal.vendor.test",
+    "subject": "??????? CTR-11 ?? ????????????",
+    "body_text": "?????????? ??????? ? ?????? ????????? ???????? ? ???? ????????.",
+    "attachments": [
+      {
+        "filename": "contract_11.docx",
+        "text": "??????? CTR-11\n?????????? ? ???????? ?????.\n?????? ??????????? ??????? ? ??????? ?????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить договор",
+      "doc_kind": "contract",
+      "template_id": "contract_or_amendment_common"
+    },
+    "critical": false,
+    "mail_type": "CONTRACT",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "ru-invoice-standard-01",
+    "language": "ru",
+    "category": "invoice",
+    "sender_email": "buh@vendor-ru.test",
+    "subject": "Счет INV-RU-01 на оплату сопровождения",
+    "body_text": "Направляем счет на оплату услуг. Итого к оплате 48 700 руб. Оплатить до 25.03.2026.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "INVOICE",
+      "doc_kind": "invoice",
+      "amount": 48700,
+      "due_date": "25.03.2026",
+      "doc_number": null,
+      "action": "Оплатить",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "critical_safety"
+    ]
+  },
+  {
+    "case_id": "ru-marketing-newsletter-01",
+    "language": "ru",
+    "category": "marketing / newsletter / promotional noise",
+    "sender_email": "news@promo-ru.test",
+    "subject": "Еженедельная рассылка и вебинар по росту продаж",
+    "body_text": "К сведению: в пятницу вебинар и новая промо-акция. Внутри подборка материалов и маркетинговых обновлений.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Ознакомиться"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "ru-meeting-reschedule-01",
+    "language": "ru",
+    "category": "meeting / scheduling",
+    "sender_email": "pm@client-ru.test",
+    "subject": "Перенос встречи по бюджету",
+    "body_text": "Встречу по бюджету переносим на 21.03.2026 в 15:00. Пожалуйста, используйте обновленный инвайт.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "ru-ambiguous-business-01",
+    "language": "ru",
+    "category": "mixed-signal ambiguous business email",
+    "sender_email": "ops@partner-ru.test",
+    "subject": "Апдейт по договору и старому счету",
+    "body_text": "К сведению: прикладываем старый счет и новую редакцию приложения к договору. Сегодня оплачивать ничего не нужно, просто сохраните материалы в треде.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "ru-payment-reminder-overdue-01",
+    "language": "ru",
+    "category": "payment reminder",
+    "sender_email": "ar@vendor-ru.test",
+    "subject": "Повторное напоминание по счету INV-RU-77",
+    "body_text": "Просим оплатить просроченный счет. Задолженность 73 400 руб. Оплатить до 18.03.2026. Второе напоминание.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "PAYMENT_REMINDER",
+      "doc_kind": "invoice",
+      "amount": 73400,
+      "due_date": "18.03.2026",
+      "doc_number": null,
+      "action": "Оплатить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "critical_safety"
+    ]
+  },
+  {
+    "case_id": "payroll-01",
+    "category": "payroll",
+    "sender_email": "hr01@hr.vendor.test",
+    "subject": "????????? ?????? ?? ??????",
+    "body_text": "?? ???????? ????????? ?????? ?? ??????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_01.pdf",
+        "text": "????????? ?????? ?? ??????\n????????? 93500 ???\n???????? 15500 ???\n? ??????? 78000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 93500
+    },
+    "critical": true,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-02",
+    "category": "payroll",
+    "sender_email": "hr02@hr.vendor.test",
+    "subject": "????????? ?????? ?? ???????",
+    "body_text": "?? ???????? ????????? ?????? ?? ???????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_02.pdf",
+        "text": "????????? ?????? ?? ???????\n????????? 97000 ???\n???????? 16000 ???\n? ??????? 81000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 97000
+    },
+    "critical": true,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-03",
+    "category": "payroll",
+    "sender_email": "hr03@hr.vendor.test",
+    "subject": "????????? ?????? ?? ????",
+    "body_text": "?? ???????? ????????? ?????? ?? ????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_03.pdf",
+        "text": "????????? ?????? ?? ????\n????????? 100500 ???\n???????? 16500 ???\n? ??????? 84000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 100500
+    },
+    "critical": true,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-04",
+    "category": "payroll",
+    "sender_email": "hr04@hr.vendor.test",
+    "subject": "????????? ?????? ?? ??????",
+    "body_text": "?? ???????? ????????? ?????? ?? ??????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_04.pdf",
+        "text": "????????? ?????? ?? ??????\n????????? 104000 ???\n???????? 17000 ???\n? ??????? 87000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 104000
+    },
+    "critical": true,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-05",
+    "category": "payroll",
+    "sender_email": "hr05@hr.vendor.test",
+    "subject": "????????? ?????? ?? ???",
+    "body_text": "?? ???????? ????????? ?????? ?? ???. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_05.pdf",
+        "text": "????????? ?????? ?? ???\n????????? 107500 ???\n???????? 17500 ???\n? ??????? 90000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 107500
+    },
+    "critical": true,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-06",
+    "category": "payroll",
+    "sender_email": "hr06@hr.vendor.test",
+    "subject": "????????? ?????? ?? ????",
+    "body_text": "?? ???????? ????????? ?????? ?? ????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_06.pdf",
+        "text": "????????? ?????? ?? ????\n????????? 111000 ???\n???????? 18000 ???\n? ??????? 93000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 111000
+    },
+    "critical": true,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-07",
+    "category": "payroll",
+    "sender_email": "hr07@hr.vendor.test",
+    "subject": "????????? ?????? ?? ????",
+    "body_text": "?? ???????? ????????? ?????? ?? ????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_07.pdf",
+        "text": "????????? ?????? ?? ????\n????????? 114500 ???\n???????? 18500 ???\n? ??????? 96000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 114500
+    },
+    "critical": false,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-08",
+    "category": "payroll",
+    "sender_email": "hr08@hr.vendor.test",
+    "subject": "????????? ?????? ?? ??????",
+    "body_text": "?? ???????? ????????? ?????? ?? ??????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_08.pdf",
+        "text": "????????? ?????? ?? ??????\n????????? 118000 ???\n???????? 19000 ???\n? ??????? 99000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 118000
+    },
+    "critical": false,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-09",
+    "category": "payroll",
+    "sender_email": "hr09@hr.vendor.test",
+    "subject": "????????? ?????? ?? ????????",
+    "body_text": "?? ???????? ????????? ?????? ?? ????????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_09.pdf",
+        "text": "????????? ?????? ?? ????????\n????????? 121500 ???\n???????? 19500 ???\n? ??????? 102000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 121500
+    },
+    "critical": false,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-10",
+    "category": "payroll",
+    "sender_email": "hr10@hr.vendor.test",
+    "subject": "????????? ?????? ?? ???????",
+    "body_text": "?? ???????? ????????? ?????? ?? ???????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_10.pdf",
+        "text": "????????? ?????? ?? ???????\n????????? 125000 ???\n???????? 20000 ???\n? ??????? 105000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 125000
+    },
+    "critical": false,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-11",
+    "category": "payroll",
+    "sender_email": "hr11@hr.vendor.test",
+    "subject": "????????? ?????? ?? ??????",
+    "body_text": "?? ???????? ????????? ?????? ?? ??????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_11.pdf",
+        "text": "????????? ?????? ?? ??????\n????????? 128500 ???\n???????? 20500 ???\n? ??????? 108000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 128500
+    },
+    "critical": false,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "payroll-12",
+    "category": "payroll",
+    "sender_email": "hr12@hr.vendor.test",
+    "subject": "????????? ?????? ?? ???????",
+    "body_text": "?? ???????? ????????? ?????? ?? ???????. ??????????, ????????????.",
+    "attachments": [
+      {
+        "filename": "payroll_12.pdf",
+        "text": "????????? ?????? ?? ???????\n????????? 132000 ???\n???????? 21000 ???\n? ??????? 111000 ???\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "payroll",
+      "amount": 132000
+    },
+    "critical": false,
+    "mail_type": "PAYROLL",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "ru-personal-low-priority-01",
+    "language": "ru",
+    "category": "personal / low-priority chatter",
+    "sender_email": "friend@private-ru.test",
+    "subject": "Кофе на следующей неделе?",
+    "body_text": "Привет! Если будет время, давай на следующей неделе выпьем кофе. Не срочно.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "reconciliation-01",
+    "category": "reconciliation",
+    "sender_email": "rec01@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-01",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_01.pdf",
+        "text": "??? ?????? ???????? ???????? REC-01\n????????? ??????? 0 ???\n?????? 19200 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 19200
+    },
+    "critical": true,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-02",
+    "category": "reconciliation",
+    "sender_email": "rec02@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-02",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_02.pdf",
+        "text": "??? ?????? ???????? ???????? REC-02\n????????? ??????? 0 ???\n?????? 20400 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 20400
+    },
+    "critical": true,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-03",
+    "category": "reconciliation",
+    "sender_email": "rec03@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-03",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_03.pdf",
+        "text": "??? ?????? ???????? ???????? REC-03\n????????? ??????? 0 ???\n?????? 21600 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 21600
+    },
+    "critical": true,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-04",
+    "category": "reconciliation",
+    "sender_email": "rec04@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-04",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_04.pdf",
+        "text": "??? ?????? ???????? ???????? REC-04\n????????? ??????? 0 ???\n?????? 22800 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 22800
+    },
+    "critical": true,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-05",
+    "category": "reconciliation",
+    "sender_email": "rec05@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-05",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_05.pdf",
+        "text": "??? ?????? ???????? ???????? REC-05\n????????? ??????? 0 ???\n?????? 24000 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 24000
+    },
+    "critical": true,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-06",
+    "category": "reconciliation",
+    "sender_email": "rec06@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-06",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_06.pdf",
+        "text": "??? ?????? ???????? ???????? REC-06\n????????? ??????? 0 ???\n?????? 25200 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 25200
+    },
+    "critical": true,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "critical_safety",
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-07",
+    "category": "reconciliation",
+    "sender_email": "rec07@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-07",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_07.pdf",
+        "text": "??? ?????? ???????? ???????? REC-07\n????????? ??????? 0 ???\n?????? 26400 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 26400
+    },
+    "critical": false,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-08",
+    "category": "reconciliation",
+    "sender_email": "rec08@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-08",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_08.pdf",
+        "text": "??? ?????? ???????? ???????? REC-08\n????????? ??????? 0 ???\n?????? 27600 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 27600
+    },
+    "critical": false,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-09",
+    "category": "reconciliation",
+    "sender_email": "rec09@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-09",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_09.pdf",
+        "text": "??? ?????? ???????? ???????? REC-09\n????????? ??????? 0 ???\n?????? 28800 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 28800
+    },
+    "critical": false,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-10",
+    "category": "reconciliation",
+    "sender_email": "rec10@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-10",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_10.pdf",
+        "text": "??? ?????? ???????? ???????? REC-10\n????????? ??????? 0 ???\n?????? 30000 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 30000
+    },
+    "critical": false,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-11",
+    "category": "reconciliation",
+    "sender_email": "rec11@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-11",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_11.pdf",
+        "text": "??? ?????? ???????? ???????? REC-11\n????????? ??????? 0 ???\n?????? 31200 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 31200
+    },
+    "critical": false,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "reconciliation-12",
+    "category": "reconciliation",
+    "sender_email": "rec12@reconciliation.vendor.test",
+    "subject": "??? ?????? ???????? ???????? REC-12",
+    "body_text": "?? ???????? ??? ?????? ???????? ????????. ?????? ??????? ??????? ? ???????.",
+    "attachments": [
+      {
+        "filename": "reconciliation_12.pdf",
+        "text": "??? ?????? ???????? ???????? REC-12\n????????? ??????? 0 ???\n?????? 32400 ???\n???????? ??????? 0 ???\n?????? ??????? ??????????.\n"
+      }
+    ],
+    "expected": {
+      "action": "Проверить",
+      "amount": 32400
+    },
+    "critical": false,
+    "mail_type": "RECONCILIATION",
+    "subsets": [
+      "recurring_templates",
+      "correction_sensitive",
+      "digest_projection_sensitive",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-01",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup01@generic-mail.test",
+    "subject": "Re: Invoice POL-01 follow-up",
+    "body_text": "Invoice POL-01.\nAmount due 21750 USD.\nPayment due 05.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 21750,
+      "due_date": "05.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-02",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup02@generic-mail.test",
+    "subject": "Re: Invoice POL-02 follow-up",
+    "body_text": "Invoice POL-02.\nAmount due 22500 USD.\nPayment due 06.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 22500,
+      "due_date": "06.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-03",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup03@generic-mail.test",
+    "subject": "Re: Invoice POL-03 follow-up",
+    "body_text": "Invoice POL-03.\nAmount due 23250 USD.\nPayment due 07.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 23250,
+      "due_date": "07.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-04",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup04@generic-mail.test",
+    "subject": "Re: Invoice POL-04 follow-up",
+    "body_text": "Invoice POL-04.\nAmount due 24000 USD.\nPayment due 08.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 24000,
+      "due_date": "08.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-05",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup05@generic-mail.test",
+    "subject": "Re: Invoice POL-05 follow-up",
+    "body_text": "Invoice POL-05.\nAmount due 24750 USD.\nPayment due 09.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 24750,
+      "due_date": "09.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-06",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup06@generic-mail.test",
+    "subject": "Re: Invoice POL-06 follow-up",
+    "body_text": "Invoice POL-06.\nAmount due 25500 USD.\nPayment due 10.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 25500,
+      "due_date": "10.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": true,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "critical_safety",
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-07",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup07@generic-mail.test",
+    "subject": "Re: Invoice POL-07 follow-up",
+    "body_text": "Invoice POL-07.\nAmount due 26250 USD.\nPayment due 11.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 26250,
+      "due_date": "11.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": false,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-08",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup08@generic-mail.test",
+    "subject": "Re: Invoice POL-08 follow-up",
+    "body_text": "Invoice POL-08.\nAmount due 27000 USD.\nPayment due 12.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 27000,
+      "due_date": "12.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": false,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-09",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup09@generic-mail.test",
+    "subject": "Re: Invoice POL-09 follow-up",
+    "body_text": "Invoice POL-09.\nAmount due 27750 USD.\nPayment due 13.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 27750,
+      "due_date": "13.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": false,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-10",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup10@generic-mail.test",
+    "subject": "Re: Invoice POL-10 follow-up",
+    "body_text": "Invoice POL-10.\nAmount due 28500 USD.\nPayment due 14.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 28500,
+      "due_date": "14.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": false,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-11",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup11@generic-mail.test",
+    "subject": "Re: Invoice POL-11 follow-up",
+    "body_text": "Invoice POL-11.\nAmount due 29250 USD.\nPayment due 15.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 29250,
+      "due_date": "15.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": false,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "polluted-reply-12",
+    "category": "reply/forward polluted email",
+    "sender_email": "followup12@generic-mail.test",
+    "subject": "Re: Invoice POL-12 follow-up",
+    "body_text": "Invoice POL-12.\nAmount due 30000 USD.\nPayment due 16.08.2025.\nPlease review the invoice details.\n\nForwarded message\nFrom: payroll@example.com\n????????? ??????: ????????? 999999 ???.\n",
+    "attachments": [],
+    "expected": {
+      "action": "Проверить",
+      "doc_kind": "invoice",
+      "amount": 30000,
+      "due_date": "16.08.2025",
+      "template_id": "russian_invoice_common"
+    },
+    "critical": false,
+    "mail_type": "INVOICE",
+    "subsets": [
+      "weak_signal",
+      "bilingual_eval"
+    ],
+    "language": "ru"
+  },
+  {
+    "case_id": "ru-security-alert-01",
+    "language": "ru",
+    "category": "security alert",
+    "sender_email": "noreply@security-ru.test",
+    "subject": "Подозрительный вход в корпоративный аккаунт",
+    "body_text": "Security alert: обнаружен подозрительный вход. Проверьте устройство и подтвердите, что это были вы.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "SECURITY_ALERT",
+      "doc_kind": "incident",
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": true,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "critical_safety"
+    ]
+  },
+  {
+    "case_id": "ru-service-notification-01",
+    "language": "ru",
+    "category": "service/system notification",
+    "sender_email": "status@service-ru.test",
+    "subject": "Обновление сервиса аналитики",
+    "body_text": "Информационное обновление: ночью перезапустим сервис аналитики. Действий не требуется, если утром все работает штатно.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "ru-shipping-update-01",
+    "language": "ru",
+    "category": "shipping / logistics update",
+    "sender_email": "log@delivery-ru.test",
+    "subject": "Отгрузка по заказу PO-RU-17 перенесена",
+    "body_text": "Сообщаем, что отгрузка задерживается. Доставка ожидается 24.03.2026, новый трекинг пришлем отдельно.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "DELIVERY_NOTICE",
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  },
+  {
+    "case_id": "ru-support-request-01",
+    "language": "ru",
+    "category": "support / client request",
+    "sender_email": "client@support-ru.test",
+    "subject": "Нужно подтвердить окно внедрения",
+    "body_text": "Просьба подтвердить, сможете ли подключиться к созвону 22.03.2026, и сообщить контакты ответственных.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Ответить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval"
+    ]
+  }
+]

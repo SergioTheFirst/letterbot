@@ -13,8 +13,62 @@ class MailTypeClassifier:
     """Deterministic mail type classifier based on message content."""
 
     INVOICE_KEYWORDS = {"счет", "счёт", "invoice", "bill", "оплат"}
-    PAYMENT_REMINDER_KEYWORDS = {"напомин", "просроч", "долг", "ожидаем"}
+    PAYMENT_REMINDER_KEYWORDS = {
+        "напомин",
+        "просроч",
+        "долг",
+        "ожидаем",
+        "повторное напоминание",
+        "второе напоминание",
+        "последнее напоминание",
+        "please pay",
+        "payment due",
+        "amount due",
+        "balance due",
+        "outstanding balance",
+        "overdue invoice",
+        "second notice",
+        "final notice",
+        "payment reminder",
+        "unpaid",
+        "overdue payment",
+        "past due",
+        "past-due",
+    }
+    NON_PAYMENT_INVOICE_REFERENCE_KEYWORDS = {
+        "historic invoice",
+        "invoice copy",
+        "old invoice",
+        "invoice thread",
+        "for reference",
+        "старый счет",
+        "старый счёт",
+        "копия счета",
+        "копия счёта",
+        "старому счету",
+        "старому счёту",
+        "отправим счет",
+        "отправим счёт",
+        "send invoice later",
+    }
+    NO_PAYMENT_NEEDED_KEYWORDS = {
+        "no payment is needed",
+        "payment is not needed",
+        "nothing to pay",
+        "оплачивать ничего не нужно",
+        "оплата не требуется",
+        "не нужно оплачивать",
+    }
     CONTRACT_KEYWORDS = {"договор", "contract", "соглашение", "agreement"}
+    CONTRACT_APPROVAL_KEYWORDS = {
+        "подпис",
+        "утверд",
+        "approve",
+        "sign",
+        "signature",
+        "docusign",
+        "please sign",
+    }
     PRICE_KEYWORDS = {"прайс", "price list", "стоимост", "цен"}
     DELIVERY_KEYWORDS = {"достав", "отгруз", "shipment", "груз"}
     DEADLINE_KEYWORDS = {"срок", "deadline", "истекает", "дата"}
@@ -231,6 +285,12 @@ class MailTypeClassifier:
         has_amount = bool(
             re.search(r"\b\d{3,}(?:\s?руб|\s?rur|\s?usd|\s?eur)?\b", combined)
         )
+        has_currency_amount = bool(
+            re.search(
+                r"\b(?:\d{1,3}(?:[ ,\u00a0]\d{3})+|\d{4,})(?:[.,]\d{1,2})?\s*(?:руб|rur|usd|eur|\$|€)\b",
+                combined,
+            )
+        )
         has_date = bool(re.search(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b", combined))
 
         kinds = {
@@ -241,7 +301,7 @@ class MailTypeClassifier:
         has_invoice_att = "INVOICE" in kinds
 
         contract_match = cls._first_match(combined, cls.CONTRACT_KEYWORDS)
-        approval_match = cls._first_match(combined, {"подпис", "утверд", "approve"})
+        approval_match = cls._first_match(combined, cls.CONTRACT_APPROVAL_KEYWORDS)
         if contract_match and approval_match:
             reason_codes.append("mt.base=CONTRACT_APPROVAL")
             reason_codes.append(f"mt.contract.keyword={contract_match}")
@@ -257,17 +317,18 @@ class MailTypeClassifier:
             reason_codes.append("mt.attachment_hint=contract_doc")
             return "CONTRACT_UPDATE", reason_codes
 
-        invoice_match = cls._first_match(combined, cls.INVOICE_KEYWORDS)
-        if invoice_match or has_invoice_att:
-            reason_codes.append("mt.base=INVOICE")
-            if invoice_match:
-                reason_codes.append(f"mt.invoice.keyword={invoice_match}")
-            if has_invoice_att:
-                reason_codes.append("mt.attachment_hint=invoice_doc")
-            return "INVOICE", reason_codes
-
         reminder_match = cls._first_match(combined, cls.PAYMENT_REMINDER_KEYWORDS)
-        if reminder_match and (has_amount or has_date):
+        reminder_hits = sum(
+            1 for marker in cls.PAYMENT_REMINDER_KEYWORDS if marker in combined
+        )
+        invoice_match = cls._first_match(combined, cls.INVOICE_KEYWORDS)
+        invoice_reference_match = cls._first_match(
+            combined, cls.NON_PAYMENT_INVOICE_REFERENCE_KEYWORDS
+        )
+        no_payment_match = cls._first_match(combined, cls.NO_PAYMENT_NEEDED_KEYWORDS)
+        if reminder_match and (has_amount or has_date) and (
+            reminder_hits >= 2 or invoice_match is None
+        ):
             reason_codes.append("mt.base=PAYMENT_REMINDER")
             reason_codes.append(f"mt.reminder.keyword={reminder_match}")
             if has_amount:
@@ -275,6 +336,22 @@ class MailTypeClassifier:
             if has_date:
                 reason_codes.append("mt.reminder.date")
             return "PAYMENT_REMINDER", reason_codes
+
+        if (
+            invoice_match
+            and not has_invoice_att
+            and not has_currency_amount
+            and (invoice_reference_match or no_payment_match)
+        ):
+            invoice_match = None
+
+        if invoice_match or has_invoice_att:
+            reason_codes.append("mt.base=INVOICE")
+            if invoice_match:
+                reason_codes.append(f"mt.invoice.keyword={invoice_match}")
+            if has_invoice_att:
+                reason_codes.append("mt.attachment_hint=invoice_doc")
+            return "INVOICE", reason_codes
 
         price_match = cls._first_match(combined, cls.PRICE_KEYWORDS)
         if price_match:
@@ -294,17 +371,17 @@ class MailTypeClassifier:
             reason_codes.append(f"mt.security.keyword={security_match}")
             return "SECURITY_ALERT", reason_codes
 
-        policy_match = cls._first_match(combined, cls.POLICY_KEYWORDS)
-        if policy_match:
-            reason_codes.append("mt.base=POLICY_UPDATE")
-            reason_codes.append(f"mt.policy.keyword={policy_match}")
-            return "POLICY_UPDATE", reason_codes
-
         meeting_match = cls._first_match(combined, cls.MEETING_KEYWORDS)
         if meeting_match:
             reason_codes.append("mt.base=MEETING_CHANGE")
             reason_codes.append(f"mt.meeting.keyword={meeting_match}")
             return "MEETING_CHANGE", reason_codes
+
+        policy_match = cls._first_match(combined, cls.POLICY_KEYWORDS)
+        if policy_match:
+            reason_codes.append("mt.base=POLICY_UPDATE")
+            reason_codes.append(f"mt.policy.keyword={policy_match}")
+            return "POLICY_UPDATE", reason_codes
 
         deadline_match = cls._first_match(combined, cls.DEADLINE_KEYWORDS)
         if deadline_match and has_date:
