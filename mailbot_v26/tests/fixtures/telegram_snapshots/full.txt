@@ -1,12 +1,12 @@
-🔴 от billing@vector.example:
+🔴 from billing@vector.example:
 <b>Счёт на оплату №42</b>
-<b><i>Оплатить счёт</i></b>
+<b><i>Pay invoice</i></b>
 
 Счёт на 87 500 руб. Оплатить до 2026-04-15.
 
-Почему:
-• найден счет
-• сумма 87 500
-• срок 2026-04-15
-<i>Аккаунт: render-contract@example.com</i>
+Why:
+• invoice detected
+• amount 87 500
+• due 2026-04-15
+<i>Account: render-contract@example.com</i>
 <i>Powered by LetterBot.ru</i>

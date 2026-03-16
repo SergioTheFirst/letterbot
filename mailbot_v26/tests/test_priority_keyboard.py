@@ -50,7 +50,7 @@ def test_email_actions_keyboard_contains_priority_and_snooze_rows() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2h", "Tomorrow"]]
 
 
 def test_snooze_callbacks_parse() -> None:
@@ -68,7 +68,7 @@ def test_email_actions_keyboard_ignores_trace_toggle_in_main_layout() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2h", "Tomorrow"]]
 
 
 def test_priority_menu_labels_match_user_facing_ux() -> None:
@@ -86,7 +86,7 @@ def test_initial_keyboard_shows_priority_and_snooze_buttons() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2h", "Tomorrow"]]
 
 
 def test_initial_keyboard_no_back_button() -> None:
@@ -142,7 +142,7 @@ def test_priority_menu_buttons_are_human_readable() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2h", "Tomorrow"]]
 
 
 def test_priority_menu_does_not_show_confusing_verno_label() -> None:
@@ -168,7 +168,7 @@ def test_back_button_returns_to_main_keyboard() -> None:
     )
     assert [
         [button["text"] for button in row] for row in base["inline_keyboard"]
-    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2h", "Tomorrow"]]
 
 
 def test_priority_keyboard_renders_direct_priority_buttons() -> None:
@@ -177,7 +177,7 @@ def test_priority_keyboard_renders_direct_priority_buttons() -> None:
     )
     assert [
         [button["text"] for button in row] for row in keyboard["inline_keyboard"]
-    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2 часа", "Завтра"]]
+    ] == [["🟦▌Low", "🟨▌Medium", "🟥▌High"], ["Snooze 2h", "Tomorrow"]]
 
 
 def test_priority_keyboard_minimal_stripes() -> None:

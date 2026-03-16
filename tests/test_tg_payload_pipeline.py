@@ -43,7 +43,7 @@ def test_tg_payload_with_attachments():
 
     validated = processor_module.validate_tg_payload(text, ctx)
 
-    assert "Вложения: 4" in validated
+    assert "Attachments: 4" in validated
     assert "- DOC: 1143 chars" in validated
     assert "- XLS: 1608 chars" in validated
     assert "- PDF: 746 chars" in validated
@@ -70,9 +70,9 @@ def test_tg_payload_never_subject_only():
         attachment_summary="",
     )
 
-    assert "от hq@example.com" in fallback
+    assert "from hq@example.com" in fallback
     assert subject in fallback
-    assert "Действий не требуется" in fallback
+    assert "No action needed" in fallback
     assert "Powered by LetterBot.ru" not in fallback
 
 
@@ -172,9 +172,9 @@ def test_pipeline_does_not_mark_success_on_invalid_tg(monkeypatch, caplog):
     assert "tg_payload_invalid" in caplog.text
     telegram_text = captured.get("telegram_text", "")
     assert (
-        telegram_text.startswith("Внимание: доставка в Telegram деградировала")
-        or telegram_text.startswith("🔵 от hq@example.com:")
-        or telegram_text.startswith("Письмо получено")
+        telegram_text.startswith("Warning: Telegram delivery degraded")
+        or telegram_text.startswith("🔵 from hq@example.com:")
+        or telegram_text.startswith("Email received")
     )
     assert any(event.get("type") == "tg_payload_invalid" for event in emitted_events)
 

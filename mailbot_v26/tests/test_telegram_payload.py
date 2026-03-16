@@ -173,4 +173,4 @@ def test_premium_clarity_single_message(monkeypatch) -> None:
         "🟨▌Medium",
         "🟥▌High",
     ]
-    assert [button["text"] for button in rows[1]] == ["Snooze 2 часа", "Завтра"]
+    assert [button["text"] for button in rows[1]] == ["Snooze 2h", "Tomorrow"]

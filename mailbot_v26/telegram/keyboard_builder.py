@@ -10,11 +10,16 @@ from mailbot_v26.telegram.decision_trace_ui import (
     HIDE_PREFIX,
     build_decision_trace_callback,
 )
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE
 
 InlineKeyboardMarkup = dict[str, list[list[dict[str, str]]]]
 
 _ACTIONABLE_DOC_KINDS = {"invoice", "payroll", "reconciliation", "contract"}
-_LOW_PRIORITY = "🔵"
+
+
+def _is_english_locale(locale: str | None) -> bool:
+    cleaned = str(locale or "").strip() or DEFAULT_LOCALE
+    return cleaned.casefold().startswith("en")
 
 
 def _safe_button(*, text: str, prefix: str, action: str, message_key: str) -> dict[str, str]:
@@ -24,7 +29,10 @@ def _safe_button(*, text: str, prefix: str, action: str, message_key: str) -> di
     }
 
 
-def _priority_row(message_key: str) -> list[dict[str, str]]:
+def _priority_row(
+    message_key: str, *, locale: str = DEFAULT_LOCALE
+) -> list[dict[str, str]]:
+    del locale
     return [
         _safe_button(
             text="🟦▌Low",
@@ -47,36 +55,42 @@ def _priority_row(message_key: str) -> list[dict[str, str]]:
     ]
 
 
-def _snooze_row(message_key: str) -> list[dict[str, str]]:
+def _snooze_row(
+    message_key: str, *, locale: str = DEFAULT_LOCALE
+) -> list[dict[str, str]]:
     return [
         {
-            "text": "Snooze 2 часа",
+            "text": "Snooze 2h" if _is_english_locale(locale) else "Отложить на 2 часа",
             "callback_data": f"snz_s:{message_key}:2h",
         },
         {
-            "text": "Завтра",
+            "text": "Tomorrow" if _is_english_locale(locale) else "Завтра",
             "callback_data": f"snz_s:{message_key}:tom",
         },
     ]
 
 
-def _feedback_rows(doc_kind: str, message_key: str) -> list[list[dict[str, str]]]:
+def _feedback_rows(
+    doc_kind: str, message_key: str, *, locale: str = DEFAULT_LOCALE
+) -> list[list[dict[str, str]]]:
     if doc_kind == "invoice":
         return [[
             _safe_button(
-                text="✓ Оплачено",
+                text="✓ Paid" if _is_english_locale(locale) else "✓ Оплачено",
                 prefix=FEEDBACK_PREFIX,
                 action="paid",
                 message_key=message_key,
             ),
             _safe_button(
-                text="✗ Не счёт",
+                text="✗ Not an invoice"
+                if _is_english_locale(locale)
+                else "✗ Не счёт",
                 prefix=FEEDBACK_PREFIX,
                 action="not_invoice",
                 message_key=message_key,
             ),
             _safe_button(
-                text="⏸ Позже",
+                text="⏰ Later" if _is_english_locale(locale) else "⏰ Позже",
                 prefix=FEEDBACK_PREFIX,
                 action="snooze",
                 message_key=message_key,
@@ -85,13 +99,17 @@ def _feedback_rows(doc_kind: str, message_key: str) -> list[list[dict[str, str]]
     if doc_kind == "payroll":
         return [[
             _safe_button(
-                text="✓ Принято к сведению",
+                text="✓ Acknowledged"
+                if _is_english_locale(locale)
+                else "✓ Принято к сведению",
                 prefix=FEEDBACK_PREFIX,
                 action="correct",
                 message_key=message_key,
             ),
             _safe_button(
-                text="✗ Неверная классификация",
+                text="✗ Wrong classification"
+                if _is_english_locale(locale)
+                else "✗ Неверная классификация",
                 prefix=FEEDBACK_PREFIX,
                 action="not_payroll",
                 message_key=message_key,
@@ -100,13 +118,15 @@ def _feedback_rows(doc_kind: str, message_key: str) -> list[list[dict[str, str]]
     if doc_kind == "contract":
         return [[
             _safe_button(
-                text="✓ На review",
+                text="✓ Review" if _is_english_locale(locale) else "✓ На review",
                 prefix=FEEDBACK_PREFIX,
                 action="correct",
                 message_key=message_key,
             ),
             _safe_button(
-                text="✗ Не контракт",
+                text="✗ Not a contract"
+                if _is_english_locale(locale)
+                else "✗ Не контракт",
                 prefix=FEEDBACK_PREFIX,
                 action="not_contract",
                 message_key=message_key,
@@ -115,7 +135,9 @@ def _feedback_rows(doc_kind: str, message_key: str) -> list[list[dict[str, str]]
     if doc_kind == "reconciliation":
         return [[
             _safe_button(
-                text="✓ Принято к сведению",
+                text="✓ Acknowledged"
+                if _is_english_locale(locale)
+                else "✓ Принято к сведению",
                 prefix=FEEDBACK_PREFIX,
                 action="correct",
                 message_key=message_key,
@@ -124,14 +146,21 @@ def _feedback_rows(doc_kind: str, message_key: str) -> list[list[dict[str, str]]
     return []
 
 
-def _trace_row(*, message_key: str, expanded: bool) -> list[dict[str, str]]:
+def _trace_row(
+    *, message_key: str, expanded: bool, locale: str = DEFAULT_LOCALE
+) -> list[dict[str, str]]:
     callback = build_decision_trace_callback(
         HIDE_PREFIX if expanded else DETAILS_PREFIX,
         int(message_key),
     )
+    label = (
+        "◀ Hide" if expanded else "Why this?"
+    ) if _is_english_locale(locale) else (
+        "◀ Скрыть" if expanded else "Почему так?"
+    )
     return [
         {
-            "text": "◀ Скрыть" if expanded else "Почему так?",
+            "text": label,
             "callback_data": callback,
         }
     ]
@@ -145,6 +174,7 @@ def build_notification_keyboard(
     message_key: int | str | None,
     show_decision_trace: bool = False,
     decision_trace_expanded: bool = False,
+    locale: str = DEFAULT_LOCALE,
 ) -> InlineKeyboardMarkup | None:
     normalized_mode = str(render_mode or "").strip().lower()
     if normalized_mode in {"safe_fallback", "short_template", "error", "startup", "degraded"}:
@@ -159,43 +189,21 @@ def build_notification_keyboard(
     normalized_doc_kind = str(doc_kind or "").strip().lower()
     normalized_priority = str(priority or "").strip()
 
-    rows = _feedback_rows(normalized_doc_kind, normalized_key)
+    rows = _feedback_rows(normalized_doc_kind, normalized_key, locale=locale)
     if normalized_doc_kind in _ACTIONABLE_DOC_KINDS or normalized_mode == "full":
-        rows.append(_priority_row(normalized_key))
-        rows.append(_snooze_row(normalized_key))
+        rows.append(_priority_row(normalized_key, locale=locale))
+        rows.append(_snooze_row(normalized_key, locale=locale))
     if show_decision_trace:
         rows.append(
             _trace_row(
                 message_key=normalized_key,
                 expanded=decision_trace_expanded,
+                locale=locale,
             )
         )
     if not rows:
         return None
     return {"inline_keyboard": rows}
-
-
-def _priority_row(message_key: str) -> list[dict[str, str]]:
-    return [
-        _safe_button(
-            text="🟦▌Low",
-            prefix=PRIORITY_PREFIX,
-            action="lo",
-            message_key=message_key,
-        ),
-        _safe_button(
-            text="🟨▌Medium",
-            prefix=PRIORITY_PREFIX,
-            action="med",
-            message_key=message_key,
-        ),
-        _safe_button(
-            text="🟥▌High",
-            prefix=PRIORITY_PREFIX,
-            action="hi",
-            message_key=message_key,
-        ),
-    ]
 
 
 __all__ = ["InlineKeyboardMarkup", "build_notification_keyboard"]

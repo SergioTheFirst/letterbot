@@ -89,8 +89,8 @@ def test_initial_keyboard_priority_buttons() -> None:
         "🟥▌High",
     ]
     assert [button["text"] for button in keyboard["inline_keyboard"][1]] == [
-        "Snooze 2 часа",
-        "Завтра",
+        "Snooze 2h",
+        "Tomorrow",
     ]
 
 
@@ -137,9 +137,9 @@ def test_initial_keyboard_shows_human_readable_actions_and_no_trace() -> None:
         "🟨▌Medium",
         "🟥▌High",
     ]
-    assert [button["text"] for button in rows[1]] == ["Snooze 2 часа", "Завтра"]
-    assert "Почему так?" not in labels
-    assert "◀ Скрыть" not in labels
+    assert [button["text"] for button in rows[1]] == ["Snooze 2h", "Tomorrow"]
+    assert "Why this?" not in labels
+    assert "◀ Hide" not in labels
 
 
 def test_invoice_excel_payload_validation_stays_full() -> None:

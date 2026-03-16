@@ -117,6 +117,20 @@ def _is_english_locale(locale: str | None) -> bool:
     return cleaned.casefold().startswith("en")
 
 
+def _localized_text(locale: str, *, en: str, ru: str) -> str:
+    return en if _is_english_locale(locale) else ru
+
+
+def _attachment_name_fallback(locale: str) -> str:
+    return _localized_text(locale, en="attachment", ru="вложение")
+
+
+def _attachment_count_label(count: int, locale: str) -> str:
+    if _is_english_locale(locale):
+        return "attachment" if count == 1 else "attachments"
+    return "вложение" if count == 1 else "вложения"
+
+
 def _localize_outbound_action(action_line: str | None, *, locale: str) -> str:
     cleaned = _strip_internal_noise(action_line).strip()
     if not cleaned:
@@ -132,11 +146,13 @@ def _is_high_priority(priority: str | None) -> bool:
     return normalized in _HIGH_PRIORITY_TOKENS
 
 
-def format_account_footer(account_email: str | None, *, locale: str = "ru") -> str:
+def format_account_footer(
+    account_email: str | None, *, locale: str = DEFAULT_LOCALE
+) -> str:
     safe_account = _escape_dynamic(account_email)
     if not safe_account:
         return ""
-    label = "Account" if _is_english_locale(locale) else "Аккаунт"
+    label = _localized_text(locale, en="Account", ru="Аккаунт")
     return f"<i>{label}: {safe_account}</i>"
 
 
@@ -145,7 +161,7 @@ def finalize_telegram_message(
     text: str,
     priority: str,
     account_email: str | None = None,
-    locale: str = "ru",
+    locale: str = DEFAULT_LOCALE,
 ) -> str:
     rendered = str(text or "").strip()
     lines = [rendered]
@@ -454,6 +470,8 @@ def _invoice_attachment_insight(
     text: str,
     attachments_count: int,
     message_facts: dict[str, Any] | None = None,
+    *,
+    locale: str = DEFAULT_LOCALE,
 ) -> str | None:
     invoice_types = {
         "INVOICE",
@@ -508,7 +526,10 @@ def _invoice_attachment_insight(
     if number_match:
         candidate = (number_match.group(1) or "").strip(" -.:;,")
         if candidate:
-            invoice_number = f"Счет №{candidate}"
+            if _is_english_locale(locale):
+                invoice_number = f"Invoice #{candidate}"
+            else:
+                invoice_number = f"Счет №{candidate}"
     amount = _normalize_amount(str(facts.get("amount") or ""))
     for match in _RUB_AMOUNT_RE.finditer(text):
         if _is_dotted_numeric_fragment(text, match):
@@ -580,31 +601,37 @@ def _invoice_attachment_insight(
     if amount:
         parts.append(amount)
     if due_date:
-        parts.append(f"до {due_date}")
+        due_label = _localized_text(locale, en="due", ru="до")
+        parts.append(f"{due_label} {due_date}")
     if parts:
         return f"📎 {' · '.join(parts)}"
-    suffix = "влож." if attachments_count > 0 else "вложение"
     count = max(attachments_count, 1)
-    return f"📎 Счёт · {count} {suffix}"
+    label = _localized_text(locale, en="Invoice", ru="Счёт")
+    return f"📎 {label} · {count} {_attachment_count_label(count, locale)}"
 
 
-def _act_attachment_insight(mail_type: str, text: str) -> str | None:
+def _act_attachment_insight(
+    mail_type: str, text: str, *, locale: str = DEFAULT_LOCALE
+) -> str | None:
     if not (mail_type.startswith("ACT") or "RECONCILIATION" in mail_type):
         return None
+    label = _localized_text(locale, en="Reconciliation", ru="Акт сверки")
     period_match = _PERIOD_RE.search(text)
     if period_match:
         month = period_match.group(1)
         year = period_match.group(2)
-        return f"📎 Акт сверки · {month} {year}"
+        return f"📎 {label} · {month} {year}"
     counterparty_match = _COUNTERPARTY_RE.search(text)
     if counterparty_match:
-        return f"📎 Акт сверки · {counterparty_match.group(0)}"
-    return "📎 Акт сверки"
+        return f"📎 {label} · {counterparty_match.group(0)}"
+    return f"📎 {label}"
 
 
-def _table_attachment_insight(attachments: list[dict[str, Any]]) -> str | None:
+def _table_attachment_insight(
+    attachments: list[dict[str, Any]], *, locale: str = DEFAULT_LOCALE
+) -> str | None:
     for attachment in attachments:
-        filename = str(attachment.get("filename") or "вложение").strip()
+        filename = str(attachment.get("filename") or _attachment_name_fallback(locale)).strip()
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext not in {"xls", "xlsx", "xlsm", "xlsb", "csv"}:
             continue
@@ -642,6 +669,7 @@ def build_attachment_insight(
     subject: str = "",
     summary: str = "",
     message_facts: dict[str, Any] | None = None,
+    locale: str = DEFAULT_LOCALE,
 ) -> str | None:
     if not attachments:
         return None
@@ -654,19 +682,25 @@ def build_attachment_insight(
         source_text,
         len(attachments),
         message_facts=message_facts,
+        locale=locale,
     )
     if invoice_line:
         return invoice_line
-    act_line = _act_attachment_insight(normalized_mail_type, source_text)
+    act_line = _act_attachment_insight(
+        normalized_mail_type, source_text, locale=locale
+    )
     if act_line:
         return act_line
-    table_line = _table_attachment_insight(attachments)
+    table_line = _table_attachment_insight(attachments, locale=locale)
     if table_line:
         return table_line
     if len(attachments) == 1:
-        filename = str(attachments[0].get("filename") or "вложение").strip()
-        return f"📎 1 вложение: {filename}"
-    return f"📎 {len(attachments)} вложения"
+        filename = str(
+            attachments[0].get("filename") or _attachment_name_fallback(locale)
+        ).strip()
+        return f"📎 1 {_attachment_count_label(1, locale)}: {filename}"
+    count = len(attachments)
+    return f"📎 {count} {_attachment_count_label(count, locale)}"
 
 
 def _is_binary_leak(text: str) -> bool:
@@ -722,22 +756,22 @@ def _attachment_size_bytes(attachment: dict[str, Any]) -> int:
     return 0
 
 
-def _format_size_mb(size_bytes: int) -> str:
+def _format_size_mb(size_bytes: int, *, locale: str = DEFAULT_LOCALE) -> str:
     if size_bytes <= 0:
-        return "0 МБ"
+        return _localized_text(locale, en="0 MB", ru="0 МБ")
     size_mb = size_bytes / (1024 * 1024)
     formatted = f"{size_mb:.1f}".rstrip("0").rstrip(".")
-    return f"{formatted} МБ"
+    return f"{formatted} {_localized_text(locale, en='MB', ru='МБ')}"
 
 
-def _attachment_type_label(filename: str) -> str:
+def _attachment_type_label(filename: str, *, locale: str = DEFAULT_LOCALE) -> str:
     cleaned = (filename or "").strip()
     if "." not in cleaned:
-        return "ДРУГОЕ"
+        return _localized_text(locale, en="OTHER", ru="ДРУГОЕ")
     ext = cleaned.rsplit(".", 1)[-1].lower()
     ext = re.sub(r"[^a-z0-9]+", "", ext)
     if not ext:
-        return "ДРУГОЕ"
+        return _localized_text(locale, en="OTHER", ru="ДРУГОЕ")
     normalized = {
         "jpeg": "JPG",
         "jpg": "JPG",
@@ -745,38 +779,49 @@ def _attachment_type_label(filename: str) -> str:
     return normalized
 
 
-def _attachment_type_summary(attachments: list[dict[str, Any]]) -> str:
+def _attachment_type_summary(
+    attachments: list[dict[str, Any]], *, locale: str = DEFAULT_LOCALE
+) -> str:
     counts = Counter(
-        _attachment_type_label(str(attachment.get("filename") or ""))
+        _attachment_type_label(str(attachment.get("filename") or ""), locale=locale)
         for attachment in attachments
     )
     summary_parts = [f"{ext}×{count}" for ext, count in sorted(counts.items())]
     summary = ", ".join(summary_parts)
+    header = _localized_text(locale, en="Attachments", ru="Вложения")
     if summary:
-        return f"Вложения: {len(attachments)} ({summary})"
-    return f"Вложения: {len(attachments)}"
+        return f"{header}: {len(attachments)} ({summary})"
+    return f"{header}: {len(attachments)}"
 
 
-def format_priority_line(priority: str, from_email: str, *, locale: str = "ru") -> str:
+def format_priority_line(
+    priority: str, from_email: str, *, locale: str = DEFAULT_LOCALE
+) -> str:
     normalized_priority = normalize_mojibake_text(priority)
     if normalized_priority not in {"🔴", "🟡", "🔵"}:
         normalized_priority = "🔵"
-    unknown_sender = "unknown" if _is_english_locale(locale) else "неизвестно"
-    sender_prefix = "from" if _is_english_locale(locale) else "от"
+    unknown_sender = _localized_text(locale, en="unknown", ru="неизвестно")
+    sender_prefix = _localized_text(locale, en="from", ru="от")
     safe_sender = _escape_dynamic(from_email or unknown_sender)
     return f"{normalized_priority} {sender_prefix} {safe_sender}:"
 
 
-def format_subject(subject: str, *, locale: str = "ru") -> str:
-    default_subject = "(no subject)" if _is_english_locale(locale) else "(без темы)"
+def format_subject(subject: str, *, locale: str = DEFAULT_LOCALE) -> str:
+    default_subject = _localized_text(locale, en="(no subject)", ru="(без темы)")
     safe_subject = _escape_dynamic(subject or default_subject)
     return f"<b>{safe_subject}</b>"
 
 
-def format_main_action(action_line: str | None, *, locale: str = "ru") -> str:
+def format_main_action(
+    action_line: str | None, *, locale: str = DEFAULT_LOCALE
+) -> str:
     cleaned = _localize_outbound_action(action_line, locale=locale)
     if not cleaned:
-        cleaned = "No action needed" if _is_english_locale(locale) else "Действий не требуется"
+        cleaned = _localized_text(
+            locale,
+            en="No action needed",
+            ru="Действий не требуется",
+        )
     safe_action = _escape_dynamic(cleaned)
     return f"<b><i>{safe_action}</i></b>"
 
@@ -786,31 +831,42 @@ def format_narrative_block(
     fact: str,
     context: str | None,
     action: str | None,
+    locale: str = DEFAULT_LOCALE,
 ) -> str:
-    lines = [f"<b>Факт:</b> <i>{_escape_dynamic(fact)}</i>"]
+    lines = [
+        f"<b>{_localized_text(locale, en='Fact', ru='Факт')}:</b> <i>{_escape_dynamic(fact)}</i>"
+    ]
     if context:
-        lines.append(f"<b>Контекст:</b> <i>{_escape_dynamic(context)}</i>")
+        lines.append(
+            f"<b>{_localized_text(locale, en='Context', ru='Контекст')}:</b> <i>{_escape_dynamic(context)}</i>"
+        )
     if action:
-        lines.append(f"<b>Действие:</b> <i>{_escape_dynamic(action)}</i>")
+        lines.append(
+            f"<b>{_localized_text(locale, en='Action', ru='Действие')}:</b> <i>{_escape_dynamic(action)}</i>"
+        )
     return "\n".join(lines)
 
 
-def format_attachments_block(attachments: list[dict[str, Any]]) -> str:
+def format_attachments_block(
+    attachments: list[dict[str, Any]], *, locale: str = DEFAULT_LOCALE
+) -> str:
     if not attachments:
         return ""
-    lines = [_attachment_type_summary(attachments)]
+    lines = [_attachment_type_summary(attachments, locale=locale)]
     for attachment in attachments:
-        filename = _escape_dynamic(attachment.get("filename") or "вложение")
+        filename = _escape_dynamic(
+            attachment.get("filename") or _attachment_name_fallback(locale)
+        )
         skipped_reason = _attachment_skipped_reason(attachment)
         if skipped_reason == "too_large":
-            size_display = _format_size_mb(_attachment_size_bytes(attachment))
+            size_display = _format_size_mb(_attachment_size_bytes(attachment), locale=locale)
             lines.append(
-                f"{filename} — <i>слишком большой файл ({size_display}), извлечение отключено</i>"
+                f"{filename} — <i>{_localized_text(locale, en='file too large', ru='слишком большой файл')} ({size_display}), {_localized_text(locale, en='extraction skipped', ru='извлечение отключено')}</i>"
             )
             continue
         if skipped_reason == "total_limit":
             lines.append(
-                f"{filename} — <i>пропущен из-за ограничения размера письма</i>"
+                f"{filename} — <i>{_localized_text(locale, en='skipped due to message size limit', ru='пропущен из-за ограничения размера письма')}</i>"
             )
             continue
         extracted_text = _normalize_attachment_text(attachment.get("text"))
@@ -837,7 +893,7 @@ def build_telegram_text(
     summary: str = "",
     message_facts: dict[str, Any] | None = None,
     relationship_profile: dict[str, Any] | None = None,
-    locale: str = "ru",
+    locale: str = DEFAULT_LOCALE,
 ) -> str:
     body_lines = _maybe_drop_duplicate_subject_line(
         subject, [format_main_action(action_line, locale=locale)]
@@ -853,6 +909,7 @@ def build_telegram_text(
         subject=subject,
         summary=summary,
         message_facts=message_facts,
+        locale=locale,
     )
     if attachment_line:
         lines.append("")
@@ -861,10 +918,12 @@ def build_telegram_text(
     if summary_excerpt:
         lines.append("")
         lines.append(_escape_dynamic(summary_excerpt))
-    explanation_points = _build_decision_explanation(message_facts or {}, mail_type)
+    explanation_points = _build_decision_explanation(
+        message_facts or {}, mail_type, locale=locale
+    )
     if explanation_points:
         lines.append("")
-        lines.append("Почему:")
+        lines.append(_localized_text(locale, en="Why:", ru="Почему:"))
         lines.extend(explanation_points)
     if relationship_profile:
         emails_count = int(relationship_profile.get("emails_count") or 0)
@@ -875,10 +934,10 @@ def build_telegram_text(
             lines.extend(
                 [
                     "",
-                    "💡 Контрагент:",
-                    f"{emails_count} писем",
-                    f"{invoice_count} счета",
-                    f"{overdue_count} задержка",
+                    _localized_text(locale, en="💡 Relationship:", ru="💡 Контрагент:"),
+                    f"{emails_count} {_localized_text(locale, en='emails', ru='писем')}",
+                    f"{invoice_count} {_localized_text(locale, en='invoices', ru='счета')}",
+                    f"{overdue_count} {_localized_text(locale, en='overdue', ru='задержка')}",
                 ]
             )
     return dedup_rendered_text("\n".join(lines))
@@ -897,7 +956,7 @@ def render_telegram_message(
     mail_type: str | None = None,
     message_facts: dict[str, Any] | None = None,
     relationship_profile: dict[str, Any] | None = None,
-    locale: str = "ru",
+    locale: str = DEFAULT_LOCALE,
 ) -> str:
     fields = apply_semantic_gates(
         action_line=action_line,
@@ -909,10 +968,10 @@ def render_telegram_message(
         priority=priority,
         from_email=from_email,
         subject=subject,
-        action_line=_resolve_action_line(fields.action_line),
+        action_line=_resolve_action_line(fields.action_line, locale=locale),
         attachments=attachments or [],
         mail_type=mail_type,
-        summary=summary,
+        summary=summary or "",
         message_facts=message_facts,
         relationship_profile=relationship_profile,
         locale=locale,
@@ -921,30 +980,43 @@ def render_telegram_message(
 
 
 def _build_decision_explanation(
-    message_facts: dict[str, Any], decision: str | None
+    message_facts: dict[str, Any],
+    decision: str | None,
+    *,
+    locale: str = DEFAULT_LOCALE,
 ) -> list[str]:
     points: list[str] = []
     normalized_decision = str(decision or "").upper()
     if normalized_decision == "INVOICE" or message_facts.get("invoice_no"):
-        points.append("• найден счет")
+        points.append(_localized_text(locale, en="• invoice detected", ru="• найден счет"))
     amount = (message_facts or {}).get("amount")
     if amount:
-        points.append(f"• сумма {_escape_dynamic(str(amount))}")
+        points.append(
+            f"{_localized_text(locale, en='• amount', ru='• сумма')} {_escape_dynamic(str(amount))}"
+        )
     due_date = (message_facts or {}).get("due_date")
     if due_date:
-        points.append(f"• срок {_escape_dynamic(str(due_date))}")
+        points.append(
+            f"{_localized_text(locale, en='• due', ru='• срок')} {_escape_dynamic(str(due_date))}"
+        )
     if normalized_decision == "CONTRACT":
-        points.append("• найден договор")
+        points.append(
+            _localized_text(locale, en="• contract detected", ru="• найден договор")
+        )
     if normalized_decision == "INCIDENT":
-        points.append("• найден инцидент")
+        points.append(
+            _localized_text(locale, en="• incident detected", ru="• найден инцидент")
+        )
     return points[:3]
 
 
-def _resolve_action_line(action_line: str | None) -> str:
+def _resolve_action_line(
+    action_line: str | None, *, locale: str = DEFAULT_LOCALE
+) -> str:
     cleaned = (action_line or "").strip()
     if cleaned:
         return cleaned
-    return "Действий не требуется"
+    return _localized_text(locale, en="No action needed", ru="Действий не требуется")
 
 
 def build_tg_fallback(
@@ -953,14 +1025,14 @@ def build_tg_fallback(
     subject: str,
     from_email: str,
     attachments: list[dict[str, Any]],
-    locale: str = "ru",
+    locale: str = DEFAULT_LOCALE,
 ) -> str:
     lines = [
         format_priority_line(priority, from_email, locale=locale),
         format_subject(subject, locale=locale),
         format_main_action(None, locale=locale),
     ]
-    attachments_block = format_attachments_block(attachments)
+    attachments_block = format_attachments_block(attachments, locale=locale)
     if attachments_block:
         lines.append("")
         lines.append(attachments_block)
@@ -968,7 +1040,7 @@ def build_tg_fallback(
 
 
 def build_tg_short_template(
-    *, priority: str, subject: str, from_email: str, locale: str = "ru"
+    *, priority: str, subject: str, from_email: str, locale: str = DEFAULT_LOCALE
 ) -> str:
     return "\n".join(
         [
@@ -986,7 +1058,7 @@ def build_minimal_telegram_text(
     subject: str,
     attachments: list[dict[str, Any]],
     max_attachment_names: int = 3,
-    locale: str = "ru",
+    locale: str = DEFAULT_LOCALE,
 ) -> str:
     base_text = build_tg_short_template(
         priority=priority,
@@ -1000,16 +1072,19 @@ def build_minimal_telegram_text(
     for attachment in attachments[:max_attachment_names]:
         minimal_attachments.append(
             {
-                "filename": attachment.get("filename") or "вложение",
+                "filename": attachment.get("filename") or _attachment_name_fallback(locale),
                 "content_type": attachment.get("content_type")
                 or attachment.get("type")
                 or "",
                 "text": "",
             }
         )
-    attachments_block = format_attachments_block(minimal_attachments)
+    attachments_block = format_attachments_block(minimal_attachments, locale=locale)
     if len(attachments) > max_attachment_names:
-        attachments_block = f"{attachments_block}\n… и ещё {len(attachments) - len(minimal_attachments)}"
+        attachments_block = (
+            f"{attachments_block}\n"
+            f"… {_localized_text(locale, en='and', ru='и ещё')} {len(attachments) - len(minimal_attachments)} {_localized_text(locale, en='more', ru='ещё')}"
+        )
     return dedup_rendered_text("\n\n".join([base_text, attachments_block]))
 
 

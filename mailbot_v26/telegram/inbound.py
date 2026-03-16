@@ -69,7 +69,7 @@ logger = get_logger("mailbot")
 _CALLBACK_PREFIXES = ("mb:prio:", "prio:")
 _TOGGLE_PREFIXES = ("mb:toggle:", "toggle:")
 _HELP_PREFIXES = ("mb:help:", "help:")
-_UI_LOCALE = "ru"
+_UI_LOCALE = DEFAULT_LOCALE
 _TELEGRAM_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
 _SENSITIVE_KV_RE = re.compile(
     r"(?i)\b(token|password|secret|api[_-]?key)\b\s*[:=]\s*([^\s,;]+)"
@@ -105,12 +105,15 @@ _FEEDBACK_DECISION_MAP = {
     "correct": "accepted",
 }
 _FEEDBACK_ACK_MAP = {
-    "paid": "Отмечено: оплачено",
-    "not_invoice": "Отмечено: не счёт",
-    "not_payroll": "Отмечено: неверная классификация",
-    "not_contract": "Отмечено: не договор",
-    "correct": "Принято",
-    "snooze": "Выберите время",
+    "paid": ("Marked: paid", "Отмечено: оплачено"),
+    "not_invoice": ("Marked: not an invoice", "Отмечено: не счёт"),
+    "not_payroll": (
+        "Marked: incorrect classification",
+        "Отмечено: неверная классификация",
+    ),
+    "not_contract": ("Marked: not a contract", "Отмечено: не договор"),
+    "correct": ("Accepted", "Принято"),
+    "snooze": ("Choose a time", "Выберите время"),
 }
 
 
@@ -156,10 +159,25 @@ def _t(key: str, **kwargs: object) -> str:
     return normalize_mojibake_text(t(key, locale=_UI_LOCALE, **kwargs))
 
 
+def _is_english_locale() -> bool:
+    return str(_UI_LOCALE or "").strip().casefold().startswith("en")
+
+
+def _ui_text(en: str, ru: str) -> str:
+    return en if _is_english_locale() else ru
+
+
+def _feedback_ack(action: str) -> str:
+    pair = _FEEDBACK_ACK_MAP.get(action)
+    if not pair:
+        return _t("inbound.ok")
+    return _ui_text(pair[0], pair[1])
+
+
 def set_inbound_locale(locale: str) -> None:
     """Set the module-level UI locale for inbound Telegram text."""
     global _UI_LOCALE
-    _UI_LOCALE = str(locale).strip() or "ru"
+    _UI_LOCALE = str(locale).strip() or DEFAULT_LOCALE
 
 
 def _normalize_priority_token(value: object) -> str:
@@ -377,6 +395,7 @@ def _build_default_reply_markup(
     priority: str,
     show_decision_trace: bool,
     expanded: bool,
+    locale: str,
 ) -> dict[str, object] | None:
     interpretation = _load_message_interpretation_snapshot(db_path, email_id)
     doc_kind = ""
@@ -387,6 +406,7 @@ def _build_default_reply_markup(
             email_id=email_id,
             expanded=expanded,
             show_decision_trace=show_decision_trace,
+            locale=locale,
         )
     return build_notification_keyboard(
         render_mode="full",
@@ -395,6 +415,7 @@ def _build_default_reply_markup(
         message_key=email_id,
         show_decision_trace=show_decision_trace,
         decision_trace_expanded=expanded,
+        locale=locale,
     )
 
 
@@ -547,13 +568,10 @@ def _save_snooze(
 def _render_tier1_message(snapshot: dict[str, object]) -> str:
     priority = _normalize_priority_token(snapshot.get("priority")) or "\U0001f535"
     from_email = normalize_mojibake_text(
-        str(
-            snapshot.get("from_email")
-            or "\u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e"
-        )
+        str(snapshot.get("from_email") or _ui_text("unknown", "неизвестно"))
     )
     subject = normalize_mojibake_text(
-        str(snapshot.get("subject") or "(\u0431\u0435\u0437 \u0442\u0435\u043c\u044b)")
+        str(snapshot.get("subject") or _ui_text("(no subject)", "(без темы)"))
     )
     action_line = str(snapshot.get("action_line") or "")
     body_summary = str(snapshot.get("body_summary") or "")
@@ -575,13 +593,20 @@ def _render_tier1_message(snapshot: dict[str, object]) -> str:
     )
     priority_source = str(snapshot.get("priority_source") or "").strip().lower()
     if priority_source == "user_override":
-        base_text = f"{base_text}\n\u041f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442: {priority} \u0432\u0440\u0443\u0447\u043d\u0443\u044e"
+        base_text = (
+            f"{base_text}\n"
+            f"{_ui_text('Priority', 'Приоритет')}: {priority} "
+            f"{_ui_text('manual', 'вручную')}"
+        )
     return telegram_safe(normalize_mojibake_text(base_text))
 
 
 def _render_decision_trace_details(snapshot: list[dict[str, object]]) -> str:
     if not snapshot:
-        return "Нет данных explainability для этого решения (trace not available)"
+        return _ui_text(
+            "No explainability data for this decision (trace not available)",
+            "Нет данных explainability для этого решения (trace not available)",
+        )
     lines: list[str] = ["DecisionTraceV1"]
     for entry in snapshot:
         decision_kind = str(entry.get("decision_kind") or "")
@@ -594,17 +619,19 @@ def _render_decision_trace_details(snapshot: list[dict[str, object]]) -> str:
         codes = entry.get("explain_codes") or []
         counterfactuals = entry.get("counterfactuals") or []
         lines.append(f"{decision_kind}: {decision_label}")
-        lines.append(f"Сигналы: {matched}/{total}")
+        lines.append(f"{_ui_text('Signals', 'Сигналы')}: {matched}/{total}")
         if codes:
             codes_line = ", ".join(str(code) for code in codes if code)
-            lines.append(f"Коды: {codes_line}")
+            lines.append(f"{_ui_text('Codes', 'Коды')}: {codes_line}")
         if counterfactuals:
-            lines.append("Контрфакты:")
+            lines.append(_ui_text("Counterfactuals:", "Контрфакты:"))
             for item in counterfactuals:
                 signal = str(item.get("signal") or "")
                 decision = str(item.get("decision") or "")
                 if signal and decision:
-                    lines.append(f"- Без {signal} → {decision}")
+                    lines.append(
+                        f"- {_ui_text('Without', 'Без')} {signal} → {decision}"
+                    )
         lines.append("")
     return "\n".join(line for line in lines if line.strip())
 
@@ -879,7 +906,7 @@ class TelegramInboundProcessor:
     feature_flags: FeatureFlags
     allowed_chat_ids: frozenset[str]
     bot_token: str
-    locale: str = "ru"
+    locale: str = DEFAULT_LOCALE
     show_decision_trace: bool = False
     support_settings: SupportSettings | None = None
 
@@ -930,7 +957,10 @@ class TelegramInboundProcessor:
                         message_id=message_id,
                         from_user_id=from_user_id,
                     )
-                    ack_text = "Не нашёл письмо для изменения"
+                    ack_text = _ui_text(
+                        "Message not found for update",
+                        "Не нашёл письмо для изменения",
+                    )
                     return
                 logger.warning(
                     "telegram_inbound_callback_invalid",
@@ -1017,7 +1047,10 @@ class TelegramInboundProcessor:
                 if self._record_priority_confirmation(payload):
                     ack_text = _t("inbound.ok")
                 else:
-                    ack_text = "Не нашёл письмо для изменения"
+                    ack_text = _ui_text(
+                        "Message not found for update",
+                        "Не нашёл письмо для изменения",
+                    )
                 return
             ack_text = _t("inbound.bad_button")
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -1178,15 +1211,15 @@ class TelegramInboundProcessor:
     ) -> str:
         email_id_raw = str(payload.get("email_id") or "").strip()
         if not email_id_raw.isdigit():
-            return "Не нашёл письмо"
+            return _ui_text("Message not found", "Не нашёл письмо")
         email_id = int(email_id_raw)
         snapshot = _load_email_snapshot(self.knowledge_db.path, email_id)
         if not snapshot:
-            return "Не нашёл письмо"
+            return _ui_text("Message not found", "Не нашёл письмо")
         action = str(payload.get("feedback_action") or "").strip().lower()
         if action == "snooze":
             self._open_snooze_menu(chat_id, message, {"email_id": email_id_raw})
-            return _FEEDBACK_ACK_MAP["snooze"]
+            return _feedback_ack("snooze")
         decision = _FEEDBACK_DECISION_MAP.get(action)
         if not decision:
             return _t("inbound.bad_button")
@@ -1195,7 +1228,7 @@ class TelegramInboundProcessor:
             email_id=email_id,
             decision=decision,
         ):
-            return "Уже отмечено"
+            return _ui_text("Already marked", "Уже отмечено")
         interpretation = _load_message_interpretation_snapshot(
             self.knowledge_db.path, email_id
         )
@@ -1225,7 +1258,7 @@ class TelegramInboundProcessor:
             feedback_action=action,
             decision=decision,
         )
-        return _FEEDBACK_ACK_MAP.get(action, _t("inbound.ok"))
+        return _feedback_ack(action)
 
     def _apply_priority(
         self, chat_id: str, payload: dict[str, str], *, send_ack: bool = True
@@ -1266,18 +1299,18 @@ class TelegramInboundProcessor:
             logger.warning(
                 "tg_priority_callback_missing_email_id", callback_data=payload
             )
-            return "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e"
+            return _ui_text("Message not found", "Не нашёл письмо")
         if not message or not isinstance(message, dict):
-            return "\u041d\u0435 \u043c\u043e\u0433\u0443 \u043e\u0442\u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c"
+            return _ui_text("Can't edit the message", "Не могу отредактировать")
         message_id = message.get("message_id")
         try:
             message_id_int = int(message_id)
         except (TypeError, ValueError):
-            return "\u041d\u0435 \u043c\u043e\u0433\u0443 \u043e\u0442\u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c"
+            return _ui_text("Can't edit the message", "Не могу отредактировать")
         email_id = int(email_id_raw)
         snapshot = _load_email_render_snapshot(self.knowledge_db.path, email_id)
         if not snapshot:
-            return "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e"
+            return _ui_text("Message not found", "Не нашёл письмо")
         account_email = str(snapshot.get("account_email") or "")
         sender_email = str(snapshot.get("from_email") or "")
         old_priority = _normalize_priority_token(snapshot.get("priority"))
@@ -1309,7 +1342,7 @@ class TelegramInboundProcessor:
                     message_id=message_id_int,
                     priority=new_priority,
                 )
-                return "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e"
+                return _ui_text("Message not found", "Не нашёл письмо")
             logger.info(
                 "tg_priority_snapshot_updated",
                 email_id=email_id,
@@ -1325,7 +1358,7 @@ class TelegramInboundProcessor:
                     chat_id=chat_id,
                     message_id=message_id_int,
                 )
-                return "\u041d\u0435 \u043d\u0430\u0448\u0451\u043b \u043f\u0438\u0441\u044c\u043c\u043e"
+                return _ui_text("Message not found", "Не нашёл письмо")
         else:
             logger.info(
                 "tg_priority_confirmation_saved",
@@ -1368,6 +1401,7 @@ class TelegramInboundProcessor:
             priority=new_priority,
             show_decision_trace=self.show_decision_trace,
             expanded=expanded,
+            locale=_UI_LOCALE,
         )
         try:
             edit_telegram_message(
@@ -1386,8 +1420,8 @@ class TelegramInboundProcessor:
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("tg_priority_edit_failed", error=str(exc))
-            return "\u041d\u0435 \u043c\u043e\u0433\u0443 \u043e\u0442\u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c"
-        return "\u041f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442 \u043e\u0431\u043d\u043e\u0432\u043b\u0451\u043d"
+            return _ui_text("Can't edit the message", "Не могу отредактировать")
+        return _ui_text("Priority updated", "Приоритет обновлён")
 
     def _open_priority_menu(
         self,
@@ -1443,6 +1477,7 @@ class TelegramInboundProcessor:
             expanded=expanded,
             prio_menu=True,
             show_decision_trace=self.show_decision_trace,
+            locale=_UI_LOCALE,
         )
         try:
             edit_telegram_message(
@@ -1510,6 +1545,7 @@ class TelegramInboundProcessor:
             priority=str(snapshot.get("priority") or ""),
             show_decision_trace=self.show_decision_trace,
             expanded=expanded,
+            locale=_UI_LOCALE,
         )
         try:
             edit_telegram_message(
@@ -1552,10 +1588,10 @@ class TelegramInboundProcessor:
         now_local = datetime.now().astimezone()
         if snooze_code == "2h":
             deliver_local = now_local + timedelta(hours=2)
-            ack = "⏰ Напомню в 2 часа"
+            ack = _ui_text("⏰ I'll remind you in 2h", "⏰ Напомню через 2 часа")
         elif snooze_code == "6h":
             deliver_local = now_local + timedelta(hours=6)
-            ack = "⏰ Напомню в 6 часов"
+            ack = _ui_text("⏰ I'll remind you in 6h", "⏰ Напомню через 6 часов")
         elif snooze_code == "tom":
             tomorrow = now_local.date() + timedelta(days=1)
             deliver_local = datetime.combine(
@@ -1566,7 +1602,10 @@ class TelegramInboundProcessor:
                 second=0,
                 microsecond=0,
             )
-            ack = "⏰ Напомню завтра в 09:00"
+            ack = _ui_text(
+                "⏰ I'll remind you tomorrow at 09:00",
+                "⏰ Напомню завтра в 09:00",
+            )
         else:
             return None
 
@@ -1663,6 +1702,7 @@ class TelegramInboundProcessor:
                 expanded=expanded,
                 snooze_menu=True,
                 show_decision_trace=self.show_decision_trace,
+                locale=_UI_LOCALE,
             )
         else:
             reply_markup = _build_default_reply_markup(
@@ -1671,6 +1711,7 @@ class TelegramInboundProcessor:
                 priority=str(snapshot.get("priority") or ""),
                 show_decision_trace=self.show_decision_trace,
                 expanded=expanded,
+                locale=_UI_LOCALE,
             )
         try:
             edit_telegram_message(
@@ -1739,6 +1780,7 @@ class TelegramInboundProcessor:
             priority=str(snapshot.get("priority") or ""),
             show_decision_trace=self.show_decision_trace,
             expanded=expanded,
+            locale=_UI_LOCALE,
         )
         try:
             edit_telegram_message(
@@ -1797,51 +1839,37 @@ class TelegramInboundProcessor:
         )
         if not gate_result.passed:
             reason_map = {
-                "cooldown_active": "пауза после отключения",
-                "insufficient_samples": "недостаточно данных",
-                "correction_rate_spike": "слишком много исправлений",
-                "analytics_failed": "ошибка аналитики",
+                "cooldown_active": _t("inbound.autopriority_reason.cooldown"),
+                "insufficient_samples": _t("inbound.autopriority_reason.samples"),
+                "correction_rate_spike": _t("inbound.autopriority_reason.corrections"),
+                "analytics_failed": _t("inbound.autopriority_reason.analytics"),
             }
-            reason = reason_map.get(gate_result.reason, "недостаточно данных")
-            self._reply(chat_id, f"Пока нельзя: качество недостаточно ({reason}).")
+            reason = reason_map.get(
+                gate_result.reason,
+                _t("inbound.autopriority_reason.samples"),
+            )
+            self._reply(
+                chat_id,
+                _t("inbound.autopriority_gate_blocked", reason=reason),
+            )
             return
         self.runtime_flag_store.set_enable_auto_priority(True)
         self._reply(chat_id, _t("inbound.autopriority_on"))
 
     def _help_text(self) -> str:
-        if _UI_LOCALE.startswith("en"):
-            return "\n".join(
-                [
-                    _t("inbound.help.title"),
-                    _t("inbound.help.status"),
-                    _t("inbound.help.doctor"),
-                    "/digest on — enable digests",
-                    "/digest off — disable digests",
-                    "/autopriority on — enable auto-priority",
-                    "/autopriority off — disable auto-priority",
-                    _t("inbound.help.commitments"),
-                    _t("inbound.help.week"),
-                    _t("inbound.help.stats"),
-                    _t("inbound.help.support"),
-                    _t("inbound.help.lang"),
-                    _t("inbound.help.help"),
-                ]
-            )
         return "\n".join(
             [
-                "\u041a\u043e\u043c\u0430\u043d\u0434\u044b:",
-                "/status \u2014 \u043a\u0440\u0430\u0442\u043a\u0438\u0439 \u0441\u0442\u0430\u0442\u0443\u0441 \u0441\u0438\u0441\u0442\u0435\u043c\u044b",
-                "/doctor \u2014 \u0434\u0438\u0430\u0433\u043d\u043e\u0441\u0442\u0438\u043a\u0430 (\u043a\u0440\u0430\u0442\u043a\u043e)",
-                "/digest on \u2014 \u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0434\u0430\u0439\u0434\u0436\u0435\u0441\u0442\u044b",
-                "/digest off \u2014 \u0432\u044b\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0434\u0430\u0439\u0434\u0436\u0435\u0441\u0442\u044b",
-                "/autopriority on \u2014 \u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442",
-                "/autopriority off \u2014 \u0432\u044b\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442",
-                "/commitments (/tasks) \u2014 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0435 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u0430",
-                "/week \u2014 \u043a\u0440\u0430\u0442\u043a\u0430\u044f \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430 \u0437\u0430 7 \u0434\u043d\u0435\u0439",
-                "/stats \u2014 \u043a\u0430\u0447\u0435\u0441\u0442\u0432\u043e \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438",
-                "/support \u2014 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0430\u0442\u044c \u043f\u0440\u043e\u0435\u043a\u0442",
+                _t("inbound.help.title"),
+                _t("inbound.help.status"),
+                _t("inbound.help.doctor"),
+                _t("inbound.help.digest"),
+                _t("inbound.help.autopriority"),
+                _t("inbound.help.commitments"),
+                _t("inbound.help.week"),
+                _t("inbound.help.stats"),
+                _t("inbound.help.support"),
                 _t("inbound.help.lang"),
-                "/help \u2014 \u044d\u0442\u0430 \u0441\u043f\u0440\u0430\u0432\u043a\u0430",
+                _t("inbound.help.help"),
             ]
         )
 
@@ -1853,23 +1881,27 @@ class TelegramInboundProcessor:
         text = _clean_text(message.get("text", ""))
         parts = text.strip().split()
         if len(parts) < 2 or parts[1].lower() not in ("en", "ru"):
-            self.send_reply(chat_id, "Usage: /lang en  or  /lang ru")
+            self.send_reply(
+                chat_id,
+                _ui_text(
+                    "Usage: /lang en  or  /lang ru",
+                    "Использование: /lang en  или  /lang ru",
+                ),
+            )
             return
         new_locale = parts[1].lower()
         self.override_store.set_value("ui_locale", new_locale)
         set_inbound_locale(new_locale)
+        self.locale = new_locale
         if new_locale == "en":
-            self.send_reply(chat_id, "\u2713 Language set to English.")
+            self.send_reply(chat_id, "✓ Language set to English.")
         else:
-            self.send_reply(chat_id, "\u2713 \u042f\u0437\u044b\u043a \u0438\u0437\u043c\u0435\u043d\u0451\u043d \u043d\u0430 \u0440\u0443\u0441\u0441\u043a\u0438\u0439.")
+            self.send_reply(chat_id, "✓ Язык изменён на русский.")
 
     def _handle_commitments(self, chat_id: str) -> None:
         account_emails = list(self._account_emails())
         if not account_emails:
-            self._reply(
-                chat_id,
-                "\u2705 \u041d\u0435\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432",
-            )
+            self._reply(chat_id, _ui_text("• No open commitments", "• Нет открытых обязательств"))
             return
         placeholders = ",".join("?" for _ in account_emails)
         try:
@@ -1893,10 +1925,7 @@ class TelegramInboundProcessor:
             logger.error("telegram_inbound_commitments_failed", error=str(exc))
             rows = []
         if not rows:
-            self._reply(
-                chat_id,
-                "\u2705 \u041d\u0435\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432",
-            )
+            self._reply(chat_id, _ui_text("• No open commitments", "• Нет открытых обязательств"))
             return
 
         deduped: list[str] = []
@@ -1911,24 +1940,21 @@ class TelegramInboundProcessor:
             if key in seen:
                 continue
             seen.add(key)
-            line = f"\u2022 {escape_tg_html(text)}"
+            line = f"• {escape_tg_html(text)}"
             if deadline:
-                line = f"{line} \u00b7 \u0434\u043e {escape_tg_html(deadline)}"
+                line = f"{line} · {_ui_text('by', 'до')} {escape_tg_html(deadline)}"
             deduped.append(line)
             if len(deduped) >= 7:
                 break
 
         if not deduped:
-            self._reply(
-                chat_id,
-                "\u2705 \u041d\u0435\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432",
-            )
+            self._reply(chat_id, _ui_text("• No open commitments", "• Нет открытых обязательств"))
             return
         self._reply(
             chat_id,
             "\n".join(
                 [
-                    "\U0001f4cb <b>\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u0430:</b>",
+                    _ui_text("📌 <b>Commitments:</b>", "📌 <b>Обязательства:</b>"),
                     *deduped,
                 ]
             ),
@@ -1936,12 +1962,13 @@ class TelegramInboundProcessor:
 
     def _week_text(self) -> str:
         account_emails = list(self._account_emails())
+        no_data = _ui_text("n/a", "н/д")
         if not account_emails:
             base = (
-                "\U0001f4ca LetterBot.ru \u2014 \u043d\u0435\u0434\u0435\u043b\u044f\n"
-                "\u041f\u0438\u0441\u0435\u043c: 0 \u00b7 \u0412\u0430\u0436\u043d\u044b\u0445: 0 \u00b7 \u041d\u0438\u0437\u043a\u0438\u0445: 0\n"
-                "\u041a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u0439: 0 \u00b7 \u0422\u043e\u0447\u043d\u043e\u0441\u0442\u044c: \u043d/\u0434\n"
-                "\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u043e: 0"
+                f"📊 LetterBot.ru · {_ui_text('week', 'неделя')}\n"
+                f"{_ui_text('Emails', 'Писем')}: 0 · {_ui_text('Important', 'Важных')}: 0 · {_ui_text('Low', 'Низких')}: 0\n"
+                f"{_ui_text('Corrections', 'Исправления')}: 0 · {_ui_text('Accuracy', 'Точность')}: {no_data}\n"
+                f"{_ui_text('Open commitments', 'Открытых обязательств')}: 0"
             )
             return "\n".join([base, self._stats_text(days=7, include_header=False)])
         primary = account_emails[0]
@@ -1951,33 +1978,34 @@ class TelegramInboundProcessor:
             days=7,
         )
         accuracy_pct = summary.get("accuracy_pct")
-        accuracy_text = (
-            f"{int(accuracy_pct)}%" if accuracy_pct is not None else "\u043d/\u0434"
-        )
+        accuracy_text = f"{int(accuracy_pct)}%" if accuracy_pct is not None else no_data
         base = (
-            "\U0001f4ca LetterBot.ru \u2014 \u043d\u0435\u0434\u0435\u043b\u044f\n"
-            f"\u041f\u0438\u0441\u0435\u043c: {int(summary.get('emails_total') or 0)} \u00b7 \u0412\u0430\u0436\u043d\u044b\u0445: {int(summary.get('important') or 0)} \u00b7 \u041d\u0438\u0437\u043a\u0438\u0445: {int(summary.get('low') or 0)}\n"
-            f"\u041a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u0439: {int(summary.get('corrections') or 0)} \u00b7 \u0422\u043e\u0447\u043d\u043e\u0441\u0442\u044c: {accuracy_text}\n"
-            f"\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u043e: {int(summary.get('open_commitments') or 0)}"
+            f"📊 LetterBot.ru · {_ui_text('week', 'неделя')}\n"
+            f"{_ui_text('Emails', 'Писем')}: {int(summary.get('emails_total') or 0)} · {_ui_text('Important', 'Важных')}: {int(summary.get('important') or 0)} · {_ui_text('Low', 'Низких')}: {int(summary.get('low') or 0)}\n"
+            f"{_ui_text('Corrections', 'Исправления')}: {int(summary.get('corrections') or 0)} · {_ui_text('Accuracy', 'Точность')}: {accuracy_text}\n"
+            f"{_ui_text('Open commitments', 'Открытых обязательств')}: {int(summary.get('open_commitments') or 0)}"
         )
         return "\n".join([base, self._stats_text(days=7, include_header=False)])
 
     def _stats_text(self, *, days: int = 7, include_header: bool = True) -> str:
         account_emails = list(self._account_emails())
+        no_data = _ui_text("n/a", "н/д")
         if not account_emails:
-            header = (
-                "\U0001f4c8 \u041a\u0430\u0447\u0435\u0441\u0442\u0432\u043e \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438"
-                if include_header
-                else ""
+            header = _ui_text(
+                "📈 Auto-priority quality",
+                "📈 Качество автоприоритета",
+            ) if include_header else ""
+            trust = _ui_text(
+                "Not enough data yet · stay cautious.",
+                "Пока данных мало · будьте осторожны.",
             )
-            trust = "\u041f\u043e\u043a\u0430 \u0434\u0430\u043d\u043d\u044b\u0445 \u043c\u0430\u043b\u043e \u2014 \u0434\u0435\u043b\u0430\u0435\u043c \u0432\u044b\u0432\u043e\u0434\u044b \u0432\u0440\u0443\u0447\u043d\u0443\u044e."
             lines = [
                 line
                 for line in [
                     header,
-                    "\u041a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u0439: 0",
-                    "Surprise rate: \u043d/\u0434",
-                    "\u041f\u0435\u0440\u0435\u0445\u043e\u0434\u044b: \u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445",
+                    f"{_ui_text('Corrections', 'Исправления')}: 0",
+                    f"{_ui_text('Surprise rate', 'Доля сюрпризов')}: {no_data}",
+                    f"{_ui_text('Transitions', 'Переходы')}: {_ui_text('no data', 'нет данных')}",
                     trust,
                 ]
                 if line
@@ -2011,42 +2039,52 @@ class TelegramInboundProcessor:
 
         corrections = int(accuracy.get("priority_corrections") or 0)
         surprise_rate = accuracy.get("surprise_rate")
-        surprise_text = "\u043d/\u0434"
+        surprise_text = no_data
         if surprise_rate is not None:
             surprise_text = f"{float(surprise_rate) * 100:.0f}%"
 
-        transitions_text = "\u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445"
+        transitions_text = _ui_text("no data", "нет данных")
         transitions = _top_priority_transitions(
             db_path=self.knowledge_db.path, days=days, limit=3
         )
         if transitions:
             transitions_text = ", ".join(
-                f"{transition} \u00d7{count}" for transition, count in transitions
+                f"{transition} ×{count}" for transition, count in transitions
             )
 
-        latency_text = "\u043d/\u0434"
+        latency_text = no_data
         decisions_total = int(calibration_totals.get("decisions_total") or 0)
         corrected_total = int(calibration_totals.get("decisions_corrected") or 0)
         if decisions_total > 0:
-            latency_text = f"{corrected_total}/{decisions_total} \u0440\u0435\u0448\u0435\u043d\u0438\u0439 \u043f\u0435\u0440\u0435\u0441\u043c\u043e\u0442\u0440\u0435\u043d\u044b"
+            latency_text = _ui_text(
+                f"{corrected_total}/{decisions_total} decisions reviewed",
+                f"{corrected_total}/{decisions_total} решений проверено",
+            )
 
-        trust_line = "\u041c\u043e\u0436\u043d\u043e \u0434\u043e\u0432\u0435\u0440\u044f\u0442\u044c \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438: \u0434\u0430"
+        trust_line = _ui_text(
+            "You can trust auto-priority: yes",
+            "Автоприоритету можно доверять: да",
+        )
         if corrections < 3:
-            trust_line = "\u041c\u043e\u0436\u043d\u043e \u0434\u043e\u0432\u0435\u0440\u044f\u0442\u044c \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438: \u043e\u0441\u0442\u043e\u0440\u043e\u0436\u043d\u043e, \u043c\u0430\u043b\u043e \u0434\u0430\u043d\u043d\u044b\u0445"
+            trust_line = _ui_text(
+                "You can trust auto-priority: be careful, not enough data",
+                "Автоприоритету можно доверять: осторожно, мало данных",
+            )
         elif surprise_rate is not None and float(surprise_rate) > 0.35:
-            trust_line = "\u041c\u043e\u0436\u043d\u043e \u0434\u043e\u0432\u0435\u0440\u044f\u0442\u044c \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438: \u043f\u043e\u043a\u0430 \u043e\u0441\u0442\u043e\u0440\u043e\u0436\u043d\u043e"
+            trust_line = _ui_text(
+                "You can trust auto-priority: cautiously for now",
+                "Автоприоритету можно доверять: пока осторожно",
+            )
 
         lines: list[str] = []
         if include_header:
-            lines.append(
-                "\U0001f4c8 \u041a\u0430\u0447\u0435\u0441\u0442\u0432\u043e \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438"
-            )
+            lines.append(_ui_text("📈 Auto-priority quality", "📈 Качество автоприоритета"))
         lines.extend(
             [
-                f"\u041a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u0439: {corrections}",
-                f"Surprise rate: {surprise_text}",
-                f"\u0421\u043a\u043e\u0440\u043e\u0441\u0442\u044c \u043a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u0439: {latency_text}",
-                f"\u041f\u0435\u0440\u0435\u0445\u043e\u0434\u044b: {transitions_text}",
+                f"{_ui_text('Corrections', 'Исправления')}: {corrections}",
+                f"{_ui_text('Surprise rate', 'Доля сюрпризов')}: {surprise_text}",
+                f"{_ui_text('Correction speed', 'Скорость проверки')}: {latency_text}",
+                f"{_ui_text('Transitions', 'Переходы')}: {transitions_text}",
                 trust_line,
             ]
         )
@@ -2058,13 +2096,18 @@ class TelegramInboundProcessor:
     def _support_text(self) -> str:
         support = self.support_settings or load_support_settings()
         if not support.enabled:
-            return "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0430 \u043f\u0440\u043e\u0435\u043a\u0442\u0430 \u0441\u0435\u0439\u0447\u0430\u0441 \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u0430."
+            return _ui_text(
+                "Project support is not configured right now.",
+                "Поддержка проекта сейчас не настроена.",
+            )
         if not support.url or support.url == "CHANGE_ME":
-            return "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0430 \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u0430, \u043d\u043e \u0441\u0441\u044b\u043b\u043a\u0430 \u0435\u0449\u0451 \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u0430."
+            return _ui_text(
+                "Support is enabled, but the link is not configured yet.",
+                "Поддержка включена, но ссылка ещё не настроена.",
+            )
         return "\n".join(
             [
-                support.label
-                or "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u0430\u0442\u044c LetterBot.ru",
+                support.label or _ui_text("Support LetterBot.ru", "Поддержать LetterBot.ru"),
                 support.text,
                 support.url,
             ]
@@ -2077,83 +2120,72 @@ class TelegramInboundProcessor:
 
         accounts = []
         for account_email in self._account_emails():
-            daily = self.knowledge_db.get_last_digest_sent_at(
-                account_email=account_email
-            )
-            weekly = self.knowledge_db.get_last_weekly_digest_sent_at(
-                account_email=account_email
-            )
+            daily = self.knowledge_db.get_last_digest_sent_at(account_email=account_email)
+            weekly = self.knowledge_db.get_last_weekly_digest_sent_at(account_email=account_email)
             accounts.append(
-                f"{account_email}: \u0434\u0435\u043d\u044c {_format_ts(daily)}, \u043d\u0435\u0434\u0435\u043b\u044f {_format_ts(weekly)}"
+                _t(
+                    "inbound.status.digest_line",
+                    account_email=account_email,
+                    daily=_format_ts(daily),
+                    weekly=_format_ts(weekly),
+                )
             )
-        accounts_block = (
-            "\n".join(accounts)
-            if accounts
-            else "\u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445"
-        )
+        accounts_block = "\n".join(accounts) if accounts else _t("inbound.status.no_data")
 
         runtime_flags, _ = self.runtime_flag_store.get_flags(force=True)
         auto_mode = (
-            "\u0430\u0432\u0442\u043e"
-            if self.feature_flags.ENABLE_AUTO_PRIORITY
-            and runtime_flags.enable_auto_priority
-            else "\u0442\u0435\u043d\u0435\u0432\u043e\u0439"
+            _t("inbound.status.auto_mode")
+            if self.feature_flags.ENABLE_AUTO_PRIORITY and runtime_flags.enable_auto_priority
+            else _t("inbound.status.shadow_mode")
         )
 
         if digest_override is True:
-            digest_flag = "\u0432\u043a\u043b\u044e\u0447\u0435\u043d\u044b"
+            digest_flag = _t("inbound.status.enabled")
         elif digest_override is False:
-            digest_flag = "\u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u044b"
+            digest_flag = _t("inbound.status.disabled")
         else:
             digest_flag = (
-                "\u0432\u043a\u043b\u044e\u0447\u0435\u043d\u044b"
+                _t("inbound.status.enabled")
                 if self.feature_flags.ENABLE_DAILY_DIGEST
-                else "\u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u044b"
+                else _t("inbound.status.disabled")
             )
 
-        preview = (
-            "\u0432\u043a\u043b"
-            if self.feature_flags.ENABLE_PREVIEW_ACTIONS
-            else "\u0432\u044b\u043a\u043b"
-        )
-        anomalies = (
-            "\u0432\u043a\u043b"
-            if self.feature_flags.ENABLE_ANOMALY_ALERTS
-            else "\u0432\u044b\u043a\u043b"
-        )
-        quality = (
-            "\u0432\u043a\u043b"
-            if self.feature_flags.ENABLE_QUALITY_METRICS
-            else "\u0432\u044b\u043a\u043b"
-        )
+        preview = _t("inbound.status.short_on") if self.feature_flags.ENABLE_PREVIEW_ACTIONS else _t("inbound.status.short_off")
+        anomalies = _t("inbound.status.short_on") if self.feature_flags.ENABLE_ANOMALY_ALERTS else _t("inbound.status.short_off")
+        quality = _t("inbound.status.short_on") if self.feature_flags.ENABLE_QUALITY_METRICS else _t("inbound.status.short_off")
 
         llm_active = system_health.mode not in {
             OperationalMode.DEGRADED_NO_LLM,
             OperationalMode.EMERGENCY_READ_ONLY,
         }
-        llm_state = (
-            "\u0430\u043a\u0442\u0438\u0432\u0435\u043d"
-            if llm_active
-            else "\u0434\u0435\u0433\u0440\u0430\u0434\u0438\u0440\u043e\u0432\u0430\u043d"
-        )
+        llm_state = _ui_text("active", "активен") if llm_active else _ui_text("degraded", "деградировал")
         delivery_mode = _status_llm_delivery_mode()
 
         status_lines = [
-            "\u0421\u0442\u0430\u0442\u0443\u0441 \u0441\u0438\u0441\u0442\u0435\u043c\u044b",
-            f"\u0420\u0435\u0436\u0438\u043c: {mode_label}",
+            _t("inbound.status.title"),
+            _t("inbound.status.mode", mode=mode_label),
             f"AI: {llm_state}",
-            f"LLM delivery: {delivery_mode}",
-            f"\u041e\u043f\u0435\u0440\u0430\u0442\u0438\u0432\u043d\u043e\u0441\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439 (24\u0447): \u0434\u043e\u0441\u0442\u0430\u0432\u043a\u0430 {_format_percent(sla.delivery_rate_24h)}, \u043e\u0448\u0438\u0431\u043a\u0438 {_format_percent(sla.error_rate_24h)}",
-            f"\u0414\u0430\u0439\u0434\u0436\u0435\u0441\u0442\u044b: {digest_flag}",
-            f"\u0410\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442: {auto_mode}",
-            f"\u0424\u043b\u0430\u0433\u0438: \u043f\u0440\u0435\u0432\u044c\u044e={preview}, \u0430\u043d\u043e\u043c\u0430\u043b\u0438\u0438={anomalies}, \u043a\u0430\u0447\u0435\u0441\u0442\u0432\u043e={quality}",
-            "\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0438 \u0434\u0430\u0439\u0434\u0436\u0435\u0441\u0442\u043e\u0432:",
+            f"{_ui_text('LLM delivery', 'LLM delivery')}: {delivery_mode}",
+            _t(
+                "inbound.status.sla",
+                delivery=_format_percent(sla.delivery_rate_24h),
+                errors=_format_percent(sla.error_rate_24h),
+            ),
+            _t("inbound.status.digest", digest=digest_flag),
+            _t("inbound.status.autopriority", mode=auto_mode),
+            _t(
+                "inbound.status.flags",
+                preview=preview,
+                anomalies=anomalies,
+                quality=quality,
+            ),
+            _t("inbound.status.last_digests"),
             accounts_block,
         ]
         insider_since = self.override_store.get_insider_since(chat_id=chat_id)
         if insider_since:
-            status_lines.append(f"\u2b50 LetterBot.ru Insider since: {insider_since}")
-        status_lines.append(f"Version: {get_version()}")
+            status_lines.append(f"🔹 LetterBot.ru Insider since: {insider_since}")
+        status_lines.append(f"{_ui_text('Version', 'Версия')}: {get_version()}")
         return normalize_mojibake_text("\n".join(status_lines))
 
     def _doctor_text(self) -> str:

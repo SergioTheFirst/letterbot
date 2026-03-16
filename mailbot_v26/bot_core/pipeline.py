@@ -716,6 +716,7 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
         attachments=attachments,
         subject=inbound.subject,
         summary=ctx.llm_result.get("body_text", "") if ctx.llm_result else "",
+        locale=locale,
     )
     if attachment_insight and attachment_insight not in telegram_text:
         telegram_text = f"{telegram_text}\n{attachment_insight}"
@@ -738,6 +739,7 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
             expanded=False,
             initial_prio=True,
             show_decision_trace=load_telegram_ui_config().show_decision_trace,
+            locale=locale,
         ),
     )
     result = send_telegram(payload)

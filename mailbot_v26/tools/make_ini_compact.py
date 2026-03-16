@@ -31,7 +31,7 @@ api_key = CHANGE_ME
 enabled = true
 
 [ui]
-locale = ru
+locale = en
 
 ; Advanced / Rare / Debug
 [maintenance]

@@ -11,6 +11,7 @@ from mailbot_v26.pipeline.signal_quality import (
     MIN_PRINTABLE_RATIO,
     evaluate_signal_quality,
 )
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE
 
 
 def test_signal_quality_low_entropy() -> None:
@@ -81,6 +82,11 @@ def test_signal_fallback_used_for_low_entropy(monkeypatch) -> None:
         llm_provider="gigachat",
     )
     captured = _configure_minimal_processor(monkeypatch, llm_result)
+    monkeypatch.setattr(
+        processor, "runtime_override_store", SimpleNamespace(get_value=lambda key: None)
+    )
+    monkeypatch.setattr(processor, "_UI_LOCALE", "ru")
+    monkeypatch.setattr(processor, "_UI_LOCALE_CONFIGURED", False)
 
     processor.process_message(
         account_email="account@example.com",
@@ -93,8 +99,40 @@ def test_signal_fallback_used_for_low_entropy(monkeypatch) -> None:
         telegram_chat_id="chat",
     )
 
-    assert "Тело письма недоступно" in captured["body_text"]
+    assert processor._resolve_outbound_ui_locale() == DEFAULT_LOCALE
+    assert "Email body unavailable" in captured["body_text"]
     assert captured["ctx"] is not None
+    assert "Subject: Subject" in captured["body_text"]
+    assert "From: sender@example.com" in captured["body_text"]
+
+
+def test_signal_fallback_uses_russian_when_locale_is_ru(monkeypatch) -> None:
+    llm_result = SimpleNamespace(
+        priority="🔵",
+        action_line="Ответить",
+        body_summary="Краткое описание письма.",
+        attachment_summaries=[],
+        llm_provider="gigachat",
+    )
+    captured = _configure_minimal_processor(monkeypatch, llm_result)
+    monkeypatch.setattr(
+        processor,
+        "runtime_override_store",
+        SimpleNamespace(get_value=lambda key: "ru"),
+    )
+
+    processor.process_message(
+        account_email="account@example.com",
+        message_id=102,
+        from_email="sender@example.com",
+        subject="Subject",
+        received_at=datetime(2024, 1, 1, 12, 0),
+        body_text="a" * (MIN_LENGTH + 10),
+        attachments=[],
+        telegram_chat_id="chat",
+    )
+
+    assert "Тело письма недоступно" in captured["body_text"]
     assert "Тема: Subject" in captured["body_text"]
     assert "От: sender@example.com" in captured["body_text"]
 

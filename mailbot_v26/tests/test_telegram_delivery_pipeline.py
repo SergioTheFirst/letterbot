@@ -584,8 +584,8 @@ def test_due_snooze_includes_smart_return_context(monkeypatch, tmp_path) -> None
     _process_queue(storage, config, processor, flags)
 
     payload = captured["payload"]
-    assert "Вы отложили это письмо 20 минут назад" in payload.html_text
-    assert "Письмо от sender@example.com" in payload.html_text
+    assert "You snoozed this email 20 minutes ago" in payload.html_text
+    assert "from sender@example.com" in payload.html_text
 
 
 def test_due_snooze_warns_after_three_snoozes(monkeypatch, tmp_path) -> None:
@@ -639,7 +639,7 @@ def test_due_snooze_warns_after_three_snoozes(monkeypatch, tmp_path) -> None:
     _process_queue(storage, config, processor, flags)
 
     payload = captured["payload"]
-    assert "Вы откладывали это письмо уже 3 раза" in payload.html_text
+    assert "You have already snoozed this email 3 times" in payload.html_text
 
 
 def test_stage_tg_uses_real_priority_and_attachment_insight(
@@ -686,7 +686,7 @@ def test_stage_tg_uses_real_priority_and_attachment_insight(
 
     payload = captured["payload"]
     assert payload.priority == "🔴"
-    assert "📎 Счет" in payload.html_text
+    assert "📎 Invoice" in payload.html_text
     assert payload.reply_markup
     assert "inline_keyboard" in payload.reply_markup
     _cleanup_pipeline(email_id)
