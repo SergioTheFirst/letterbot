@@ -775,6 +775,11 @@ def render_report(
     *,
     generated_at: str,
 ) -> str:
+    def _format_ratio(numerator: int, denominator: int) -> str:
+        if denominator <= 0:
+            return "n/a"
+        return f"{numerator}/{denominator}"
+
     total = max(1, int(summary.total_cases))
     pass_rate = (float(summary.passed_cases) / float(total)) * 100.0
     critical_failed = [
@@ -786,6 +791,10 @@ def render_report(
     weak_categories = [
         item for item in summary.category_summaries if item.failed > 0
     ]
+    top_failure_categories = sorted(
+        weak_categories,
+        key=lambda item: (-item.failed, item.name),
+    )[:5]
     e2e_cases = [item for item in summary.case_results if item.case.dry_run_validated]
     dangerous_render_failures = [
         item
@@ -834,6 +843,31 @@ def render_report(
         and item.case.dry_run_validated
         and (not item.render_contains_ok or not item.render_mode_ok)
     )
+    language_quality_lines: list[str] = []
+    for bucket in summary.language_summaries:
+        language_results = [
+            item
+            for item in summary.case_results
+            if (_normalize_optional_text(item.case.language) or "unknown") == bucket.name
+        ]
+        action_correct = sum(1 for item in language_results if item.action_ok)
+        amount_correct = sum(
+            1 for item in language_results if item.amount_tolerant_ok
+        )
+        due_correct = sum(1 for item in language_results if item.due_date_ok)
+        mail_type_cases = [
+            item for item in language_results if item.case.expected.mail_type is not None
+        ]
+        mail_type_correct = sum(1 for item in mail_type_cases if item.mail_type_ok)
+        language_quality_lines.append(
+            (
+                f"{bucket.name:<32}: pass {bucket.passed}/{bucket.total}  |  "
+                f"action {_format_ratio(action_correct, len(language_results))}  |  "
+                f"amount {_format_ratio(amount_correct, len(language_results))}  |  "
+                f"due {_format_ratio(due_correct, len(language_results))}  |  "
+                f"mail_type {_format_ratio(mail_type_correct, len(mail_type_cases))}"
+            )
+        )
     lines = [
         "=== LETTERBOT GOLDEN CORPUS REPORT ===",
         f"Date: {generated_at}",
@@ -855,10 +889,21 @@ def render_report(
     for bucket in summary.language_summaries:
         pct = (float(bucket.passed) / float(max(1, bucket.total))) * 100.0
         lines.append(f"{bucket.name:<32}: {bucket.passed}/{bucket.total}  ({pct:.0f}%)")
+    lines.extend(["", "LANGUAGE QUALITY:"])
+    if not language_quality_lines:
+        lines.append("none")
+    else:
+        lines.extend(language_quality_lines)
     lines.extend(["", "CATEGORY BREAKDOWN:"])
     for bucket in summary.category_summaries:
         pct = (float(bucket.passed) / float(max(1, bucket.total))) * 100.0
         lines.append(f"{bucket.name:<32}: {bucket.passed}/{bucket.total}  ({pct:.0f}%)")
+    lines.extend(["", "TOP FAILURE CATEGORIES:"])
+    if not top_failure_categories:
+        lines.append("none")
+    else:
+        for bucket in top_failure_categories:
+            lines.append(f"{bucket.name}: {bucket.failed} failed")
     lines.extend(
         [
             "",

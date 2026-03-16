@@ -40,6 +40,22 @@ def test_extracts_english_action_markers() -> None:
     assert "let us know" in facts.actions
 
 
+def test_extract_actions_ignores_negated_or_partial_english_markers() -> None:
+    extractor = FactExtractor()
+    text = (
+        "We were pleased with the outcome. "
+        "The file was reattached after review. "
+        "No action needed from your side and approval is not required today."
+    )
+
+    facts = extractor.extract_facts(text)
+
+    assert "please" not in facts.actions
+    assert "attached" not in facts.actions
+    assert "required" not in facts.actions
+    assert "action needed" not in facts.actions
+
+
 def test_validate_summary_rejects_template_phrase():
     extractor = FactExtractor()
     facts = FactBundle(keywords=["итоги", "проект"])

@@ -55,9 +55,12 @@ class MailTypeClassifier:
         "no payment is needed",
         "payment is not needed",
         "nothing to pay",
+        "no payment action is required",
+        "payment action is not required",
         "оплачивать ничего не нужно",
         "оплата не требуется",
         "не нужно оплачивать",
+        "действий по оплате не требуется",
     }
     CONTRACT_KEYWORDS = {"договор", "contract", "соглашение", "agreement"}
     CONTRACT_APPROVAL_KEYWORDS = {
@@ -68,6 +71,17 @@ class MailTypeClassifier:
         "signature",
         "docusign",
         "please sign",
+    }
+    CONTRACT_APPROVAL_NEGATIVE_KEYWORDS = {
+        "no signature is required",
+        "no signature required",
+        "signature is not required",
+        "signature not required",
+        "no approval required",
+        "approval is not required",
+        "\u043f\u043e\u0434\u043f\u0438\u0441\u044c \u043d\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f",
+        "\u043f\u043e\u0434\u043f\u0438\u0441\u044c \u0441\u0435\u0433\u043e\u0434\u043d\u044f \u043d\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f",
+        "\u0441\u043e\u0433\u043b\u0430\u0441\u043e\u0432\u0430\u043d\u0438\u0435 \u043d\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f",
     }
     PRICE_KEYWORDS = {"прайс", "price list", "стоимост", "цен"}
     DELIVERY_KEYWORDS = {"достав", "отгруз", "shipment", "груз"}
@@ -302,6 +316,8 @@ class MailTypeClassifier:
 
         contract_match = cls._first_match(combined, cls.CONTRACT_KEYWORDS)
         approval_match = cls._first_match(combined, cls.CONTRACT_APPROVAL_KEYWORDS)
+        if cls._first_match(combined, cls.CONTRACT_APPROVAL_NEGATIVE_KEYWORDS):
+            approval_match = None
         if contract_match and approval_match:
             reason_codes.append("mt.base=CONTRACT_APPROVAL")
             reason_codes.append(f"mt.contract.keyword={contract_match}")

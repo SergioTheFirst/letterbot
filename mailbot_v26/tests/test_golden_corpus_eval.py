@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from mailbot_v26.tools.eval_golden_corpus import (
     evaluate_case,
@@ -9,6 +10,13 @@ from mailbot_v26.tools.eval_golden_corpus import (
     main,
     render_report,
     render_summary,
+)
+
+BILINGUAL_CORPUS_PATH = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_corpus"
+    / "bilingual_cases.json"
 )
 
 
@@ -203,6 +211,8 @@ def test_report_output_contains_category_breakdown() -> None:
     rendered = render_report(summary, generated_at="2026-03-09T00:00:00+00:00")
 
     assert "CATEGORY BREAKDOWN:" in rendered
+    assert "LANGUAGE QUALITY:" in rendered
+    assert "TOP FAILURE CATEGORIES:" in rendered
     assert "E2E DRY-RUN CASES:" in rendered
     assert "PROMOTION SHADOW CASES:" in rendered
     assert "invoice" in rendered
@@ -287,3 +297,18 @@ def test_report_contains_e2e_section() -> None:
 
     assert "E2E DRY-RUN CASES:" in rendered
     assert "Dangerous render failures:" in rendered
+
+
+def test_bilingual_canary_cases_pass() -> None:
+    load_golden_corpus.cache_clear()
+    canary_cases = [
+        case
+        for case in load_golden_corpus(str(BILINGUAL_CORPUS_PATH))
+        if "canary" in case.subsets
+    ]
+
+    summary = evaluate_golden_corpus(canary_cases)
+
+    assert len(canary_cases) >= 12
+    assert summary.failed_cases == 0
+    assert summary.passed_cases == summary.total_cases

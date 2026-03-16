@@ -2770,5 +2770,306 @@
     "subsets": [
       "bilingual_eval"
     ]
+  },
+  {
+    "case_id": "en-canary-usage-export-no-payment-action-01",
+    "language": "en",
+    "category": "service/system notification",
+    "sender_email": "ops@reports.vendor.test",
+    "subject": "Monthly usage export for records",
+    "body_text": "Attached is the March usage export in CSV format. Line items: 14, 27, 2026. No invoice is attached and no payment action is required.",
+    "attachments": [
+      {
+        "filename": "usage_export_march.csv",
+        "text": "row 14\nrow 27\nref 2026\n"
+      }
+    ],
+    "expected": {
+      "mail_type": "UNKNOWN",
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "en-canary-forwarded-archive-invoice-01",
+    "language": "en",
+    "category": "reply/forward polluted email",
+    "sender_email": "billing@archive.vendor.test",
+    "subject": "Fwd: archived invoice thread for records",
+    "body_text": "Forwarding the old invoice thread for reference only. The actual invoice will be sent later. No payment action is required.\n\nOld note: due date 01.02.2026 for archive only.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "UNKNOWN",
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "en-canary-contract-appendix-no-signature-01",
+    "language": "en",
+    "category": "contract/amendment",
+    "sender_email": "legal@vendor.test",
+    "subject": "Updated appendix for your records",
+    "body_text": "For your information, attached is the updated contract appendix for reference only. No signature is required today.",
+    "attachments": [
+      {
+        "filename": "appendix_update.docx",
+        "text": "Contract appendix update for records only. No signature is required today."
+      }
+    ],
+    "expected": {
+      "mail_type": "CONTRACT_UPDATE",
+      "doc_kind": "contract",
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить договор"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "en-canary-support-status-followup-01",
+    "language": "en",
+    "category": "support / client request",
+    "sender_email": "support@vendor.test",
+    "subject": "Quick note on resolved ticket",
+    "body_text": "Hello team, please let us know if the issue remains open. This is not urgent; we only need a quick note by Friday.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Ответить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "en-canary-mixed-thread-reference-01",
+    "language": "en",
+    "category": "mixed-signal ambiguous business email",
+    "sender_email": "ops@partner.vendor.test",
+    "subject": "Mixed thread: archived invoice reference",
+    "body_text": "For your information, we attached the historic invoice copy for reference only. No payment action is required.\n\nНиже старая переписка по доставке.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "en-canary-weak-sender-strong-signature-01",
+    "language": "en",
+    "category": "contract / signature request",
+    "sender_email": "hello@gmail.test",
+    "subject": "Quick one",
+    "body_text": "Please review and sign the attached agreement by 21.03.2026 and confirm receipt.",
+    "attachments": [
+      {
+        "filename": "agreement_signature_request.pdf",
+        "text": "Agreement signature request. Please sign by 21.03.2026."
+      }
+    ],
+    "expected": {
+      "mail_type": "CONTRACT_APPROVAL",
+      "doc_kind": "contract",
+      "amount": null,
+      "due_date": "21.03.2026",
+      "doc_number": null,
+      "action": "Ответить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "ru-canary-usage-export-no-payment-action-01",
+    "language": "ru",
+    "category": "service/system notification",
+    "sender_email": "ops@reports-ru.vendor.test",
+    "subject": "Выгрузка использования за март",
+    "body_text": "Во вложении выгрузка использования за март в CSV. Строки: 14, 27, 2026. Счет не приложен и действий по оплате не требуется.",
+    "attachments": [
+      {
+        "filename": "usage_export_march_ru.csv",
+        "text": "строка 14\nстрока 27\nкод 2026\n"
+      }
+    ],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "ru-canary-forwarded-archive-invoice-01",
+    "language": "ru",
+    "category": "reply/forward polluted email",
+    "sender_email": "billing@archive-ru.vendor.test",
+    "subject": "FW: старая копия счета для архива",
+    "body_text": "Пересылаю старую копию счета для справки. Актуальный счет пришлем позже, действий по оплате не требуется.\n\nOld note: due date 01.02.2026 for archive only.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "UNKNOWN",
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "ru-canary-contract-appendix-no-signature-01",
+    "language": "ru",
+    "category": "contract/amendment",
+    "sender_email": "legal@vendor-ru.test",
+    "subject": "Обновленное допсоглашение для архива",
+    "body_text": "К сведению: во вложении обновленное допсоглашение для архива. Подпись сегодня не требуется.",
+    "attachments": [
+      {
+        "filename": "dopsoglashenie_update.docx",
+        "text": "Допсоглашение к договору. Подпись сегодня не требуется."
+      }
+    ],
+    "expected": {
+      "mail_type": "CONTRACT_UPDATE",
+      "doc_kind": "contract",
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить договор"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "ru-canary-support-status-followup-01",
+    "language": "ru",
+    "category": "support / client request",
+    "sender_email": "support@vendor-ru.test",
+    "subject": "Нужен короткий статус по тикету",
+    "body_text": "Добрый день, подскажите, проблема еще актуальна? Срочности нет, нужен только короткий статус к пятнице.",
+    "attachments": [],
+    "expected": {
+      "mail_type": null,
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "ru-canary-mixed-thread-reference-01",
+    "language": "ru",
+    "category": "mixed-signal ambiguous business email",
+    "sender_email": "ops@partner-ru.vendor.test",
+    "subject": "К сведению: старая копия invoice в смешанной переписке",
+    "body_text": "К сведению: приложили historic invoice copy только для справки. Действий по оплате не требуется.\n\nНиже старое обсуждение по логистике.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "UNKNOWN",
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
+  },
+  {
+    "case_id": "ru-canary-strong-sender-weak-body-reference-01",
+    "language": "ru",
+    "category": "sender clear but content weak",
+    "sender_email": "billing@archive-ru.vendor.test",
+    "subject": "Архивная копия счета",
+    "body_text": "Только для справки. Действий по оплате не требуется.",
+    "attachments": [],
+    "expected": {
+      "mail_type": "UNKNOWN",
+      "doc_kind": null,
+      "amount": null,
+      "due_date": null,
+      "doc_number": null,
+      "action": "Проверить"
+    },
+    "critical": false,
+    "mail_type": "",
+    "subsets": [
+      "bilingual_eval",
+      "canary"
+    ]
   }
 ]
