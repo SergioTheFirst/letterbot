@@ -45,6 +45,18 @@ class FactExtractor:
         "confirm receipt",
         "complete payment",
     )
+    _ACTION_PATTERNS: Sequence[tuple[str, re.Pattern[str]]] = tuple(
+        (
+            keyword,
+            re.compile(rf"(?<!\w){re.escape(keyword)}(?!\w)", re.IGNORECASE),
+        )
+        for keyword in _ACTION_KEYWORDS
+    )
+    _NEGATED_ACTION_KEYWORDS: Sequence[str] = (
+        "required",
+        "action needed",
+        "action required",
+    )
     _TEMPLATE_PHRASES: Sequence[str] = (
         "касается темы",
         "без подробностей",
@@ -165,9 +177,15 @@ class FactExtractor:
     def _extract_actions(self, text: str) -> List[str]:
         found: List[str] = []
         lowered_text = text.lower()
-        for keyword in self._ACTION_KEYWORDS:
-            if keyword in lowered_text:
-                found.append(keyword)
+        for keyword, pattern in self._ACTION_PATTERNS:
+            match = pattern.search(text)
+            if not match:
+                continue
+            if keyword in self._NEGATED_ACTION_KEYWORDS:
+                prefix = lowered_text[max(0, match.start() - 4) : match.start()]
+                if prefix.endswith("no ") or prefix.endswith("not "):
+                    continue
+            found.append(keyword)
         return found
 
     def _extract_entities(self, text: str) -> List[str]:

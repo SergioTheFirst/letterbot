@@ -2886,9 +2886,12 @@ _FACT_NO_PAYMENT_MARKERS = (
     "no payment is needed",
     "nothing to pay",
     "payment is not needed",
+    "no payment action is required",
+    "payment action is not required",
     "оплачивать ничего не нужно",
     "оплата не требуется",
     "не нужно оплачивать",
+    "действий по оплате не требуется",
 )
 _FACT_NON_PAYMENT_INVOICE_REFERENCE_MARKERS = (
     "historic invoice",
@@ -4369,6 +4372,13 @@ def _collect_message_facts(
         and not invoice_reference_only
         and _contains_any(lowered, _DIRECT_PAYMENT_INTENT_MARKERS)
     )
+    if (no_payment_needed or invoice_reference_only) and not explicit_invoice:
+        amount = ""
+        amount_window_hit = False
+        due_date = ""
+        due_date_window_hit = False
+        doc_number = ""
+        doc_number_window_hit = False
     payroll_signal = explicit_payroll or (
         not explicit_invoice and _contains_any(lowered, _FACT_PAYROLL_MARKERS)
     )

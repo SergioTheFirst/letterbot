@@ -65,3 +65,35 @@ def test_future_invoice_notice_without_amount_does_not_classify_as_invoice() -> 
     )
 
     assert mail_type != "INVOICE"
+
+
+def test_no_payment_action_required_suppresses_invoice_false_positive() -> None:
+    mail_type = MailTypeClassifier.classify(
+        subject="Monthly usage export for records",
+        body=(
+            "Attached is the March usage export in CSV format. "
+            "No invoice is attached and no payment action is required."
+        ),
+        attachments=[],
+    )
+
+    assert mail_type == "UNKNOWN"
+
+
+def test_no_signature_required_contract_attachment_stays_contract_update() -> None:
+    class _Attachment:
+        filename = "appendix_update.docx"
+        content_type = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    mail_type = MailTypeClassifier.classify(
+        subject="Updated appendix for your records",
+        body=(
+            "For your information, attached is the updated contract appendix "
+            "for reference only. No signature is required today."
+        ),
+        attachments=[_Attachment()],
+    )
+
+    assert mail_type == "CONTRACT_UPDATE"
