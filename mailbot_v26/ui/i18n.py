@@ -8,7 +8,7 @@ from typing import Iterable
 
 from mailbot_v26.text.mojibake import normalize_mojibake_text
 
-DEFAULT_LOCALE = "ru"
+DEFAULT_LOCALE = "en"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -46,6 +46,36 @@ _MAIL_TYPE_LABELS_RU = {
 }
 
 
+_MAIL_TYPE_LABELS_EN = {
+    "invoice": "Invoice",
+    "invoice.final": "Invoice — final",
+    "invoice.overdue": "Invoice — overdue",
+    "payment_reminder": "Payment reminder",
+    "reminder": "Reminder",
+    "reminder.first": "Reminder — first",
+    "reminder.escalation": "Reminder — escalation",
+    "deadline_reminder": "Deadline reminder",
+    "contract": "Contract",
+    "contract.approval": "Contract — pending approval",
+    "contract.update": "Contract — update",
+    "contract.termination": "Contract — termination",
+    "contract.amendment": "Contract — amendment",
+    "contract.new": "Contract — new",
+    "claim": "Claim",
+    "claim.dispute": "Claim / dispute",
+    "claim.complaint": "Complaint",
+    "price_list": "Price list",
+    "delivery_notice": "Delivery notice",
+    "security_alert": "Security alert",
+    "policy_update": "Policy update",
+    "meeting_change": "Meeting change",
+    "account_change": "Account update",
+    "information_only": "Informational",
+    "unknown": "Uncategorised",
+    "generic": "Uncategorised",
+}
+
+
 _DOMAIN_LABELS_RU = {
     "billing": "Биллинг",
     "bank": "Банк/платежи",
@@ -62,6 +92,22 @@ _DOMAIN_LABELS_RU = {
 }
 
 
+_DOMAIN_LABELS_EN = {
+    "billing": "Billing",
+    "bank": "Bank / payments",
+    "finance": "Finance",
+    "hr": "HR",
+    "legal": "Legal",
+    "it": "IT",
+    "sales": "Sales",
+    "ops": "Operations",
+    "marketing": "Marketing",
+    "invoice": "Invoices",
+    "contract": "Contracts",
+    "unknown": "Uncategorised",
+}
+
+
 _MODE_LABELS_RU = {
     "full": "Полный режим",
     "degraded_no_llm": "Деградация: без AI",
@@ -70,10 +116,25 @@ _MODE_LABELS_RU = {
 }
 
 
+_MODE_LABELS_EN = {
+    "full": "Full mode",
+    "degraded_no_llm": "Degraded: no AI",
+    "degraded_no_telegram": "Degraded: Telegram unavailable",
+    "emergency_read_only": "Emergency: read-only",
+}
+
+
 _ANOMALY_SEVERITY_RU = {
     "info": "инфо",
     "warn": "предупреждение",
     "alert": "тревога",
+}
+
+
+_ANOMALY_SEVERITY_EN = {
+    "info": "info",
+    "warn": "warning",
+    "alert": "alert",
 }
 
 
@@ -122,6 +183,54 @@ _REASON_LABELS_RU = {
     "prio_vip_fyi_dampen": "VIP: FYI",
     "prio_vip_freq_dampen": "VIP: частота",
     "prio_vip_commitment_boost": "VIP: обязательства",
+}
+
+
+_REASON_LABELS_EN = {
+    "mt.invoice.final.keyword": "final invoice",
+    "mt.invoice.overdue.keyword": "overdue invoice",
+    "mt.reminder.escalation.keyword": "escalated reminder",
+    "mt.reminder.first.keyword": "first reminder",
+    "mt.reminder.escalation.urgency": "urgency detected",
+    "mt.contract.termination.keyword": "contract termination",
+    "mt.contract.amendment.keyword": "contract amendment",
+    "mt.contract.new.keyword": "new contract",
+    "mt.contract.keyword": "contract",
+    "mt.contract.approval.keyword": "contract pending approval",
+    "mt.attachment_hint": "attachment hint",
+    "mt.reminder.keyword": "reminder markers",
+    "mt.reminder.amount": "amount stated",
+    "mt.reminder.date": "due date stated",
+    "mt.price.keyword": "price list / catalogue",
+    "mt.delivery.keyword": "delivery notice",
+    "mt.security.keyword": "security alert",
+    "mt.policy.keyword": "policy update",
+    "mt.meeting.keyword": "meeting change",
+    "mt.deadline.keyword": "deadline mentioned",
+    "mt.account.keyword": "account update",
+    "mt.info.keyword": "informational",
+    "mt.claim.dispute.keyword": "claim / dispute",
+    "mt.claim.complaint.keyword": "complaint",
+    "prio_urgent_keyword": "urgency keywords",
+    "prio_urgent_weighted_by_type": "urgency boosted by type",
+    "prio_amount_100k": "amount >100k",
+    "prio_amount_50k": "amount >50k",
+    "prio_amount_10k": "amount >10k",
+    "prio_amount_base": "amount detected",
+    "prio_deadline_1d": "deadline ≤1d",
+    "prio_deadline_3d": "deadline ≤3d",
+    "prio_deadline_7d": "deadline ≤7d",
+    "prio_type_invoice_final": "final invoice",
+    "prio_type_reminder_escalation": "reminder escalation",
+    "prio_type_contract_termination": "contract termination",
+    "prio_type_claim": "claim",
+    "prio_freq_spike_3x": "frequency spike",
+    "prio_chain_3plus": "3+ reminders in chain",
+    "prio_chain_2plus": "2+ reminders in chain",
+    "prio_vip_base": "VIP sender",
+    "prio_vip_fyi_dampen": "VIP: FYI",
+    "prio_vip_freq_dampen": "VIP: frequency",
+    "prio_vip_commitment_boost": "VIP: commitment",
 }
 
 
@@ -174,6 +283,7 @@ _STRINGS_RU = {
     "inbound.help.week": "/week — краткая статистика за 7 дней",
     "inbound.help.stats": "/stats — качество автоприоритизации",
     "inbound.help.support": "/support — поддержать проект",
+    "inbound.help.lang": "/lang en|ru — переключить язык",
     "inbound.help.help": "/help — эта справка",
     "inbound.status.title": "Статус системы",
     "inbound.status.mode": "Режим: {mode}",
@@ -205,6 +315,84 @@ _STRINGS_RU = {
 }
 
 
+_STRINGS_EN = {
+    "preview.title": "AI Preview",
+    "preview.action": "Suggested action:",
+    "preview.reason": "Reason:",
+    "preview.why": "WHY THIS PRIORITY:",
+    "preview.confidence": "Confidence",
+    "preview.insights": "Insights",
+    "preview.narrative": "Narrative",
+    "preview.signals": "Signals",
+    "preview.digest": "Insights digest",
+    "digest.daily": "<b>Daily Digest</b>",
+    "digest.weekly": "<b>Weekly Digest (7 days)</b>",
+    "digest.anomalies": "• Anomalies:",
+    "digest.attention": "• Attention:",
+    "sla.alert.title": "Warning: Telegram delivery degraded",
+    "sla.alert.delivery": "Delivery (24h)",
+    "sla.alert.latency": "p90 latency",
+    "sla.alert.top_error": "Top error",
+    "sla.alert.action": "Action",
+    "inbound.bad_button": "Unknown button. Try /help.",
+    "inbound.ok": "Done.",
+    "inbound.bad_email_id": "Invalid email identifier.",
+    "inbound.priority_ack": "Saved: priority updated to {priority}.",
+    "inbound.priority_help": (
+        "Priority corrections are stored and used in auto-priority "
+        "quality checks.\nIf corrections are too frequent, auto-priority "
+        "stays in shadow mode."
+    ),
+    "inbound.toggle_unknown": "Unknown setting.",
+    "inbound.digest_enabled": "Digests enabled.",
+    "inbound.digest_disabled": "Digests disabled.",
+    "inbound.digest_usage": "Usage: /digest on|off",
+    "inbound.autopriority_usage": "Usage: /autopriority on|off",
+    "inbound.autopriority_off": "Auto-priority disabled. Mode: shadow.",
+    "inbound.autopriority_on": "Auto-priority enabled.",
+    "inbound.autopriority_gate_blocked": "Not yet: quality insufficient ({reason}).",
+    "inbound.autopriority_reason.cooldown": "cooldown after disable",
+    "inbound.autopriority_reason.samples": "not enough data",
+    "inbound.autopriority_reason.corrections": "too many corrections",
+    "inbound.autopriority_reason.analytics": "analytics error",
+    "inbound.command_unknown": "Unknown command. Try /help.",
+    "inbound.help.title": "Commands:",
+    "inbound.help.status": "/status — brief system status",
+    "inbound.help.doctor": "/doctor — diagnostics (brief)",
+    "inbound.help.digest": "/digest on|off — enable or disable digests",
+    "inbound.help.autopriority": "/autopriority on|off — enable or disable auto-priority",
+    "inbound.help.commitments": "/commitments (/tasks) — open commitments",
+    "inbound.help.week": "/week — 7-day stats summary",
+    "inbound.help.stats": "/stats — auto-priority quality",
+    "inbound.help.support": "/support — support the project",
+    "inbound.help.lang": "/lang en|ru — switch language",
+    "inbound.help.help": "/help — this help",
+    "inbound.status.title": "System status",
+    "inbound.status.mode": "Mode: {mode}",
+    "inbound.status.sla": "Notification SLA (24h): delivery {delivery}, errors {errors}",
+    "inbound.status.digest": "Digests: {digest}",
+    "inbound.status.autopriority": "Auto-priority: {mode}",
+    "inbound.status.flags": "Flags: preview={preview}, anomalies={anomalies}, quality={quality}",
+    "inbound.status.last_digests": "Last digest sends:",
+    "inbound.status.no_data": "no data",
+    "inbound.status.never_sent": "never sent",
+    "inbound.status.digest_line": "{account_email}: daily {daily}, weekly {weekly}",
+    "inbound.status.enabled": "enabled",
+    "inbound.status.disabled": "disabled",
+    "inbound.status.short_on": "on",
+    "inbound.status.short_off": "off",
+    "inbound.status.auto_mode": "auto",
+    "inbound.status.shadow_mode": "shadow",
+    "inbound.doctor.unavailable": "Doctor unavailable.",
+    "inbound.doctor.failed": "Doctor finished with error.",
+    "inbound.doctor.ok": "Doctor: all checks OK.",
+    "inbound.doctor.warn_title": "Doctor: warnings found.",
+    "inbound.doctor.status_ok": "OK",
+    "inbound.doctor.status_warn": "WARNING",
+    "inbound.doctor.status_fail": "ERROR",
+}
+
+
 def get_locale(config: configparser.ConfigParser | dict | None) -> str:
     if config is None:
         return DEFAULT_LOCALE
@@ -229,11 +417,16 @@ def get_locale(config: configparser.ConfigParser | dict | None) -> str:
 
 
 def t(key: str, *, locale: str = DEFAULT_LOCALE, **kwargs) -> str:
-    catalog = _STRINGS_RU if locale.startswith("ru") else {}
+    if locale.startswith("ru"):
+        catalog = _STRINGS_RU
+    elif locale.startswith("en"):
+        catalog = _STRINGS_EN
+    else:
+        catalog = _STRINGS_EN
     template = catalog.get(key)
     if template is None:
         _LOGGER.warning("Missing i18n key: %s (locale=%s)", key, locale)
-        return ""
+        return key
     try:
         return _clean_i18n_text(template.format(**kwargs))
     except Exception:
@@ -248,51 +441,76 @@ def _normalize_code(code: str) -> str:
 def humanize_mail_type(code: str | None, locale: str = DEFAULT_LOCALE) -> str:
     if not code:
         return ""
+    labels = _MAIL_TYPE_LABELS_EN if locale.startswith("en") else _MAIL_TYPE_LABELS_RU
     normalized = _normalize_code(code).replace("_", ".")
     parts = normalized.split(".")
     while parts:
         candidate = ".".join(parts)
-        label = _MAIL_TYPE_LABELS_RU.get(candidate)
+        label = labels.get(candidate)
         if label:
             return label
         parts = parts[:-1]
-    return f"Тип: {code}"
+    fallback = "Type" if locale.startswith("en") else "Тип"
+    return f"{fallback}: {code}"
 
 
 def humanize_domain(code: str | None, locale: str = DEFAULT_LOCALE) -> str:
     if not code:
         return ""
+    labels = _DOMAIN_LABELS_EN if locale.startswith("en") else _DOMAIN_LABELS_RU
     normalized = _normalize_code(code).replace("_", "")
-    return _DOMAIN_LABELS_RU.get(normalized, f"Домен: {code}")
+    fallback = "Domain" if locale.startswith("en") else "Домен"
+    return labels.get(normalized, f"{fallback}: {code}")
 
 
 def humanize_mode(code: str | None, locale: str = DEFAULT_LOCALE) -> str:
     if not code:
         return ""
+    labels = _MODE_LABELS_EN if locale.startswith("en") else _MODE_LABELS_RU
     normalized = _normalize_code(code)
-    return _MODE_LABELS_RU.get(normalized, f"Режим: {code}")
+    fallback = "Mode" if locale.startswith("en") else "Режим"
+    return labels.get(normalized, f"{fallback}: {code}")
 
 
 def humanize_severity(code: str | None, locale: str = DEFAULT_LOCALE) -> str:
     if not code:
         return ""
+    labels = (
+        _ANOMALY_SEVERITY_EN if locale.startswith("en") else _ANOMALY_SEVERITY_RU
+    )
     normalized = _normalize_code(code)
-    return _ANOMALY_SEVERITY_RU.get(normalized, f"Уровень: {code}")
+    fallback = "Severity" if locale.startswith("en") else "Уровень"
+    return labels.get(normalized, f"{fallback}: {code}")
 
 
-def _humanize_attachment_hint(detail: str | None) -> str:
+def _humanize_attachment_hint(
+    detail: str | None, locale: str = DEFAULT_LOCALE
+) -> str:
+    fallback = "attachment hint" if locale.startswith("en") else "подсказка по вложению"
     if not detail:
-        return "подсказка по вложению"
+        return fallback
     if "contract" in detail:
-        return "вложение похоже на договор"
+        return (
+            "attachment looks like contract"
+            if locale.startswith("en")
+            else "вложение похоже на договор"
+        )
     if "invoice" in detail:
-        return "вложение похоже на счёт"
-    return "подсказка по вложению"
+        return (
+            "attachment looks like invoice"
+            if locale.startswith("en")
+            else "вложение похоже на счёт"
+        )
+    return fallback
 
 
 def humanize_reason_codes(
     reasons: Iterable[str], locale: str = DEFAULT_LOCALE
 ) -> list[str]:
+    labels_map = _REASON_LABELS_EN if locale.startswith("en") else _REASON_LABELS_RU
+    mail_type_labels = (
+        _MAIL_TYPE_LABELS_EN if locale.startswith("en") else _MAIL_TYPE_LABELS_RU
+    )
     labels: list[str] = []
     for reason in reasons:
         if not reason:
@@ -300,22 +518,25 @@ def humanize_reason_codes(
         raw = str(reason)
         key, detail = (raw.split("=", 1) + [None])[:2]
         normalized = _normalize_code(key).replace("_", ".")
-        label = _REASON_LABELS_RU.get(normalized)
+        label = labels_map.get(normalized)
         if normalized in {"mt.base", "mt.mail_type"} and detail:
             labels.append(humanize_mail_type(detail, locale))
             continue
         if normalized == "mt.attachment_hint":
-            labels.append(_humanize_attachment_hint(detail))
+            labels.append(_humanize_attachment_hint(detail, locale))
             continue
         if normalized.startswith("mt.") and detail:
-            base_label = _MAIL_TYPE_LABELS_RU.get(normalized.replace("mt.", ""))
+            base_label = mail_type_labels.get(normalized.replace("mt.", ""))
             if base_label:
                 labels.append(base_label)
                 continue
         if label:
             labels.append(label)
             continue
-        labels.append(f"неизвестный маркер ({normalized})")
+        fallback = (
+            "unknown marker" if locale.startswith("en") else "неизвестный маркер"
+        )
+        labels.append(f"{fallback} ({normalized})")
     return labels
 
 

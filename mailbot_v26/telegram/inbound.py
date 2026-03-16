@@ -54,7 +54,7 @@ from mailbot_v26.telegram.callback_data import (
 )
 from mailbot_v26.telegram.keyboard_builder import build_notification_keyboard
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
-from mailbot_v26.ui.i18n import humanize_mode, t
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE, get_locale, humanize_mode, t
 from mailbot_v26.text.mojibake import normalize_mojibake_text
 from mailbot_v26.config.llm_queue import load_llm_queue_config
 from mailbot_v26.worker.telegram_sender import (
@@ -154,6 +154,12 @@ def _summarize_poll_payload(payload: object) -> dict[str, object]:
 
 def _t(key: str, **kwargs: object) -> str:
     return normalize_mojibake_text(t(key, locale=_UI_LOCALE, **kwargs))
+
+
+def set_inbound_locale(locale: str) -> None:
+    """Set the module-level UI locale for inbound Telegram text."""
+    global _UI_LOCALE
+    _UI_LOCALE = str(locale).strip() or "ru"
 
 
 def _normalize_priority_token(value: object) -> str:
@@ -871,6 +877,7 @@ class TelegramInboundProcessor:
     feature_flags: FeatureFlags
     allowed_chat_ids: frozenset[str]
     bot_token: str
+    locale: str = "ru"
     show_decision_trace: bool = False
     support_settings: SupportSettings | None = None
 
@@ -887,6 +894,7 @@ class TelegramInboundProcessor:
             return
 
     def handle_callback_query(self, callback: dict[str, object]) -> None:
+        set_inbound_locale(self.locale)
         data = _clean_text(callback.get("data"))
         message = callback.get("message")
         chat_id = ""
@@ -1021,6 +1029,7 @@ class TelegramInboundProcessor:
             self._answer_callback(callback_id, ack_text)
 
     def handle_message(self, message: dict[str, object]) -> None:
+        set_inbound_locale(self.locale)
         chat_id = ""
         chat = message.get("chat")
         if isinstance(chat, dict):
@@ -1050,6 +1059,9 @@ class TelegramInboundProcessor:
             return
         if command in {"/autopriority", "autopriority"}:
             self._handle_auto_priority_toggle(chat_id, args)
+            return
+        if command in {"/lang", "lang"}:
+            self._handle_lang_command(message)
             return
         if command in {"/commitments", "/tasks", "commitments", "tasks"}:
             self._handle_commitments(chat_id)
@@ -1795,6 +1807,24 @@ class TelegramInboundProcessor:
         self._reply(chat_id, _t("inbound.autopriority_on"))
 
     def _help_text(self) -> str:
+        if _UI_LOCALE.startswith("en"):
+            return "\n".join(
+                [
+                    _t("inbound.help.title"),
+                    _t("inbound.help.status"),
+                    _t("inbound.help.doctor"),
+                    "/digest on — enable digests",
+                    "/digest off — disable digests",
+                    "/autopriority on — enable auto-priority",
+                    "/autopriority off — disable auto-priority",
+                    _t("inbound.help.commitments"),
+                    _t("inbound.help.week"),
+                    _t("inbound.help.stats"),
+                    _t("inbound.help.support"),
+                    _t("inbound.help.lang"),
+                    _t("inbound.help.help"),
+                ]
+            )
         return "\n".join(
             [
                 "\u041a\u043e\u043c\u0430\u043d\u0434\u044b:",
@@ -1808,9 +1838,28 @@ class TelegramInboundProcessor:
                 "/week \u2014 \u043a\u0440\u0430\u0442\u043a\u0430\u044f \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430 \u0437\u0430 7 \u0434\u043d\u0435\u0439",
                 "/stats \u2014 \u043a\u0430\u0447\u0435\u0441\u0442\u0432\u043e \u0430\u0432\u0442\u043e\u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0438\u0437\u0430\u0446\u0438\u0438",
                 "/support \u2014 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0430\u0442\u044c \u043f\u0440\u043e\u0435\u043a\u0442",
+                _t("inbound.help.lang"),
                 "/help \u2014 \u044d\u0442\u0430 \u0441\u043f\u0440\u0430\u0432\u043a\u0430",
             ]
         )
+
+    def _handle_lang_command(self, message: dict) -> None:
+        chat = message.get("chat", {})
+        if not isinstance(chat, dict):
+            chat = {}
+        chat_id = _clean_text(chat.get("id"))
+        text = _clean_text(message.get("text", ""))
+        parts = text.strip().split()
+        if len(parts) < 2 or parts[1].lower() not in ("en", "ru"):
+            self.send_reply(chat_id, "Usage: /lang en  or  /lang ru")
+            return
+        new_locale = parts[1].lower()
+        self.override_store.set_value("ui_locale", new_locale)
+        set_inbound_locale(new_locale)
+        if new_locale == "en":
+            self.send_reply(chat_id, "\u2713 Language set to English.")
+        else:
+            self.send_reply(chat_id, "\u2713 \u042f\u0437\u044b\u043a \u0438\u0437\u043c\u0435\u043d\u0451\u043d \u043d\u0430 \u0440\u0443\u0441\u0441\u043a\u0438\u0439.")
 
     def _handle_commitments(self, chat_id: str) -> None:
         account_emails = list(self._account_emails())
@@ -2020,7 +2069,7 @@ class TelegramInboundProcessor:
         )
 
     def _status_text(self, *, chat_id: str) -> str:
-        mode_label = humanize_mode(system_health.mode.value, locale="ru")
+        mode_label = humanize_mode(system_health.mode.value, locale=_UI_LOCALE)
         sla = compute_notification_sla(analytics=self.analytics)
         digest_override = self.override_store.get_overrides().digest_enabled
 

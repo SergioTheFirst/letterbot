@@ -185,6 +185,7 @@ from mailbot_v26.llm.request_queue import (
 from .signal_quality import evaluate_signal_quality
 from mailbot_v26.ui.i18n import (
     DEFAULT_LOCALE,
+    get_locale,
     humanize_mail_type,
     humanize_reason_codes,
     humanize_severity,
@@ -326,7 +327,7 @@ priority_engine_v2 = PriorityEngineV2(
 )
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
-_UI_LOCALE = DEFAULT_LOCALE
+_UI_LOCALE = "ru"
 auto_priority_gates = AutoPriorityGates(analytics)
 auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
 auto_priority_gate_config: AutoPriorityGateConfig | None = None
@@ -401,6 +402,29 @@ def configure_processor_config_dir(config_dir: Path) -> None:
     _load_budget_gate_config_cached.cache_clear()
     _load_budget_usage_config_cached.cache_clear()
     _load_llm_queue_config_cached.cache_clear()
+    try:
+        import configparser as _cp
+
+        _parser = _cp.ConfigParser()
+        _parser.read(
+            [
+                str(_MODULE_CONFIG_DIR / "settings.ini"),
+                str(_MODULE_CONFIG_DIR / "config.ini"),
+            ],
+            encoding="utf-8",
+        )
+        if _parser.has_option("ui", "locale"):
+            configure_processor_locale(get_locale(_parser))
+        else:
+            configure_processor_locale("ru")
+    except Exception:
+        pass
+
+
+def configure_processor_locale(locale: str) -> None:
+    """Set the UI locale used for all Telegram-facing text."""
+    global _UI_LOCALE
+    _UI_LOCALE = str(locale).strip() or "ru"
 
 
 def configure_processor_db_path(db_path: Path) -> None:
