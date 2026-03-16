@@ -79,7 +79,7 @@ llm_usage_window_days = 7
 force_llm_always = false
 
 [ui]
-locale = ru
+locale = en
 
 [branding]
 show_watermark = true

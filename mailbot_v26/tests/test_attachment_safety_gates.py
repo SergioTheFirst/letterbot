@@ -65,8 +65,8 @@ def test_gate_oversize_attachment(tmp_path: Path) -> None:
             }
         ]
     )
-    assert "слишком большой файл" in block
-    assert "извлечение отключено" in block
+    assert "file too large" in block
+    assert "extraction skipped" in block
 
 
 def test_gate_total_limit(tmp_path: Path) -> None:

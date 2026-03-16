@@ -29,7 +29,7 @@ def test_attachments_block_formatting_and_truncation() -> None:
 
     rendered = format_attachments_block(attachments)
 
-    assert rendered.startswith("Вложения: 3 (PDF×1, PNG×1, TXT×1)")
+    assert rendered.startswith("Attachments: 3 (PDF×1, PNG×1, TXT×1)")
     assert "report.pdf — <i>summary</i>" in rendered
     assert "<i>report.pdf" not in rendered
     assert "\nscan.png\n" in f"\n{rendered}\n"
@@ -70,7 +70,7 @@ def test_processor_format_drops_duplicate_subject_first_body_line_with_fw_re() -
         attachment_summary="",
     )
 
-    assert rendered.splitlines() == ["🔴 от sender@example.com — FW: Счет"]
+    assert rendered.splitlines() == ["🔴 from sender@example.com — FW: Счет"]
 
 
 def test_signal_hints_are_single_per_type() -> None:
@@ -115,7 +115,7 @@ def test_processor_build_telegram_text_uses_mail_type_for_attachment_insight() -
         attachment_summary=None,
     )
 
-    assert "📎 58 200 ₽ · до 28.02" in rendered
+    assert "📎 58 200 ₽ · due 28.02" in rendered
     assert "bill.pdf" not in rendered
 
 

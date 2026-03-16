@@ -77,8 +77,8 @@ FIXTURE_SPECS: tuple[EmlFixtureSpec, ...] = (
             "Net 15.\n"
             "Pay by 28.03.2026."
         ),
-        expected_contains=("5 480", "28.03.2026", "Оплатить"),
-        expected_not_contains=("Проверить",),
+        expected_contains=("5 480", "28.03.2026", "Pay"),
+        expected_not_contains=("Review",),
     ),
     EmlFixtureSpec(
         filename="en_payment_reminder_overdue.eml",
@@ -91,8 +91,8 @@ FIXTURE_SPECS: tuple[EmlFixtureSpec, ...] = (
             "Pay by 15.03.2026.\n"
             "Second notice."
         ),
-        expected_contains=("4 820", "15.03.2026", "Оплатить"),
-        expected_not_contains=("Проверить",),
+        expected_contains=("4 820", "15.03.2026", "Pay"),
+        expected_not_contains=("Review",),
     ),
     EmlFixtureSpec(
         filename="en_payment_reminder_final_notice.eml",
@@ -104,8 +104,8 @@ FIXTURE_SPECS: tuple[EmlFixtureSpec, ...] = (
             "Please pay by March 18, 2026.\n"
             "Final notice."
         ),
-        expected_contains=("9 120", "18.03.2026", "Оплатить"),
-        expected_not_contains=("Проверить",),
+        expected_contains=("9 120", "18.03.2026", "Pay"),
+        expected_not_contains=("Review",),
     ),
     EmlFixtureSpec(
         filename="payroll_standard.eml",

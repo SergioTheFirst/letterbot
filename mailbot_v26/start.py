@@ -985,26 +985,91 @@ def _process_queue(
 
 
 def _render_snooze_reminder_text(
-    storage: Storage, *, email_id: int, reminder_text: str
+    storage: Storage, *, email_id: int, reminder_text: str, locale: str
 ) -> str:
+    from mailbot_v26.pipeline import tg_renderer
+
     existing = str(reminder_text or "").strip()
-    if existing:
+
+    def _stored_text_matches_locale(text: str) -> bool:
+        is_english = str(locale or "").strip().startswith("en")
+        normalized = str(text or "")
+        if not normalized:
+            return False
+        if is_english:
+            return not any(
+                marker in normalized
+                for marker in (
+                    " от ",
+                    "Аккаунт:",
+                    "Ответить",
+                    "Проверить",
+                    "Действий не требуется",
+                    "Приоритет:",
+                )
+            )
+        return not any(
+            marker in normalized
+            for marker in (
+                " from ",
+                "Account:",
+                "Reply",
+                "Review",
+                "No action needed",
+                "Priority:",
+            )
+        )
+
+    if existing and _stored_text_matches_locale(existing):
         return existing
-    row = storage.conn.execute(
-        """
-        SELECT priority, from_email, subject, action_line
-        FROM emails
-        WHERE id = ?
-        """,
-        (email_id,),
-    ).fetchone()
-    if not row:
-        return f"Письмо #{email_id}"
-    priority = str(row[0] or "🔵")
-    from_email = str(row[1] or "неизвестно")
-    subject = str(row[2] or "(без темы)")
-    action_line = str(row[3] or "Проверить")
-    return f"{priority} от {from_email}:\n{subject}\n{action_line}"
+    try:
+        columns = {
+            str(row[1]) for row in storage.conn.execute("PRAGMA table_info(emails)").fetchall()
+        }
+    except sqlite3.OperationalError:
+        columns = set()
+    select_fields = [
+        field
+        for field in ("priority", "from_email", "subject", "action_line", "account_email")
+        if field in columns
+    ]
+    row_map: dict[str, object] = {}
+    if select_fields:
+        row = storage.conn.execute(
+            f"""
+            SELECT {", ".join(select_fields)}
+            FROM emails
+            WHERE id = ?
+            """,
+            (email_id,),
+        ).fetchone()
+        if row:
+            row_map = dict(zip(select_fields, row))
+    if not row_map:
+        if existing:
+            return existing
+        fallback = "Email" if str(locale or "").strip().startswith("en") else "Письмо"
+        return f"{fallback} #{email_id}"
+    priority = str(row_map.get("priority") or "🔵")
+    from_email = str(row_map.get("from_email") or "")
+    subject = str(row_map.get("subject") or "")
+    action_line = str(row_map.get("action_line") or "")
+    account_email = str(row_map.get("account_email") or "")
+    reminder = tg_renderer.render_telegram_message(
+        priority=priority,
+        from_email=from_email,
+        subject=subject,
+        action_line=action_line,
+        summary=None,
+        attachments=[],
+        locale=locale,
+    )
+    return tg_renderer.finalize_telegram_message(
+        text=reminder,
+        priority=priority,
+        account_email=account_email,
+        locale=locale,
+    )
 
 
 def _build_snooze_return_text(
@@ -1013,16 +1078,8 @@ def _build_snooze_return_text(
     email_id: int,
     reminder_text: str,
     snoozed_at_utc: str = "",
+    locale: str,
 ) -> str:
-    def _pluralize(value: int, one: str, few: str, many: str) -> str:
-        mod10 = value % 10
-        mod100 = value % 100
-        if mod10 == 1 and mod100 != 11:
-            return one
-        if mod10 in {2, 3, 4} and mod100 not in {12, 13, 14}:
-            return few
-        return many
-
     def _parse_utc(raw_value: str) -> datetime | None:
         value = str(raw_value or "").strip()
         if not value:
@@ -1036,27 +1093,52 @@ def _build_snooze_return_text(
         return parsed.astimezone(timezone.utc)
 
     def _render_delay(now_utc: datetime, snoozed_at: datetime | None) -> str:
+        is_english = str(locale or "").strip().startswith("en")
         if snoozed_at is None:
             return ""
         delta_seconds = max(int((now_utc - snoozed_at).total_seconds()), 0)
         if delta_seconds < 60:
-            return "только что"
+            return "just now" if is_english else "только что"
         if (
             now_utc.date() != snoozed_at.date()
             and (now_utc.date() - snoozed_at.date()).days == 1
         ):
-            return "вчера"
+            return "yesterday" if is_english else "вчера"
         minutes = delta_seconds // 60
         if minutes < 60:
-            return (
-                f"{minutes} "
-                f"{_pluralize(minutes, 'минуту', 'минуты', 'минут')} назад"
-            )
+            if is_english:
+                unit = "minute" if minutes == 1 else "minutes"
+                return f"{minutes} {unit} ago"
+            if minutes % 10 == 1 and minutes % 100 != 11:
+                suffix = "минуту"
+            elif minutes % 10 in {2, 3, 4} and minutes % 100 not in {12, 13, 14}:
+                suffix = "минуты"
+            else:
+                suffix = "минут"
+            return f"{minutes} {suffix} назад"
         hours = delta_seconds // 3600
         if hours < 24:
-            return f"{hours} {_pluralize(hours, 'час', 'часа', 'часов')} назад"
+            if is_english:
+                unit = "hour" if hours == 1 else "hours"
+                return f"{hours} {unit} ago"
+            if hours % 10 == 1 and hours % 100 != 11:
+                suffix = "час"
+            elif hours % 10 in {2, 3, 4} and hours % 100 not in {12, 13, 14}:
+                suffix = "часа"
+            else:
+                suffix = "часов"
+            return f"{hours} {suffix} назад"
         days = delta_seconds // 86400
-        return f"{days} {_pluralize(days, 'день', 'дня', 'дней')} назад"
+        if is_english:
+            unit = "day" if days == 1 else "days"
+            return f"{days} {unit} ago"
+        if days % 10 == 1 and days % 100 != 11:
+            suffix = "день"
+        elif days % 10 in {2, 3, 4} and days % 100 not in {12, 13, 14}:
+            suffix = "дня"
+        else:
+            suffix = "дней"
+        return f"{days} {suffix} назад"
 
     def _load_snooze_count() -> int:
         try:
@@ -1083,17 +1165,33 @@ def _build_snooze_return_text(
         storage,
         email_id=email_id,
         reminder_text=reminder_text,
+        locale=locale,
     )
     prefix_lines: list[str] = []
     delay_text = _render_delay(datetime.now(timezone.utc), _parse_utc(snoozed_at_utc))
     if delay_text:
-        prefix_lines.append(f"⏰ Вы отложили это письмо {delay_text}")
+        prefix_lines.append(
+            "⏰ You snoozed this email " + delay_text
+            if str(locale or "").strip().startswith("en")
+            else f"⏰ Вы отложили это письмо {delay_text}"
+        )
     snooze_count = _load_snooze_count()
     if snooze_count >= 3:
-        prefix_lines.append(
-            f"⚠️ Вы откладывали это письмо уже {snooze_count} "
-            f"{_pluralize(snooze_count, 'раз', 'раза', 'раз')}"
-        )
+        if str(locale or "").strip().startswith("en"):
+            times_label = "time" if snooze_count == 1 else "times"
+            prefix_lines.append(
+                f"⚠️ You have already snoozed this email {snooze_count} {times_label}"
+            )
+        else:
+            if snooze_count % 10 == 1 and snooze_count % 100 != 11:
+                times_label = "раз"
+            elif snooze_count % 10 in {2, 3, 4} and snooze_count % 100 not in {12, 13, 14}:
+                times_label = "раза"
+            else:
+                times_label = "раз"
+            prefix_lines.append(
+                f"⚠️ Вы откладывали это письмо уже {snooze_count} {times_label}"
+            )
     if not prefix_lines:
         return existing
     return "\n\n".join(["\n".join(prefix_lines), existing])
@@ -1107,6 +1205,7 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
     account = config.accounts[0] if config.accounts else None
     if not account:
         return
+    ui_locale = processor_module._resolve_outbound_ui_locale()
 
     for item in due_items:
         snooze_id = int(item["id"])
@@ -1118,6 +1217,7 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
             email_id=email_id,
             reminder_text=str(item.get("reminder_text") or ""),
             snoozed_at_utc=str(item.get("snoozed_at_utc") or ""),
+            locale=ui_locale,
         )
         delivery_key = _build_telegram_delivery_key(
             email_id=email_id,
@@ -1135,7 +1235,9 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
             storage.mark_snooze_delivered(snooze_id=snooze_id)
             continue
         payload = TelegramPayload(
-            html_text=telegram_safe(f"📌 Напоминание\n\n{reminder_text}"),
+            html_text=telegram_safe(
+                f"{'📌 Reminder' if str(ui_locale).startswith('en') else '📌 Напоминание'}\n\n{reminder_text}"
+            ),
             priority="🔵",
             metadata={
                 "bot_token": config.keys.telegram_bot_token,
@@ -1146,6 +1248,7 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
                 expanded=False,
                 initial_prio=True,
                 show_decision_trace=load_telegram_ui_config().show_decision_trace,
+                locale=ui_locale,
             ),
         )
         result = send_telegram(payload)

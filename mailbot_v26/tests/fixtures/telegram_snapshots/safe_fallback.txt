@@ -1,4 +1,4 @@
-🔵 от неизвестно:
-<b>(без темы)</b>
-<b><i>Действий не требуется</i></b>
-<i>Аккаунт: render-contract@example.com</i>
+🔵 from unknown:
+<b>(no subject)</b>
+<b><i>No action needed</i></b>
+<i>Account: render-contract@example.com</i>

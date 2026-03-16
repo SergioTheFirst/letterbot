@@ -301,10 +301,10 @@
     "expected_render_contains": [
       "5 480",
       "28.03.2026",
-      "Оплатить"
+      "Pay"
     ],
     "expected_render_not_contains": [
-      "Проверить"
+      "Review"
     ]
   },
   {
@@ -757,10 +757,10 @@
     "expected_render_contains": [
       "9 120",
       "18.03.2026",
-      "Оплатить"
+      "Pay"
     ],
     "expected_render_not_contains": [
-      "Проверить"
+      "Review"
     ]
   },
   {
@@ -792,10 +792,10 @@
     "expected_render_contains": [
       "4 820",
       "15.03.2026",
-      "Оплатить"
+      "Pay"
     ],
     "expected_render_not_contains": [
-      "Проверить"
+      "Review"
     ]
   },
   {

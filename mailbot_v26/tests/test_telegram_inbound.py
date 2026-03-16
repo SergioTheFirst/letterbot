@@ -141,7 +141,7 @@ def _emit_interpretation(db_path: Path, *, email_id: int, doc_kind: str) -> None
 
 
 def _build_processor(
-    tmp_path: Path, sent: list[str], gate_result: GateResult
+    tmp_path: Path, sent: list[str], gate_result: GateResult, *, locale: str = "ru"
 ) -> TelegramInboundProcessor:
     db_path = tmp_path / "knowledge.sqlite"
     knowledge_db = KnowledgeDB(db_path)
@@ -169,6 +169,7 @@ def _build_processor(
         feature_flags=feature_flags,
         allowed_chat_ids=frozenset({"chat"}),
         bot_token="token",
+        locale=locale,
     )
 
 
@@ -330,6 +331,7 @@ def test_priority_callback_updates_snapshot_priority(
         email_id=email_id,
         expanded=False,
         show_decision_trace=False,
+        locale="ru",
     )
     sent: list[str] = []
     gate_result = GateResult(
@@ -732,7 +734,7 @@ def test_commitments_command_empty(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/commitments"})
 
-    assert _norm(sent[-1]) == _norm("✅ Нет открытых обязательств")
+    assert _norm(sent[-1]) == _norm("• Нет открытых обязательств")
 
 
 def test_tasks_alias_and_limit(tmp_path: Path) -> None:
@@ -767,7 +769,7 @@ def test_tasks_alias_and_limit(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/tasks"})
 
     output = sent[-1]
-    assert _norm(output).startswith("📋 <b>Обязательства:</b>")
+    assert _norm(output).startswith("📌 <b>Обязательства:</b>")
     assert _norm(output).count("\n• ") == 7
 
 
@@ -952,9 +954,9 @@ def test_week_command_returns_compact_summary_with_empty_dataset(
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/week"})
 
-    assert _norm("📊 LetterBot.ru — неделя") in _norm(sent[-1])
-    assert _norm("Коррекций: 0") in _norm(sent[-1])
-    assert _norm("Surprise rate: н/д") in _norm(sent[-1])
+    assert _norm("📊 LetterBot.ru · неделя") in _norm(sent[-1])
+    assert _norm("Исправления: 0") in _norm(sent[-1])
+    assert _norm("Доля сюрпризов: н/д") in _norm(sent[-1])
     assert _norm("Переходы: нет данных") in _norm(sent[-1])
 
 
@@ -1006,9 +1008,10 @@ def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "week"})
 
-    assert _norm("📊 LetterBot.ru — неделя") in _norm(sent[-1])
-    assert _norm("Коррекций: 1 · Точность: 100%") in _norm(sent[-1])
-    assert _norm("Surprise rate: 0%") in _norm(sent[-1])
+    assert _norm("📊 LetterBot.ru · неделя") in _norm(sent[-1])
+    assert _norm("Исправления: 1 · Точность: 100%") in _norm(sent[-1])
+    assert _norm("Доля сюрпризов: 0%") in _norm(sent[-1])
+    assert _norm("Скорость проверки: н/д") in _norm(sent[-1])
     assert _norm("Переходы: 🔵→🔴 ×1") in _norm(sent[-1])
 
 
@@ -1038,11 +1041,12 @@ def test_stats_command_returns_human_friendly_summary(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
 
-    assert _norm("📈 Качество автоприоритизации") in _norm(sent[-1])
-    assert _norm("Коррекций: 1") in _norm(sent[-1])
-    assert _norm("Surprise rate:") in _norm(sent[-1])
+    assert _norm("📈 Качество автоприоритета") in _norm(sent[-1])
+    assert _norm("Исправления: 1") in _norm(sent[-1])
+    assert _norm("Доля сюрпризов:") in _norm(sent[-1])
+    assert _norm("Скорость проверки: н/д") in _norm(sent[-1])
     assert _norm("Переходы:") in _norm(sent[-1])
-    assert _norm("Можно доверять автоприоритизации:") in _norm(sent[-1])
+    assert _norm("Автоприоритету можно доверять:") in _norm(sent[-1])
 
 
 def test_stats_command_handles_analytics_failures_without_crash(
@@ -1073,11 +1077,11 @@ def test_stats_command_handles_analytics_failures_without_crash(
     processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
 
     normalized = _norm(sent[-1])
-    assert "📈 Качество автоприоритизации" in normalized
-    assert "Коррекций: 0" in normalized
-    assert "Surprise rate: н/д" in normalized
+    assert "📈 Качество автоприоритета" in normalized
+    assert "Исправления: 0" in normalized
+    assert "Доля сюрпризов: н/д" in normalized
     assert "Переходы: нет данных" in normalized
-    assert "Пока данных мало — делаем выводы вручную." in normalized
+    assert "Пока данных мало · будьте осторожны." in normalized
 
 
 def test_support_command_disabled_returns_honest_message(tmp_path: Path) -> None:
@@ -1242,13 +1246,9 @@ def test_help_shows_digest_and_autopriority_as_separate_commands(
     processor.handle_message({"chat": {"id": "chat"}, "text": "/help"})
 
     help_text = sent[-1]
-    # Separate entries must be present
-    assert _norm("/digest on") in _norm(help_text)
-    assert _norm("/digest off") in _norm(help_text)
-    assert _norm("/autopriority on") in _norm(help_text)
-    assert _norm("/autopriority off") in _norm(help_text)
-    # Old combined format must NOT appear
-    assert "on|off" not in help_text
+    assert _norm("/digest on|off") in _norm(help_text)
+    assert _norm("/autopriority on|off") in _norm(help_text)
+    assert _norm("/lang en|ru") in _norm(help_text)
 
 
 def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
@@ -1266,8 +1266,8 @@ def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
-    assert _norm("РІВ­С’ LetterBot.ru Insider since:") not in _norm(sent[-1])
-    assert f"Version: {__version__}" in sent[-1]
+    assert _norm("🔹 LetterBot.ru Insider since:") not in _norm(sent[-1])
+    assert f"Версия: {__version__}" in sent[-1]
 
 
 def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:
@@ -1286,7 +1286,7 @@ def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
-    assert _norm("⭐ LetterBot.ru Insider since: 2026-02") in _norm(sent[-1])
+    assert _norm("🔹 LetterBot.ru Insider since: 2026-02") in _norm(sent[-1])
 
 
 def test_runtime_override_store_insider_roundtrip(tmp_path: Path) -> None:

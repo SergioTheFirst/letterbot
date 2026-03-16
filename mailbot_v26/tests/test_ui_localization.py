@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from mailbot_v26.doctor import DoctorEntry, _format_report
 from mailbot_v26.insights.quality_metrics import CountBreakdown, QualityMetricsSnapshot
@@ -140,7 +141,69 @@ def test_i18n_en_locale_catalogs() -> None:
     assert humanize_mode("full", locale="en") == "Full mode"
     assert humanize_mode("full", locale="ru") == "Полный режим"
     assert t("preview.title", locale="en") == "AI Preview"
+    assert t("preview.decision_buttons", locale="en") == "[Accept] [Dismiss]"
+    assert (
+        t("preview.signal_unavailable", locale="en")
+        == "Email body unavailable (low extraction quality)."
+    )
     assert t("nonexistent.key", locale="en") == "nonexistent.key"
+
+
+def test_processor_preview_helpers_follow_active_locale(monkeypatch) -> None:
+    monkeypatch.setattr(
+        processor,
+        "runtime_override_store",
+        SimpleNamespace(get_value=lambda key: "en"),
+    )
+
+    preview_text = processor._build_preview_message(  # type: ignore[attr-defined]
+        action_text="Reply",
+        reasons=[],
+        confidence=0.91,
+        priority_explain_lines=[],
+    )
+    preview_text = processor._append_commitments_preview(  # type: ignore[attr-defined]
+        preview_text,
+        [SimpleNamespace(commitment_text="Send signed copy", status="pending")],
+    )
+    preview_text = processor._append_narrative_preview(  # type: ignore[attr-defined]
+        preview_text,
+        SimpleNamespace(
+            fact="Invoice attached",
+            pattern="Monthly billing",
+            action="Review and reply",
+        ),
+    )
+
+    assert "[Accept] [Dismiss]" in preview_text
+    assert "[Set High] [Set Medium] [Set Low]" in preview_text
+    assert "Commitments" in preview_text
+    assert '• "Send signed copy" — pending' in preview_text
+    assert "Fact: Invoice attached" in preview_text
+    assert "Context: Monthly billing" in preview_text
+    assert "Action: Review and reply" in preview_text
+    explain_lines = processor._build_priority_explain_lines(  # type: ignore[attr-defined]
+        mail_type="invoice",
+        mail_type_reasons=[],
+        priority_v2_result=None,
+        commitments=[],
+        received_at=datetime(2024, 1, 1),
+    )
+    assert any(line.startswith("Type: Invoice") for line in explain_lines)
+
+
+def test_processor_preview_helpers_restore_russian_with_ru_override(monkeypatch) -> None:
+    monkeypatch.setattr(
+        processor,
+        "runtime_override_store",
+        SimpleNamespace(get_value=lambda key: "ru"),
+    )
+
+    fallback = processor._build_signal_fallback("Тема", "")  # type: ignore[attr-defined]
+
+    assert "Тело письма недоступно" in fallback
+    assert "Тема: Тема" in fallback
+    assert "От: неизвестно" in fallback
 
 
 def test_doctor_ru_report_has_ru_context() -> None:

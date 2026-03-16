@@ -34,7 +34,7 @@ first_run_bootstrap_max_messages = 20
 maintenance_mode = 0
 
 [ui]
-locale = ru
+locale = en
 
 ; =====================
 ; LLM providers

@@ -14,16 +14,16 @@ def test_decision_explanation_invoice() -> None:
     )
 
     assert explanation == [
-        "• найден счет",
-        "• сумма 87 500 ₽",
-        "• срок 15.04",
+        "• invoice detected",
+        "• amount 87 500 ₽",
+        "• due 15.04",
     ]
 
 
 def test_decision_explanation_contract() -> None:
     explanation = tg_renderer._build_decision_explanation({}, "CONTRACT")
 
-    assert explanation == ["• найден договор"]
+    assert explanation == ["• contract detected"]
 
 
 def test_decision_explanation_max_three_points() -> None:
@@ -37,9 +37,9 @@ def test_decision_explanation_max_three_points() -> None:
     )
 
     assert explanation == [
-        "• найден счет",
-        "• сумма 10 000 ₽",
-        "• срок 20.05",
+        "• invoice detected",
+        "• amount 10 000 ₽",
+        "• due 20.05",
     ]
 
 
@@ -56,8 +56,8 @@ def test_tg_render_standard() -> None:
         attachments=attachments,
     )
 
-    assert "📎 1 вложение: report.pdf" in rendered
-    assert "<b><i>Проверить письмо</i></b>" in rendered
+    assert "📎 1 attachment: report.pdf" in rendered
+    assert "<b><i>Review email</i></b>" in rendered
 
 
 def test_tg_no_brackets() -> None:
@@ -96,7 +96,7 @@ def test_tg_render_dedup_summary_equals_action_line() -> None:
         attachments=[],
     )
 
-    assert rendered.count("Проверить договор") == 1
+    assert rendered.count("Review contract") == 1
 
 
 def test_tg_render_drops_duplicate_insight() -> None:
@@ -111,10 +111,10 @@ def test_tg_render_drops_duplicate_insight() -> None:
 
 def test_tg_render_dedup_almost_identical_sentences() -> None:
     deduped = tg_renderer.dedup_sentences(
-        ["Согласовать оплату счета", "Оплату счета согласовать"]
+        ["Согласовать оплату счёта", "Оплату счёта согласовать"]
     )
 
-    assert deduped == ["Согласовать оплату счета"]
+    assert deduped == ["Согласовать оплату счёта"]
 
 
 def test_tg_render_skips_short_summary() -> None:
@@ -207,7 +207,7 @@ def test_tg_render_empty_subject_is_stable() -> None:
         attachments=[],
     )
 
-    assert "<b>(без темы)</b>" in rendered
+    assert "<b>(no subject)</b>" in rendered
 
 
 def test_tg_render_drops_duplicate_subject_with_whitespace_and_fwd_prefix() -> None:
@@ -246,13 +246,13 @@ def test_attachment_insight_invoice_amount_due_date() -> None:
     rendered = tg_renderer.build_telegram_text(
         priority="🔴",
         from_email="sender@example.com",
-        subject="Счет",
+        subject="Счёт",
         action_line="Оплатить",
         attachments=attachments,
         mail_type="INVOICE",
     )
 
-    assert "📎 58 200 ₽ · до 28.02" in rendered
+    assert "📎 58 200 ₽ · due 28.02" in rendered
     assert "invoice.pdf" not in rendered
 
 
@@ -260,27 +260,27 @@ def test_attachment_insight_invoice_excel_number_amount_due_date() -> None:
     attachments = [
         {
             "filename": "invoice_123.xlsx",
-            "text": "Счет №123 от 20.02.2026 Итого 128400 руб. Оплатить до 25.02.2026",
+            "text": "Счёт №123 от 20.02.2026 Итого 128400 руб. Оплатить до 25.02.2026",
         }
     ]
 
     rendered = tg_renderer.build_telegram_text(
         priority="🟡",
         from_email="sender@example.com",
-        subject="Счет",
+        subject="Счёт",
         action_line="Оплатить",
         attachments=attachments,
         mail_type="INVOICE",
     )
 
-    assert "📎 Счет №123 · 128 400 ₽ · до 25.02" in rendered
+    assert "📎 Invoice #123 · 128 400 ₽ · due 25.02" in rendered
 
 
 def test_attachment_insight_invoice_from_attachment_text_without_mail_type() -> None:
     attachments = [
         {
             "filename": "table.xlsx",
-            "text": "Счет №123 Итого 87 500 руб. Оплатить до 15.04.2026",
+            "text": "Счёт №123 Итого 87 500 руб. Оплатить до 15.04.2026",
         }
     ]
 
@@ -293,7 +293,7 @@ def test_attachment_insight_invoice_from_attachment_text_without_mail_type() -> 
         mail_type="",
     )
 
-    assert "📎 Счет №123 · 87 500 ₽ · до 15.04" in rendered
+    assert "📎 Invoice #123 · 87 500 ₽ · due 15.04" in rendered
 
 
 def test_attachment_insight_english_invoice_markers() -> None:
@@ -317,7 +317,7 @@ def test_attachment_insight_english_invoice_markers() -> None:
         mail_type="INVOICE",
     )
 
-    assert "📎 5 480 ₽ · до 28.03" in rendered
+    assert "📎 5 480 ₽ · due 28.03" in rendered
 
 
 def test_attachment_insight_act_reconciliation_period() -> None:
@@ -337,7 +337,7 @@ def test_attachment_insight_act_reconciliation_period() -> None:
         mail_type="ACT_RECONCILIATION",
     )
 
-    assert "📎 Акт сверки · январь 2026" in rendered
+    assert "📎 Reconciliation · январь 2026" in rendered
     assert "таблиц" not in rendered.lower()
 
 
@@ -363,7 +363,7 @@ def test_attachment_insight_generic_excel_headers() -> None:
 
 def test_attachment_insight_honest_fallback_for_unreadable_file() -> None:
     attachments = [
-        {"filename": "Счет.xls", "text": "@@@ ###"},
+        {"filename": "Счёт.xls", "text": "@@@ ###"},
     ]
 
     rendered = tg_renderer.build_telegram_text(
@@ -375,7 +375,7 @@ def test_attachment_insight_honest_fallback_for_unreadable_file() -> None:
         mail_type="",
     )
 
-    assert "📎 1 вложение: Счет.xls" in rendered
+    assert "📎 1 attachment: Счёт.xls" in rendered
     assert "\n\n\n" not in rendered
 
 
@@ -411,10 +411,10 @@ def test_tg_render_premium_human_first_layout() -> None:
         attachments=[{"filename": "invoice.pdf", "text": ""}],
     )
 
-    assert rendered.splitlines()[0] == "🟡 от sender@example.com:"
+    assert rendered.splitlines()[0] == "🟡 from sender@example.com:"
     assert "<b>Тема письма</b>" in rendered
-    assert "<b><i>Ответить</i></b>" in rendered
-    assert "📎 1 вложение: invoice.pdf" in rendered
+    assert "<b><i>Reply</i></b>" in rendered
+    assert "📎 1 attachment: invoice.pdf" in rendered
     assert "Первая строка" in rendered and "Четвертая строка" not in rendered
     assert "Powered by LetterBot.ru" not in rendered
 
@@ -465,7 +465,11 @@ def test_tg_render_strips_external_mail_warning_tail_from_excerpt() -> None:
         from_email="sender@example.com",
         subject="Subject",
         action_line="Проверить",
-        summary="Полезный текст\nВНЕШНЯЯ ПОЧТА: Если отправитель почты неизвестен...\nШум",
+        summary=(
+            "Полезный текст\n"
+            "ВНЕШНЯЯ ПОЧТА: Если отправитель почты неизвестен...\n"
+            "Шум"
+        ),
         attachments=[],
     )
 
@@ -491,7 +495,7 @@ def test_attachment_insight_uses_decision_facts() -> None:
         },
     )
 
-    assert "📎 87 500 ₽ · до 15.04" in rendered
+    assert "📎 87 500 ₽ · due 15.04" in rendered
 
 
 def test_all_email_notifications_render_priority_circle() -> None:

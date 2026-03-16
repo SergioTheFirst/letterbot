@@ -106,8 +106,8 @@ def test_telegram_contains_attachment_summary(monkeypatch) -> None:
 
     html_text = captured["payload"].html_text
     assert (
-        html_text.startswith("📩 Письмо получено")
-        or "📎 1 вложение: doc1.doc" in html_text
+        html_text.startswith("📩 Email received")
+        or "📎 1 attachment: doc1.doc" in html_text
     )
 
 
@@ -185,8 +185,8 @@ def test_no_minimal_template_when_attachments_exist(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert "ℹ️ Детали будут доступны позже." not in html_text
-    assert html_text.startswith("📩 Письмо получено") or (
+    assert "ℹ️ Details will be available later." not in html_text
+    assert html_text.startswith("📩 Email received") or (
         "📎" in html_text and "report.pdf" in html_text
     )
 
@@ -224,10 +224,10 @@ def test_empty_body_with_attachments_keeps_attachment_visibility(monkeypatch) ->
     )
 
     html_text = captured["payload"].html_text
-    assert html_text.startswith("📩 Письмо получено") or (
+    assert html_text.startswith("📩 Email received") or (
         html_text.startswith("🔵 from sender@example.com:")
         and "📎" in html_text
-        and "3 влож" in html_text
+        and "3 attachment" in html_text
     )
 
 
@@ -254,8 +254,8 @@ def test_binary_attachment_text_is_omitted(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert html_text.startswith("📩 Письмо получено") or "dump.bin" in html_text
-    if not html_text.startswith("📩 Письмо получено"):
+    assert html_text.startswith("📩 Email received") or "dump.bin" in html_text
+    if not html_text.startswith("📩 Email received"):
         assert "dump.bin — <i>" not in html_text
         assert "b'\x00\x01" not in html_text
         assert "fail" not in html_text.lower()
@@ -305,6 +305,6 @@ def test_narrative_block_keeps_payload_safe(monkeypatch) -> None:
     )
 
     html_text = captured["payload"].html_text
-    assert "<b>Факт:</b>" in html_text
+    assert "<b>Fact:</b>" in html_text
     assert base64_blob not in html_text
     assert "data=b'" not in html_text

@@ -1,10 +1,10 @@
-🟡 от contracts@vector.example:
+🟡 from contracts@vector.example:
 <b>Допсоглашение к договору</b>
-<b><i>Проверить договор</i></b>
+<b><i>Review contract</i></b>
 
 Проверьте условия дополнительного соглашения.
 
-Почему:
-• срок 2026-05-01
-• найден договор
-<i>Аккаунт: render-contract@example.com</i>
+Why:
+• due 2026-05-01
+• contract detected
+<i>Account: render-contract@example.com</i>

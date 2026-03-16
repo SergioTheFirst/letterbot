@@ -160,14 +160,14 @@ def test_safe_fallback_still_shows_attachments(monkeypatch) -> None:
 
     telegram_text = sent["payload"].html_text
     assert (
-        telegram_text.startswith("📩 Письмо получено")
-        or telegram_text.startswith("🔴 от sender@example.com:")
-        or telegram_text.startswith("Письмо получено")
+        telegram_text.startswith("📩 Email received")
+        or telegram_text.startswith("🔴 from sender@example.com:")
+        or telegram_text.startswith("Email received")
     )
     assert (
-        telegram_text.startswith("📩 Письмо получено")
+        telegram_text.startswith("📩 Email received")
         or "📎" in telegram_text
-        or "Вложения:" in telegram_text
+        or "Attachments:" in telegram_text
     )
 
 

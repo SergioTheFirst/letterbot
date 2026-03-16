@@ -1,4 +1,4 @@
-🔵 от info@example.com:
+🔵 from info@example.com:
 <b>Короткое уведомление</b>
-<b><i>Действий не требуется</i></b>
-<i>Аккаунт: render-contract@example.com</i>
+<b><i>No action needed</i></b>
+<i>Account: render-contract@example.com</i>

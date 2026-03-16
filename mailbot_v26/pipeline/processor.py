@@ -328,7 +328,7 @@ priority_engine_v2 = PriorityEngineV2(
 )
 shadow_action_engine = ShadowActionEngine(analytics)
 priority_confidence_engine = PriorityConfidenceEngine()
-_UI_LOCALE = "ru"
+_UI_LOCALE = DEFAULT_LOCALE
 _UI_LOCALE_CONFIGURED = False
 auto_priority_gates = AutoPriorityGates(analytics)
 auto_priority_breaker = AutoPriorityCircuitBreaker(analytics)
@@ -953,26 +953,30 @@ def _maybe_alert_notification_sla(
     now_dt = datetime.now(timezone.utc)
     if not notification_alert_store.should_alert(fingerprint=fingerprint, now=now_dt):
         return
-    delivery_pct = f"{sla_result.delivery_rate_24h * 100:.1f}%" if sla_result else "н/д"
+    locale = _resolve_outbound_ui_locale()
+    no_data = t("sla.alert.no_data", locale=locale)
+    delivery_pct = f"{sla_result.delivery_rate_24h * 100:.1f}%" if sla_result else no_data
     p90_latency = (
-        f"{int(sla_result.p90_latency_24h)}с"
+        f"{int(sla_result.p90_latency_24h)}{'s' if str(locale).startswith('en') else 'с'}"
         if sla_result and sla_result.p90_latency_24h is not None
-        else "н/д"
+        else no_data
     )
-    top_error = "н/д"
+    top_error = no_data
     if sla_result and sla_result.top_error_reasons_24h:
         top = sla_result.top_error_reasons_24h[0]
         top_error = f"{top.reason} ({top.share * 100:.1f}%)"
     action_hint = (
-        "текст без форматирования" if consecutive_failures >= 3 else "повторяем"
+        t("sla.alert.action.plain_text", locale=locale)
+        if consecutive_failures >= 3
+        else t("sla.alert.action.retrying", locale=locale)
     )
-    alert_prefix = t("sla.alert.title", locale=_UI_LOCALE)
+    alert_prefix = t("sla.alert.title", locale=locale)
     alert_text = (
         f"{alert_prefix}\n"
-        f"{t('sla.alert.delivery', locale=_UI_LOCALE)}: {delivery_pct}\n"
-        f"{t('sla.alert.latency', locale=_UI_LOCALE)}: {p90_latency}\n"
-        f"{t('sla.alert.top_error', locale=_UI_LOCALE)}: {top_error}\n"
-        f"{t('sla.alert.action', locale=_UI_LOCALE)}: {action_hint}"
+        f"{t('sla.alert.delivery', locale=locale)}: {delivery_pct}\n"
+        f"{t('sla.alert.latency', locale=locale)}: {p90_latency}\n"
+        f"{t('sla.alert.top_error', locale=locale)}: {top_error}\n"
+        f"{t('sla.alert.action', locale=locale)}: {action_hint}"
     )
     alert_text = append_watermark(alert_text, html=True)
     payload = TelegramPayload(
@@ -1677,8 +1681,20 @@ def _build_attachment_details(
 def _build_attachment_summary(details: list[dict[str, Any]]) -> str:
     if not details:
         return ""
+    locale = _resolve_outbound_ui_locale()
     total_chars = sum(detail["chars"] for detail in details)
-    lines = [f"Вложения: {len(details)}", f"Всего текста: {total_chars} chars"]
+    lines = [
+        (
+            f"Attachments: {len(details)}"
+            if str(locale).startswith("en")
+            else f"Вложения: {len(details)}"
+        ),
+        (
+            f"Total text: {total_chars} chars"
+            if str(locale).startswith("en")
+            else f"Всего текста: {total_chars} chars"
+        ),
+    ]
     lines.extend(f"- {detail['kind']}: {detail['chars']} chars" for detail in details)
     return "\n".join(lines)
 
@@ -2500,7 +2516,7 @@ def _build_minimal_telegram_payload(
         from_email=from_email,
         subject=subject,
         attachments=minimal_attachments,
-        locale=_UI_LOCALE,
+        locale=_resolve_outbound_ui_locale(),
     )
     trimmed_text = _trim_telegram_body(minimal_text)
     return TelegramPayload(
@@ -2537,6 +2553,7 @@ def _build_telegram_text(
     relationship_profile: dict[str, Any] | None = None,
     interpretation: MessageInterpretation | None = None,
 ) -> str:
+    locale = _resolve_outbound_ui_locale()
     attachments = attachments or []
     resolved_action = _resolve_action_line(action_line)
     mail_type_for_render = mail_type
@@ -2603,7 +2620,7 @@ def _build_telegram_text(
             mail_type=mail_type_for_render,
             message_facts=message_facts,
             relationship_profile=relationship_profile,
-            locale=_UI_LOCALE,
+            locale=locale,
         )
         return _normalize_mojibake_text(rendered)
     fields = tg_renderer.apply_semantic_gates(
@@ -2611,17 +2628,29 @@ def _build_telegram_text(
         summary=body_summary,
     )
     safe_sender = escape_tg_html(
-        from_email or "\u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e"
+        from_email or ("unknown" if str(locale).startswith("en") else "неизвестно")
     )
     safe_subject = escape_tg_html(
-        subject or "(\u0431\u0435\u0437 \u0442\u0435\u043c\u044b)"
+        subject or ("(no subject)" if str(locale).startswith("en") else "(без темы)")
     )
     safe_summary = escape_tg_html(fields.summary or "")
+    localized_action = tg_renderer._localize_outbound_action(
+        fields.action_line,
+        locale=locale,
+    )
+    if not localized_action:
+        localized_action = (
+            "No action needed"
+            if str(locale).startswith("en")
+            else "Действий не требуется"
+        )
     body_lines = tg_renderer._maybe_drop_duplicate_subject_line(
         subject,
-        [fields.action_line],
+        [localized_action],
     )
-    lines = [f"{priority} \u043e\u0442 {safe_sender} \u2014 {safe_subject}"]
+    lines = [
+        f"{priority} {'from' if str(locale).startswith('en') else 'от'} {safe_sender} — {safe_subject}"
+    ]
     if body_lines:
         lines.append(escape_tg_html(body_lines[0]))
     if safe_summary:
@@ -2640,8 +2669,13 @@ def _build_progressive_telegram_payload(
     priority: str,
     metadata: dict[str, Any],
 ) -> TelegramPayload:
+    locale = _resolve_outbound_ui_locale()
     return TelegramPayload(
-        html_text=_normalize_mojibake_text("📩 Письмо получено\nОбрабатываю вложения…"),
+        html_text=_normalize_mojibake_text(
+            "📩 Email received\nProcessing attachments…"
+            if str(locale).startswith("en")
+            else "📩 Письмо получено\nОбрабатываю вложения…"
+        ),
         priority=priority,
         metadata=metadata,
         reply_markup=None,
@@ -4724,6 +4758,7 @@ def validate_tg_payload(text: str, ctx: EmailContext) -> str:
         marker in normalized_text
         for marker in (
             "влож",
+            "attachment",
             "📎",
             "💰",
             "акт сверки",
@@ -5099,7 +5134,7 @@ def build_telegram_payload(
         text=telegram_text,
         priority=context.priority,
         account_email=str(context.metadata.get("account_email") or ""),
-        locale=_UI_LOCALE,
+        locale=_resolve_outbound_ui_locale(),
     )
     if render_mode != TelegramRenderMode.FULL or payload_invalid:
         fallback_reason = (
@@ -5167,6 +5202,7 @@ def build_telegram_payload(
             priority=context.priority,
             message_key=context.email_id,
             show_decision_trace=False,
+            locale=_resolve_outbound_ui_locale(),
         ),
     )
     assert "Сделать:" not in payload.html_text
@@ -5889,7 +5925,12 @@ def _build_message_decision(
             if value
         )
         if tokens and not resolved_summary:
-            resolved_summary = f"Счёт к оплате: {tokens}".strip()
+            summary_label = (
+                "Invoice due"
+                if str(_resolve_outbound_ui_locale()).startswith("en")
+                else "Счёт к оплате"
+            )
+            resolved_summary = f"{summary_label}: {tokens}".strip()
     if doc_kind == "payroll":
         message_facts["due_date"] = ""
         if not str(message_facts.get("amount") or "").strip():
@@ -6293,17 +6334,15 @@ def _enqueue_llm_request_with_retry(request: LLMRequest, *, email_id: int) -> bo
     return False
 
 
-_PREVIEW_DECISION_LINE = "[Принять] [Отклонить]"
-_PREVIEW_PRIORITY_LINE = "[Сделать Высокий] [Сделать Средний] [Сделать Низкий]"
-
-
 def _normalize_reason_code(reason: str) -> str:
-    labels = humanize_reason_codes((reason,), locale=_UI_LOCALE)
+    labels = humanize_reason_codes((reason,), locale=_resolve_outbound_ui_locale())
     return labels[0] if labels else ""
 
 
 def _format_mail_type_label(mail_type: str) -> str:
-    return humanize_mail_type(mail_type, locale=_UI_LOCALE) or "unknown"
+    return humanize_mail_type(
+        mail_type, locale=_resolve_outbound_ui_locale()
+    ) or "unknown"
 
 
 def _format_amount_value(value: int) -> str:
@@ -6311,6 +6350,15 @@ def _format_amount_value(value: int) -> str:
 
 
 def _format_deadline_days(days_out: int) -> str:
+    locale = _resolve_outbound_ui_locale()
+    if str(locale).startswith("en"):
+        if days_out < 0:
+            return "overdue"
+        if days_out == 0:
+            return "today"
+        if days_out == 1:
+            return "Tomorrow"
+        return f"in {days_out} days"
     if days_out < 0:
         return "просрочено"
     if days_out == 0:
@@ -6349,6 +6397,14 @@ def _build_priority_explain_lines(
     commitments: list[Commitment],
     received_at: datetime,
 ) -> list[str]:
+    locale = _resolve_outbound_ui_locale()
+    is_en = str(locale).startswith("en")
+    type_label = "Type" if is_en else "Тип"
+    deadline_label = "Deadline" if is_en else "Дедлайн"
+    amount_label_name = "Amount" if is_en else "Сумма"
+    urgency_label = "Urgency" if is_en else "Срочность"
+    reason_prefix = "reason" if is_en else "причина"
+    no_data_label = "no data" if is_en else "нет данных"
     lines: list[str] = []
     breakdown = priority_v2_result.breakdown if priority_v2_result else tuple()
 
@@ -6358,9 +6414,9 @@ def _build_priority_explain_lines(
             mail_type_item = _select_breakdown_item(breakdown, "mail_type")
             reason = mail_type_item.reason_code if mail_type_item else None
         reason_label = _normalize_reason_code(reason or "")
-        line = f"Тип: {_format_mail_type_label(mail_type)}"
+        line = f"{type_label}: {_format_mail_type_label(mail_type)}"
         if reason_label:
-            line = f"{line} (причина: {reason_label})"
+            line = f"{line} ({reason_prefix}: {reason_label})"
         lines.append(line)
 
     deadline_item = _select_breakdown_item(breakdown, "deadline")
@@ -6369,10 +6425,10 @@ def _build_priority_explain_lines(
             days_out = int(deadline_item.detail)
         except ValueError:
             days_out = 0
-        line = f"Дедлайн: {_format_deadline_days(days_out)}"
+        line = f"{deadline_label}: {_format_deadline_days(days_out)}"
         reason_label = _normalize_reason_code(deadline_item.reason_code)
         if reason_label:
-            line = f"{line} (причина: {reason_label})"
+            line = f"{line} ({reason_prefix}: {reason_label})"
         lines.append(line)
     elif commitments:
         parsed_deadlines = [
@@ -6384,7 +6440,7 @@ def _build_priority_explain_lines(
         if parsed_deadlines:
             nearest = min(parsed_deadlines)
             days_out = (nearest.date() - received_at.date()).days
-            line = f"Дедлайн: {_format_deadline_days(days_out)}"
+            line = f"{deadline_label}: {_format_deadline_days(days_out)}"
             lines.append(line)
 
     amount_item = _select_breakdown_item(breakdown, "amount")
@@ -6395,24 +6451,24 @@ def _build_priority_explain_lines(
             amount_value = 0
         if amount_value > 0:
             amount_label = _format_amount_value(amount_value)
-            line = f"Сумма: {amount_label}"
+            line = f"{amount_label_name}: {amount_label}"
             reason_label = _normalize_reason_code(amount_item.reason_code)
             if reason_label:
-                line = f"{line} (причина: {reason_label})"
+                line = f"{line} ({reason_prefix}: {reason_label})"
             lines.append(line)
 
     if len(lines) < 3:
         urgency_item = _select_breakdown_item(breakdown, "urgency")
         if urgency_item and urgency_item.detail:
             detail = _sanitize_preview_line(str(urgency_item.detail))
-            line = f"Срочность: {detail}"
+            line = f"{urgency_label}: {detail}"
             reason_label = _normalize_reason_code(urgency_item.reason_code)
             if reason_label:
-                line = f"{line} (причина: {reason_label})"
+                line = f"{line} ({reason_prefix}: {reason_label})"
             lines.append(line)
 
     if not lines:
-        lines.append("нет данных")
+        lines.append(no_data_label)
 
     return [_sanitize_preview_line(line) for line in lines[:3]]
 
@@ -6424,34 +6480,35 @@ def _build_preview_message(
     confidence: float | None,
     priority_explain_lines: list[str],
 ) -> str:
+    locale = _resolve_outbound_ui_locale()
     action_line = _sanitize_preview_line(action_text)
-    localized_reasons = humanize_reason_codes(reasons, locale=_UI_LOCALE)
+    localized_reasons = humanize_reason_codes(reasons, locale=locale)
     safe_reasons = [
         _sanitize_preview_line(reason)
         for reason in (localized_reasons or reasons)
         if reason
     ]
     if not safe_reasons:
-        safe_reasons = ["нет данных"]
+        safe_reasons = [t("inbound.status.no_data", locale=locale)]
     confidence_value = confidence if confidence is not None else 0.0
     lines = [
-        t("preview.title", locale=_UI_LOCALE),
+        t("preview.title", locale=locale),
         "",
-        t("preview.action", locale=_UI_LOCALE),
+        t("preview.action", locale=locale),
         f"• {action_line}",
-        t("preview.reason", locale=_UI_LOCALE),
+        t("preview.reason", locale=locale),
     ]
     lines.extend(f"• {reason}" for reason in safe_reasons)
     if priority_explain_lines:
         lines.append("")
-        lines.append(t("preview.why", locale=_UI_LOCALE))
+        lines.append(t("preview.why", locale=locale))
         lines.extend(f"- {line}" for line in priority_explain_lines)
     lines.append(
-        f"{t('preview.confidence', locale=_UI_LOCALE)}: {confidence_value:.2f}"
+        f"{t('preview.confidence', locale=locale)}: {confidence_value:.2f}"
     )
     lines.append("")
-    lines.append(_PREVIEW_DECISION_LINE)
-    lines.append(_PREVIEW_PRIORITY_LINE)
+    lines.append(t("preview.decision_buttons", locale=locale))
+    lines.append(t("preview.priority_buttons", locale=locale))
     return "\n".join(lines)
 
 
@@ -6460,17 +6517,19 @@ def _append_commitments_preview(
 ) -> str:
     if not commitments:
         return preview_text
-    lines = [preview_text, "", "Обязательства"]
+    locale = _resolve_outbound_ui_locale()
+    lines = [preview_text, "", t("preview.commitments", locale=locale)]
     status_labels = {
-        "pending": ("", "ожидается"),
-        "fulfilled": ("", "выполнено"),
-        "expired": ("", "просрочено"),
-        "unknown": ("", "неизвестно"),
+        "pending": ("", t("preview.commitment.pending", locale=locale)),
+        "fulfilled": ("", t("preview.commitment.fulfilled", locale=locale)),
+        "expired": ("", t("preview.commitment.expired", locale=locale)),
+        "unknown": ("", t("preview.commitment.unknown", locale=locale)),
     }
     for commitment in commitments:
         safe_text = _sanitize_preview_line(commitment.commitment_text)
         icon, label = status_labels.get(
-            commitment.status, ("", commitment.status or "неизвестно")
+            commitment.status,
+            ("", commitment.status or t("preview.commitment.unknown", locale=locale)),
         )
         line = f'• "{safe_text}" — {label}'.replace("  ", " ").strip()
         lines.append(line)
@@ -6486,14 +6545,23 @@ def _append_commitment_signal_preview(
     fulfilled_count: int,
     expired_count: int,
 ) -> str:
-    safe_sender = _sanitize_preview_line(from_email or "неизвестно")
+    locale = _resolve_outbound_ui_locale()
+    safe_sender = _sanitize_preview_line(
+        from_email or t("preview.unknown_sender", locale=locale)
+    )
     lines = [
         preview_text,
         "",
-        "Контекст отношений:",
-        f"  Контрагент: {safe_sender}",
-        f"  Надёжность обязательств: {label} {score}/100",
-        f"  (выполнено: {fulfilled_count}, просрочено: {expired_count} за 30 дней)",
+        t("preview.relationship_context", locale=locale),
+        f"  {t('preview.counterparty', locale=locale)}: {safe_sender}",
+        f"  {t('preview.commitment_reliability', locale=locale)}: {label} {score}/100",
+        "  "
+        + t(
+            "preview.commitment_stats",
+            locale=locale,
+            fulfilled_count=fulfilled_count,
+            expired_count=expired_count,
+        ),
     ]
     return "\n".join(lines)
 
@@ -6504,7 +6572,8 @@ def _append_insights_preview(
 ) -> str:
     if not insights:
         return preview_text
-    lines = [preview_text, "", t("preview.insights", locale=_UI_LOCALE)]
+    locale = _resolve_outbound_ui_locale()
+    lines = [preview_text, "", t("preview.insights", locale=locale)]
     for insight in insights:
         title = _sanitize_preview_line(insight.type)
         severity = _sanitize_preview_line(insight.severity)
@@ -6522,6 +6591,7 @@ def _append_narrative_preview(
 ) -> str:
     if narrative is None:
         return preview_text
+    locale = _resolve_outbound_ui_locale()
     lines = preview_text.split("\n")
     insert_at = len(lines)
     for idx, line in enumerate(lines):
@@ -6529,12 +6599,18 @@ def _append_narrative_preview(
         if cleaned.startswith("[") and cleaned.endswith("]"):
             insert_at = idx
             break
-    narrative_lines = ["", t("preview.narrative", locale=_UI_LOCALE)]
-    narrative_lines.append(f"Факт: {_sanitize_preview_line(narrative.fact)}")
+    narrative_lines = ["", t("preview.narrative", locale=locale)]
+    narrative_lines.append(
+        f"{t('preview.fact', locale=locale)} {_sanitize_preview_line(narrative.fact)}"
+    )
     if narrative.pattern:
-        narrative_lines.append(f"Контекст: {_sanitize_preview_line(narrative.pattern)}")
+        narrative_lines.append(
+            f"{t('preview.context', locale=locale)} {_sanitize_preview_line(narrative.pattern)}"
+        )
     if narrative.action:
-        narrative_lines.append(f"Действие: {_sanitize_preview_line(narrative.action)}")
+        narrative_lines.append(
+            f"{t('preview.action_detail', locale=locale)} {_sanitize_preview_line(narrative.action)}"
+        )
     lines[insert_at:insert_at] = narrative_lines
     return "\n".join(lines)
 
@@ -6545,9 +6621,10 @@ def _append_insight_digest_preview(
 ) -> str:
     if digest is None:
         return preview_text
+    locale = _resolve_outbound_ui_locale()
     status = _sanitize_preview_line(digest.status_label)
     headline = _sanitize_preview_line(digest.headline)
-    lines = [preview_text, "", t("preview.digest", locale=_UI_LOCALE), status, headline]
+    lines = [preview_text, "", t("preview.digest", locale=locale), status, headline]
     if digest.short_explanation:
         for line in digest.short_explanation.split("\n"):
             clean_line = _sanitize_preview_line(line)
@@ -6562,12 +6639,11 @@ def _append_anomalies_preview(
 ) -> str:
     if not anomalies:
         return preview_text
-    lines = [preview_text, "", t("preview.signals", locale=_UI_LOCALE)]
+    locale = _resolve_outbound_ui_locale()
+    lines = [preview_text, "", t("preview.signals", locale=locale)]
     for anomaly in anomalies:
         title = _sanitize_preview_line(anomaly.title)
-        severity = _sanitize_preview_line(
-            humanize_severity(anomaly.severity, locale=_UI_LOCALE)
-        )
+        severity = _sanitize_preview_line(humanize_severity(anomaly.severity, locale=locale))
         details = _sanitize_preview_line(anomaly.details)
         lines.append(f"• {title} ({severity})")
         if details:
@@ -6576,12 +6652,13 @@ def _append_anomalies_preview(
 
 
 def _build_signal_fallback(subject: str, from_email: str) -> str:
-    safe_subject = subject or "(без темы)"
-    safe_sender = from_email or "неизвестно"
+    locale = _resolve_outbound_ui_locale()
+    safe_subject = subject or t("preview.no_subject", locale=locale)
+    safe_sender = from_email or t("preview.unknown_sender", locale=locale)
     return (
-        "Тело письма недоступно (низкое качество извлечения).\n"
-        f"Тема: {safe_subject}\n"
-        f"От: {safe_sender}"
+        f"{t('preview.signal_unavailable', locale=locale)}\n"
+        f"{t('preview.subject', locale=locale)} {safe_subject}\n"
+        f"{t('preview.sender', locale=locale)} {safe_sender}"
     )
 
 
