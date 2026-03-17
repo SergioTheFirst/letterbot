@@ -104,7 +104,6 @@ from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.observability import get_logger
 from mailbot_v26.telegram_utils import escape_tg_html
-from mailbot_v26.ui.branding import append_watermark
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.decision_trace_v1 import (
@@ -440,6 +439,10 @@ def _resolve_outbound_ui_locale() -> str:
     if _UI_LOCALE_CONFIGURED:
         return str(_UI_LOCALE or "").strip() or DEFAULT_LOCALE
     return DEFAULT_LOCALE
+
+
+def _locale_text(locale: str, *, en: str, ru: str) -> str:
+    return en if str(locale or "").strip().casefold().startswith("en") else ru
 
 
 def configure_processor_db_path(db_path: Path) -> None:
@@ -978,7 +981,6 @@ def _maybe_alert_notification_sla(
         f"{t('sla.alert.top_error', locale=locale)}: {top_error}\n"
         f"{t('sla.alert.action', locale=locale)}: {action_hint}"
     )
-    alert_text = append_watermark(alert_text, html=True)
     payload = TelegramPayload(
         html_text=escape_tg_html(alert_text),
         priority="\U0001f534",
@@ -1176,13 +1178,18 @@ class MessageProcessor:
 
     def process(self, account_login: str, message: InboundMessage) -> str:
         """Lightweight placeholder processor to keep imports stable."""
-        sender = message.sender or "неизвестно"
+        locale = _resolve_outbound_ui_locale()
+        sender = message.sender or _locale_text(
+            locale, en="unknown", ru="неизвестно"
+        )
         display_sender = sender
         if "@" in sender:
             local = sender.split("@", 1)[0].replace(".", " ").replace("_", " ").strip()
             if local:
                 display_sender = local.title()
-        subject = message.subject or "(без темы)"
+        subject = message.subject or _locale_text(
+            locale, en="(no subject)", ru="(без темы)"
+        )
         body_text = message.body or ""
         priority = self._choose_priority(subject, body_text, message.attachments or [])
         action_line = self._normalize_action_subject(
@@ -1961,6 +1968,7 @@ def _build_premium_clarity_attachments(
     *,
     suppress_numeric_facts: bool,
 ) -> list[str]:
+    locale = _resolve_outbound_ui_locale()
     summary_by_name: dict[str, str] = {}
     for summary in attachment_summaries:
         filename = str(summary.get("filename") or "").strip()
@@ -1970,9 +1978,17 @@ def _build_premium_clarity_attachments(
         if not summary_text:
             continue
         summary_by_name[filename.lower()] = summary_text
-    lines = [f"📎 Вложения ({len(attachments)}):"]
+    lines = [
+        _locale_text(
+            locale,
+            en=f"📎 Attachments ({len(attachments)}):",
+            ru=f"📎 Вложения ({len(attachments)}):",
+        )
+    ]
     for attachment in attachments[:3]:
-        raw_filename = attachment.get("filename") or "вложение"
+        raw_filename = attachment.get("filename") or _locale_text(
+            locale, en="attachment", ru="вложение"
+        )
         filename = _escape_dynamic(strip_disallowed_emojis(raw_filename))
         summary_text = summary_by_name.get(str(raw_filename).strip().lower(), "")
         summary_text = _normalize_attachment_text(summary_text)
@@ -1987,7 +2003,13 @@ def _build_premium_clarity_attachments(
             lines.append(f"• {filename}")
     remaining = len(attachments) - 3
     if remaining > 0:
-        lines.append(f"... и ещё {remaining}")
+        lines.append(
+            _locale_text(
+                locale,
+                en=f"... and {remaining} more",
+                ru=f"... и ещё {remaining}",
+            )
+        )
     return lines
 
 
@@ -2335,9 +2357,16 @@ def _build_premium_clarity_text(
     extraction_failed: bool,
 ) -> str:
     priority = _normalize_priority_value(strip_disallowed_emojis(priority or ""))
-    sender_display = from_email or from_name or "неизвестно"
+    locale = _resolve_outbound_ui_locale()
+    sender_display = from_email or from_name or _locale_text(
+        locale, en="unknown", ru="неизвестно"
+    )
     safe_sender = _escape_dynamic(strip_disallowed_emojis(sender_display))
-    safe_subject = _escape_dynamic(strip_disallowed_emojis(subject or "(без темы)"))
+    safe_subject = _escape_dynamic(
+        strip_disallowed_emojis(
+            subject or _locale_text(locale, en="(no subject)", ru="(без темы)")
+        )
+    )
     action_text = strip_disallowed_emojis(_resolve_action_line(action_line))
     normalized_mail_type = (mail_type or "").strip().upper()
     normalized_action = _normalized_lower(re.sub(r"[\W_]+", " ", action_text).strip())
@@ -2438,23 +2467,40 @@ def _build_premium_clarity_text(
     )
     short_action = decision.action
     body_summary = decision.summary
-    safe_action = _escape_dynamic(short_action)
+    safe_action = _escape_dynamic(
+        tg_renderer._localize_outbound_action(short_action, locale=locale)
+    )
     excerpt_source = (body_summary or "").strip() or (body_text or "").strip()
     excerpt = tg_renderer._clean_excerpt(excerpt_source, max_lines=3)
 
     if attachments:
         first_name = _escape_dynamic(
-            strip_disallowed_emojis(str(attachments[0].get("filename") or "вложение"))
+            strip_disallowed_emojis(
+                str(
+                    attachments[0].get("filename")
+                    or _locale_text(locale, en="attachment", ru="вложение")
+                )
+            )
         )
         if len(attachments) == 1:
-            attachment_line = f"📎 1 вложение: {first_name}"
+            attachment_line = _locale_text(
+                locale,
+                en=f"📎 1 attachment: {first_name}",
+                ru=f"📎 1 вложение: {first_name}",
+            )
         else:
-            attachment_line = f"📎 {len(attachments)} вложения"
+            attachment_line = _locale_text(
+                locale,
+                en=f"📎 {len(attachments)} attachments",
+                ru=f"📎 {len(attachments)} вложения",
+            )
     else:
-        attachment_line = "📎 0 вложений"
+        attachment_line = _locale_text(
+            locale, en="📎 0 attachments", ru="📎 0 вложений"
+        )
 
     lines = [
-        f"{priority} от {safe_sender}:",
+        f"{priority} {_locale_text(locale, en='from', ru='от')} {safe_sender}:",
         safe_subject,
         safe_action,
         "",
@@ -2468,7 +2514,7 @@ def _build_premium_clarity_text(
         )
 
     deduped_lines = tg_renderer.dedup_rendered_lines(lines)
-    return append_watermark("\n".join(deduped_lines), html=True)
+    return "\n".join(deduped_lines)
 
 
 def _trim_telegram_body(text: str) -> str:
@@ -4810,13 +4856,33 @@ def _build_tg_plain_text(
     from_email: str,
     action_line: str,
     attachments: list[dict[str, Any]],
+    locale: str | None = None,
 ) -> str:
-    safe_subject = escape_tg_html(subject or "(без темы)")
-    safe_sender = escape_tg_html(from_email or "неизвестно")
-    resolved_action = escape_tg_html(_resolve_action_line(action_line))
-    lines = [f"{priority} от {safe_sender}:", safe_subject, resolved_action]
+    resolved_locale = locale or _resolve_outbound_ui_locale()
+    safe_subject = escape_tg_html(
+        subject or _locale_text(resolved_locale, en="(no subject)", ru="(без темы)")
+    )
+    safe_sender = escape_tg_html(
+        from_email or _locale_text(resolved_locale, en="unknown", ru="неизвестно")
+    )
+    resolved_action = escape_tg_html(
+        tg_renderer._localize_outbound_action(
+            _resolve_action_line(action_line), locale=resolved_locale
+        )
+    )
+    lines = [
+        f"{priority} {_locale_text(resolved_locale, en='from', ru='от')} {safe_sender}:",
+        safe_subject,
+        resolved_action,
+    ]
     if attachments:
-        lines.append(f"Вложения: {len(attachments)}")
+        lines.append(
+            _locale_text(
+                resolved_locale,
+                en=f"Attachments: {len(attachments)}",
+                ru=f"Вложения: {len(attachments)}",
+            )
+        )
     return "\n".join(lines)
 
 
@@ -5036,6 +5102,7 @@ def build_telegram_payload(
             from_email=context.from_email,
             action_line=context.action_line,
             attachments=context.attachment_files,
+            locale=_resolve_outbound_ui_locale(),
         )
 
     no_llm_summary = ""

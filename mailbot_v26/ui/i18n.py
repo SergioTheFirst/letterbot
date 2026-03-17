@@ -1,4 +1,4 @@
-"""Deterministic RU-first localization helpers for user-facing text."""
+"""Deterministic localization helpers for user-facing text."""
 
 from __future__ import annotations
 
@@ -305,7 +305,7 @@ _STRINGS_RU = {
     "inbound.help.week": "/week — краткая статистика за 7 дней",
     "inbound.help.stats": "/stats — качество автоприоритизации",
     "inbound.help.support": "/support — поддержать проект",
-    "inbound.help.lang": "/lang en|ru — переключить язык",
+    "inbound.help.lang": "/langen | /langru (/lang en|ru) — переключить язык",
     "inbound.help.help": "/help — эта справка",
     "inbound.status.title": "Статус системы",
     "inbound.status.mode": "Режим: {mode}",
@@ -409,7 +409,7 @@ _STRINGS_EN = {
     "inbound.help.week": "/week — 7-day stats summary",
     "inbound.help.stats": "/stats — auto-priority quality",
     "inbound.help.support": "/support — support the project",
-    "inbound.help.lang": "/lang en|ru — switch language",
+    "inbound.help.lang": "/langen | /langru (/lang en|ru) — switch language",
     "inbound.help.help": "/help — this help",
     "inbound.status.title": "System status",
     "inbound.status.mode": "Mode: {mode}",

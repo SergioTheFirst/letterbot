@@ -236,3 +236,10 @@ def test_attention_ui_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         assert response.status_code == 200
         text = response.get_data(as_text=True)
         assert "attention-table" in text
+        assert "Time estimate:" in text
+        empty_response = client.get(
+            "/attention", query_string={"account_email": "missing@example.com"}
+        )
+        assert empty_response.status_code == 200
+        empty_text = empty_response.get_data(as_text=True)
+        assert "Expand the window or add more mailboxes" in empty_text

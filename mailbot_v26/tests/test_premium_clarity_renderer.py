@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 
 from mailbot_v26.pipeline import processor
-from mailbot_v26.ui.branding import WATERMARK_LINE
 
 
 def _render(
@@ -43,13 +42,13 @@ def test_premium_clarity_default_layout_matches_target() -> None:
     rendered = _render(attachments=[{"filename": "invoice.pdf", "text": ""}])
     lines = rendered.splitlines()
 
-    assert lines[0] == "🟡 от sender@example.com:"
+    assert lines[0] == "🟡 from sender@example.com:"
     assert lines[1] == "Тема письма"
-    assert lines[2] == "Ответить"
+    assert lines[2] == "Reply"
     assert lines[3] == ""
-    assert lines[4] == "📎 1 вложение: invoice.pdf"
+    assert lines[4] == "📎 1 attachment: invoice.pdf"
     assert lines[5:8] == ["Первая строка.", "Вторая строка.", "Третья строка."]
-    assert WATERMARK_LINE in rendered
+    assert "Powered by LetterBot.ru" not in rendered
 
 
 def test_premium_clarity_default_layout_does_not_include_fallback_noise() -> None:
@@ -69,22 +68,22 @@ def test_premium_clarity_first_line_keeps_colored_priority_dot() -> None:
 
 
 def test_premium_clarity_action_shortcuts() -> None:
-    assert _render(action_line="Нужно ответить сегодня").splitlines()[2] == "Ответить"
-    assert _render(action_line="Оплатить счёт до завтра").splitlines()[2] == "Оплатить"
-    assert _render(action_line="Проверка данных").splitlines()[2] == "Проверить"
+    assert _render(action_line="Нужно ответить сегодня").splitlines()[2] == "Reply"
+    assert _render(action_line="Оплатить счёт до завтра").splitlines()[2] == "Pay"
+    assert _render(action_line="Проверка данных").splitlines()[2] == "Review"
 
 
 def test_premium_clarity_default_without_attachments() -> None:
     rendered = _render(attachments=[])
-    assert "📎 0 вложений" in rendered
+    assert "📎 0 attachments" in rendered
 
 
 def test_premium_clarity_generic_attention_actions_normalized_to_check() -> None:
-    assert _render(action_line="Проверьте вручную").splitlines()[2] == "Проверить"
-    assert _render(action_line="Attention Needed").splitlines()[2] == "Проверить"
+    assert _render(action_line="Проверьте вручную").splitlines()[2] == "Review"
+    assert _render(action_line="Attention Needed").splitlines()[2] == "Review"
     assert (
         _render(action_line="Недостаточно данных для оценки").splitlines()[2]
-        == "Проверить"
+        == "Review"
     )
 
 
@@ -94,7 +93,7 @@ def test_premium_clarity_invoice_with_excel_attachment_prefers_pay_action() -> N
         received_at=datetime(2026, 1, 1),
         from_email="billing@example.com",
         from_name="Billing",
-        subject="Счет на оплату №55",
+        subject="Счёт на оплату №55",
         mail_type="INVOICE",
         action_line="Проверьте вручную",
         body_summary="",
@@ -113,7 +112,7 @@ def test_premium_clarity_invoice_with_excel_attachment_prefers_pay_action() -> N
         confidence_dots_scale=10,
         extraction_failed=False,
     )
-    assert rendered.splitlines()[2] == "Оплатить"
+    assert rendered.splitlines()[2] == "Pay"
 
 
 def test_premium_clarity_reconciliation_prefers_reconcile_action() -> None:
@@ -121,7 +120,7 @@ def test_premium_clarity_reconciliation_prefers_reconcile_action() -> None:
         action_line="Проверьте вручную",
         body_summary="Направляю акт сверки за март 2026",
     )
-    assert rendered.splitlines()[2] == "Сверить"
+    assert rendered.splitlines()[2] == "Reconcile"
 
 
 def test_premium_clarity_information_only_prefers_read_action() -> None:
@@ -129,7 +128,7 @@ def test_premium_clarity_information_only_prefers_read_action() -> None:
         action_line="Проверьте вручную",
         body_summary="FYI: информационное письмо для ознакомления",
     )
-    assert rendered.splitlines()[2] == "Ознакомиться"
+    assert rendered.splitlines()[2] == "Review"
 
 
 def test_premium_clarity_outage_alert_is_check_not_pay() -> None:
@@ -157,7 +156,7 @@ def test_premium_clarity_outage_alert_is_check_not_pay() -> None:
         confidence_dots_scale=10,
         extraction_failed=False,
     )
-    assert rendered.splitlines()[2] == "Проверить"
+    assert rendered.splitlines()[2] == "Review"
 
 
 def test_premium_clarity_investment_promo_prefers_read_not_pay() -> None:
@@ -165,7 +164,7 @@ def test_premium_clarity_investment_promo_prefers_read_not_pay() -> None:
         action_line="Проверьте вручную",
         body_summary="Инвестиционный дайджест: высокая доходность, рекламная рассылка",
     )
-    assert rendered.splitlines()[2] == "Ознакомиться"
+    assert rendered.splitlines()[2] == "Review"
 
 
 def test_premium_clarity_signed_contract_prefers_record_action() -> None:
@@ -193,4 +192,4 @@ def test_premium_clarity_signed_contract_prefers_record_action() -> None:
         confidence_dots_scale=10,
         extraction_failed=False,
     )
-    assert rendered.splitlines()[2] == "Зафиксировать"
+    assert rendered.splitlines()[2] == "Record"

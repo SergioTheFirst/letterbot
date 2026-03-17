@@ -80,6 +80,7 @@ from mailbot_v26.system.truth_guard import (
     assert_not_projection_source,
     mark_as_stale,
 )
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE, get_locale
 from mailbot_v26.version import get_version
 from mailbot_v26.web_observability.doctor_export import build_diagnostics_zip
 from mailbot_v26.tools.networking import get_primary_ipv4
@@ -235,6 +236,7 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
 def _render_template(app: Flask, template_name: str, **context: object) -> str:
     context.setdefault("request", request)
     context.setdefault("session", session)
+    context.setdefault("ui_locale", str(app.config.get("UI_LOCALE") or DEFAULT_LOCALE))
     support_settings = app.config.get("SUPPORT_SETTINGS")
     support_enabled = bool(
         isinstance(support_settings, SupportSettings) and support_settings.enabled
@@ -1200,6 +1202,139 @@ def _humanize_health_detail(
     sanitized = " ".join(str(detail or "").split())
     if "traceback" in sanitized.lower():
         return "Подробности скрыты — откройте Details для диагностики"
+    return sanitized
+
+
+def _humanize_health_detail_localized(
+    component: str,
+    *,
+    subtype: str = "",
+    detail: str = "",
+    status: str = "",
+    locale: str = DEFAULT_LOCALE,
+) -> str:
+    use_en = str(locale or DEFAULT_LOCALE).strip().casefold().startswith("en")
+
+    def _t(*, en: str, ru: str) -> str:
+        return en if use_en else ru
+
+    lowered = f"{subtype} {detail}".lower()
+    if component == "IMAP":
+        if status == "unavailable":
+            return _t(
+                en="IMAP health history unavailable — check events_v1 and database access",
+                ru="История IMAP health недоступна — проверьте events_v1 и доступ к базе",
+            )
+        if status == "unknown":
+            return _t(
+                en="No confirmed successful IMAP cycle in the selected window",
+                ru="Нет подтверждённого успешного IMAP цикла в выбранном окне",
+            )
+        if "auth" in lowered or "login" in lowered or "password" in lowered:
+            return _t(
+                en="Authentication error — check the IMAP password in settings",
+                ru="Ошибка авторизации — проверьте пароль IMAP в настройках",
+            )
+        if subtype == "cooldown" or "cooldown" in lowered:
+            return _t(
+                en="Cooldown active — the next attempt will happen later",
+                ru="Активен cooldown — повторная попытка будет позже",
+            )
+        if "timeout" in lowered or "timed out" in lowered or "connect" in lowered:
+            return _t(
+                en="IMAP server unavailable — the last contact ended with an error",
+                ru="Сервер IMAP недоступен — последний контакт завершился ошибкой",
+            )
+        if subtype == "dead_letter":
+            return _t(
+                en="There are emails in dead-letter — review failed messages",
+                ru="Есть письма в dead-letter — проверьте сбойные сообщения",
+            )
+        if subtype == "processing_failure":
+            return _t(
+                en="Email processing error — review recent failures",
+                ru="Ошибка обработки письма — проверьте последние сбои",
+            )
+        if status == "down":
+            return _t(
+                en="No recent successful IMAP contact",
+                ru="Нет свежего успешного контакта с IMAP",
+            )
+    if component == "Telegram":
+        if status == "unavailable":
+            return _t(
+                en="Telegram status unavailable — health snapshot missing",
+                ru="Статус Telegram недоступен — health snapshot отсутствует",
+            )
+        if status == "unknown":
+            return _t(
+                en="No confirmed Telegram health snapshot in the selected window",
+                ru="Нет подтверждённого Telegram health snapshot в выбранном окне",
+            )
+        if "token" in lowered or "auth" in lowered:
+            return _t(
+                en="Telegram error — check the bot token and API availability",
+                ru="Ошибка Telegram — проверьте токен и доступность API",
+            )
+        if status != "ok":
+            return _t(
+                en="Telegram delivery degraded — check recent errors",
+                ru="Доставка в Telegram деградировала — проверьте последние ошибки",
+            )
+    if component == "LLM":
+        if status == "unavailable":
+            return _t(
+                en="LLM status unavailable — snapshot and metrics could not be read",
+                ru="Статус LLM недоступен — snapshot и метрики не прочитаны",
+            )
+        if status == "unknown":
+            return _t(
+                en="No recent LLM snapshot in the selected window",
+                ru="Нет свежего LLM snapshot в выбранном окне",
+            )
+        if status != "ok":
+            return _t(
+                en="Fallback mode active — LLM unavailable, template path only",
+                ru="Активен fallback режим — LLM недоступен, работает только template",
+            )
+    if component == "DB":
+        if status == "unavailable":
+            return _t(
+                en="DB status unavailable — check the SQLite file and access rights",
+                ru="Статус БД недоступен — проверьте файл SQLite и права доступа",
+            )
+        if status == "unknown":
+            return _t(
+                en="No confirmed DB snapshot in the selected window",
+                ru="Нет подтверждённого DB snapshot в выбранном окне",
+            )
+        if status != "ok":
+            return _t(
+                en="Database unavailable or overloaded — check the file and locks",
+                ru="База данных недоступна или перегружена — проверьте файл и блокировки",
+            )
+    if component == "Scheduler / Digests":
+        if status == "unavailable":
+            return _t(
+                en="Scheduler status unavailable — runtime snapshot missing",
+                ru="Статус планировщика недоступен — runtime snapshot отсутствует",
+            )
+        if status == "unknown":
+            return _t(
+                en="No recent scheduler-cycle confirmation",
+                ru="Нет свежего подтверждения цикла планировщика",
+            )
+        if status != "ok":
+            return _t(
+                en="Digest scheduler has not confirmed a successful cycle recently",
+                ru="Планировщик дайджестов давно не подтверждал успешный цикл",
+            )
+    sanitized = " ".join(str(detail or "").split())
+    if "traceback" in sanitized.lower():
+        return _t(
+            en="Details hidden — open Details for diagnostics",
+            ru="Подробности скрыты — откройте Details для диагностики",
+        )
     return sanitized
 
 
@@ -3608,6 +3743,7 @@ def create_app(
     allow_pii: bool | None = None,
     api_token: str = "",
     allow_cidrs: Iterable[str] | None = None,
+    config_dir: Path | None = None,
     config_path: Path | None = None,
     log_path: Path | None = None,
     dist_root: Path | None = None,
@@ -3654,6 +3790,21 @@ def create_app(
     app.config["WEB_UI_BIND"] = str(web_ui_bind)
     app.config["WEB_UI_PORT"] = int(web_ui_port)
     app.config["WEB_UI_ALLOW_LOCAL_SMOKE_BYPASS"] = bool(allow_local_smoke_bypass)
+    ui_locale = DEFAULT_LOCALE
+    if config_dir is not None:
+        try:
+            parser = configparser.ConfigParser()
+            parser.read(
+                [
+                    str(Path(config_dir) / "settings.ini"),
+                    str(Path(config_dir) / "config.ini"),
+                ],
+                encoding="utf-8",
+            )
+            ui_locale = get_locale(parser)
+        except Exception:
+            ui_locale = DEFAULT_LOCALE
+    app.config["UI_LOCALE"] = str(ui_locale or DEFAULT_LOCALE)
     app.config["ANALYTICS_FACTORY"] = lambda: KnowledgeAnalytics(
         app.config["DB_PATH"], read_only=True
     )
@@ -5967,11 +6118,12 @@ def create_app(
                 "last_ok_relative": _format_relative_time(imap_payload.get("last_success_ts")),
                 "detail": None
                 if imap_status == "ok"
-                else _humanize_health_detail(
+                else _humanize_health_detail_localized(
                     "IMAP",
                     subtype=str(latest_imap_payload.get("subtype") or ""),
                     detail=str(latest_imap_payload.get("detail") or ""),
                     status=imap_status,
+                    locale=str(app.config.get("UI_LOCALE") or DEFAULT_LOCALE),
                 ),
                 "truth_source": "events_v1",
                 "canonical_evidence": True,
@@ -6041,10 +6193,11 @@ def create_app(
                     "last_ok_relative": _format_relative_time(last_snapshot_ts),
                     "detail": None
                     if status == "ok"
-                    else _humanize_health_detail(
+                    else _humanize_health_detail_localized(
                         component_name,
                         detail=raw_detail,
                         status=status,
+                        locale=str(app.config.get("UI_LOCALE") or DEFAULT_LOCALE),
                     ),
                     "truth_source": "processing_spans.status_strip",
                     "canonical_evidence": canonical_evidence,
@@ -6073,9 +6226,10 @@ def create_app(
                 ),
                 "detail": None
                 if scheduler_status == "ok"
-                else _humanize_health_detail(
+                else _humanize_health_detail_localized(
                     "Scheduler / Digests",
                     status=scheduler_status,
+                    locale=str(app.config.get("UI_LOCALE") or DEFAULT_LOCALE),
                 ),
                 "truth_source": "events_v1",
                 "canonical_evidence": True,
@@ -6099,11 +6253,12 @@ def create_app(
                     or str(cooldown_payload.get("next_retry_at") or "").strip()
                     or None
                 )
-                cooldown_reason = _humanize_health_detail(
+                cooldown_reason = _humanize_health_detail_localized(
                     "IMAP",
                     subtype="cooldown",
                     detail=str(cooldown_payload.get("detail") or ""),
                     status="degraded",
+                    locale=str(app.config.get("UI_LOCALE") or DEFAULT_LOCALE),
                 )
                 if cooldown_resume_at is not None:
                     resume_dt = _parse_datetime_value(cooldown_resume_at)
@@ -7819,6 +7974,7 @@ def main() -> None:
         attention_cost_per_hour=attention_cost,
         api_token=web_ui.api_token,
         allow_cidrs=web_ui.allow_cidrs,
+        config_dir=config_dir,
         config_path=config_path,
         log_path=project_root / "mailbot.log",
         dist_root=project_root,

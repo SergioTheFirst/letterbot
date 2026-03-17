@@ -901,6 +901,10 @@ def maybe_send_weekly_digest(
 
     digest_text = _build_weekly_digest_text(data)
     share_card = _build_shareable_weekly_card(data)
+    share_card_lines = share_card.splitlines()
+    if share_card_lines:
+        share_card_lines[-1] = "Powered by LetterBot.ru"
+        share_card = "\n".join(share_card_lines)
     digest_text = f"{digest_text}\n\nShare this report\n{share_card}"
     payload = TelegramPayload(
         html_text=telegram_safe(digest_text),

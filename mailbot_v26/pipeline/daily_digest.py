@@ -825,7 +825,7 @@ def maybe_send_daily_digest(
         )
         return
 
-    digest_text = _build_digest_text(data)
+    digest_text = f"{_build_digest_text(data)}\n\n<i>Powered by LetterBot.ru</i>"
     payload = TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",

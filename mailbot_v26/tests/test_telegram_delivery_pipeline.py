@@ -136,6 +136,8 @@ def test_telegram_retry_on_http_failure(
         remaining = storage.conn.execute("SELECT COUNT(*) FROM queue").fetchone()[0]
     assert remaining == 1
     assert "telegram_delivery_retry" in caplog.text
+    assert "error_class=RuntimeError" in caplog.text
+    assert "next_retry_at_utc=" in caplog.text
     _cleanup_pipeline(email_id)
 
 

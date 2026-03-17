@@ -4,10 +4,11 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Callable, Dict, Tuple
 
 from mailbot_v26.config_loader import AccountConfig
 from mailbot_v26.health.mail_accounts import _mask_login
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE
 
 
 @dataclass
@@ -34,11 +35,18 @@ class _AccountMeta:
 
 
 class AccountRuntimeHealthManager:
-    def __init__(self, state_path: Path, *, alert_cooldown_minutes: int = 60) -> None:
+    def __init__(
+        self,
+        state_path: Path,
+        *,
+        alert_cooldown_minutes: int = 60,
+        locale_resolver: Callable[[], str] | None = None,
+    ) -> None:
         self._state_path = state_path
         self._alert_cooldown = timedelta(minutes=alert_cooldown_minutes)
         self._states: Dict[str, AccountRuntimeState] = {}
         self._account_meta: Dict[str, _AccountMeta] = {}
+        self._locale_resolver = locale_resolver or (lambda: DEFAULT_LOCALE)
         self._load_state()
 
     def register_account(self, account: AccountConfig) -> None:
@@ -179,24 +187,54 @@ class AccountRuntimeHealthManager:
             return "imap_connectivity"
         return "other"
 
-    @staticmethod
-    def _human_diagnosis(state: AccountRuntimeState) -> str:
+    def _current_locale(self) -> str:
+        try:
+            locale = str(self._locale_resolver() or "").strip()
+        except Exception:
+            locale = ""
+        return locale or DEFAULT_LOCALE
+
+    def _ui_text(self, *, en: str, ru: str) -> str:
+        return en if self._current_locale().casefold().startswith("en") else ru
+
+    def _human_diagnosis(self, state: AccountRuntimeState) -> str:
         lowered = f"{state.last_error_class or ''} {state.last_error or ''}".lower()
         if state.failure_bucket == "imap_auth":
-            return "неверный логин или пароль"
+            return self._ui_text(
+                en="invalid login or password",
+                ru="неверный логин или пароль",
+            )
         if state.failure_bucket == "imap_network_timeout" and (
             "handshake" in lowered or "ssl" in lowered
         ):
-            return "ошибка защищенного соединения"
+            return self._ui_text(
+                en="secure connection failed",
+                ru="ошибка защищённого соединения",
+            )
         if state.failure_bucket == "imap_network_timeout":
-            return "сервер долго не отвечает"
+            return self._ui_text(
+                en="server is taking too long to respond",
+                ru="сервер долго не отвечает",
+            )
         if state.failure_bucket == "imap_server_unavailable":
-            return "почтовый сервер недоступен"
+            return self._ui_text(
+                en="mail server is unavailable",
+                ru="почтовый сервер недоступен",
+            )
         if state.failure_bucket == "imap_connectivity":
-            return "не удается подключиться к почтовому серверу"
+            return self._ui_text(
+                en="unable to connect to the mail server",
+                ru="не удается подключиться к почтовому серверу",
+            )
         if "timeout" in lowered or "timed out" in lowered:
-            return "сервер долго не отвечает"
-        return "временная ошибка подключения к почте"
+            return self._ui_text(
+                en="server is taking too long to respond",
+                ru="сервер долго не отвечает",
+            )
+        return self._ui_text(
+            en="temporary mail connectivity issue",
+            ru="временная ошибка подключения к почте",
+        )
 
     def _get_state(self, account_id: str) -> AccountRuntimeState:
         if account_id not in self._states:
@@ -224,32 +262,42 @@ class AccountRuntimeHealthManager:
         diagnosis = self._human_diagnosis(state)
         retry_in = self._format_retry(state.next_retry_at_utc, now_utc)
         lines = [
-            f"🚨 Почта {masked_login} временно недоступна",
-            f"Причина: {diagnosis}",
-            f"Следующая попытка: {retry_in}",
+            self._ui_text(
+                en=f"🚨 Mailbox {masked_login} is temporarily unavailable",
+                ru=f"🚨 Почта {masked_login} временно недоступна",
+            ),
+            f"{self._ui_text(en='Reason', ru='Причина')}: {diagnosis}",
+            f"{self._ui_text(en='Next attempt', ru='Следующая попытка')}: {retry_in}",
         ]
         if state.cooldown_until_utc is not None:
-            lines.append("Режим паузы: 24 часа (повторяющиеся ошибки соединения)")
+            lines.append(
+                self._ui_text(
+                    en="Cooldown: 24h (repeated connection failures)",
+                    ru="Режим паузы: 24 часа (повторяющиеся ошибки соединения)",
+                )
+            )
         return "\n".join(lines)
 
-    @staticmethod
-    def _format_retry(next_retry_at: datetime | None, now_utc: datetime) -> str:
+    def _format_retry(self, next_retry_at: datetime | None, now_utc: datetime) -> str:
         if next_retry_at is None:
-            return "сейчас"
+            return self._ui_text(en="now", ru="сейчас")
         remaining = max(next_retry_at - now_utc, timedelta())
         total_minutes = int(remaining.total_seconds() // 60)
         hours, minutes = divmod(total_minutes, 60)
         parts: list[str] = []
         if hours:
-            parts.append(f"{hours} ч")
+            parts.append(self._ui_text(en=f"{hours} h", ru=f"{hours} ч"))
         if minutes:
-            parts.append(f"{minutes} мин")
+            parts.append(self._ui_text(en=f"{minutes} min", ru=f"{minutes} мин"))
         if not parts:
-            parts.append("0 мин")
+            parts.append(self._ui_text(en="0 min", ru="0 мин"))
         retry_at_text = (
             next_retry_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         )
-        return f"через {' '.join(parts)} (в {retry_at_text})"
+        return self._ui_text(
+            en=f"in {' '.join(parts)} (at {retry_at_text})",
+            ru=f"через {' '.join(parts)} (в {retry_at_text})",
+        )
 
     def _build_fingerprint(
         self,
