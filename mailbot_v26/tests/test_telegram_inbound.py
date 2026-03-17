@@ -197,6 +197,30 @@ def test_lang_command_persists_ui_locale_override(tmp_path: Path) -> None:
     assert processor.override_store.get_value("ui_locale") == "ru"
 
 
+def test_lang_alias_commands_persist_ui_locale_override(tmp_path: Path) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="test",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    processor.handle_update(
+        {"update_id": 1, "message": {"chat": {"id": "chat"}, "text": "/langen"}}
+    )
+    assert processor.override_store.get_value("ui_locale") == "en"
+
+    processor.handle_update(
+        {"update_id": 2, "message": {"chat": {"id": "chat"}, "text": "/langru"}}
+    )
+    assert processor.override_store.get_value("ui_locale") == "ru"
+
+
 def test_parse_callback_data_priority() -> None:
     parsed = parse_callback_data("mb:prio:123:R")
     assert parsed == ("priority", {"email_id": "123", "priority": "🔴"})
@@ -1248,7 +1272,7 @@ def test_help_shows_digest_and_autopriority_as_separate_commands(
     help_text = sent[-1]
     assert _norm("/digest on|off") in _norm(help_text)
     assert _norm("/autopriority on|off") in _norm(help_text)
-    assert _norm("/lang en|ru") in _norm(help_text)
+    assert _norm("/langen | /langru (/lang en|ru)") in _norm(help_text)
 
 
 def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:

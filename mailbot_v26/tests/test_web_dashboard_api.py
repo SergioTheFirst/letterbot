@@ -1474,6 +1474,49 @@ def test_health_status_shows_human_readable_cause_not_traceback(tmp_path: Path) 
 
     components = {row["name"]: row for row in resp.get_json()["components"]}
     assert "Traceback" not in (components["IMAP"]["detail"] or "")
+    assert "error" in (components["IMAP"]["detail"] or "").lower()
+
+
+def test_health_status_restores_russian_when_ui_locale_is_ru(tmp_path: Path) -> None:
+    db_path = tmp_path / "health-status-cause-ru.sqlite"
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.ini").write_text("[ui]\nlocale = ru\n", encoding="utf-8")
+    KnowledgeDB(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=(now - timedelta(minutes=20)).timestamp(),
+            payload={"subtype": "success", "detail": "stale"},
+        )
+        _insert_event(
+            conn,
+            event_type="imap_health_v1",
+            ts_utc=now.timestamp(),
+            payload={
+                "subtype": "processing_failure",
+                "detail": "Traceback: socket timeout during IMAP login",
+            },
+        )
+        conn.commit()
+
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        config_dir=config_dir,
+    )
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        resp = client.get(
+            "/api/health/status",
+            query_string={"account_emails": "primary@example.com"},
+        )
+
+    components = {row["name"]: row for row in resp.get_json()["components"]}
+    assert "Traceback" not in (components["IMAP"]["detail"] or "")
     assert "Ошибка" in (components["IMAP"]["detail"] or "")
 
 

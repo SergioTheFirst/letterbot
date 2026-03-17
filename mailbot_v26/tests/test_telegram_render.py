@@ -246,7 +246,7 @@ def test_render_result_has_required_contract_fields() -> None:
     assert result.sender_identity_label == "ООО Вектор"
 
 
-def test_render_full_payload_has_single_watermark() -> None:
+def test_render_full_payload_has_no_watermark() -> None:
     result = render_email_notification(_full_request())
 
-    assert result.text.count("Powered by LetterBot.ru") == 1
+    assert "Powered by LetterBot.ru" not in result.text

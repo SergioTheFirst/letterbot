@@ -345,7 +345,11 @@ def _load_email_render_snapshot(
         logger.error("telegram_inbound_email_render_failed", error=str(exc))
         return None
     attachment_rows = [
-        {"filename": row[0] or "вложение", "text": "", "content_type": ""}
+        {
+            "filename": row[0] or _ui_text("attachment", "вложение"),
+            "text": "",
+            "content_type": "",
+        }
         for row in attachments
         if row and row[0]
     ]
@@ -1095,7 +1099,7 @@ class TelegramInboundProcessor:
         if command in {"/autopriority", "autopriority"}:
             self._handle_auto_priority_toggle(chat_id, args)
             return
-        if command in {"/lang", "lang"}:
+        if command in {"/lang", "lang", "/langen", "langen", "/langru", "langru"}:
             self._handle_lang_command(message)
             return
         if command in {"/commitments", "/tasks", "commitments", "tasks"}:
@@ -1880,16 +1884,22 @@ class TelegramInboundProcessor:
         chat_id = _clean_text(chat.get("id"))
         text = _clean_text(message.get("text", ""))
         parts = text.strip().split()
-        if len(parts) < 2 or parts[1].lower() not in ("en", "ru"):
+        command = parts[0].lower() if parts else ""
+        if command in {"/langen", "langen"}:
+            new_locale = "en"
+        elif command in {"/langru", "langru"}:
+            new_locale = "ru"
+        elif len(parts) >= 2 and parts[1].lower() in ("en", "ru"):
+            new_locale = parts[1].lower()
+        else:
             self.send_reply(
                 chat_id,
                 _ui_text(
-                    "Usage: /lang en  or  /lang ru",
-                    "Использование: /lang en  или  /lang ru",
+                    "Usage: /langen or /langru (also /lang en or /lang ru)",
+                    "Использование: /langen или /langru (также /lang en или /lang ru)",
                 ),
             )
             return
-        new_locale = parts[1].lower()
         self.override_store.set_value("ui_locale", new_locale)
         set_inbound_locale(new_locale)
         self.locale = new_locale

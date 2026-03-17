@@ -563,6 +563,7 @@ def test_weekly_digest_contains_shareable_card(monkeypatch, tmp_path) -> None:
 
     assert sent
     payload = sent[0]["payload"]
+    assert "Powered by LetterBot.ru" in payload.html_text
     assert "Share this report" in payload.html_text
     assert "📊 My Mail Week" in payload.html_text
     assert payload.metadata["shareable_weekly_qr_url"] == "https://letterbot.ru"

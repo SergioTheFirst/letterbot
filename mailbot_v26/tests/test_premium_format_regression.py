@@ -50,10 +50,10 @@ def test_full_render_contains_priority_circle() -> None:
     assert "🟡" in payload.html_text
 
 
-def test_full_render_contains_watermark() -> None:
+def test_full_render_has_no_watermark() -> None:
     payload, _, _ = processor.build_telegram_payload(_base_context(priority="🔴"))
 
-    assert "Powered by" in payload.html_text
+    assert "Powered by" not in payload.html_text
 
 
 def test_message_includes_account_name() -> None:
@@ -67,7 +67,7 @@ def test_powered_line_only_for_high_priority() -> None:
     high_payload, _, _ = processor.build_telegram_payload(_base_context(priority="🔴"))
 
     assert "Powered by LetterBot.ru" not in medium_payload.html_text
-    assert "Powered by LetterBot.ru" in high_payload.html_text
+    assert "Powered by LetterBot.ru" not in high_payload.html_text
 
 
 def test_full_render_contains_attachment_line() -> None:

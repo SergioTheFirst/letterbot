@@ -252,6 +252,7 @@ def test_daily_digest_sent_with_deferred_items(monkeypatch, tmp_path) -> None:
     assert len(sent) == 1
     payload = sent[0]["payload"]
     assert "Отложено писем" in payload.html_text
+    assert "Powered by LetterBot.ru" in payload.html_text
 
 
 def test_daily_digest_attention_block(monkeypatch, tmp_path) -> None:

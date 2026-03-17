@@ -17,9 +17,16 @@ def _account(account_id: str = "acc1") -> AccountConfig:
     )
 
 
-def _manager(tmp_path, cooldown_minutes: int = 60) -> AccountRuntimeHealthManager:
+def _manager(
+    tmp_path,
+    cooldown_minutes: int = 60,
+    *,
+    locale: str = "en",
+) -> AccountRuntimeHealthManager:
     mgr = AccountRuntimeHealthManager(
-        tmp_path / "runtime_state.json", alert_cooldown_minutes=cooldown_minutes
+        tmp_path / "runtime_state.json",
+        alert_cooldown_minutes=cooldown_minutes,
+        locale_resolver=lambda: locale,
     )
     mgr.register_account(_account())
     return mgr
@@ -153,9 +160,9 @@ def test_imap_runtime_failure_is_localized_for_user(tmp_path):
     )
 
     assert should_alert is True
-    assert "Почта" in text
-    assert "Причина:" in text
-    assert "Следующая попытка:" in text
+    assert "Mailbox" in text
+    assert "Reason:" in text
+    assert "Next attempt:" in text
     assert "IMAP RUNTIME FAILURE" not in text
 
 
@@ -168,12 +175,17 @@ def test_no_mojibake_in_imap_runtime_failure_message(tmp_path):
     )
 
     assert normalize_mojibake_text(text) == text
-    for token in ("Р Р†Р вЂљ", "Р В РЎвЂўР РЋРІР‚С™", "РЎР‚РЎСџ", "вЂ"):
+    for token in (
+        "Р В Р вЂ Р В РІР‚С™",
+        "Р В Р’В Р РЋРІР‚СћР В Р Р‹Р Р†Р вЂљРЎв„ў",
+        "Р РЋР вЂљР РЋРЎСџ",
+        "РІР‚",
+    ):
         assert token not in text
 
 
 def test_auth_error_has_human_readable_russian_diagnosis(tmp_path):
-    mgr = _manager(tmp_path)
+    mgr = _manager(tmp_path, locale="ru")
     now = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
     _should_alert, text = mgr.on_failure(
@@ -181,6 +193,19 @@ def test_auth_error_has_human_readable_russian_diagnosis(tmp_path):
     )
 
     assert "неверный логин или пароль" in text.lower()
+
+
+def test_imap_runtime_failure_restores_russian_when_locale_is_ru(tmp_path):
+    mgr = _manager(tmp_path, locale="ru")
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    _should_alert, text = mgr.on_failure(
+        "acc1", TimeoutError("SSL handshake timed out"), now
+    )
+
+    assert "Почта" in text
+    assert "Причина:" in text
+    assert "Следующая попытка:" in text
 
 
 def test_repeated_handshake_timeouts_enter_24h_cooldown(tmp_path):

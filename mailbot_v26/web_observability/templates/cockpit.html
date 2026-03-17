@@ -392,6 +392,8 @@
         }
         body.innerHTML = rows.map((row) => `<tr><td class="mono">${escapeHtml(displayValue(row.date, 'UNAVAILABLE'))}</td><td class="mono">${escapeHtml(displayValue(row.time, 'UNAVAILABLE'))}</td><td>${escapeHtml(displayValue(row.sender_display, 'Sender hidden'))}</td><td><span class="badge ${escapeHtml(String(row.priority_class || 'muted'))}">${escapeHtml(displayValue(row.priority_label, 'UNKNOWN'))}</span></td><td><div class="info-primary">${escapeHtml(displayValue(row.info_primary, 'UNAVAILABLE'))}</div>${row.info_secondary ? `<div class="info-secondary">${escapeHtml(String(row.info_secondary))}</div>` : ''}</td></tr>`).join('');
       };
+      const noContactSummaryText = {% if ui_locale[:2] == 'ru' %}'Для этого scope пока нет contact summary.'{% else %}'No contact summary for this scope yet.'{% endif %};
+      const noIssuerSummaryText = {% if ui_locale[:2] == 'ru' %}'Для этого scope пока нет issuer summary.'{% else %}'No issuer summary for this scope yet.'{% endif %};
       const renderDashboard = (data) => {
         setText('preview-emails-today', displayValue(data.emails_today));
         setText('preview-emails-hour', displayValue(data.emails_last_hour));
@@ -434,8 +436,8 @@
         (Array.isArray(data.ai && data.ai.recent_providers) ? data.ai.recent_providers : []).forEach((item) => aiItems.push({ html: `<li>Provider: ${escapeHtml(String(item.label || 'unknown'))}</li>` }));
         (Array.isArray(data.ai && data.ai.recent_traces) ? data.ai.recent_traces : []).forEach((item) => aiItems.push({ html: `<li>${escapeHtml(String(item.decision_kind || 'decision'))}: ${escapeHtml(String(item.codes_text || 'no explain codes'))}</li>` }));
         renderList('home-ai-items', aiItems.map((item) => item.html), 'No recent AI decision traces recorded yet.', (item) => item);
-        renderList('top-contacts-list', data.top_contacts, 'Для этого scope пока нет contact summary.', (item) => `<li>${escapeHtml(maskEmail(item.sender_email))} - ${escapeHtml(displayValue(item.emails_count, '0'))} emails</li>`);
-        renderList('top-issuers-list', data.top_issuers, 'Для этого scope пока нет issuer summary.', (item) => `<li>${escapeHtml(String(item.issuer_label || item.issuer_key || 'issuer'))} - waiting ${escapeHtml(displayValue(item.documents_waiting_attention_count, '0'))}</li>`);
+        renderList('top-contacts-list', data.top_contacts, noContactSummaryText, (item) => `<li>${escapeHtml(maskEmail(item.sender_email))} - ${escapeHtml(displayValue(item.emails_count, '0'))} emails</li>`);
+        renderList('top-issuers-list', data.top_issuers, noIssuerSummaryText, (item) => `<li>${escapeHtml(String(item.issuer_label || item.issuer_key || 'issuer'))} - waiting ${escapeHtml(displayValue(item.documents_waiting_attention_count, '0'))}</li>`);
         renderProcessed(data.processed_table || {});
       };
       const refreshStatus = () => fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' }).then((resp) => { if (!resp.ok) throw new Error('status'); return resp.text(); }).then((html) => { if (strip) strip.innerHTML = html; if (offline) offline.classList.remove('active'); }).catch(() => { if (offline) offline.classList.add('active'); });

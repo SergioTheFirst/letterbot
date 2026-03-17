@@ -168,8 +168,6 @@ def finalize_telegram_message(
     account_footer = format_account_footer(account_email, locale=locale)
     if account_footer and account_footer not in rendered:
         lines.append(account_footer)
-    if _is_high_priority(priority) and _WATERMARK_LINE not in rendered:
-        lines.append(_WATERMARK_LINE)
     return "\n".join(line for line in lines if line)
 
 

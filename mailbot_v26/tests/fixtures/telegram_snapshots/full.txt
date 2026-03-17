@@ -9,4 +9,3 @@ Why:
 • amount 87 500
 • due 2026-04-15
 <i>Account: render-contract@example.com</i>
-<i>Powered by LetterBot.ru</i>

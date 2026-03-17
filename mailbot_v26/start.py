@@ -8,7 +8,7 @@ import argparse
 import sqlite3
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
@@ -93,7 +93,6 @@ from mailbot_v26.system.startup_health import (
 )
 from mailbot_v26.text.mime_utils import decode_mime_header
 from mailbot_v26.telegram_utils import telegram_safe
-from mailbot_v26.ui.branding import append_watermark
 from mailbot_v26.worker.telegram_sender import send_telegram
 from mailbot_v26.tools.backfill_events import maybe_backfill_events
 from mailbot_v26.version import __version__
@@ -390,11 +389,48 @@ def _build_system_payload(
     chat_id: str,
     priority: str = "🔵",
 ) -> TelegramPayload:
-    text = append_watermark(text, html=True)
     return TelegramPayload(
         html_text=telegram_safe(text),
         priority=priority,
         metadata={"bot_token": bot_token, "chat_id": chat_id},
+    )
+
+
+def _ui_text_for_locale(locale: str, *, en: str, ru: str) -> str:
+    return en if str(locale or "").strip().casefold().startswith("en") else ru
+
+
+def _telegram_delivery_failed_notice(*, locale: str) -> str:
+    return _ui_text_for_locale(
+        locale,
+        en="Telegram delivery failed. Check the email client.",
+        ru="Доставка в Telegram не удалась. Проверьте почту вручную.",
+    )
+
+
+def _telegram_delivery_failed_detail(
+    *,
+    locale: str,
+    email_id: int,
+    account_email: str,
+    error_text: str,
+) -> str:
+    if str(locale or "").strip().casefold().startswith("en"):
+        return "\n".join(
+            [
+                "🔴 TELEGRAM DELIVERY FAILED",
+                f"Email ID: {email_id}",
+                f"Account: {account_email}",
+                f"Reason: {error_text}",
+            ]
+        )
+    return "\n".join(
+        [
+            "🔴 СБОЙ ДОСТАВКИ В TELEGRAM",
+            f"Письмо ID: {email_id}",
+            f"Аккаунт: {account_email}",
+            f"Причина: {error_text}",
+        ]
     )
 
 
@@ -829,7 +865,8 @@ def _process_queue(
                     if result.retryable:
                         raise RuntimeError(error)
                     if account:
-                        notice = "Telegram delivery failed. Check email client."
+                        locale = processor_module._resolve_outbound_ui_locale()
+                        notice = _telegram_delivery_failed_notice(locale=locale)
                         payload = _build_system_payload(
                             text=notice,
                             bot_token=config.keys.telegram_bot_token,
@@ -839,25 +876,34 @@ def _process_queue(
                         fallback_result = send_telegram(payload)
                         if not fallback_result.delivered:
                             logger.error(
-                                "telegram_delivery_failed_notice_failed email_id=%s",
+                                "telegram_delivery_failed_notice_failed email_id=%s attempts=%s locale=%s error=%s",
                                 email_id,
+                                attempts,
+                                locale,
+                                fallback_result.error or "",
                             )
                     storage.set_email_delivery_failed(email_id, error)
                     storage.mark_done(queue_id)
                     PIPELINE_INBOUND_CACHE.pop(email_id, None)
                     PIPELINE_CACHE.pop(email_id, None)
                     PIPELINE_RAW_CACHE.pop(email_id, None)
+                    error_class = "DeliveryError"
                     logger.error(
-                        "telegram_delivery_failed email_id=%s attempts=%s error=%s",
+                        "telegram_delivery_failed email_id=%s attempts=%s error_class=%s error=%s",
                         email_id,
                         attempts,
+                        error_class,
                         error,
                     )
                     event_emitter.emit(
                         type="telegram_delivery_failed",
                         timestamp=datetime.now(timezone.utc),
                         email_id=email_id,
-                        payload={"attempts": attempts, "error": error},
+                        payload={
+                            "attempts": attempts,
+                            "error": error,
+                            "error_class": error_class,
+                        },
                     )
             else:
                 storage.mark_done(queue_id)
@@ -867,6 +913,7 @@ def _process_queue(
             backoff = min(600, 10 * (2**attempts))
             if stage == "TG":
                 if attempts >= max_tg_attempts:
+                    error_class = queue_exc.__class__.__name__
                     try:
                         storage.set_email_delivery_failed(email_id, str(queue_exc))
                         storage.mark_done(queue_id)
@@ -880,11 +927,12 @@ def _process_queue(
                         else None
                     )
                     if account:
-                        notice = (
-                            "\U0001f534 TELEGRAM DELIVERY FAILED\n"
-                            f"Email ID: {email_id}\n"
-                            f"Account: {ctx.account_email}\n"
-                            f"Reason: {queue_exc}"
+                        locale = processor_module._resolve_outbound_ui_locale()
+                        notice = _telegram_delivery_failed_detail(
+                            locale=locale,
+                            email_id=email_id,
+                            account_email=ctx.account_email,
+                            error_text=str(queue_exc),
                         )
                         payload = _build_system_payload(
                             text=notice,
@@ -895,20 +943,28 @@ def _process_queue(
                         result = send_telegram(payload)
                         if not result.delivered:
                             logger.error(
-                                "telegram_delivery_failed_notice_failed email_id=%s",
+                                "telegram_delivery_failed_notice_failed email_id=%s attempts=%s locale=%s error=%s",
                                 email_id,
+                                attempts,
+                                locale,
+                                result.error or "",
                             )
                     logger.error(
-                        "telegram_delivery_failed email_id=%s attempts=%s error=%s",
+                        "telegram_delivery_failed email_id=%s attempts=%s error_class=%s error=%s",
                         email_id,
                         attempts,
+                        error_class,
                         queue_exc,
                     )
                     event_emitter.emit(
                         type="telegram_delivery_failed",
                         timestamp=datetime.now(timezone.utc),
                         email_id=email_id,
-                        payload={"attempts": attempts, "error": str(queue_exc)},
+                        payload={
+                            "attempts": attempts,
+                            "error": str(queue_exc),
+                            "error_class": error_class,
+                        },
                     )
                     if ctx:
                         _emit_contract_event(
@@ -916,9 +972,15 @@ def _process_queue(
                             ts_utc=datetime.now(timezone.utc).timestamp(),
                             account_id=ctx.account_email,
                             email_id=email_id,
-                            payload={"attempts": attempts, "error": str(queue_exc)},
+                            payload={
+                                "attempts": attempts,
+                                "error": str(queue_exc),
+                                "error_class": error_class,
+                            },
                         )
                 else:
+                    retry_ts = datetime.now(timezone.utc) + timedelta(seconds=backoff)
+                    error_class = queue_exc.__class__.__name__
                     try:
                         storage.mark_error(queue_id, str(queue_exc), backoff)
                     except Exception:
@@ -926,16 +988,24 @@ def _process_queue(
                             "Failed to mark error for queue_id %s", queue_id
                         )
                     logger.info(
-                        "telegram_delivery_retry email_id=%s attempt=%s backoff_seconds=%s",
+                        "telegram_delivery_retry email_id=%s attempt=%s backoff_seconds=%s error_class=%s next_retry_at_utc=%s",
                         email_id,
                         attempts,
                         backoff,
+                        error_class,
+                        retry_ts.isoformat(),
                     )
                     event_emitter.emit(
                         type="telegram_delivery_retry",
                         timestamp=datetime.now(timezone.utc),
                         email_id=email_id,
-                        payload={"attempt": attempts, "backoff_seconds": backoff},
+                        payload={
+                            "attempt": attempts,
+                            "backoff_seconds": backoff,
+                            "error": str(queue_exc),
+                            "error_class": error_class,
+                            "next_retry_at_utc": retry_ts.isoformat(),
+                        },
                     )
                 continue
             account_id = ctx.account_email if ctx else ""
@@ -1302,7 +1372,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
     storage: Storage | None = None
     runtime_health = AccountRuntimeHealthManager(
-        CURRENT_DIR / "data" / "runtime_health.json"
+        CURRENT_DIR / "data" / "runtime_health.json",
+        locale_resolver=lambda: processor_module._resolve_outbound_ui_locale(),
     )
     try:
         resolved_paths = resolve_config_paths(config_dir)
@@ -1582,7 +1653,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             state_store=inbound_state_store,
                         )
                     except Exception:
-                        logger.exception("telegram_inbound_cycle_failed")
+                        logger.exception("telegram_inbound_poll_failed")
 
                     for account in accounts_to_poll:
                         login = account.login or "no_login"
