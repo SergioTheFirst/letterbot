@@ -19,7 +19,7 @@ Runs on your machine. No cloud. All data stored locally in SQLite.
 Suggested action: pay the invoice
 87,500 ₽ · due Apr 15 · attachment: invoice.xlsx
 
-[🔴 Urgent]  [🟡 Important]  [🔵 Low]
+[🔴 High  ][🟡 Medium]  [🔵 Low]
 [⏰ Snooze 2h]  [📅 Tomorrow]
 ```
 
@@ -134,7 +134,7 @@ See the [LICENSE](LICENSE) file for details.
 |---|---|
 | 🌐 Website | [letterbot.ru](https://letterbot.ru) |
 | 💬 Telegram community | [t.me/+1xHH6NwJONVlZTA6](https://t.me/+1xHH6NwJONVlZTA6) |
-| 📧 Email | [support@example.com](mailto:support@example.com) |
+| 📧 Email | [master@letterbot.ru](mailto:master@letterbot.ru) |
 | ☕ Donate | [Boosty](https://boosty.to/personalbot/donate?qr=true) · [CloudTips](https://pay.cloudtips.ru/p/00d77c6a) |
 
 ---
@@ -268,4 +268,4 @@ Letterbot бесплатный и будет таким. Поддержать р
 ---
 
 
-*© 2026 Letterbot.ru — читает почту, пересылает важное.*
+*© 2026 Letterbot.ru — почту в Telegram. Локально, бесплатно, навсегда.*
