@@ -1,6 +1,6 @@
 """Single source of truth for Letterbot app version."""
 
-__version__ = "28.0.0-rc"
+__version__ = "28.0.0"
 BUILD_METADATA = ""
 
 

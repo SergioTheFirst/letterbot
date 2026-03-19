@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [28.0.0] - 2026-03-XX
+
+### Added
+- English (EN) locale support: DEFAULT_LOCALE = "en", full EN i18n
+  catalog (92 keys), humanize_* dispatch by locale, /langen /langru
+  /lang en|ru bot commands.
+- Bilingual golden corpus 120/120 (60 EN + 60 RU).
+- configure_processor_locale() wired from startup and /lang command.
+
+### Changed
+- Premium Telegram UX: single message per email, edit-in-place
+  priority updates, watermark in digests only.
+- Weekly digest format: calm human-first layout with prioritised
+  bullet points.
+- Bounded sender-memory personalisation (45-day window, ±12 bias).
+- Default locale in settings.ini.example set to en.
+
+### Fixed
+- Processor locale now propagates on /lang command at runtime.
+- Priority callback always answers and edits in-place (no second
+  message).
+- Startup DB parent directory created before Storage().
+- Delivery SLA edit-in-place: no resend on edit failure.
+
+### Security
+- None.
+
 ## [Unreleased]
 
 ### Added
