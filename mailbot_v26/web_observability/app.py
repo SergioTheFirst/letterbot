@@ -1151,6 +1151,7 @@ def _humanize_health_detail(
     detail: str = "",
     status: str = "",
 ) -> str:
+    # DEPRECATED: use _humanize_health_detail_localized; kept for safety.
     lowered = f"{subtype} {detail}".lower()
     if component == "IMAP":
         if status == "unavailable":

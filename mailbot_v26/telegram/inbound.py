@@ -1903,6 +1903,11 @@ class TelegramInboundProcessor:
         self.override_store.set_value("ui_locale", new_locale)
         set_inbound_locale(new_locale)
         self.locale = new_locale
+        try:
+            from mailbot_v26.pipeline import processor as _proc_mod
+            _proc_mod.configure_processor_locale(new_locale)
+        except Exception:
+            pass
         if new_locale == "en":
             self.send_reply(chat_id, "✓ Language set to English.")
         else:
