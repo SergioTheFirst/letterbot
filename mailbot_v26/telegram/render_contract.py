@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from mailbot_v26.domain.issuer_identity import normalize_sender_identity
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE
 
 if TYPE_CHECKING:
     from mailbot_v26.pipeline.processor import MessageInterpretation
@@ -79,6 +80,12 @@ def _build_sender_identity(request: TelegramRenderRequest) -> dict[str, str]:
 def render_email_notification(request: TelegramRenderRequest) -> TelegramRenderResult:
     from mailbot_v26.pipeline import processor
 
+    previous_locale = str(
+        getattr(processor, "_UI_LOCALE", DEFAULT_LOCALE) or DEFAULT_LOCALE
+    )
+    previous_configured = bool(getattr(processor, "_UI_LOCALE_CONFIGURED", False))
+    processor.configure_processor_locale(DEFAULT_LOCALE)
+
     if request.enable_premium_clarity:
         render_result = processor._render_notification(
             message_id=request.email_id,
@@ -148,6 +155,11 @@ def render_email_notification(request: TelegramRenderRequest) -> TelegramRenderR
             render_mode=render_mode,
             payload_invalid=payload_invalid,
         )
+    if previous_configured:
+        processor.configure_processor_locale(previous_locale)
+    else:
+        processor._UI_LOCALE = previous_locale
+        processor._UI_LOCALE_CONFIGURED = False
     identity = _build_sender_identity(request)
     return TelegramRenderResult(
         text=render_result.payload.html_text,
