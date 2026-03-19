@@ -1214,7 +1214,7 @@ def test_support_command_enabled_without_url_reports_not_configured(
     processor.support_settings = SupportSettings(
         enabled=True,
         text="text",
-        url="CHANGE_ME",
+        url="",
         label="Поддержать LetterBot.ru",
         frequency_days=30,
     )

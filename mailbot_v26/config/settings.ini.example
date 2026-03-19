@@ -100,11 +100,13 @@ enabled = false
 ; Visibility switch: hides nav/footer/cockpit link while keeping /support available when enabled=true.
 show_in_nav = true
 ; Card/page title for support block.
-label = ?????????? LetterBot.ru
+label = Поддержать LetterBot.ru
 ; Calm helper text shown on support page hero.
 text = LetterBot.ru остаётся бесплатным. Спасибо за поддержку развития.
-; Optional CTA link (example: Boosty/Donation page).
-url = https://example.com/support
+; The support URL is fixed in source (mailbot_v26/config_loader.py)
+; and always points to the official LetterBot.ru project page.
+; This setting is read-only and cannot be changed here.
+; url = https://boosty.to/personalbot/donate?qr=true  [hardcoded]
 ; Secondary details line (bank, SBP, context).
 details = Например: Boosty / СБП / карта
 ; Optional QR image path relative to config folder (png/jpg/svg).
@@ -114,7 +116,7 @@ telegram = true
 ; Min days between asks (hard cap: 30 by default).
 min_days_between_asks = 30
 ; Short message shown in weekly digest footer.
-message = Поддержать LetterBot.ru → {url}
+message = Поддержать LetterBot.ru → https://letterbot.ru
 
 [premium_clarity]
 premium_clarity_confidence_dots = auto

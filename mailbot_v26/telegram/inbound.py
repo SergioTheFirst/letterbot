@@ -2115,16 +2115,19 @@ class TelegramInboundProcessor:
                 "Project support is not configured right now.",
                 "Поддержка проекта сейчас не настроена.",
             )
-        if not support.url or support.url == "CHANGE_ME":
+        if not support.url:
             return _ui_text(
                 "Support is enabled, but the link is not configured yet.",
                 "Поддержка включена, но ссылка ещё не настроена.",
             )
+        from mailbot_v26.config_loader import _PROJECT_SUPPORT_URL
+
+        final_url = support.url or _PROJECT_SUPPORT_URL
         return "\n".join(
             [
                 support.label or _ui_text("Support LetterBot.ru", "Поддержать LetterBot.ru"),
                 support.text,
-                support.url,
+                final_url,
             ]
         )
 

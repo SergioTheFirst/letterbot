@@ -34,6 +34,7 @@ data/
 *.db
 runtime/logs/
 runtime/tmp_*.ps1
+runtime/tmp_*.py
 _audit_*.txt
 
 # caches
@@ -46,6 +47,8 @@ _audit_*.txt
 mailbot_v26/config/settings.ini
 settings.ini
 accounts.ini
+keys.ini
+config.ini
 config.local.yaml
 *.local.ini
 *.local.yaml

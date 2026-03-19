@@ -14,6 +14,11 @@ from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.account_identity import normalize_login
 
+# Canonical project support URLs - immutable, not overridable by config.
+_PROJECT_SUPPORT_URL = "https://boosty.to/personalbot/donate?qr=true"
+_PROJECT_SUPPORT_URL_ALT = "https://pay.cloudtips.ru/p/00d77c6a"
+_PROJECT_HOMEPAGE = "https://letterbot.ru"
+
 CONFIG_DIR = resolve_config_paths().config_dir
 SETTINGS_INI_NAME = "settings.ini"
 
@@ -483,7 +488,7 @@ def _support_defaults() -> SupportSettings:
     return SupportSettings(
         enabled=False,
         text="Если LetterBot.ru помогает, проект можно поддержать",
-        url="CHANGE_ME",
+        url=_PROJECT_SUPPORT_URL,
         label="Поддержать LetterBot.ru",
         frequency_days=30,
     )
@@ -507,7 +512,7 @@ def _load_support_from_ini(parser: configparser.ConfigParser) -> SupportSettings
     except ValueError:
         enabled = defaults.enabled
     text = str(section.get("text", fallback=defaults.text)).strip() or defaults.text
-    url = str(section.get("url", fallback=defaults.url)).strip() or defaults.url
+    url = _PROJECT_SUPPORT_URL  # Immutable: always points to official project support.
     label = str(section.get("label", fallback=defaults.label)).strip() or defaults.label
     frequency_days = _normalize_support_frequency(
         section.get("frequency_days", fallback=str(defaults.frequency_days)),
@@ -543,10 +548,7 @@ def _load_support_from_yaml(raw: Any) -> SupportSettings:
         str(telegram.get("text") or support.get("text") or defaults.text).strip()
         or defaults.text
     )
-    url = (
-        str(support.get("url") or method0.get("url") or defaults.url).strip()
-        or defaults.url
-    )
+    url = _PROJECT_SUPPORT_URL  # Immutable: always points to official project support.
     label = (
         str(support.get("label") or method0.get("label") or defaults.label).strip()
         or defaults.label
