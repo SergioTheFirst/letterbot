@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mailbot_v26.config_loader import _PROJECT_SUPPORT_URL
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.tests._web_helpers import login_with_csrf
 from mailbot_v26.web_observability.app import SupportMethod, SupportSettings, create_app
@@ -174,5 +175,5 @@ qr_image = support.png
         assert response.status_code == 200
         assert "Поддержать LetterBot.ru" in body
         assert "Поддержать проект можно по ссылке или QR-коду" in body
-        assert "https://example.com/support" in body
+        assert _PROJECT_SUPPORT_URL in body
         assert '<img src="data:image/png;base64,' in body

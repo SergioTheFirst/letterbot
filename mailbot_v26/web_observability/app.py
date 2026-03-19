@@ -53,6 +53,7 @@ except ModuleNotFoundError:
 
 from mailbot_v26.config_loader import (
     CONFIG_DIR,
+    _PROJECT_SUPPORT_URL,
     load_storage_config,
     load_web_config,
     load_web_ui_password_from_ini,
@@ -1737,7 +1738,6 @@ def _image_data_uri(path: Path) -> str:
 
 def _homepage_donate_context(
     *,
-    donate_url: str = DEFAULT_HOMEPAGE_DONATE_URL,
     qr_path: Path | None = None,
 ) -> dict[str, object]:
     resolved_qr_path = Path(qr_path) if qr_path is not None else DEFAULT_HOMEPAGE_DONATE_QR_PATH
@@ -1776,7 +1776,7 @@ def _homepage_donate_context(
             )
     return {
         "title": "Support LetterBot.ru",
-        "url": donate_url,
+        "url": DEFAULT_HOMEPAGE_DONATE_URL,
         "qr_image_data_uri": qr_data_uri,
         "qr_alt": DEFAULT_HOMEPAGE_DONATE_QR_ALT,
         "qr_width": DEFAULT_HOMEPAGE_DONATE_QR_SIZE,
@@ -2455,7 +2455,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
         label = parser.get("support", "label", fallback="?????????? LetterBot.ru").strip()
         text = parser.get("support", "text", fallback="").strip()
         details = parser.get("support", "details", fallback="").strip()
-        url = parser.get("support", "url", fallback="").strip()
+        url = _PROJECT_SUPPORT_URL
         qr_rel = parser.get("support", "qr_image", fallback="").strip()
         qr_uri = ""
         if qr_rel:
@@ -2530,7 +2530,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
                 details=str(item.get("details", "") or "").strip(),
                 phone=str(item.get("phone", "") or "").strip(),
                 number=str(item.get("number", "") or "").strip(),
-                url=str(item.get("url", "") or "").strip(),
+                url=_PROJECT_SUPPORT_URL,
                 qr_image=qr_rel,
                 qr_image_data_uri=qr_uri,
             )

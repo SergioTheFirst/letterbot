@@ -3,6 +3,7 @@ from pathlib import Path
 
 from mailbot_v26.config_loader import (
     BotConfig,
+    _PROJECT_SUPPORT_URL,
     load_accounts_config,
     load_branding_config,
     load_config,
@@ -387,7 +388,7 @@ host = imap.example.com
 
     assert support.enabled is True
     assert support.text == "Support text"
-    assert support.url == "https://example.com/donate"
+    assert support.url == _PROJECT_SUPPORT_URL
     assert support.label == "Поддержать"
     assert support.frequency_days == 45
 
@@ -414,7 +415,7 @@ host = imap.example.com
 
     assert support.enabled is False
     assert support.text == "Если LetterBot.ru помогает, проект можно поддержать"
-    assert support.url == "CHANGE_ME"
+    assert support.url == _PROJECT_SUPPORT_URL
     assert support.label == "Поддержать LetterBot.ru"
     assert support.frequency_days == 30
 
