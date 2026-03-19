@@ -21,9 +21,11 @@ from mailbot_v26.version import __version__
 from mailbot_v26.telegram.inbound import (
     InboundStateStore,
     TelegramInboundProcessor,
+    _render_tier1_message,
     parse_callback_data,
     parse_command,
     run_inbound_polling,
+    set_inbound_locale,
 )
 from mailbot_v26.telegram.callback_data import (
     FEEDBACK_PREFIX,
@@ -219,6 +221,41 @@ def test_lang_alias_commands_persist_ui_locale_override(tmp_path: Path) -> None:
         {"update_id": 2, "message": {"chat": {"id": "chat"}, "text": "/langru"}}
     )
     assert processor.override_store.get_value("ui_locale") == "ru"
+
+
+def test_lang_command_propagates_to_processor_module(
+    tmp_path: Path, monkeypatch
+) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="test",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+    processor_calls: list[str] = []
+    override_calls: list[tuple[str, str]] = []
+
+    def _fake_configure(locale: str) -> None:
+        processor_calls.append(locale)
+
+    def _fake_set_value(key: str, value: str) -> None:
+        override_calls.append((key, value))
+
+    monkeypatch.setattr(
+        "mailbot_v26.pipeline.processor.configure_processor_locale",
+        _fake_configure,
+    )
+    monkeypatch.setattr(processor.override_store, "set_value", _fake_set_value)
+
+    processor._handle_lang_command({"chat": {"id": "chat"}, "text": "/lang en"})
+
+    assert processor_calls == ["en"]
+    assert override_calls == [("ui_locale", "en")]
 
 
 def test_parse_callback_data_priority() -> None:
@@ -1899,6 +1936,33 @@ def test_priority_callback_edits_message_with_manual_priority_marker(
     rendered = _norm(str(edited[-1]["html_text"]))
     assert "Приоритет:" in rendered
     assert "вручную" in rendered
+
+
+def test_priority_manual_line_locale() -> None:
+    snapshot = {
+        "priority": "\U0001f7e1",
+        "priority_source": "user_override",
+        "from_email": "sender@example.com",
+        "subject": "Subject",
+        "action_line": "",
+        "body_summary": "",
+        "account_email": "account@example.com",
+        "attachments": [],
+    }
+
+    set_inbound_locale("en")
+    en_rendered = _norm(_render_tier1_message(snapshot))
+    set_inbound_locale("ru")
+    ru_rendered = _norm(_render_tier1_message(snapshot))
+    set_inbound_locale("ru")
+    assert "\u041f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442" in ru_rendered
+    assert "\u0432\u0440\u0443\u0447\u043d\u0443\u044e" in ru_rendered
+    ru_rendered = ru_rendered.encode("utf-8").decode("cp1251")
+
+    assert "Priority" in en_rendered
+    assert "manual" in en_rendered
+    assert "РџСЂРёРѕСЂРёС‚РµС‚" in ru_rendered
+    assert "РІСЂСѓС‡РЅСѓСЋ" in ru_rendered
 
 
 def test_manual_priority_marker_not_duplicated_on_rerender(

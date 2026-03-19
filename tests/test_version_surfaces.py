@@ -51,3 +51,10 @@ def test_doctor_diagnostics_metadata_contains_version(tmp_path: Path) -> None:
 
     assert f"app_version={__version__}" in metadata_text
     assert f"app_version={__version__}" in runtime_text
+
+
+def test_version_is_release() -> None:
+    v = get_version()
+    assert v == "28.0.0", f"Expected 28.0.0, got {v!r}"
+    assert "rc" not in v, "Version must not contain 'rc' for release"
+    assert "dev" not in v, "Version must not contain 'dev' for release"
