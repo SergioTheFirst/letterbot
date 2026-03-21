@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}System health - {{ title }}{% endblock %}
+
+{% block page_actions %}
+  <div class="mode-toggle">
+    <a class="mode-pill {% if cockpit_mode == 'basic' %}active{% endif %}" href="{{ mode_basic_url }}">Basic</a>
+    <a class="mode-pill {% if cockpit_mode == 'engineer' %}active{% endif %}" href="{{ mode_engineer_url }}">Engineer</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="status-strip" id="status-strip">
+    <div class="status-strip-content" id="status-strip-content">
+      {% include "partials/status_strip.html" %}
+    </div>
+    <div class="status-strip-offline" id="status-strip-offline">offline</div>
+  </div>
+
+  <div class="health-grid">
+    <div class="health-main stack">
+      <div class="card health-header surface-panel" data-testid="health-header">
+        <div class="section-title">
+          <h2>System health</h2>
+          <div class="hint">Snapshot summary for the current operating mode.</div>
+        </div>
+        <div class="health-header-body">
+          <div>
+            <div class="health-explanation">{{ health_header.explanation }}</div>
+            <div class="health-meta">Latest snapshot: <span class="mono">{{ health_header.last_snapshot }}</span></div>
+          </div>
+          <div class="health-mode">
+            <div class="label">System mode</div>
+            <span class="badge {{ health_header.mode_class }}">{{ health_header.mode }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="health-overview" id="health-overview">
+        <div id="health-overview-content">
+          {% include "partials/health_overview.html" %}
+        </div>
+        <div class="status-strip-offline" id="health-overview-offline">health refresh paused</div>
+      </div>
+    </div>
+
+    <div class="health-side stack">
+      <div class="card surface-panel">
+        <div class="section-title">
+          <h2>Golden signals</h2>
+          <div class="hint">Key indicators for the selected scope.</div>
+        </div>
+        {% if health_signals %}
+        <div class="signal-grid health-signal-grid">
+          <div class="signal-item">
+            <div class="label">TG success rate</div>
+            <div class="value">{{ health_signals.tg_success_rate }}</div>
+          </div>
+          <div class="signal-item">
+            <div class="label">Fallback rate</div>
+            <div class="value">{{ health_signals.fallback_rate }}</div>
+          </div>
+          <div class="signal-item">
+            <div class="label">Latency p95</div>
+            <div class="value">{{ health_signals.latency_p95 }}</div>
+          </div>
+        </div>
+        {% else %}
+        <div class="hint">No health indicators yet for this scope.</div>
+        {% endif %}
+      </div>
+
+      <div class="card surface-panel" data-testid="health-trend">
+        <div class="section-title">
+          <h2>Incidents and trend</h2>
+          <div class="hint">Recent snapshots and mode transitions.</div>
+        </div>
+        {% if health_trend %}
+        <div class="table-scroll">
+          <table class="table compact fixed">
+            <thead>
+              <tr>
+                <th>Time (UTC)</th>
+                <th>Mode</th>
+                <th>Gates</th>
+                <th>Metrics</th>
+                <th>Snapshot</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in health_trend %}
+              <tr data-testid="health-trend-row" data-snapshot="{{ row.snapshot }}">
+                <td class="mono">{{ row.ts }}</td>
+                <td><span class="badge muted">{{ row.mode }}</span></td>
+                <td class="truncate">{{ row.gates }}</td>
+                <td class="truncate">{{ row.metrics }}</td>
+                <td class="mono">{{ row.snapshot_short }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="hint">No incident or trend data for this filter set.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if engineer_mode %}
+  <div class="card engineer-card" data-testid="health-engineer-block">
+    <div class="section-title">
+      <h2>Health timeline</h2>
+      <div class="hint">Extended observation window</div>
+    </div>
+    {% if engineer_timeline %}
+    <div class="table-scroll">
+      <table class="table compact fixed">
+        <thead>
+          <tr>
+            <th>Time (UTC)</th>
+            <th>Mode</th>
+            <th>Gates</th>
+            <th>Metrics</th>
+            <th>Snapshot</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in engineer_timeline %}
+          <tr data-snapshot="{{ row.snapshot }}">
+            <td class="mono">{{ row.ts }}</td>
+            <td><span class="badge muted">{{ row.mode }}</span></td>
+            <td class="truncate">{{ row.gates }}</td>
+            <td class="truncate">{{ row.metrics }}</td>
+            <td class="mono">{{ row.snapshot_short }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="hint">Expand the window to view additional snapshots.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <script>
+    (function() {
+      const strip = document.getElementById('status-strip-content');
+      const offline = document.getElementById('status-strip-offline');
+      if (!strip || !offline) return;
+      const refresh = () => {
+        fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' })
+          .then((resp) => {
+            if (!resp.ok) throw new Error('status');
+            return resp.text();
+          })
+          .then((html) => {
+            strip.innerHTML = html;
+            offline.classList.remove('active');
+          })
+          .catch(() => {
+            offline.classList.add('active');
+          });
+      };
+      document.addEventListener('letterbot:page-visible', refresh);
+      setInterval(refresh, {{ status_refresh_ms }});
+    })();
+
+    (function() {
+      const container = document.getElementById('health-overview-content');
+      const offline = document.getElementById('health-overview-offline');
+      if (!container || !offline) return;
+      const refresh = () => {
+        fetch(`/partial/health${window.location.search}`, { credentials: 'same-origin' })
+          .then((resp) => {
+            if (!resp.ok) throw new Error('health');
+            return resp.text();
+          })
+          .then((html) => {
+            container.innerHTML = html;
+            offline.classList.remove('active');
+          })
+          .catch(() => {
+            offline.classList.add('active');
+          });
+      };
+      document.addEventListener('letterbot:page-visible', refresh);
+      setInterval(refresh, {{ health_refresh_ms }});
+    })();
+  </script>
+  <script>
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        document.dispatchEvent(new Event('letterbot:page-visible'));
+      }
+    });
+  </script>
+{% endblock %}

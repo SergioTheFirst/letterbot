@@ -24,7 +24,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-"%VENV_PY%" -m PyInstaller pyinstaller.spec --noconfirm --clean --distpath "%REPO_ROOT%\dist" --workpath "%REPO_ROOT%\build" --specpath "%REPO_ROOT%"
+"%VENV_PY%" -m PyInstaller pyinstaller.spec --noconfirm --clean --distpath "%REPO_ROOT%\dist" --workpath "%REPO_ROOT%\build"
 if errorlevel 1 (
     echo ERROR: PyInstaller build failed.
     exit /b 1
@@ -35,9 +35,19 @@ if not exist "%DIST_DIR%" (
     echo ERROR: dist\Letterbot not found after build.
     exit /b 1
 )
+if not exist "%DIST_DIR%\mailbot_v26\config" mkdir "%DIST_DIR%\mailbot_v26\config"
 
 if exist "%REPO_ROOT%\mailbot_v26\config\settings.ini.example" (
     copy /Y "%REPO_ROOT%\mailbot_v26\config\settings.ini.example" "%DIST_DIR%\mailbot_v26\config\settings.ini.example" >nul
+) else (
+    echo WARNING: mailbot_v26\config\settings.ini.example not found.
+)
+
+if exist "%REPO_ROOT%\mailbot_v26\config\accounts.ini.example" (
+    copy /Y "%REPO_ROOT%\mailbot_v26\config\accounts.ini.example" "%DIST_DIR%\mailbot_v26\config\accounts.ini.example" >nul
+) else (
+    echo WARNING: mailbot_v26\config\accounts.ini.example not found.
+)
 ) else (
     echo WARNING: mailbot_v26\config\settings.ini.example not found.
 )
