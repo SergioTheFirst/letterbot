@@ -6,6 +6,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO_ROOT / "mailbot_v26" / "config"
@@ -66,7 +68,15 @@ def test_no_hardcoded_credentials_in_python_files() -> None:
 
 def test_local_real_config_files_are_gitignored() -> None:
     git = shutil.which("git")
-    assert git is not None
+    if not git:
+        pytest.skip("git not available")
+    is_git_repo = subprocess.run(
+        [git, "rev-parse", "--git-dir"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+    ).returncode == 0
+    if not is_git_repo:
+        pytest.skip("not a git repository — skipping gitignore check")
 
     result = subprocess.run(
         [git, "check-ignore", "settings.ini", "accounts.ini", "keys.ini", ".env"],
