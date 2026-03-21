@@ -52,3 +52,6 @@ config.ini
 config.local.yaml
 *.local.ini
 *.local.yaml
+# Build artifacts 
+dist/ 
+build/ 
