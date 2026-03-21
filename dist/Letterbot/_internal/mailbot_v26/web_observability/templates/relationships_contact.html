@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Contact - {{ title }}{% endblock %}
+
+{% block content %}
+  {% if error_block %}
+  <div class="alert">{{ error_block | striptags }}</div>
+  {% endif %}
+
+  <div class="card-actions">
+    <a class="btn ghost" href="{{ relationships_url }}">&larr; Relationships</a>
+  </div>
+
+  <div class="card" id="contact-data"
+       data-contact='{{ detail_json | safe }}'
+       data-contact-id='{{ contact_id | e }}'>
+    <div class="section-title">
+      <h2>Contact detail</h2>
+      <div class="hint">{{ contact_id }}</div>
+    </div>
+    <div id="contact-content">
+      <div class="hint">Loading...</div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const el = document.getElementById("contact-data");
+      if (!el) return;
+      let payload = {};
+      try {
+        payload = JSON.parse(el.dataset.contact || "{}");
+      } catch (e) {
+        payload = {};
+      }
+      const contact = payload.contact || {};
+      const content = document.getElementById("contact-content");
+      if (!content) return;
+      if (!contact || !contact.id) {
+        content.innerHTML = '<div class="hint">No data for this contact.</div>';
+        return;
+      }
+
+      const esc = (value) => String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;");
+
+      const trust = typeof contact.trust_score === "number" ? contact.trust_score.toFixed(2) : "-";
+      const count = contact.email_count ?? contact.emails_total ?? 0;
+
+      content.innerHTML = `
+        <div class="detail-grid">
+          <div><div class="detail-label">Entity</div><div class="detail-value">${esc(contact.id)}</div></div>
+          <div><div class="detail-label">Label</div><div class="detail-value">${esc(contact.label || "-")}</div></div>
+          <div><div class="detail-label">Trust score</div><div class="detail-value">${esc(trust)}</div></div>
+          <div><div class="detail-label">Emails</div><div class="detail-value">${esc(count)}</div></div>
+        </div>`;
+    })();
+  </script>
+{% endblock %}

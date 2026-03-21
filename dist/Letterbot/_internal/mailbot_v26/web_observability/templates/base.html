@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ title or "LetterBot.ru" }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%235c8df6'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='white'>L</text></svg>">
+</head>
+<body>
+  {% set vars = dashboard_vars if dashboard_vars is defined and dashboard_vars else None %}
+  {% set donate_url = support_url if support_enabled else '' %}
+  {% set donate_cta_url = donate_url or ('/support' if support_enabled and support_nav_enabled else '') %}
+  {% set community_url = "https://t.me/+1xHH6NwJONVlZTA6" %}
+  {% set header_donate_url = homepage_donate.url if homepage_donate and homepage_donate.url else 'https://pay.cloudtips.ru/p/00d77c6a' %}
+  {% set donate_qr_url = homepage_donate.qr_image_data_uri if homepage_donate and homepage_donate.qr_image_data_uri else '' %}
+  {% set donate_qr_alt = homepage_donate.qr_alt if homepage_donate and homepage_donate.qr_alt else 'QR code to support LetterBot.ru' %}
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="topbar-primary">
+        <a class="brand-mark" href="{{ url_for('index') }}" aria-label="LetterBot.ru home">LB</a>
+        <div class="brand-stack">
+          <div class="brand">LetterBot.ru</div>
+          <div class="subtitle"><a class="community-link" href="{{ community_url }}" target="_blank" rel="noopener noreferrer">Telegram channel</a></div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        {% if header_donate_url %}
+        <a
+          class="topbar-donate-qr"
+          href="{{ header_donate_url }}"
+          {% if header_donate_url.startswith('http') %}target="_blank" rel="noopener noreferrer"{% endif %}
+          aria-label="Support LetterBot.ru"
+        >
+          {% if donate_qr_url %}
+          <img src="{{ donate_qr_url }}" alt="{{ donate_qr_alt }}" width="44" height="44">
+          {% else %}
+          <span class="topbar-donate-icon" aria-hidden="true">◌</span>
+          {% endif %}
+          <span class="topbar-donate-qr-copy">
+            <span class="topbar-donate-qr-caption">donate</span>
+            <span class="topbar-donate-qr-link">CloudTips</span>
+          </span>
+        </a>
+        {% endif %}
+      </div>
+    </header>
+
+    {% if not hide_nav %}
+    <section class="toolbar-shell">
+      <div class="toolbar-main">
+        <nav class="nav">
+          <a href="{{ url_for('index') }}" class="nav-link {% if request.path in ['/', '/cockpit', '/dashboard'] %}active{% endif %}">Home</a>
+          <a href="{{ url_for('archive') }}" class="nav-link {% if request.path.startswith('/archive') %}active{% endif %}">Archive</a>
+          <a href="{{ url_for('health') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">Health</a>
+          <a href="{{ url_for('events') }}" class="nav-link {% if request.path == '/events' %}active{% endif %}">Events</a>
+          <a href="{{ url_for('doctor') }}" class="nav-link {% if request.path.startswith('/doctor') %}active{% endif %}">Doctor</a>
+          <a href="{{ url_for('commitments') }}" class="nav-link {% if request.path.startswith('/commitments') %}active{% endif %}">Commitments</a>
+          <a href="{{ url_for('latency') }}" class="nav-link {% if request.path == '/latency' %}active{% endif %}">Latency</a>
+          <a href="{{ url_for('attention') }}" class="nav-link {% if request.path == '/attention' %}active{% endif %}">Attention</a>
+          <a href="{{ url_for('learning') }}" class="nav-link {% if request.path == '/learning' %}active{% endif %}">Learning</a>
+          <a href="{{ url_for('relationships') }}" class="nav-link {% if request.path.startswith('/relationships') %}active{% endif %}">Relationships</a>
+          {% if cfg.features.donate_enabled and support_nav_enabled %}<a href="{{ url_for('support') }}" class="nav-link {% if request.path.startswith('/support') %}active{% endif %}">Support</a>{% endif %}
+        </nav>
+        <form method="get" action="{{ request.path }}" class="dashboard-vars">
+          <div class="var-field">
+            <label for="account_emails">Accounts</label>
+            <input id="account_emails" name="account_emails" type="text" value="{{ vars.account_emails|join(',') if vars else '' }}" placeholder="comma-separated">
+          </div>
+          <div class="var-field">
+            <label for="window_days">Window</label>
+            <select id="window_days" name="window_days">
+              {% set window_val = vars.window_days if vars else 7 %}
+              {% for option in [7, 30, 90] %}
+              <option value="{{ option }}" {% if option == window_val %}selected{% endif %}>{{ option }}d</option>
+              {% endfor %}
+              {% if window_val not in [7, 30, 90] %}
+              <option value="{{ window_val }}" selected>{{ window_val }}d</option>
+              {% endif %}
+            </select>
+          </div>
+          {% if not hide_limit %}
+          <div class="var-field">
+            <label for="limit">Limit</label>
+            {% set limit_val = vars.limit if vars else 25 %}
+            <select id="limit" name="limit">
+              {% for option in [10, 25, 50] %}
+              <option value="{{ option }}" {% if option == limit_val %}selected{% endif %}>{{ option }}</option>
+              {% endfor %}
+              {% if limit_val not in [10, 25, 50] %}
+              <option value="{{ limit_val }}" selected>{{ limit_val }}</option>
+              {% endif %}
+            </select>
+          </div>
+          {% endif %}
+          {% if pii_allowed %}
+          <div class="var-field var-checkbox">
+            <label for="pii">PII</label>
+            <input id="pii" name="pii" type="checkbox" value="1" {% if vars and vars.pii %}checked{% endif %}>
+          </div>
+          {% endif %}
+          {% if lane is defined %}
+          <input type="hidden" name="lane" value="{{ lane }}">
+          {% endif %}
+          {% if account_email %}<input type="hidden" name="account_email" value="{{ account_email }}">{% endif %}
+          {% if cockpit_mode %}<input type="hidden" name="mode" value="{{ cockpit_mode }}">{% endif %}
+          <div class="var-actions">
+            <button type="submit">Apply</button>
+          </div>
+        </form>
+      </div>
+    </section>
+    {% endif %}
+
+    <main class="page">
+      {% if page_title or page_actions %}
+      <div class="page-header">
+        {% if page_title %}<h1>{{ page_title }}</h1>{% endif %}
+        {% if page_actions %}<div class="page-actions">{% block page_actions %}{{ page_actions }}{% endblock %}</div>{% endif %}
+      </div>
+      {% endif %}
+
+      {% if error %}
+      <div class="alert">{{ error }}</div>
+      {% endif %}
+
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="app-footer">
+      <div class="footer-brand">LetterBot.ru v{{ app_version }}</div>
+      <div class="footer-links">
+        <a href="https://letterbot.ru" target="_blank" rel="noopener noreferrer">LetterBot.ru</a>
+        <a href="mailto:master@letterbot.ru">master@letterbot.ru</a>
+        {% if support_nav_enabled %}<a href="/support" class="footer-support-link">Support</a>{% endif %}
+        {% if donate_url %}
+        <a
+          href="{{ donate_url }}"
+          class="footer-donate-link"
+          {% if donate_url.startswith('http') %}target="_blank" rel="noopener noreferrer"{% endif %}
+        >Donate</a>
+        {% endif %}
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

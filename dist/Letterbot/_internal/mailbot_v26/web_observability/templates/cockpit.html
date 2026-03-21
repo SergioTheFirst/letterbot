@@ -1,0 +1,457 @@
+{% extends "base.html" %}
+{% block title %}LetterBot.ru - Home{% endblock %}
+
+{% block page_actions %}
+  <div class="mode-toggle">
+    <a class="mode-pill {% if cockpit_mode == 'basic' %}active{% endif %}" href="{{ mode_basic_url }}">Basic</a>
+    <a class="mode-pill {% if cockpit_mode == 'engineer' %}active{% endif %}" href="{{ mode_engineer_url }}">Engineer</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  {% set preview_meta = dashboard_preview.meta if dashboard_preview and dashboard_preview.meta else {} %}
+  {% set preview_priority = dashboard_preview.priority if dashboard_preview and dashboard_preview.priority else {} %}
+  {% set processed_table = dashboard_preview.processed_table if dashboard_preview and dashboard_preview.processed_table else {} %}
+  {% set processed_rows = processed_table.rows if processed_table and processed_table.rows else [] %}
+  {% set runtime = dashboard_preview.runtime if dashboard_preview and dashboard_preview.runtime else {} %}
+  {% set health = dashboard_preview.health if dashboard_preview and dashboard_preview.health else {} %}
+  {% set latency = dashboard_preview.latency if dashboard_preview and dashboard_preview.latency else {} %}
+  {% set ai = dashboard_preview.ai if dashboard_preview and dashboard_preview.ai else {} %}
+  {% set donate_method = support_methods[0] if support_methods else None %}
+  {% set donate_card_url = support_url or (donate_method.url if donate_method and donate_method.url else '') %}
+  {% set donate_card_title = donate_method.label if donate_method and donate_method.label else 'Support LetterBot.ru' %}
+  {% set donate_card_qr = donate_method.qr_image_data_uri if donate_method and donate_method.qr_image_data_uri else '' %}
+  {% set donate_card_alt = 'QR code to support LetterBot.ru' %}
+  {% set donate_card_fallback = 'QR unavailable. Use the donation link.' %}
+  {% set donate_card_target = donate_card_url or (url_for('support') if donate_card_qr and support_nav_enabled else '') %}
+
+  <div class="status-strip" id="status-strip">
+    <div class="status-strip-content" id="status-strip-content">
+      {% include "partials/status_strip.html" %}
+    </div>
+    <div class="status-strip-offline" id="status-strip-offline">offline</div>
+  </div>
+
+  <section class="dashboard-shell" data-testid="live-dashboard">
+    <section class="hero-card">
+      <div>
+        <div class="eyebrow">Read-only observability</div>
+        <h2>A system that explains itself</h2>
+        <p class="hero-detail" id="preview-dashboard-detail">{{ dashboard_preview_detail }}</p>
+      </div>
+      <div class="hero-meta">
+        <span class="badge {{ health.status_class or 'muted' }}" id="dashboard-meta-status">{{ preview_meta.status|default('unknown')|upper }}</span>
+        <div class="hero-updated" id="preview-dashboard-updated">Updated: {{ dashboard_preview_updated }}</div>
+        <div class="hero-updated" id="dashboard-meta-detail">{{ dashboard_preview_detail }}</div>
+      </div>
+    </section>
+
+    <section class="metrics-grid">
+      <article class="metric-card">
+        <div class="metric-label">System status</div>
+        <div class="metric-value" id="preview-dashboard-status">{{ health.status_label or 'UNKNOWN' }}</div>
+        <div class="metric-subtle">{{ health.detail or 'No health evidence yet for this scope.' }}</div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Latest runtime signal</div>
+        <div class="metric-value" id="runtime-last-evidence">{{ runtime.last_runtime_evidence_display or 'UNAVAILABLE' }}</div>
+        <div class="metric-subtle" id="runtime-last-evidence-relative">{{ runtime.last_runtime_evidence_relative or 'No runtime signals yet.' }}</div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Emails today</div>
+        <div class="metric-value" id="preview-emails-today">{{ dashboard_preview.emails_today if dashboard_preview.emails_today is not none else 'unknown' }}</div>
+        <div class="metric-subtle">Last hour: <span id="preview-emails-hour">{{ dashboard_preview.emails_last_hour if dashboard_preview.emails_last_hour is not none else 'unknown' }}</span></div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">LLM calls</div>
+        <div class="metric-value" id="preview-llm-calls">{{ dashboard_preview.llm_calls_today if dashboard_preview.llm_calls_today is not none else 'unknown' }}</div>
+        <div class="metric-subtle">Fallback: <span id="preview-llm-fallback">{{ dashboard_preview.llm_fallback_today if dashboard_preview.llm_fallback_today is not none else 'unknown' }}</span></div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">High priority</div>
+        <div class="metric-value" id="preview-priority-red">{{ preview_priority.red if preview_priority.red is not none else 'unknown' }}</div>
+        <div class="metric-subtle">Rows in feed: <span id="processed-count">{{ processed_table.available_count if processed_table.available_count is not none else 0 }}</span></div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Latency p95</div>
+        <div class="metric-value" id="home-latency-p95">{{ latency.pipeline_p95 or 'NO DATA' }}</div>
+        <div class="metric-subtle">Trace coverage: <span id="home-ai-trace-coverage">{{ ai.trace_coverage or '0/0' }}</span></div>
+      </article>
+    </section>
+
+    <div class="dashboard-grid">
+      <div class="dashboard-main">
+        <section class="card data-card" id="card-ops-health" data-testid="homepage-health">
+          <div class="section-title">
+            <h2>System</h2>
+            <div class="hint">Canonical health, IMAP, and pipeline evidence.</div>
+          </div>
+          <div class="metric-pair-grid">
+            <div class="metric-pair">
+              <span class="metric-label">IMAP</span>
+              <span class="badge muted" id="health-imap-status">UNKNOWN</span>
+              <div class="metric-subtle" id="health-imap-meta">{{ runtime.last_imap_success_display or 'UNAVAILABLE' }}</div>
+            </div>
+            <div class="metric-pair">
+              <span class="metric-label">Pipeline</span>
+              <span class="badge muted" id="health-pipeline-status">{{ runtime.status_label or 'UNKNOWN' }}</span>
+              <div class="metric-subtle" id="health-pipeline-meta">{{ runtime.last_processed_display or 'UNAVAILABLE' }}</div>
+            </div>
+          </div>
+          <div class="hint" id="home-health-detail">{{ health.detail or 'No health evidence yet for this scope.' }}</div>
+          <ul class="simple-links" id="home-health-components">
+            {% if health.components %}
+              {% for item in health.components %}
+              <li><span class="badge {{ item.status_class }}">{{ item.name }}: {{ item.status }}</span>{% if item.detail %} {{ item.detail }}{% endif %}</li>
+              {% endfor %}
+            {% else %}
+              <li class="hint">No health evidence yet for this scope.</li>
+            {% endif %}
+          </ul>
+        </section>
+
+        <section class="card data-card">
+          <div class="section-title">
+            <h2>Live feed</h2>
+            <div class="hint">Read-only recent deliveries from runtime analytics.</div>
+          </div>
+          <div class="table-scroll">
+            <table class="table compact">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Sender</th>
+                  <th>Summary</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if activity_rows %}
+                  {% for row in activity_rows[:6] %}
+                  <tr>
+                    <td class="mono">{{ row.delivered }}</td>
+                    <td>Sender hidden</td>
+                    <td>{{ row.telegram_preview }}</td>
+                    <td><span class="badge {{ row.status_class }}">{{ row.status }}</span></td>
+                  </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr><td colspan="4" class="table-empty">No recent activity yet for this scope.</td></tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card data-card" data-testid="homepage-latency">
+          <div class="section-title">
+            <h2>Latency</h2>
+            <div class="hint">Real processing spans with no synthetic values.</div>
+          </div>
+          <div class="section-header-line">
+            <span class="badge {{ latency.status_class or 'muted' }}" id="home-latency-status">{{ latency.status_label or 'NO LATENCY DATA' }}</span>
+            <span class="hint" id="home-latency-detail">{{ latency.detail or 'No latency data yet for this scope.' }}</span>
+          </div>
+          <div class="signal-grid">
+            <div class="signal-item"><div class="label">Pipeline p50</div><div class="value" id="home-latency-p50">{{ latency.pipeline_p50 or '—' }}</div></div>
+            <div class="signal-item"><div class="label">Pipeline p95</div><div class="value" id="home-latency-p95">{{ latency.pipeline_p95 or '—' }}</div></div>
+            <div class="signal-item"><div class="label">LLM p90</div><div class="value" id="home-latency-llm-p90">{{ latency.llm_p90 or '—' }}</div></div>
+            <div class="signal-item"><div class="label">Samples</div><div class="value" id="home-latency-samples">{{ latency.sample_count_display or '0 spans' }}</div></div>
+            <div class="signal-item"><div class="label">Error rate</div><div class="value" id="home-latency-error-rate">{{ latency.error_rate or '—' }}</div></div>
+            <div class="signal-item"><div class="label">Fallback rate</div><div class="value" id="home-latency-fallback-rate">{{ latency.fallback_rate or '—' }}</div></div>
+          </div>
+          <div class="empty-state" id="home-latency-empty">{% if not latency.available %}{{ latency.status_label or 'NO LATENCY DATA' }}{% endif %}</div>
+        </section>
+
+        <section class="card data-card" data-testid="homepage-ai">
+          <div class="section-title">
+            <h2>AI / LLM decisions</h2>
+            <div class="hint">Provider routing and decision traces only when they were actually recorded.</div>
+          </div>
+          <div class="section-header-line">
+            <span class="badge {{ ai.status_class or 'muted' }}" id="home-ai-status">{{ ai.status_label or 'NO AI DATA' }}</span>
+            <span class="hint" id="home-ai-detail">{{ ai.detail or 'No recent LLM calls or decision traces for this scope.' }}</span>
+          </div>
+          <div class="metric-row">
+            <span class="badge muted">Calls: <b id="home-ai-calls">{{ ai.llm_calls_today }}</b></span>
+            <span class="badge muted">Fallback: <b id="home-ai-fallback">{{ ai.llm_fallback_today }}</b></span>
+            <span class="badge muted">Trace coverage: <b id="home-ai-trace-coverage">{{ ai.trace_coverage }}</b></span>
+          </div>
+          <ul class="simple-links" id="home-ai-items">
+            {% if ai.recent_providers %}
+              {% for item in ai.recent_providers %}
+              <li>Provider: {{ item.label }}</li>
+              {% endfor %}
+            {% endif %}
+            {% if ai.recent_traces %}
+              {% for item in ai.recent_traces %}
+              <li>{{ item.decision_kind }}: {{ item.codes_text }}</li>
+              {% endfor %}
+            {% elif not ai.recent_providers %}
+              <li class="hint">No recent AI decision traces recorded yet.</li>
+            {% endif %}
+          </ul>
+        </section>
+
+        <section class="card data-card">
+          <div class="section-title">
+            <h2>Recent events</h2>
+            <div class="hint">Recent canonical runtime events for the current scope.</div>
+          </div>
+          <div class="hint">Loaded events: <span id="preview-events-count">{{ dashboard_preview_events|length }}</span></div>
+          <ul class="simple-links events-feed" id="preview-recent-events">
+            {% if dashboard_preview_events %}
+              {% for item in dashboard_preview_events %}
+              <li>{{ item.text or item.type or 'event' }}</li>
+              {% endfor %}
+            {% else %}
+              <li class="hint">{{ dashboard_preview_events_empty }}</li>
+            {% endif %}
+          </ul>
+        </section>
+
+        <section class="card data-card">
+          <div class="section-title">
+            <h2>Processed emails</h2>
+            <div class="hint">Anonymized canonical timeline. Telegram info comes only from persisted Telegram-safe summary fields.</div>
+          </div>
+          <div class="section-header-line">
+            <span class="badge {{ processed_table.status_class or 'muted' }}" id="processed-table-status">{{ processed_table.status_label or 'NO DATA' }}</span>
+            <span class="hint" id="processed-table-detail">{{ processed_table.detail or 'No processed emails yet for this scope.' }}</span>
+          </div>
+          <div class="table-scroll processed-table-wrapper">
+            <table class="table processed-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Time</th>
+                  <th>Sender</th>
+                  <th>Priority</th>
+                  <th>Info</th>
+                </tr>
+              </thead>
+              <tbody id="processed-table-body">
+                {% if processed_rows %}
+                  {% for row in processed_rows %}
+                  <tr>
+                    <td class="mono">{{ row.date }}</td>
+                    <td class="mono">{{ row.time }}</td>
+                    <td>{{ row.sender_display }}</td>
+                    <td><span class="badge {{ row.priority_class }}">{{ row.priority_label }}</span></td>
+                    <td>
+                      <div class="info-primary">{{ row.info_primary }}</div>
+                      {% if row.info_secondary %}<div class="info-secondary">{{ row.info_secondary }}</div>{% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr><td colspan="5" class="table-empty">No processed emails yet for this scope.</td></tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {% if engineer_mode %}
+        <section class="card data-card" data-testid="engineer-blocks">
+          <div class="section-title">
+            <h2>Engineer detail</h2>
+            <div class="hint">Read-only drill-down for slow spans and recent errors.</div>
+          </div>
+          <div class="empty-state">{% if engineer_slowest or engineer_errors %}Engineer mode enabled.{% else %}No extra engineer-only samples in this scope.{% endif %}</div>
+        </section>
+        {% endif %}
+      </div>
+
+      <aside class="dashboard-side">
+        <section class="card data-card">
+          <div class="section-title">
+            <h2>Runtime overview</h2>
+            <div class="hint">Honest status for fields the runtime does not persist.</div>
+          </div>
+          <div class="runtime-list">
+            <div class="runtime-item"><span>Started at</span><strong id="runtime-started-at">{{ runtime.started_at_display or 'UNAVAILABLE' }}</strong></div>
+            <div class="runtime-item"><span>Uptime</span><strong id="runtime-uptime">{{ runtime.uptime_display or 'UNAVAILABLE' }}</strong></div>
+            <div class="runtime-item"><span>Last runtime evidence</span><strong id="runtime-last-evidence-side">{{ runtime.last_runtime_evidence_display or 'UNAVAILABLE' }}</strong></div>
+            <div class="runtime-item"><span>Last processed</span><strong id="runtime-last-processed">{{ runtime.last_processed_display or 'UNAVAILABLE' }}</strong></div>
+          </div>
+          <div class="hint">{{ runtime.availability_note or 'No runtime evidence available for this scope.' }}</div>
+        </section>
+
+        <section class="card data-card">
+          <div class="section-title">
+            <h2>Automation quality</h2>
+            <div class="hint">Observability based on feedback data, not the source of truth.</div>
+          </div>
+          {% if quality_summary.available %}
+          <div class="quality-metric" data-testid="quality-summary"><span class="label">Corrections</span><span class="value">{{ quality_summary.corrections }}</span></div>
+          <div class="quality-metric"><span class="label">Surprise rate</span><span class="value">{{ quality_summary.surprise_rate }}</span></div>
+          <div class="hint">{{ quality_summary.trust_hint }}</div>
+          {% else %}
+          <div class="empty-state" data-testid="quality-summary">Not enough feedback yet. Quality summary appears after corrections are recorded.</div>
+          {% endif %}
+        </section>
+
+        <section class="card data-card">
+          <div class="section-title">
+            <h2>Top contacts</h2>
+            <div class="hint">Secondary analytics view. Sender identity remains hidden.</div>
+          </div>
+          <ul class="simple-links" id="top-contacts-list"><li class="hint">Live contact summary updates after refresh.</li></ul>
+        </section>
+
+        <section class="card data-card">
+          <div class="section-title">
+            <h2>Top issuers</h2>
+            <div class="hint">Business concentration from derived analytics.</div>
+          </div>
+          <ul class="simple-links" id="top-issuers-list"><li class="hint">Live issuer summary updates after refresh.</li></ul>
+        </section>
+
+        {% if donate_card_target or donate_card_qr %}
+        <section class="card data-card donate-card" data-testid="homepage-donate">
+          <div class="section-title">
+            <h2>{{ donate_card_title }}</h2>
+            <div class="hint">Donation surfaces stay separate from runtime state.</div>
+          </div>
+          {% if donate_card_qr %}
+          {% if donate_card_target %}
+          <a class="donate-card-link" href="{{ donate_card_target }}" {% if donate_card_target.startswith('http') %}target="_blank" rel="noopener noreferrer"{% endif %}>
+            <img src="{{ donate_card_qr }}" alt="{{ donate_card_alt }}" width="{{ homepage_donate.qr_width if homepage_donate and homepage_donate.qr_width else 192 }}" height="{{ homepage_donate.qr_height if homepage_donate and homepage_donate.qr_height else 192 }}">
+          </a>
+          {% else %}
+          <img src="{{ donate_card_qr }}" alt="{{ donate_card_alt }}" width="{{ homepage_donate.qr_width if homepage_donate and homepage_donate.qr_width else 192 }}" height="{{ homepage_donate.qr_height if homepage_donate and homepage_donate.qr_height else 192 }}">
+          {% endif %}
+          <div class="hint">Support QR</div>
+          {% else %}
+          <div class="empty-state">{{ donate_card_fallback }}</div>
+          {% endif %}
+          {% if donate_card_target %}
+          <a class="btn donate-inline-link" href="{{ donate_card_target }}" {% if donate_card_target.startswith('http') %}target="_blank" rel="noopener noreferrer"{% endif %}>{{ donate_card_target }}</a>
+          {% endif %}
+        </section>
+        {% endif %}
+
+        <section class="card data-card useful-links-card">
+          <div class="section-title">
+            <h2>Useful links</h2>
+            <div class="hint">Additional observability surfaces.</div>
+          </div>
+          <ul class="simple-links">
+            <li><a href="{{ url_for('archive') }}">Archive</a></li>
+            <li><a href="{{ url_for('health') }}">Health</a></li>
+            <li><a href="{{ url_for('events') }}">Events</a></li>
+            <li><a href="{{ url_for('doctor') }}">Doctor</a></li>
+            {% if commitments_url %}<li><a href="{{ commitments_url }}">Commitments</a></li>{% endif %}
+          </ul>
+        </section>
+      </aside>
+    </div>
+  </section>
+
+  <script>
+    (function () {
+      const byId = (id) => document.getElementById(id);
+      const strip = byId('status-strip-content');
+      const offline = byId('status-strip-offline');
+      const body = byId('processed-table-body');
+      const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      const displayValue = (value, fallback = 'unknown') => value === null || value === undefined || value === '' ? fallback : String(value);
+      const setText = (id, value) => { const node = byId(id); if (node) node.textContent = String(value); };
+      const setBadge = (id, label, klass) => { const node = byId(id); if (node) { node.className = `badge ${klass || 'muted'}`; node.textContent = String(label || 'UNKNOWN'); } };
+      const metaSummary = (meta) => {
+        const sections = meta && meta.sections ? meta.sections : {};
+        const issues = Object.entries(sections).filter(([, entry]) => entry && entry.status && entry.status !== 'ok').map(([name, entry]) => `${name}: ${entry.detail || entry.status}`);
+        return issues.length ? issues.slice(0, 4).join(' · ') : 'Canonical runtime storage and events are in sync for visible sections.';
+      };
+      const maskEmail = (value) => {
+        const text = String(value || '').trim();
+        if (!text || !text.includes('@')) return text || 'Sender hidden';
+        const parts = text.split('@', 2);
+        return `${parts[0].slice(0, 1) || ''}…@${parts[1] || ''}`;
+      };
+      const renderList = (id, items, emptyText, mapper) => {
+        const node = byId(id);
+        if (!node) return;
+        const rows = Array.isArray(items) ? items : [];
+        if (!rows.length) {
+          node.innerHTML = `<li class="hint">${escapeHtml(emptyText)}</li>`;
+          return;
+        }
+        node.innerHTML = rows.map(mapper).join('');
+      };
+      const renderProcessed = (processed) => {
+        setBadge('processed-table-status', processed && processed.status_label, processed && processed.status_class);
+        setText('processed-table-detail', displayValue(processed && processed.detail, 'No processed emails yet for this scope.'));
+        setText('processed-count', displayValue(processed && processed.available_count, '0'));
+        if (!body) return;
+        const rows = processed && Array.isArray(processed.rows) ? processed.rows : [];
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="5" class="table-empty">No processed emails yet for this scope.</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map((row) => `<tr><td class="mono">${escapeHtml(displayValue(row.date, 'UNAVAILABLE'))}</td><td class="mono">${escapeHtml(displayValue(row.time, 'UNAVAILABLE'))}</td><td>${escapeHtml(displayValue(row.sender_display, 'Sender hidden'))}</td><td><span class="badge ${escapeHtml(String(row.priority_class || 'muted'))}">${escapeHtml(displayValue(row.priority_label, 'UNKNOWN'))}</span></td><td><div class="info-primary">${escapeHtml(displayValue(row.info_primary, 'UNAVAILABLE'))}</div>${row.info_secondary ? `<div class="info-secondary">${escapeHtml(String(row.info_secondary))}</div>` : ''}</td></tr>`).join('');
+      };
+      const noContactSummaryText = {% if ui_locale[:2] == 'ru' %}'Для этого scope пока нет contact summary.'{% else %}'No contact summary for this scope yet.'{% endif %};
+      const noIssuerSummaryText = {% if ui_locale[:2] == 'ru' %}'Для этого scope пока нет issuer summary.'{% else %}'No issuer summary for this scope yet.'{% endif %};
+      const renderDashboard = (data) => {
+        setText('preview-emails-today', displayValue(data.emails_today));
+        setText('preview-emails-hour', displayValue(data.emails_last_hour));
+        setText('preview-llm-calls', displayValue(data.llm_calls_today));
+        setText('preview-llm-fallback', displayValue(data.llm_fallback_today));
+        setText('preview-priority-red', displayValue(data.priority && data.priority.red));
+        setText('preview-dashboard-status', displayValue((data.health && data.health.status_label) || (data.meta && data.meta.status), 'UNKNOWN'));
+        setText('preview-dashboard-updated', `Updated: ${displayValue(data.meta && data.meta.generated_at, 'unknown')}`);
+        setText('preview-dashboard-detail', metaSummary(data.meta || {}));
+        setText('dashboard-meta-detail', metaSummary(data.meta || {}));
+        setText('preview-events-count', Array.isArray(data.recent_events) ? data.recent_events.length : '0');
+        setBadge('dashboard-meta-status', (data.health && data.health.status_label) || 'UNKNOWN', (data.health && data.health.status_class) || 'muted');
+        setBadge('home-health-status', (data.runtime && data.runtime.status_label) || 'UNKNOWN', (data.runtime && data.runtime.status_class) || 'muted');
+        setText('home-health-detail', displayValue(data.health && data.health.detail, 'No health evidence yet for this scope.'));
+        setText('health-imap-meta', displayValue(data.runtime && data.runtime.last_imap_success_display, 'UNAVAILABLE'));
+        setText('health-pipeline-meta', displayValue(data.runtime && data.runtime.last_processed_display, 'UNAVAILABLE'));
+        setText('runtime-last-evidence', displayValue(data.runtime && data.runtime.last_runtime_evidence_display, 'UNAVAILABLE'));
+        setText('runtime-last-evidence-relative', displayValue(data.runtime && data.runtime.last_runtime_evidence_relative, 'No runtime evidence yet.'));
+        setText('runtime-started-at', displayValue(data.runtime && data.runtime.started_at_display, 'UNAVAILABLE'));
+        setText('runtime-uptime', displayValue(data.runtime && data.runtime.uptime_display, 'UNAVAILABLE'));
+        setText('runtime-last-evidence-side', displayValue(data.runtime && data.runtime.last_runtime_evidence_display, 'UNAVAILABLE'));
+        setText('runtime-last-processed', displayValue(data.runtime && data.runtime.last_processed_display, 'UNAVAILABLE'));
+        setBadge('home-latency-status', data.latency && data.latency.status_label, data.latency && data.latency.status_class);
+        setText('home-latency-detail', displayValue(data.latency && data.latency.detail, 'No latency data yet for this scope.'));
+        setText('home-latency-p50', displayValue(data.latency && data.latency.pipeline_p50, '—'));
+        setText('home-latency-p95', displayValue(data.latency && data.latency.pipeline_p95, '—'));
+        setText('home-latency-llm-p90', displayValue(data.latency && data.latency.llm_p90, '—'));
+        setText('home-latency-samples', displayValue(data.latency && data.latency.sample_count_display, '0 spans'));
+        setText('home-latency-error-rate', displayValue(data.latency && data.latency.error_rate, '—'));
+        setText('home-latency-fallback-rate', displayValue(data.latency && data.latency.fallback_rate, '—'));
+        setText('home-latency-empty', data.latency && data.latency.available ? '' : displayValue(data.latency && data.latency.status_label, 'NO LATENCY DATA'));
+        setBadge('home-ai-status', data.ai && data.ai.status_label, data.ai && data.ai.status_class);
+        setText('home-ai-detail', displayValue(data.ai && data.ai.detail, 'No recent LLM calls or decision traces for this scope.'));
+        setText('home-ai-calls', displayValue(data.ai && data.ai.llm_calls_today, 'unknown'));
+        setText('home-ai-fallback', displayValue(data.ai && data.ai.llm_fallback_today, 'unknown'));
+        setText('home-ai-trace-coverage', displayValue(data.ai && data.ai.trace_coverage, '0/0'));
+        renderList('preview-recent-events', data.recent_events, 'No recent events yet.', (item) => `<li>${escapeHtml(String(item.text || item.type || 'event'))}</li>`);
+        renderList('home-health-components', data.health && data.health.components, 'No health evidence yet for this scope.', (item) => `<li><span class="badge ${escapeHtml(String(item.status_class || 'muted'))}">${escapeHtml(String(item.name || 'Component'))}: ${escapeHtml(String(item.status || 'UNKNOWN'))}</span>${item.detail ? ` ${escapeHtml(String(item.detail))}` : ''}</li>`);
+        const aiItems = [];
+        (Array.isArray(data.ai && data.ai.recent_providers) ? data.ai.recent_providers : []).forEach((item) => aiItems.push({ html: `<li>Provider: ${escapeHtml(String(item.label || 'unknown'))}</li>` }));
+        (Array.isArray(data.ai && data.ai.recent_traces) ? data.ai.recent_traces : []).forEach((item) => aiItems.push({ html: `<li>${escapeHtml(String(item.decision_kind || 'decision'))}: ${escapeHtml(String(item.codes_text || 'no explain codes'))}</li>` }));
+        renderList('home-ai-items', aiItems.map((item) => item.html), 'No recent AI decision traces recorded yet.', (item) => item);
+        renderList('top-contacts-list', data.top_contacts, noContactSummaryText, (item) => `<li>${escapeHtml(maskEmail(item.sender_email))} - ${escapeHtml(displayValue(item.emails_count, '0'))} emails</li>`);
+        renderList('top-issuers-list', data.top_issuers, noIssuerSummaryText, (item) => `<li>${escapeHtml(String(item.issuer_label || item.issuer_key || 'issuer'))} - waiting ${escapeHtml(displayValue(item.documents_waiting_attention_count, '0'))}</li>`);
+        renderProcessed(data.processed_table || {});
+      };
+      const refreshStatus = () => fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' }).then((resp) => { if (!resp.ok) throw new Error('status'); return resp.text(); }).then((html) => { if (strip) strip.innerHTML = html; if (offline) offline.classList.remove('active'); }).catch(() => { if (offline) offline.classList.add('active'); });
+      const refreshDashboard = () => fetch('/api/dashboard' + window.location.search, { credentials: 'same-origin' }).then((resp) => { if (!resp.ok) throw new Error('dashboard'); return resp.json(); }).then(renderDashboard).catch(() => { setBadge('dashboard-meta-status', 'UNAVAILABLE', 'warn'); setText('preview-dashboard-updated', 'Update failed'); });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          refreshStatus();
+          refreshDashboard();
+        }
+      });
+      refreshStatus();
+      refreshDashboard();
+      setInterval(refreshStatus, {{ status_refresh_ms }});
+      setInterval(refreshDashboard, 15000);
+    })();
+  </script>
+{% endblock %}
