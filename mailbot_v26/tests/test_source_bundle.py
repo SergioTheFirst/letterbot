@@ -5,6 +5,8 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from mailbot_v26.tools.source_bundle import build_source_bundle
 
 
@@ -120,8 +122,17 @@ def test_gitignore_covers_runtime_temp_files() -> None:
 
 def test_no_runtime_garbage_tracked_in_repo() -> None:
     git = shutil.which("git")
-    assert git is not None
+    if not git:
+        pytest.skip("git not available")
     repo_root = Path(__file__).resolve().parents[2]
+    is_git_repo = subprocess.run(
+        [git, "rev-parse", "--git-dir"],
+        cwd=repo_root,
+        capture_output=True,
+    ).returncode == 0
+    if not is_git_repo:
+        pytest.skip("not a git repository — skipping tracked-files check")
+
     tracked = subprocess.run(
         [
             git,

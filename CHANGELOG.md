@@ -45,7 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Security
 - None.
 
-## [28.0.0-rc] - 2026-03-01
+## [28.0.0-rc] - 2026-03-21
 
 ### Added
 - Release-candidate packaging and version surface synchronization
