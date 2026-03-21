@@ -2,7 +2,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-from mailbot_v26.doctor import DoctorEntry, _format_report
+from mailbot_v26.doctor import DoctorEntry, _format_report, _set_doctor_locale
 from mailbot_v26.insights.quality_metrics import CountBreakdown, QualityMetricsSnapshot
 from mailbot_v26.observability.notification_sla import (
     ErrorBreakdown,
@@ -207,13 +207,17 @@ def test_processor_preview_helpers_restore_russian_with_ru_override(monkeypatch)
 
 
 def test_doctor_ru_report_has_ru_context() -> None:
-    report = _format_report(
-        [
-            DoctorEntry("SQLite", "OK", "валидно"),
-            DoctorEntry("IMAP", "FAIL", "нет настроенных аккаунтов"),
-        ],
-        base_dir=Path("/tmp/config"),
-    )
+    _set_doctor_locale("ru")
+    try:
+        report = _format_report(
+            [
+                DoctorEntry("SQLite", "OK", "валидно"),
+                DoctorEntry("IMAP", "FAIL", "нет настроенных аккаунтов"),
+            ],
+            base_dir=Path("/tmp/config"),
+        )
+    finally:
+        _set_doctor_locale("en")
 
     assert "ОТЧЁТ ДОКТОРА" in report
     assert "Version" not in report

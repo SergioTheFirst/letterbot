@@ -37,6 +37,7 @@ from mailbot_v26.priority.priority_engine_v2 import (
 )
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.telegram_utils import telegram_safe
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE, get_locale
 from mailbot_v26.version import __version__
 from mailbot_v26.worker.telegram_sender import (
     DeliveryResult,
@@ -92,14 +93,42 @@ REQUIRED_TABLES = {
 
 CRITICAL_COMPONENTS = {"SQLite"}
 
-_STATUS_LABELS_RU = {
-    "OK": "ОК",
-    "WARN": "ПРЕДУПРЕЖДЕНИЕ",
-    "FAIL": "ОШИБКА",
-}
-
-
 logger = logging.getLogger(__name__)
+_DOCTOR_LOCALE = DEFAULT_LOCALE
+
+
+def _get_doctor_locale(config_dir: Path | None = None) -> str:
+    if config_dir is None:
+        return DEFAULT_LOCALE
+    try:
+        import configparser as _cp
+
+        parser = _cp.ConfigParser()
+        parser.read(
+            [str(config_dir / "settings.ini"), str(config_dir / "config.ini")],
+            encoding="utf-8",
+        )
+        return get_locale(parser)
+    except Exception:
+        return DEFAULT_LOCALE
+
+
+def _set_doctor_locale(locale: str) -> None:
+    global _DOCTOR_LOCALE
+    _DOCTOR_LOCALE = str(locale).strip() or DEFAULT_LOCALE
+
+
+def _ui_text(*, en: str, ru: str) -> str:
+    return en if _DOCTOR_LOCALE.casefold().startswith("en") else ru
+
+
+def _status_label(status: str) -> str:
+    labels = {
+        "OK": _ui_text(en="OK", ru="ОК"),
+        "WARN": _ui_text(en="WARNING", ru="ПРЕДУПРЕЖДЕНИЕ"),
+        "FAIL": _ui_text(en="ERROR", ru="ОШИБКА"),
+    }
+    return labels.get(status, status)
 
 
 def _is_missing_secret(value: object) -> bool:
@@ -110,8 +139,9 @@ def _is_missing_secret(value: object) -> bool:
 
 
 def run_doctor(config_dir: Path | None = None) -> DoctorReport:
-    require_runtime_for("doctor")
     base_dir = config_dir or CONFIG_DIR
+    _set_doctor_locale(_get_doctor_locale(base_dir))
+    require_runtime_for("doctor")
     entries, config_data = run_doctor_checks(config_dir=base_dir, return_config=True)
 
     report_text = _format_report(entries, base_dir)
@@ -124,10 +154,18 @@ def run_doctor(config_dir: Path | None = None) -> DoctorReport:
     )
 
     if telegram_sent:
-        print("[ОК] Отчёт доктора отправлен в Telegram")
+        print(
+            _ui_text(
+                en="[OK] Doctor report sent to Telegram",
+                ru="[ОК] Отчёт доктора отправлен в Telegram",
+            )
+        )
     else:
         print(
-            "[ПРЕДУПРЕЖДЕНИЕ] Отчёт доктора не отправлен в Telegram"
+            _ui_text(
+                en="[WARNING] Doctor report not sent to Telegram",
+                ru="[ПРЕДУПРЕЖДЕНИЕ] Отчёт доктора не отправлен в Telegram",
+            )
             + (f" ({telegram_error})" if telegram_error else "")
         )
 
@@ -171,6 +209,7 @@ def run_doctor_checks(
     return_config: bool = False,
 ) -> list[DoctorEntry] | tuple[list[DoctorEntry], dict[str, object]]:
     base_dir = config_dir or CONFIG_DIR
+    _set_doctor_locale(_get_doctor_locale(base_dir))
     entries: list[DoctorEntry] = []
 
     entries.append(_check_python())
@@ -214,14 +253,21 @@ def _check_python() -> DoctorEntry:
     status = "OK" if ok else "WARN"
     details = f"{version.major}.{version.minor}.{version.micro}"
     if not ok:
-        details = f"{details} (требуется >=3.10)"
+        details = (
+            f"{details} "
+            f"({_ui_text(en='requires >=3.10', ru='требуется >=3.10')})"
+        )
     return DoctorEntry("Python", status, details)
 
 
 def _check_venv() -> DoctorEntry:
     in_venv = sys.prefix != sys.base_prefix or bool(os.environ.get("VIRTUAL_ENV"))
     status = "OK" if in_venv else "WARN"
-    details = "активирован" if in_venv else "не обнаружен"
+    details = (
+        _ui_text(en="active", ru="активирован")
+        if in_venv
+        else _ui_text(en="not found", ru="не обнаружен")
+    )
     return DoctorEntry("Virtualenv", status, details)
 
 
@@ -239,17 +285,36 @@ def _check_dependencies() -> DoctorEntry:
         except Exception:
             missing_optional.append(module)
     if missing_required:
-        details = f"отсутствуют: {', '.join(sorted(missing_required))}"
+        joined_required = ", ".join(sorted(missing_required))
+        details = _ui_text(
+            en=f"missing: {joined_required}",
+            ru=f"отсутствуют: {joined_required}",
+        )
         if missing_optional:
-            details = f"{details}; опционально отсутствуют: {', '.join(sorted(missing_optional))} (не блокирует запуск)"
+            joined_optional = ", ".join(sorted(missing_optional))
+            details = (
+                f"{details}; "
+                + _ui_text(
+                    en=f"optional missing: {joined_optional} (non-blocking)",
+                    ru=f"опционально отсутствуют: {joined_optional} (не блокирует запуск)",
+                )
+            )
         return DoctorEntry("Dependencies", "FAIL", details)
     if missing_optional:
+        joined_optional = ", ".join(sorted(missing_optional))
         return DoctorEntry(
             "Dependencies",
             "WARN",
-            f"опционально отсутствуют: {', '.join(sorted(missing_optional))} (не блокирует запуск)",
+            _ui_text(
+                en=f"optional missing: {joined_optional} (non-blocking)",
+                ru=f"опционально отсутствуют: {joined_optional} (не блокирует запуск)",
+            ),
         )
-    return DoctorEntry("Dependencies", "OK", "импорты успешны")
+    return DoctorEntry(
+        "Dependencies",
+        "OK",
+        _ui_text(en="imports OK", ru="импорты успешны"),
+    )
 
 
 def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, object]]:
@@ -262,7 +327,13 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
         if yaml_errors:
             entries.append(DoctorEntry("config.yaml", "WARN", "; ".join(yaml_errors)))
         else:
-            entries.append(DoctorEntry("config.yaml", "OK", "загружен"))
+            entries.append(
+                DoctorEntry(
+                    "config.yaml",
+                    "OK",
+                    _ui_text(en="loaded", ru="загружен"),
+                )
+            )
     data["raw_config"] = raw_config
     data["bot_config"] = bot_config
 
@@ -272,7 +343,13 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
 
     try:
         general = load_general_config(base_dir)
-        entries.append(DoctorEntry("settings.ini (general)", "OK", "загружен"))
+        entries.append(
+            DoctorEntry(
+                "settings.ini (general)",
+                "OK",
+                _ui_text(en="loaded", ru="загружен"),
+            )
+        )
         data["admin_chat_id"] = general.admin_chat_id
     except ConfigError as exc:
         entries.append(DoctorEntry("settings.ini", "FAIL", str(exc)))
@@ -281,7 +358,7 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
         keys = load_keys_config(base_dir)
         token = keys.telegram_bot_token
         if resolved.two_file_mode:
-            details = "загружен"
+            details = _ui_text(en="loaded", ru="загружен")
             if not token and resolved.keys_path.exists():
                 legacy_keys = read_user_ini_with_defaults(
                     resolved.keys_path,
@@ -292,14 +369,20 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
                     legacy_keys.get("telegram", "bot_token", fallback="")
                 ).strip()
                 if token:
-                    details = "загружен (legacy keys.ini fallback)"
+                    details = _ui_text(
+                        en="loaded (legacy keys.ini fallback)",
+                        ru="загружен (legacy keys.ini fallback)",
+                    )
             entries.append(DoctorEntry("accounts.ini (secrets)", "OK", details))
         else:
             status = "OK"
-            details = "загружен"
+            details = _ui_text(en="loaded", ru="загружен")
             if not resolved.keys_path.exists():
                 status = "WARN"
-                details = "legacy keys.ini не найден"
+                details = _ui_text(
+                    en="legacy keys.ini not found",
+                    ru="legacy keys.ini не найден",
+                )
             entries.append(DoctorEntry("keys.ini", status, details))
         data["telegram_bot_token"] = token
     except ConfigError as exc:
@@ -323,11 +406,26 @@ def _check_config_files(base_dir: Path) -> tuple[list[DoctorEntry], dict[str, ob
                 DoctorEntry(
                     "web port availability",
                     "WARN",
-                    f"Порт {web.port} занят. Откройте {base_dir / 'settings.ini'} и измените [web] port = ...",
+                    _ui_text(
+                        en=(
+                            f"Port {web.port} is busy. Open "
+                            f"{base_dir / 'settings.ini'} and change [web] port = ..."
+                        ),
+                        ru=(
+                            f"Порт {web.port} занят. Откройте "
+                            f"{base_dir / 'settings.ini'} и измените [web] port = ..."
+                        ),
+                    ),
                 )
             )
         else:
-            entries.append(DoctorEntry("web port availability", "OK", "порт свободен"))
+            entries.append(
+                DoctorEntry(
+                    "web port availability",
+                    "OK",
+                    _ui_text(en="port available", ru="порт свободен"),
+                )
+            )
     except ConfigError as exc:
         entries.append(DoctorEntry("web (settings.ini)", "WARN", str(exc)))
 
@@ -357,9 +455,15 @@ def _validate_accounts_ini(
             DoctorEntry(
                 "accounts.ini",
                 "FAIL",
-                (
-                    f"Файл не найден: {path}. "
-                    f'Создайте файл командой: copy "{source}" "{target}"'
+                _ui_text(
+                    en=(
+                        f"File not found: {path}. "
+                        f'Create it with: copy "{source}" "{target}"'
+                    ),
+                    ru=(
+                        f"Файл не найден: {path}. "
+                        f'Создайте файл командой: copy "{source}" "{target}"'
+                    ),
                 ),
             ),
             [],
@@ -376,42 +480,70 @@ def _validate_accounts_ini(
 
     for section_name in parser.sections():
         if not ACCOUNT_ID_PATTERN.fullmatch(section_name):
-            issues.append(f"некорректный id секции: {section_name}")
+            issues.append(
+                _ui_text(
+                    en=f"invalid section id: {section_name}",
+                    ru=f"некорректный id секции: {section_name}",
+                )
+            )
             has_critical = True
             continue
         section = parser[section_name]
-        account_issues: list[str] = []
+        raw_account_issues: list[str] = []
+        display_account_issues: list[str] = []
         login = section.get("login", "").strip()
         password = section.get("password", "").strip()
         host = section.get("host", "").strip()
         chat_id = section.get("telegram_chat_id", "").strip()
 
         if not login:
-            account_issues.append("нет login")
+            raw_account_issues.append("нет login")
+            display_account_issues.append(
+                _ui_text(en="missing login", ru="нет login")
+            )
         if not password:
-            account_issues.append("нет password")
+            raw_account_issues.append("нет password")
+            display_account_issues.append(
+                _ui_text(en="missing password", ru="нет password")
+            )
         if not host:
-            account_issues.append("нет host")
+            raw_account_issues.append("нет host")
+            display_account_issues.append(_ui_text(en="missing host", ru="нет host"))
 
         try:
             port = section.getint("port", fallback=993)
             if not (1 <= port <= 65535):
-                account_issues.append("порт вне диапазона")
+                raw_account_issues.append("порт вне диапазона")
+                display_account_issues.append(
+                    _ui_text(en="port out of range", ru="порт вне диапазона")
+                )
         except ValueError:
             port = None
-            account_issues.append("некорректный port")
+            raw_account_issues.append("некорректный port")
+            display_account_issues.append(
+                _ui_text(en="invalid port", ru="некорректный port")
+            )
 
         try:
             use_ssl = section.getboolean("use_ssl", fallback=True)
         except ValueError:
             use_ssl = None
-            account_issues.append("некорректный use_ssl")
+            raw_account_issues.append("некорректный use_ssl")
+            display_account_issues.append(
+                _ui_text(en="invalid use_ssl", ru="некорректный use_ssl")
+            )
 
         if not chat_id:
-            account_issues.append("нет telegram_chat_id")
+            raw_account_issues.append("нет telegram_chat_id")
+            display_account_issues.append(
+                _ui_text(
+                    en="missing telegram_chat_id",
+                    ru="нет telegram_chat_id",
+                )
+            )
 
         if any(
-            issue in account_issues
+            issue in raw_account_issues
             for issue in (
                 "missing login",
                 "missing password",
@@ -422,8 +554,8 @@ def _validate_accounts_ini(
         ):
             has_critical = True
 
-        if account_issues:
-            issues.append(f"{section_name}: {', '.join(account_issues)}")
+        if display_account_issues:
+            issues.append(f"{section_name}: {', '.join(display_account_issues)}")
 
         accounts.append(
             {
@@ -438,14 +570,19 @@ def _validate_accounts_ini(
         )
 
     if not accounts:
-        issues.append("учётные записи не заданы")
+        issues.append(
+            _ui_text(
+                en="accounts are not configured",
+                ru="учётные записи не заданы",
+            )
+        )
         has_critical = True
 
     if not issues:
         status = "OK"
     else:
         status = "FAIL" if has_critical else "WARN"
-    details = "валидно" if not issues else "; ".join(issues)
+    details = _ui_text(en="valid", ru="валидно") if not issues else "; ".join(issues)
     return DoctorEntry("accounts.ini", status, details), accounts
 
 
@@ -480,16 +617,30 @@ def _resolve_yaml_config_path(config_dir: Path | None) -> Path | None:
 def _config_template_hint(config_path: Path, *, two_file_mode: bool = False) -> str:
     example_path = config_path.with_name(f"{config_path.name}.example")
     if two_file_mode:
-        return (
-            f"Файл не найден: {config_path}. Используйте шаблон {example_path}. "
-            f"Скопировать: copy {example_path.name} {config_path.name}"
+        return _ui_text(
+            en=(
+                f"File not found: {config_path}. Use template {example_path}. "
+                f"Copy: copy {example_path.name} {config_path.name}"
+            ),
+            ru=(
+                f"Файл не найден: {config_path}. Используйте шаблон {example_path}. "
+                f"Скопировать: copy {example_path.name} {config_path.name}"
+            ),
         )
     compact_example_path = config_path.with_name("config.ini.compact.example")
-    return (
-        f"Файл не найден: {config_path}. Используйте шаблон {example_path} "
-        f"или начните с компактного {compact_example_path}. "
-        f"Скопировать (полный): copy {example_path.name} {config_path.name}. "
-        f"Скопировать (compact): copy config.ini.compact.example config.ini"
+    return _ui_text(
+        en=(
+            f"File not found: {config_path}. Use template {example_path} "
+            f"or start from compact {compact_example_path}. "
+            f"Copy (full): copy {example_path.name} {config_path.name}. "
+            f"Copy (compact): copy config.ini.compact.example config.ini"
+        ),
+        ru=(
+            f"Файл не найден: {config_path}. Используйте шаблон {example_path} "
+            f"или начните с компактного {compact_example_path}. "
+            f"Скопировать (полный): copy {example_path.name} {config_path.name}. "
+            f"Скопировать (compact): copy config.ini.compact.example config.ini"
+        ),
     )
 
 
@@ -551,7 +702,11 @@ def _is_loopback_bind(bind: str) -> bool:
 
 def _check_sqlite(db_path: object) -> DoctorEntry:
     if not db_path:
-        return DoctorEntry("SQLite", "FAIL", "db_path не указан")
+        return DoctorEntry(
+            "SQLite",
+            "FAIL",
+            _ui_text(en="db_path is not set", ru="db_path не указан"),
+        )
     path = Path(db_path)
     try:
         with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
@@ -562,14 +717,26 @@ def _check_sqlite(db_path: object) -> DoctorEntry:
 
     missing = sorted(REQUIRED_TABLES - tables)
     if missing:
-        return DoctorEntry("SQLite", "WARN", f"нет таблиц: {', '.join(missing)}")
+        joined = ", ".join(missing)
+        return DoctorEntry(
+            "SQLite",
+            "WARN",
+            _ui_text(en=f"missing tables: {joined}", ru=f"нет таблиц: {joined}"),
+        )
     return DoctorEntry("SQLite", "OK", str(path))
 
 
 def _check_telegram(bot_token: object) -> DoctorEntry:
     token = str(bot_token or "").strip()
     if not token:
-        return DoctorEntry("Telegram", "WARN", "bot token не задан; отправка пропущена")
+        return DoctorEntry(
+            "Telegram",
+            "WARN",
+            _ui_text(
+                en="bot token is not set; sending skipped",
+                ru="bot token не задан; отправка пропущена",
+            ),
+        )
     ok, details = ping_telegram(token)
     status = "OK" if ok else "WARN"
     return DoctorEntry("Telegram", status, details)
@@ -581,7 +748,16 @@ def _check_llm(base_dir: Path) -> list[DoctorEntry]:
         config = llm_router._load_llm_config(base_dir)
         router = llm_router.LLMRouter(config)
     except Exception as exc:
-        return [DoctorEntry("LLM", "WARN", f"ошибка конфигурации: {exc}")]
+        return [
+            DoctorEntry(
+                "LLM",
+                "WARN",
+                _ui_text(
+                    en=f"config error: {exc}",
+                    ru=f"ошибка конфигурации: {exc}",
+                ),
+            )
+        ]
 
     entries.append(
         _check_provider(
@@ -607,45 +783,82 @@ def _check_provider(
 ) -> DoctorEntry:
     provider = router._providers.get(name)
     if not enabled_flag and _is_missing_secret(has_credentials):
-        return DoctorEntry(name.capitalize(), "WARN", "отключен")
+        return DoctorEntry(
+            name.capitalize(),
+            "WARN",
+            _ui_text(en="disabled", ru="отключен"),
+        )
     if _is_missing_secret(has_credentials):
         return DoctorEntry(name.capitalize(), "WARN", "NOT CONFIGURED")
     if not provider:
-        return DoctorEntry(name.capitalize(), "WARN", "провайдер недоступен")
+        return DoctorEntry(
+            name.capitalize(),
+            "WARN",
+            _ui_text(en="provider unavailable", ru="провайдер недоступен"),
+        )
     ok = provider.healthcheck()
     status = "OK" if ok else "WARN"
-    details = "активен" if ok else "проверка не пройдена"
+    details = (
+        _ui_text(en="active", ru="активен")
+        if ok
+        else _ui_text(en="healthcheck failed", ru="проверка не пройдена")
+    )
     return DoctorEntry(name.capitalize(), status, details)
 
 
 def _check_imap(accounts: object, *, timeout_sec: float = 10.0) -> list[DoctorEntry]:
     if not accounts:
-        return [DoctorEntry("IMAP", "WARN", "нет настроенных аккаунтов")]
+        return [
+            DoctorEntry(
+                "IMAP",
+                "WARN",
+                _ui_text(en="no configured accounts", ru="нет настроенных аккаунтов"),
+            )
+        ]
 
     results = check_mail_accounts(accounts, timeout_sec=timeout_sec)
 
     failures = [result for result in results if result.status != "OK"]
     if not failures:
-        return [DoctorEntry("IMAP", "OK", f"{len(results)} аккаунтов в порядке")]
+        return [
+            DoctorEntry(
+                "IMAP",
+                "OK",
+                _ui_text(
+                    en=f"{len(results)} accounts OK",
+                    ru=f"{len(results)} аккаунтов в порядке",
+                ),
+            )
+        ]
 
     status = "WARN"
 
     details = "; ".join(
-        f"{result.account_id}: {result.error or 'ошибка'}" for result in failures
+        (
+            f"{result.account_id}: "
+            f"{result.error or _ui_text(en='error', ru='ошибка')}"
+        )
+        for result in failures
     )
     return [DoctorEntry("IMAP", status, details)]
 
 
 def _format_report(entries: list[DoctorEntry], base_dir: Path) -> str:
     lines = [
-        "=== ОТЧЁТ ДОКТОРА LETTERBOT ===",
-        f"Версия: {__version__}",
-        f"Каталог конфигурации: {base_dir}",
+        _ui_text(
+            en="=== LETTERBOT DOCTOR REPORT ===",
+            ru="=== ОТЧЁТ ДОКТОРА LETTERBOT ===",
+        ),
+        _ui_text(en=f"Version: {__version__}", ru=f"Версия: {__version__}"),
+        _ui_text(
+            en=f"Config directory: {base_dir}",
+            ru=f"Каталог конфигурации: {base_dir}",
+        ),
         "",
     ]
     for entry in entries:
         detail = f" ({entry.details})" if entry.details else ""
-        status_display = _STATUS_LABELS_RU.get(entry.status, entry.status)
+        status_display = _status_label(entry.status)
         lines.append(f"- {entry.component}: {status_display}{detail}")
     return "\n".join(lines)
 
