@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
 from mailbot_v26 import doctor
+
+
+@pytest.fixture(autouse=True)
+def _reset_doctor_locale() -> None:
+    doctor._set_doctor_locale("en")
+    yield
+    doctor._set_doctor_locale("en")
 
 
 def test_check_dependencies_optional_missing_is_warn(monkeypatch) -> None:
@@ -16,7 +25,7 @@ def test_check_dependencies_optional_missing_is_warn(monkeypatch) -> None:
     assert entry.component == "Dependencies"
     assert entry.status == "WARN"
     assert "ldap" in entry.details
-    assert "не блокирует запуск" in entry.details
+    assert "non-blocking" in entry.details
 
 
 def test_check_dependencies_required_missing_is_fail(monkeypatch) -> None:
