@@ -251,7 +251,7 @@ def test_daily_digest_sent_with_deferred_items(monkeypatch, tmp_path) -> None:
 
     assert len(sent) == 1
     payload = sent[0]["payload"]
-    assert "Отложено писем" in payload.html_text
+    assert "Deferred emails" in payload.html_text
     assert "Powered by LetterBot.ru" in payload.html_text
 
 
@@ -282,8 +282,8 @@ def test_daily_digest_attention_block(monkeypatch, tmp_path) -> None:
 
     assert len(sent) == 1
     payload = sent[0]["payload"]
-    assert "Куда ушло внимание" in payload.html_text
-    assert "Лучшие контрагенты" in payload.html_text
+    assert "Where attention went" in payload.html_text
+    assert "Best counterparties" in payload.html_text
 
 
 def test_digest_or_preview_uses_v2_when_available(tmp_path) -> None:

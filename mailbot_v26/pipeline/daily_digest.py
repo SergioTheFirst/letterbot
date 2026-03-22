@@ -29,6 +29,7 @@ from mailbot_v26.observability.notification_sla import (
 )
 from mailbot_v26.observability import get_logger
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
+from mailbot_v26.pipeline.processor import _resolve_outbound_ui_locale
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
@@ -87,12 +88,149 @@ class RegretMinimizationStats:
     window_days: int
 
 
+def _locale_text(locale: str, *, en: str, ru: str) -> str:
+    return en if str(locale or "").strip().casefold().startswith("en") else ru
+
+
+def _format_attention_top_sinks_localized(
+    entities: Sequence[AttentionEntity], locale: str
+) -> list[str]:
+    if not entities:
+        return [_locale_text(locale, en="- not enough data", ru="- недостаточно данных")]
+    lines: list[str] = []
+    for entity in entities:
+        lines.append(
+            _locale_text(
+                locale,
+                en=(
+                    f"- {escape_tg_html(entity.label)}: "
+                    f"{entity.estimated_read_minutes:.1f} min, emails {entity.message_count}"
+                ),
+                ru=(
+                    f"- {escape_tg_html(entity.label)}: "
+                    f"{entity.estimated_read_minutes:.1f} мин, писем {entity.message_count}"
+                ),
+            )
+        )
+    return lines
+
+
+def _format_attention_risks_localized(
+    entities: Sequence[AttentionEntity], locale: str
+) -> list[str]:
+    if not entities:
+        return [
+            _locale_text(locale, en="- no risks detected", ru="- рисков не зафиксировано")
+        ]
+    lines: list[str] = []
+    for entity in entities:
+        reasons: list[str] = []
+        if entity.health_delta is not None and entity.health_delta < 0:
+            reasons.append(
+                _locale_text(
+                    locale,
+                    en=f"health {entity.health_delta:+.0f}",
+                    ru=f"здоровье {entity.health_delta:+.0f}",
+                )
+            )
+        if entity.trust_delta is not None and entity.trust_delta < 0:
+            reasons.append(
+                _locale_text(
+                    locale,
+                    en=f"trust {entity.trust_delta * 100:+.1f} pp",
+                    ru=f"trust {entity.trust_delta * 100:+.1f} п.п.",
+                )
+            )
+        if entity.anomalies:
+            reasons.append(_locale_text(locale, en="anomalies", ru="аномалии"))
+        reason_text = ", ".join(reasons) if reasons else _locale_text(
+            locale, en="anomalies", ru="аномалии"
+        )
+        lines.append(f"- {escape_tg_html(entity.label)}: {reason_text}")
+    return lines
+
+
+def _format_attention_best_localized(
+    entities: Sequence[AttentionEntity], locale: str
+) -> list[str]:
+    if not entities:
+        return [_locale_text(locale, en="- no growth data", ru="- данных о росте нет")]
+    lines: list[str] = []
+    for entity in entities:
+        details: list[str] = []
+        if entity.trust_delta is not None and entity.trust_delta > 0:
+            details.append(
+                _locale_text(
+                    locale,
+                    en=f"trust {entity.trust_delta * 100:+.1f} pp",
+                    ru=f"trust {entity.trust_delta * 100:+.1f} п.п.",
+                )
+            )
+        if entity.health_delta is not None and entity.health_delta > 0:
+            details.append(
+                _locale_text(
+                    locale,
+                    en=f"health {entity.health_delta:+.0f}",
+                    ru=f"здоровье {entity.health_delta:+.0f}",
+                )
+            )
+        detail_text = ", ".join(details) if details else _locale_text(
+            locale, en="stable", ru="стабильно"
+        )
+        lines.append(f"- {escape_tg_html(entity.label)}: {detail_text}")
+    return lines
+
+
+def _format_attention_block_localized(
+    result: AttentionEconomicsResult, locale: str
+) -> list[str]:
+    lines = [
+        f"<b>{_locale_text(locale, en='⏱ Where attention went', ru='⏱ Куда ушло внимание')}</b>"
+    ]
+    lines.extend(_format_attention_top_sinks_localized(result.top_sinks, locale))
+    lines.append(f"<b>{_locale_text(locale, en='Risks', ru='Риски')}</b>")
+    lines.extend(_format_attention_risks_localized(result.at_risk, locale))
+    lines.append(
+        f"<b>{_locale_text(locale, en='Best counterparties', ru='Лучшие контрагенты')}</b>"
+    )
+    lines.extend(
+        _format_attention_best_localized(result.best_counterparties, locale)
+    )
+    return lines
+
+
+def _humanize_commitment_status(status: str, locale: str) -> str:
+    normalized = str(status or "").strip().casefold()
+    if normalized in {"pending", "ожидает"}:
+        return _locale_text(locale, en="pending", ru="ожидает")
+    if normalized in {"fulfilled", "done", "completed", "выполнено"}:
+        return _locale_text(locale, en="fulfilled", ru="выполнено")
+    if normalized in {"expired", "overdue", "просрочено"}:
+        return _locale_text(locale, en="overdue", ru="просрочено")
+    if normalized in {"unknown", "неизвестно"}:
+        return _locale_text(locale, en="unknown", ru="неизвестно")
+    return str(status or "")
+
+
+def _deadlock_template_text(locale: str, *, from_email: str | None, subject: str | None) -> str:
+    if str(locale or "").strip().casefold().startswith("en"):
+        return "I suggest a 15-minute call today or tomorrow so we can resolve this faster."
+    return action_templates.template_for_deadlock(from_email=from_email, subject=subject)
+
+
+def _silence_template_text(locale: str, *, contact: str) -> str:
+    if str(locale or "").strip().casefold().startswith("en"):
+        return "A quick reminder about our open question. Would today work to get back to it?"
+    return action_templates.template_for_silence(contact=contact)
+
+
 def _collect_anomaly_alerts(
     *,
     analytics: KnowledgeAnalytics,
     now: datetime,
     contract_event_emitter: ContractEventEmitter | None = None,
     account_email: str | None = None,
+    locale: str = DEFAULT_LOCALE,
 ) -> list[str]:
     alerts: list[str] = []
     try:
@@ -123,9 +261,7 @@ def _collect_anomaly_alerts(
         safe_label = escape_tg_html(label)
         for anomaly in anomalies:
             title = escape_tg_html(anomaly.title)
-            severity = escape_tg_html(
-                humanize_severity(anomaly.severity, locale=DEFAULT_LOCALE)
-            )
+            severity = escape_tg_html(humanize_severity(anomaly.severity, locale=locale))
             alerts.append(f"{safe_label}: {title} ({severity})")
             if contract_event_emitter is not None and account_email:
                 try:
@@ -175,6 +311,7 @@ def _collect_digest_data(
     trust_bootstrap_config: TrustBootstrapConfig | None = None,
     include_regret_minimization: bool = False,
     regret_minimization_config: RegretMinimizationConfig | None = None,
+    locale: str = DEFAULT_LOCALE,
     now: datetime | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
@@ -225,6 +362,7 @@ def _collect_digest_data(
             now=now or datetime.now(timezone.utc),
             contract_event_emitter=contract_event_emitter,
             account_email=account_email,
+            locale=locale,
         )
 
     attention_economics: AttentionEconomicsResult | None = None
@@ -471,24 +609,54 @@ def _collect_digest_data(
     )
 
 
-def _build_digest_text(data: DigestData) -> str:
-    lines = [t("digest.daily", locale=DEFAULT_LOCALE)]
+def _build_digest_text(data: DigestData, locale: str = DEFAULT_LOCALE) -> str:
+    lines = [t("digest.daily", locale=locale)]
     if data.trust_bootstrap_snapshot and data.trust_bootstrap_snapshot.active:
-        lines.append(f"{_LEARNING_EMOJI} <b>Режим обучения</b>")
         lines.append(
-            "• Прогресс: "
-            f"{data.trust_bootstrap_snapshot.samples_count}/{data.trust_bootstrap_min_samples}"
+            f"{_LEARNING_EMOJI} <b>{_locale_text(locale, en='Learning mode', ru='Режим обучения')}</b>"
         )
-        lines.append("• Я пока показываю факты и наблюдения — без «готовых действий».")
+        lines.append(
+            _locale_text(
+                locale,
+                en=(
+                    "• Progress: "
+                    f"{data.trust_bootstrap_snapshot.samples_count}/{data.trust_bootstrap_min_samples}"
+                ),
+                ru=(
+                    "• Прогресс: "
+                    f"{data.trust_bootstrap_snapshot.samples_count}/{data.trust_bootstrap_min_samples}"
+                ),
+            )
+        )
+        lines.append(
+            _locale_text(
+                locale,
+                en="• I’m showing facts and observations for now, without ready-made actions.",
+                ru="• Я пока показываю факты и наблюдения — без «готовых действий».",
+            )
+        )
     if data.deferred_total > 0:
         lines.append(
-            "• Отложено писем: "
-            f"{data.deferred_total} "
-            f"(вложения: {data.deferred_attachments_only}, "
-            f"информационные: {data.deferred_informational})"
+            _locale_text(
+                locale,
+                en=(
+                    f"• Deferred emails: {data.deferred_total} "
+                    f"(attachments: {data.deferred_attachments_only}, informational: {data.deferred_informational})"
+                ),
+                ru=(
+                    f"• Отложено писем: {data.deferred_total} "
+                    f"(вложения: {data.deferred_attachments_only}, информационные: {data.deferred_informational})"
+                ),
+            )
         )
     if data.deferred_items:
-        lines.append("• Отложено для снижения перегрузки:")
+        lines.append(
+            _locale_text(
+                locale,
+                en="• Deferred to reduce overload:",
+                ru="• Отложено для снижения перегрузки:",
+            )
+        )
         for item in data.deferred_items:
             sender = item.get("sender") or ""
             summary = item.get("summary") or item.get("subject") or ""
@@ -496,10 +664,15 @@ def _build_digest_text(data: DigestData) -> str:
             if label_parts:
                 lines.append(f"  - {' — '.join(label_parts)}")
     if data.uncertainty_queue_items:
-        lines.append("<b>Требуют уточнения</b>")
         lines.append(
-            "• Низкая уверенность по приоритету: "
-            f"{len(data.uncertainty_queue_items)}"
+            f"<b>{_locale_text(locale, en='Needs clarification', ru='Требуют уточнения')}</b>"
+        )
+        lines.append(
+            _locale_text(
+                locale,
+                en=f"• Low confidence priority decisions: {len(data.uncertainty_queue_items)}",
+                ru=f"• Низкая уверенность по приоритету: {len(data.uncertainty_queue_items)}",
+            )
         )
         for item in data.uncertainty_queue_items:
             sender = str(item.get("sender") or "").strip()
@@ -517,9 +690,17 @@ def _build_digest_text(data: DigestData) -> str:
             lines.append(f"  - {label} ({confidence}%)")
     if data.commitments_pending > 0 or data.commitments_expired > 0:
         lines.append(
-            "• Обязательства: "
-            f"ожидают {data.commitments_pending}, "
-            f"просрочено {data.commitments_expired}"
+            _locale_text(
+                locale,
+                en=(
+                    f"• Commitments: pending {data.commitments_pending}, "
+                    f"overdue {data.commitments_expired}"
+                ),
+                ru=(
+                    f"• Обязательства: ожидают {data.commitments_pending}, "
+                    f"просрочено {data.commitments_expired}"
+                ),
+            )
         )
         if (
             data.commitments_expired > 0
@@ -530,12 +711,22 @@ def _build_digest_text(data: DigestData) -> str:
         ):
             stats = data.regret_minimization_stats
             lines.append(
-                "• Если откладывать: "
-                f"в похожих случаях за {stats.window_days} дней снижение доверия было "
-                f"в {stats.drops} из {stats.total} ({stats.pct}%)."
+                _locale_text(
+                    locale,
+                    en=(
+                        f"• If deferred: in similar cases over {stats.window_days} days "
+                        f"trust dropped in {stats.drops} of {stats.total} ({stats.pct}%)."
+                    ),
+                    ru=(
+                        f"• Если откладывать: в похожих случаях за {stats.window_days} дней "
+                        f"снижение доверия было в {stats.drops} из {stats.total} ({stats.pct}%)."
+                    ),
+                )
             )
         if data.commitment_chain_digest_items:
-            lines.append("<b>Контекст по обязательствам</b>")
+            lines.append(
+                f"<b>{_locale_text(locale, en='Commitment context', ru='Контекст по обязательствам')}</b>"
+            )
             for entry in data.commitment_chain_digest_items:
                 label = escape_tg_html(str(entry.get("entity_label") or ""))
                 if not label:
@@ -543,58 +734,103 @@ def _build_digest_text(data: DigestData) -> str:
                 lines.append(f"• {label}")
                 items = entry.get("items") or []
                 for item in items:
-                    status = escape_tg_html(str(item.get("status") or ""))
+                    status = escape_tg_html(
+                        _humanize_commitment_status(str(item.get("status") or ""), locale)
+                    )
                     text = escape_tg_html(str(item.get("text") or ""))
                     if not status or not text:
                         continue
                     line = f"  - {status}: {text}"
                     due = item.get("due")
                     if due:
-                        line += f" (срок: {escape_tg_html(str(due))})"
+                        line += _locale_text(
+                            locale,
+                            en=f" (due: {escape_tg_html(str(due))})",
+                            ru=f" (срок: {escape_tg_html(str(due))})",
+                        )
                     lines.append(line)
     if data.trust_delta is not None and abs(data.trust_delta) > _TRUST_DELTA_THRESHOLD:
         delta_pp = data.trust_delta * 100.0
         sign = "+" if delta_pp >= 0 else ""
-        lines.append(f"• Уровень доверия: {sign}{delta_pp:.1f} п.п.")
+        lines.append(
+            _locale_text(
+                locale,
+                en=f"• Trust level: {sign}{delta_pp:.1f} pp",
+                ru=f"• Уровень доверия: {sign}{delta_pp:.1f} п.п.",
+            )
+        )
     if (
         data.health_delta is not None
         and abs(data.health_delta) >= _RELATIONSHIP_HEALTH_DELTA_THRESHOLD
     ):
         sign = "+" if data.health_delta >= 0 else ""
-        lines.append(f"• Здоровье отношений: {sign}{data.health_delta:.0f} пунктов")
+        lines.append(
+            _locale_text(
+                locale,
+                en=f"• Relationship health: {sign}{data.health_delta:.0f} points",
+                ru=f"• Здоровье отношений: {sign}{data.health_delta:.0f} пунктов",
+            )
+        )
     if data.anomaly_alerts:
-        lines.append(t("digest.anomalies", locale=DEFAULT_LOCALE))
+        lines.append(t("digest.anomalies", locale=locale))
         lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:5])
     if data.quality_metrics is not None:
         qm = data.quality_metrics
         rate_display = ""
         if qm.correction_rate is not None:
-            rate_display = f" ({qm.correction_rate * 100:.1f}% писем)"
+            rate_display = _locale_text(
+                locale,
+                en=f" ({qm.correction_rate * 100:.1f}% of emails)",
+                ru=f" ({qm.correction_rate * 100:.1f}% писем)",
+            )
         lines.append(
-            "• Качество: " f"исправлений {qm.corrections_total} за 24ч{rate_display}"
+            _locale_text(
+                locale,
+                en=f"• Quality: {qm.corrections_total} corrections in 24h{rate_display}",
+                ru=f"• Качество: исправлений {qm.corrections_total} за 24ч{rate_display}",
+            )
         )
         priority_breakdown = ", ".join(
             f"{escape_tg_html(item.key)}: {item.count}" for item in qm.by_new_priority
         )
         if priority_breakdown:
-            lines.append(f"  - по приоритету: {priority_breakdown}")
+            lines.append(
+                _locale_text(
+                    locale,
+                    en=f"  - by priority: {priority_breakdown}",
+                    ru=f"  - по приоритету: {priority_breakdown}",
+                )
+            )
     if data.notification_sla is not None:
         sla = data.notification_sla
         delivered_pct = sla.delivery_rate_24h * 100
         salvage_pct = sla.salvage_rate_24h * 100
         p90 = sla.p90_latency_24h or 0
         lines.append(
-            "• Надёжность уведомлений 24ч: "
-            f"доставлено {delivered_pct:.1f}%, p90 {p90:.0f}с, резерв {salvage_pct:.1f}%"
+            _locale_text(
+                locale,
+                en=(
+                    f"• Notification reliability 24h: delivered {delivered_pct:.1f}%, "
+                    f"p90 {p90:.0f}s, recovery {salvage_pct:.1f}%"
+                ),
+                ru=(
+                    f"• Надёжность уведомлений 24ч: доставлено {delivered_pct:.1f}%, "
+                    f"p90 {p90:.0f}с, резерв {salvage_pct:.1f}%"
+                ),
+            )
         )
         if sla.top_error_reasons_24h:
             top = sla.top_error_reasons_24h[0]
             lines.append(
-                f"  - главная ошибка: {escape_tg_html(top.reason)} ({top.share * 100:.1f}%)"
+                _locale_text(
+                    locale,
+                    en=f"  - top error: {escape_tg_html(top.reason)} ({top.share * 100:.1f}%)",
+                    ru=f"  - главная ошибка: {escape_tg_html(top.reason)} ({top.share * 100:.1f}%)",
+                )
             )
     if data.attention_economics is not None:
         lines.append("")
-        lines.extend(format_attention_block(data.attention_economics))
+        lines.extend(_format_attention_block_localized(data.attention_economics, locale))
     if data.digest_insights_enabled and data.digest_insights_max_items > 0:
         insights_lines: list[str] = []
         insight_count = 0
@@ -602,9 +838,9 @@ def _build_digest_text(data: DigestData) -> str:
             data.trust_bootstrap_snapshot and data.trust_bootstrap_snapshot.active
         )
         insights_header = (
-            f"{_WARNING_EMOJI} <b>ТРЕБУЕТ ВНИМАНИЯ</b>"
+            f"{_WARNING_EMOJI} <b>{_locale_text(locale, en='ATTENTION NEEDED', ru='ТРЕБУЕТ ВНИМАНИЯ')}</b>"
             if action_mode
-            else f"{_OBSERVATION_EMOJI} <b>НАБЛЮДЕНИЯ</b>"
+            else f"{_OBSERVATION_EMOJI} <b>{_locale_text(locale, en='OBSERVATIONS', ru='НАБЛЮДЕНИЯ')}</b>"
         )
         for item in data.deadlock_insights:
             if insight_count >= data.digest_insights_max_items:
@@ -614,21 +850,34 @@ def _build_digest_text(data: DigestData) -> str:
                 continue
             if action_mode:
                 insights_lines.append(
-                    "• Застой в переписке: "
-                    f"{label} "
-                    f"→ {_TARGET_EMOJI} Предложить созвон (15 мин)"
+                    _locale_text(
+                        locale,
+                        en=f"• Stalled thread: {label} → {_TARGET_EMOJI} Propose a 15-min call",
+                        ru=f"• Застой в переписке: {label} → {_TARGET_EMOJI} Предложить созвон (15 мин)",
+                    )
                 )
                 if data.digest_action_templates_enabled:
-                    template = action_templates.template_for_deadlock(
+                    template = _deadlock_template_text(
+                        locale,
                         from_email=str(item.get("from_email") or "") or None,
                         subject=str(item.get("subject") or "") or None,
                     )
                     if template:
                         insights_lines.append(
-                            f"  <i>Текст: {escape_tg_html(template)}</i>"
+                            _locale_text(
+                                locale,
+                                en=f"  <i>Text: {escape_tg_html(template)}</i>",
+                                ru=f"  <i>Текст: {escape_tg_html(template)}</i>",
+                            )
                         )
             else:
-                insights_lines.append("• Наблюдение: " f"застой в переписке — {label}")
+                insights_lines.append(
+                    _locale_text(
+                        locale,
+                        en=f"• Observation: stalled thread — {label}",
+                        ru=f"• Наблюдение: застой в переписке — {label}",
+                    )
+                )
             insight_count += 1
         for item in data.silence_insights:
             if insight_count >= data.digest_insights_max_items:
@@ -636,22 +885,32 @@ def _build_digest_text(data: DigestData) -> str:
             contact = _format_silence_contact(item)
             if not contact:
                 continue
-            days = _format_silence_days_label(item)
+            days = _format_silence_days_label(item, locale=locale)
             if action_mode:
                 insights_lines.append(
-                    "• Нет ответа: "
-                    f"{contact} — {days} "
-                    f"→ {_TARGET_EMOJI} Вежливо напомнить сегодня"
+                    _locale_text(
+                        locale,
+                        en=f"• No reply: {contact} — {days} → {_TARGET_EMOJI} Send a polite reminder today",
+                        ru=f"• Нет ответа: {contact} — {days} → {_TARGET_EMOJI} Вежливо напомнить сегодня",
+                    )
                 )
                 if data.digest_action_templates_enabled:
-                    template = action_templates.template_for_silence(contact=contact)
+                    template = _silence_template_text(locale, contact=contact)
                     if template:
                         insights_lines.append(
-                            f"  <i>Текст: {escape_tg_html(template)}</i>"
+                            _locale_text(
+                                locale,
+                                en=f"  <i>Text: {escape_tg_html(template)}</i>",
+                                ru=f"  <i>Текст: {escape_tg_html(template)}</i>",
+                            )
                         )
             else:
                 insights_lines.append(
-                    "• Наблюдение: " f"нет ответа — {contact}, {days}"
+                    _locale_text(
+                        locale,
+                        en=f"• Observation: no reply — {contact}, {days}",
+                        ru=f"• Наблюдение: нет ответа — {contact}, {days}",
+                    )
                 )
             insight_count += 1
         if insights_lines:
@@ -667,30 +926,58 @@ def _build_digest_text(data: DigestData) -> str:
                 return None
 
         lines.append(
-            f"{_CHART_EMOJI} <b>ПОВЕДЕНЧЕСКИЕ МЕТРИКИ ({data.behavior_metrics_window_days} дней)</b>"
+            _locale_text(
+                locale,
+                en=f"{_CHART_EMOJI} <b>BEHAVIORAL METRICS ({data.behavior_metrics_window_days} days)</b>",
+                ru=f"{_CHART_EMOJI} <b>ПОВЕДЕНЧЕСКИЕ МЕТРИКИ ({data.behavior_metrics_window_days} дней)</b>",
+            )
         )
         surprise_rate = metrics.get("surprise_rate")
         if surprise_rate is not None:
             pct = _percent(surprise_rate)
             if pct is not None:
-                lines.append(f"• Ошибки приоритета: {pct}%")
+                lines.append(
+                    _locale_text(
+                        locale,
+                        en=f"• Priority mistakes: {pct}%",
+                        ru=f"• Ошибки приоритета: {pct}%",
+                    )
+                )
         compression_rate = metrics.get("compression_rate")
         if compression_rate is not None:
             pct = _percent(compression_rate)
             if pct is not None:
-                lines.append(f"• Снижение шума: {pct}%")
+                lines.append(
+                    _locale_text(
+                        locale,
+                        en=f"• Noise reduction: {pct}%",
+                        ru=f"• Снижение шума: {pct}%",
+                    )
+                )
         distribution = metrics.get("attention_debt_distribution")
         if isinstance(distribution, dict):
             low = int(distribution.get("low") or 0)
             medium = int(distribution.get("medium") or 0)
             high = int(distribution.get("high") or 0)
-            lines.append(f"• Долг внимания: низк {low}, средн {medium}, высок {high}")
+            lines.append(
+                _locale_text(
+                    locale,
+                    en=f"• Attention debt: low {low}, medium {medium}, high {high}",
+                    ru=f"• Долг внимания: низк {low}, средн {medium}, высок {high}",
+                )
+            )
         signal_counts = metrics.get("signal_counts")
         if isinstance(signal_counts, dict):
             deadlock = int(signal_counts.get("deadlock_count") or 0)
             silence = int(signal_counts.get("silence_count") or 0)
             if deadlock > 0 or silence > 0:
-                lines.append(f"• Сигналы: дедлок {deadlock}, тишина {silence}")
+                lines.append(
+                    _locale_text(
+                        locale,
+                        en=f"• Signals: deadlock {deadlock}, silence {silence}",
+                        ru=f"• Сигналы: дедлок {deadlock}, тишина {silence}",
+                    )
+                )
     return "\n".join(lines)
 
 
@@ -710,13 +997,18 @@ def _format_silence_contact(item: dict[str, object]) -> str:
     return escape_tg_html(contact)
 
 
-def _format_silence_days_label(item: dict[str, object]) -> str:
+def _format_silence_days_label(
+    item: dict[str, object], *, locale: str = DEFAULT_LOCALE
+) -> str:
     raw = item.get("days_silent")
     try:
         days = int(raw)
     except (TypeError, ValueError):
         days = 0
     days = max(days, 0)
+    if str(locale or "").strip().casefold().startswith("en"):
+        suffix = "day" if days == 1 else "days"
+        return f"{days} {suffix}"
     if days % 10 == 1 and days % 100 != 11:
         suffix = "день"
     elif days % 10 in {2, 3, 4} and days % 100 not in {12, 13, 14}:
@@ -774,6 +1066,7 @@ def maybe_send_daily_digest(
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
+    _locale = _resolve_outbound_ui_locale()
     data = _collect_digest_data(
         analytics=analytics,
         account_email=account_email,
@@ -786,6 +1079,7 @@ def maybe_send_daily_digest(
         behavior_metrics_window_days=behavior_metrics_window_days,
         include_commitment_chain_digest=include_commitment_chain_digest,
         commitment_chain_digest_config=commitment_chain_digest_config,
+        locale=_locale,
         contract_event_emitter=contract_event_emitter,
     )
     already_sent = analytics.has_daily_digest_sent(
@@ -825,7 +1119,7 @@ def maybe_send_daily_digest(
         )
         return
 
-    digest_text = f"{_build_digest_text(data)}\n\n<i>Powered by LetterBot.ru</i>"
+    digest_text = f"{_build_digest_text(data, locale=_locale)}\n\n<i>Powered by LetterBot.ru</i>"
     payload = TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",

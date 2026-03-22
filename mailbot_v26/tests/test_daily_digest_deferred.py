@@ -24,7 +24,7 @@ def test_daily_digest_includes_deferred_items() -> None:
         digest_insights_max_items=0,
         digest_action_templates_enabled=False,
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "Отложено для снижения перегрузки" in text
     assert "user@example.com" in text
     assert "Кратко" in text

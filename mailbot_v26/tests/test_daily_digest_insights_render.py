@@ -64,7 +64,7 @@ def _base_digest_kwargs() -> dict[str, object]:
 
 def test_daily_digest_insights_section_absent_when_empty() -> None:
     data = daily_digest.DigestData(**_base_digest_kwargs())
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "ТРЕБУЕТ ВНИМАНИЯ" not in text
 
 
@@ -86,7 +86,7 @@ def test_daily_digest_insights_section_present_with_items() -> None:
             ],
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "\u26a0\ufe0f <b>ТРЕБУЕТ ВНИМАНИЯ</b>" in text
     assert "Застой в переписке" in text
     assert "Нет ответа" in text
@@ -111,7 +111,7 @@ def test_daily_digest_insights_order_and_limit() -> None:
             ],
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     lines = text.splitlines()
     header_index = lines.index("\u26a0\ufe0f <b>ТРЕБУЕТ ВНИМАНИЯ</b>")
     insight_lines = lines[header_index + 1 : header_index + 4]
@@ -141,7 +141,7 @@ def test_daily_digest_insights_action_templates_present_when_enabled() -> None:
             ],
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     lines = [line for line in text.splitlines() if line.strip()]
     assert any(
         line.startswith("  <i>Текст:") and line.endswith("</i>") for line in lines
@@ -181,7 +181,7 @@ def test_daily_digest_insights_action_templates_absent_when_disabled() -> None:
             ],
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "Текст:" not in text
     assert "пинговать" not in text
     assert "Deadlock" not in text
@@ -210,7 +210,7 @@ def test_daily_digest_bootstrap_block_and_templates_hidden() -> None:
             "silence_insights": [{"contact": "client@example.com", "days_silent": 5}],
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "\U0001f393 <b>Режим обучения</b>" in text
     assert "Прогресс: 12/50" in text
     assert "Текст:" not in text
@@ -239,7 +239,7 @@ def test_daily_digest_bootstrap_inactive_keeps_templates() -> None:
             "silence_insights": [{"contact": "client@example.com", "days_silent": 5}],
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "\U0001f393 <b>Режим обучения</b>" not in text
     assert "Текст:" in text
 
@@ -330,7 +330,7 @@ def test_daily_digest_insights_scope_aggregation(monkeypatch, tmp_path) -> None:
         now=now,
     )
 
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert (
         f"• Застой в переписке: primary@example.com — Первичный → {_TARGET_EMOJI} "
         "Предложить созвон (15 мин)" in text

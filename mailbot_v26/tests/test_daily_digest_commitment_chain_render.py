@@ -28,7 +28,7 @@ def _base_digest_kwargs() -> dict[str, object]:
 
 def test_daily_digest_commitment_chain_absent_when_disabled() -> None:
     data = daily_digest.DigestData(**_base_digest_kwargs())
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "Контекст по обязательствам" not in text
 
 
@@ -57,7 +57,7 @@ def test_daily_digest_commitment_chain_rendering() -> None:
             ],
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "<b>Контекст по обязательствам</b>" in text
     assert "• Клиент А" in text
     assert "  - ожидает: Отправить договор (срок: 2024-07-12)" in text

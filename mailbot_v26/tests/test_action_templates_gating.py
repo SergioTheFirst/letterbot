@@ -123,7 +123,7 @@ def _render_digest(data: daily_digest.DigestData) -> str:
         digest_insights_enabled=True,
         digest_insights_max_items=3,
     )
-    return daily_digest._build_digest_text(enriched)
+    return daily_digest._build_digest_text(enriched, locale="ru")
 
 
 def _collect_data(

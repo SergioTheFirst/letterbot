@@ -34,7 +34,7 @@ def test_daily_digest_behavior_metrics_block_omitted_when_empty() -> None:
             "behavior_metrics": None,
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "ПОВЕДЕНЧЕСКИЕ МЕТРИКИ" not in text
 
 
@@ -59,7 +59,7 @@ def test_daily_digest_behavior_metrics_block_present() -> None:
             },
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "ПОВЕДЕНЧЕСКИЕ МЕТРИКИ (7 дней)" in text
     assert "Ошибки приоритета: 24%" in text
     assert "Снижение шума: 50%" in text

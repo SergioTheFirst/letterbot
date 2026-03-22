@@ -99,7 +99,7 @@ def test_daily_digest_uncertainty_queue_absent_when_flag_off(tmp_path) -> None:
         include_uncertainty_queue=False,
         now=datetime.now(timezone.utc),
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "Требуют уточнения" not in text
 
 
@@ -120,7 +120,7 @@ def test_daily_digest_uncertainty_queue_rendered_and_limited(tmp_path) -> None:
         ),
         now=datetime.now(timezone.utc),
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "<b>Требуют уточнения</b>" in text
     assert "Низкая уверенность по приоритету: 2" in text
     assert "first@example.com — Первое (60%)" in text
@@ -217,7 +217,7 @@ def test_daily_digest_uncertainty_queue_aggregates_scope_accounts(
         ),
         now=now,
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
 
     assert "Низкая уверенность по приоритету: 3" in text
     assert "alpha@example.com — Альфа (60%)" in text
@@ -253,5 +253,5 @@ def test_bootstrap_keeps_action_templates_suppressed() -> None:
             ],
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "Текст:" not in text

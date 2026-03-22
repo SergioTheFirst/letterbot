@@ -41,7 +41,7 @@ def test_progress_line_shown_for_sufficient_weekly_data() -> None:
             ),
         }
     )
-    text = weekly_digest._build_weekly_digest_text(data)
+    text = weekly_digest._build_weekly_digest_text(data, locale="ru")
     assert (
         "Твой прогресс: точность бота выросла до 89% благодаря твоим 7 коррекциям."
         in text
@@ -62,5 +62,5 @@ def test_progress_line_omitted_for_insufficient_corrections() -> None:
             ),
         }
     )
-    text = weekly_digest._build_weekly_digest_text(data)
+    text = weekly_digest._build_weekly_digest_text(data, locale="ru")
     assert "Твой прогресс:" not in text
