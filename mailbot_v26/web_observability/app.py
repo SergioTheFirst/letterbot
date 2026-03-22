@@ -8007,6 +8007,65 @@ def main() -> None:
         raise
 
 
+def start_web_in_thread(
+    *,
+    config_dir: Path,
+    db_path: Path,
+    host: str = "127.0.0.1",
+    port: int = 8787,
+    password: str = "",
+) -> None:
+    """Start the Flask web UI in a background daemon thread.
+
+    Safe to call from a frozen PyInstaller EXE where subprocess
+    cannot spawn a separate web process.
+    """
+    import threading
+
+    def _run() -> None:
+        try:
+            from mailbot_v26.config_loader import (
+                load_web_config,
+                load_web_ui_password_from_ini,
+            )
+            import os
+
+            ini_password = load_web_ui_password_from_ini(config_dir)
+            env_password = str(os.environ.get("WEB_PASSWORD") or "").strip()
+            resolved_password = env_password or ini_password or password
+
+            secret_key, attention_cost = _load_web_ui_secrets(config_dir)
+
+            app = create_app(
+                db_path=db_path,
+                password=resolved_password,
+                secret_key=secret_key,
+                attention_cost_per_hour=attention_cost,
+                config_dir=config_dir,
+                config_path=None,
+                log_path=Path(config_dir).parent / "mailbot.log",
+                dist_root=Path(config_dir).parent,
+                web_ui_bind=host,
+                web_ui_port=int(port),
+                allow_local_smoke_bypass=True,
+                support_settings=None,
+            )
+            app.run(
+                host=host,
+                port=int(port),
+                debug=False,
+                use_reloader=False,
+                threaded=True,
+            )
+        except Exception as exc:
+            import logging
+
+            logging.getLogger("mailbot").error("web_thread_failed error=%s", exc)
+
+    thread = threading.Thread(target=_run, name="web-ui", daemon=True)
+    thread.start()
+
+
 if __name__ == "__main__":
     try:
         main()
