@@ -1590,6 +1590,33 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         )
         print("[OK] Ready to work\n")
 
+        # Start web UI in background thread when running as frozen EXE
+        # In source mode run_stack.py handles this as a separate process
+        try:
+            import sys as _sys
+
+            if getattr(_sys, "frozen", False):
+                from mailbot_v26.config_loader import (
+                    load_storage_config,
+                    load_web_config,
+                )
+
+                _web_cfg = load_web_config(resolved_config_dir)
+                _storage_cfg = load_storage_config(resolved_config_dir)
+                from mailbot_v26.web_observability.app import start_web_in_thread
+
+                start_web_in_thread(
+                    config_dir=resolved_config_dir,
+                    db_path=_storage_cfg.db_path,
+                    host=_web_cfg.host or "127.0.0.1",
+                    port=_web_cfg.port or 8787,
+                )
+                print(
+                    f"[OK] Web UI starting at http://{_web_cfg.host or '127.0.0.1'}:{_web_cfg.port or 8787}/"
+                )
+        except Exception as _web_exc:
+            print(f"[WARN] Web UI could not start: {_web_exc}")
+
         bootstrap_notice_sent = False
         imap_health_started_accounts: set[str] = set()
         cycle = 0
