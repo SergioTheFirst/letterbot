@@ -195,7 +195,7 @@ def test_digest_blocks_include_notification_sla() -> None:
         digest_insights_max_items=0,
         digest_action_templates_enabled=False,
     )
-    text = daily_digest._build_digest_text(digest_data)
+    text = daily_digest._build_digest_text(digest_data, locale="ru")
     assert "Надёжность уведомлений" in text
 
     weekly_data = _build_weekly_digest_text(
@@ -210,6 +210,7 @@ def test_digest_blocks_include_notification_sla() -> None:
             anomaly_alerts=[],
             notification_sla=sla,
             previous_week_sla=sla,
-        )
+        ),
+        locale="ru",
     )
     assert "Надёжность уведомлений" not in weekly_data

@@ -44,7 +44,7 @@ def test_daily_digest_regret_minimization_line_rendered() -> None:
             "regret_minimization_stats": stats,
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert (
         "• Если откладывать: в похожих случаях за 90 дней снижение доверия было "
         "в 5 из 12 (42%)."
@@ -76,5 +76,5 @@ def test_daily_digest_regret_minimization_hidden_during_bootstrap() -> None:
             "trust_bootstrap_min_samples": 5,
         }
     )
-    text = daily_digest._build_digest_text(data)
+    text = daily_digest._build_digest_text(data, locale="ru")
     assert "Если откладывать:" not in text

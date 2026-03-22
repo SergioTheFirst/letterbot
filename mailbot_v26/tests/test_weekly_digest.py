@@ -34,6 +34,10 @@ def _patch_due_config(monkeypatch) -> None:
     )
 
 
+def _patch_locale(monkeypatch, locale: str = "en") -> None:
+    monkeypatch.setattr(weekly_digest, "_resolve_outbound_ui_locale", lambda: locale)
+
+
 def _insert_email(
     conn: sqlite3.Connection,
     *,
@@ -122,6 +126,7 @@ def test_weekly_digest_sent_once_per_week(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(weekly_digest, "enqueue_tg", _enqueue_tg)
     _patch_due_config(monkeypatch)
+    _patch_locale(monkeypatch)
 
     weekly_digest.maybe_send_weekly_digest(
         knowledge_db=db,
@@ -165,6 +170,7 @@ def test_weekly_digest_empty_content_is_deterministic(monkeypatch, tmp_path) -> 
 
     monkeypatch.setattr(weekly_digest, "enqueue_tg", _enqueue_tg)
     _patch_due_config(monkeypatch)
+    _patch_locale(monkeypatch)
 
     weekly_digest.maybe_send_weekly_digest(
         knowledge_db=db,
@@ -179,8 +185,8 @@ def test_weekly_digest_empty_content_is_deterministic(monkeypatch, tmp_path) -> 
 
     assert len(sent) == 1
     html_text = sent[0]["payload"].html_text
-    assert "За неделю 0 писем. Главное:" in html_text
-    assert "• Спокойная неделя: критичных сигналов не было." in html_text
+    assert "Over the week 0 emails. Highlights:" in html_text
+    assert "• Quiet week: no critical signals." in html_text
 
 
 def test_weekly_digest_flag_disabled_in_config(tmp_path) -> None:
@@ -320,6 +326,7 @@ def test_weekly_digest_attention_block_added_when_flag_on(
 
     monkeypatch.setattr(weekly_digest, "enqueue_tg", _enqueue_tg)
     _patch_due_config(monkeypatch)
+    _patch_locale(monkeypatch)
 
     weekly_digest.maybe_send_weekly_digest(
         knowledge_db=db,
@@ -335,7 +342,7 @@ def test_weekly_digest_attention_block_added_when_flag_on(
 
     assert sent, "digest should be delivered"
     html_text = sent[0]["payload"].html_text
-    assert "⏱ Куда ушло внимание" in html_text
+    assert "⏱ Where attention went" in html_text
     assert "alice@example.com" in html_text
     assert "bob@example.com" in html_text
 
@@ -390,6 +397,7 @@ def test_weekly_digest_attention_block_skipped_on_small_sample(
 
     monkeypatch.setattr(weekly_digest, "enqueue_tg", _enqueue_tg)
     _patch_due_config(monkeypatch)
+    _patch_locale(monkeypatch)
 
     weekly_digest.maybe_send_weekly_digest(
         knowledge_db=db,
@@ -405,8 +413,8 @@ def test_weekly_digest_attention_block_skipped_on_small_sample(
 
     assert sent, "digest should still be delivered"
     html_text = sent[0]["payload"].html_text
-    assert "⏱ Куда ушло внимание" not in html_text
-    assert "Спокойная неделя" in html_text
+    assert "⏱ Where attention went" not in html_text
+    assert "Quiet week" in html_text
 
     with sqlite3.connect(events_path) as conn:
         cur = conn.execute(
@@ -549,6 +557,7 @@ def test_weekly_digest_contains_shareable_card(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(weekly_digest, "enqueue_tg", _enqueue_tg)
     _patch_due_config(monkeypatch)
+    _patch_locale(monkeypatch)
 
     weekly_digest.maybe_send_weekly_digest(
         knowledge_db=db,
@@ -571,7 +580,7 @@ def test_weekly_digest_contains_shareable_card(monkeypatch, tmp_path) -> None:
         "inline_keyboard": [
             [
                 {
-                    "text": "📤 Поделиться отчётом",
+                    "text": "📤 Share report",
                     "switch_inline_query_current_chat": payload.metadata[
                         "shareable_weekly_card"
                     ],

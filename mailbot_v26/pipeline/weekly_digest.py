@@ -26,6 +26,7 @@ from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
+from mailbot_v26.pipeline.processor import _resolve_outbound_ui_locale
 from mailbot_v26.pipeline.stage_telegram import enqueue_tg
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.storage.analytics import KnowledgeAnalytics, WeeklyAccuracyProgress
@@ -96,6 +97,128 @@ class WeeklyDigestData:
     business_summary: dict[str, object] | None = None
 
 
+def _locale_text(locale: str, *, en: str, ru: str) -> str:
+    return en if str(locale or "").strip().casefold().startswith("en") else ru
+
+
+def _format_attention_top_sinks_localized(
+    entities: Sequence[AttentionEntity], locale: str
+) -> list[str]:
+    if not entities:
+        return [_locale_text(locale, en="- not enough data", ru="- недостаточно данных")]
+    lines: list[str] = []
+    for entity in entities:
+        lines.append(
+            _locale_text(
+                locale,
+                en=(
+                    f"- {escape_tg_html(entity.label)}: "
+                    f"{entity.estimated_read_minutes:.1f} min, emails {entity.message_count}"
+                ),
+                ru=(
+                    f"- {escape_tg_html(entity.label)}: "
+                    f"{entity.estimated_read_minutes:.1f} мин, писем {entity.message_count}"
+                ),
+            )
+        )
+    return lines
+
+
+def _format_attention_risks_localized(
+    entities: Sequence[AttentionEntity], locale: str
+) -> list[str]:
+    if not entities:
+        return [
+            _locale_text(locale, en="- no risks detected", ru="- рисков не зафиксировано")
+        ]
+    lines: list[str] = []
+    for entity in entities:
+        reasons: list[str] = []
+        if entity.health_delta is not None and entity.health_delta < 0:
+            reasons.append(
+                _locale_text(
+                    locale,
+                    en=f"health {entity.health_delta:+.0f}",
+                    ru=f"здоровье {entity.health_delta:+.0f}",
+                )
+            )
+        if entity.trust_delta is not None and entity.trust_delta < 0:
+            reasons.append(
+                _locale_text(
+                    locale,
+                    en=f"trust {entity.trust_delta * 100:+.1f} pp",
+                    ru=f"trust {entity.trust_delta * 100:+.1f} п.п.",
+                )
+            )
+        if entity.anomalies:
+            reasons.append(_locale_text(locale, en="anomalies", ru="аномалии"))
+        reason_text = ", ".join(reasons) if reasons else _locale_text(
+            locale, en="anomalies", ru="аномалии"
+        )
+        lines.append(f"- {escape_tg_html(entity.label)}: {reason_text}")
+    return lines
+
+
+def _format_attention_best_localized(
+    entities: Sequence[AttentionEntity], locale: str
+) -> list[str]:
+    if not entities:
+        return [_locale_text(locale, en="- no growth data", ru="- данных о росте нет")]
+    lines: list[str] = []
+    for entity in entities:
+        details: list[str] = []
+        if entity.trust_delta is not None and entity.trust_delta > 0:
+            details.append(
+                _locale_text(
+                    locale,
+                    en=f"trust {entity.trust_delta * 100:+.1f} pp",
+                    ru=f"trust {entity.trust_delta * 100:+.1f} п.п.",
+                )
+            )
+        if entity.health_delta is not None and entity.health_delta > 0:
+            details.append(
+                _locale_text(
+                    locale,
+                    en=f"health {entity.health_delta:+.0f}",
+                    ru=f"здоровье {entity.health_delta:+.0f}",
+                )
+            )
+        detail_text = ", ".join(details) if details else _locale_text(
+            locale, en="stable", ru="стабильно"
+        )
+        lines.append(f"- {escape_tg_html(entity.label)}: {detail_text}")
+    return lines
+
+
+def _format_attention_block_localized(
+    result: AttentionEconomicsResult, locale: str
+) -> list[str]:
+    lines = [
+        f"<b>{_locale_text(locale, en='⏱ Where attention went', ru='⏱ Куда ушло внимание')}</b>"
+    ]
+    lines.extend(_format_attention_top_sinks_localized(result.top_sinks, locale))
+    lines.append(f"<b>{_locale_text(locale, en='Risks', ru='Риски')}</b>")
+    lines.extend(_format_attention_risks_localized(result.at_risk, locale))
+    lines.append(
+        f"<b>{_locale_text(locale, en='Best counterparties', ru='Лучшие контрагенты')}</b>"
+    )
+    lines.extend(
+        _format_attention_best_localized(result.best_counterparties, locale)
+    )
+    return lines
+
+
+def _humanize_relationship_trend(trend: str | None, locale: str) -> str:
+    normalized = str(trend or "").strip().casefold()
+    if normalized == "improving":
+        return _locale_text(locale, en="improving", ru="улучшается")
+    if normalized == "declining":
+        return _locale_text(locale, en="declining", ru="ухудшается")
+    if normalized == "stable":
+        return _locale_text(locale, en="stable", ru="стабильный")
+    return str(trend or "")
+
+
 def _parse_weekday(value: str | None) -> int:
     if not value:
         return 0
@@ -155,37 +278,61 @@ def _safe_text(value: str, *, max_len: int = 80) -> str:
     return escape_tg_html(cleaned)
 
 
-def _attention_summary(attention: Sequence[dict[str, object]]) -> str:
+def _attention_summary(
+    attention: Sequence[dict[str, object]], locale: str = DEFAULT_LOCALE
+) -> str:
     if not attention:
-        return "нет данных"
+        return _locale_text(locale, en="no data", ru="нет данных")
     top = attention[:3]
     parts: list[str] = []
     for item in top:
-        name = _safe_text(str(item.get("entity") or "неизвестно"), max_len=40)
+        name = _safe_text(
+            str(
+                item.get("entity")
+                or _locale_text(locale, en="unknown", ru="неизвестно")
+            ),
+            max_len=40,
+        )
         words = int(item.get("words") or 0)
         minutes = words / 200.0
         minutes_display = 0.1 if minutes > 0 and minutes < 0.1 else minutes
-        parts.append(f"{name} — {minutes_display:.1f} мин")
+        parts.append(
+            _locale_text(
+                locale,
+                en=f"{name} — {minutes_display:.1f} min",
+                ru=f"{name} — {minutes_display:.1f} мин",
+            )
+        )
     return ", ".join(parts)
 
 
-def _overdue_summary(items: Sequence[dict[str, object]]) -> str:
+def _overdue_summary(
+    items: Sequence[dict[str, object]], locale: str = DEFAULT_LOCALE
+) -> str:
     if not items:
-        return "нет"
+        return _locale_text(locale, en="none", ru="нет")
     parts: list[str] = []
     for item in items[:5]:
-        name = _safe_text(str(item.get("from_email") or "неизвестно"), max_len=24)
+        name = _safe_text(
+            str(
+                item.get("from_email")
+                or _locale_text(locale, en="unknown", ru="неизвестно")
+            ),
+            max_len=24,
+        )
         text = _safe_text(str(item.get("commitment_text") or ""), max_len=48)
         deadline = _safe_text(str(item.get("deadline_iso") or ""), max_len=16)
         parts.append(f"{name} → {text} → {deadline}")
     return "; ".join(parts)
 
 
-def _trust_summary(trust_deltas: dict[str, list[dict[str, object]]]) -> str:
+def _trust_summary(
+    trust_deltas: dict[str, list[dict[str, object]]], locale: str = DEFAULT_LOCALE
+) -> str:
     up = trust_deltas.get("up", [])
     down = trust_deltas.get("down", [])
     if not up and not down:
-        return "недостаточно истории"
+        return _locale_text(locale, en="not enough history", ru="недостаточно истории")
     parts: list[str] = []
     if up:
         up_items = []
@@ -194,8 +341,16 @@ def _trust_summary(trust_deltas: dict[str, list[dict[str, object]]]) -> str:
                 str(item.get("entity_name") or item.get("entity_id") or ""), max_len=24
             )
             delta_pp = float(item.get("delta") or 0.0) * 100.0
-            up_items.append(f"{name} +{delta_pp:.1f} п.п.")
-        parts.append(f"рост: {', '.join(up_items)}")
+            up_items.append(
+                _locale_text(
+                    locale,
+                    en=f"{name} +{delta_pp:.1f} pp",
+                    ru=f"{name} +{delta_pp:.1f} п.п.",
+                )
+            )
+        parts.append(
+            _locale_text(locale, en=f"growth: {', '.join(up_items)}", ru=f"рост: {', '.join(up_items)}")
+        )
     if down:
         down_items = []
         for item in down:
@@ -203,13 +358,22 @@ def _trust_summary(trust_deltas: dict[str, list[dict[str, object]]]) -> str:
                 str(item.get("entity_name") or item.get("entity_id") or ""), max_len=24
             )
             delta_pp = float(item.get("delta") or 0.0) * 100.0
-            down_items.append(f"{name} {delta_pp:.1f} п.п.")
-        parts.append(f"падение: {', '.join(down_items)}")
+            down_items.append(
+                _locale_text(
+                    locale,
+                    en=f"{name} {delta_pp:.1f} pp",
+                    ru=f"{name} {delta_pp:.1f} п.п.",
+                )
+            )
+        parts.append(
+            _locale_text(locale, en=f"decline: {', '.join(down_items)}", ru=f"падение: {', '.join(down_items)}")
+        )
     return "; ".join(parts)
 
 
 def _format_weekly_accuracy_progress(
     progress: WeeklyAccuracyProgress | None,
+    locale: str = DEFAULT_LOCALE,
 ) -> str | None:
     if progress is None:
         return None
@@ -225,15 +389,31 @@ def _format_weekly_accuracy_progress(
     if abs(delta) < 2:
         return None
     if delta > 0:
-        return (
-            "Твой прогресс: "
-            f"точность бота выросла до {accuracy_pct}% "
-            f"благодаря твоим {corrections} коррекциям."
+        return _locale_text(
+            locale,
+            en=(
+                "Your progress: "
+                f"bot accuracy increased to {accuracy_pct}% "
+                f"thanks to your {corrections} corrections."
+            ),
+            ru=(
+                "Твой прогресс: "
+                f"точность бота выросла до {accuracy_pct}% "
+                f"благодаря твоим {corrections} коррекциям."
+            ),
         )
-    return (
-        "Твой прогресс: "
-        f"точность бота снизилась до {accuracy_pct}% "
-        f"при {corrections} коррекциях за неделю."
+    return _locale_text(
+        locale,
+        en=(
+            "Your progress: "
+            f"bot accuracy fell to {accuracy_pct}% "
+            f"with {corrections} corrections over the week."
+        ),
+        ru=(
+            "Твой прогресс: "
+            f"точность бота снизилась до {accuracy_pct}% "
+            f"при {corrections} коррекциях за неделю."
+        ),
     )
 
 
@@ -290,6 +470,7 @@ def _collect_anomaly_alerts(
     now: datetime,
     contract_event_emitter: ContractEventEmitter | None = None,
     account_email: str | None = None,
+    locale: str = DEFAULT_LOCALE,
 ) -> list[str]:
     alerts: list[str] = []
     try:
@@ -320,9 +501,7 @@ def _collect_anomaly_alerts(
         safe_label = escape_tg_html(label)
         for anomaly in anomalies:
             title = escape_tg_html(anomaly.title)
-            severity = escape_tg_html(
-                humanize_severity(anomaly.severity, locale=DEFAULT_LOCALE)
-            )
+            severity = escape_tg_html(humanize_severity(anomaly.severity, locale=locale))
             alerts.append(f"{safe_label}: {title} ({severity})")
             if contract_event_emitter is not None and account_email:
                 try:
@@ -433,6 +612,7 @@ def _collect_weekly_data(
     weekly_calibration_window_days: int = 7,
     weekly_calibration_top_n: int = 3,
     weekly_calibration_min_corrections: int = 10,
+    locale: str = DEFAULT_LOCALE,
     event_emitter: EventEmitter | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
     now: datetime | None = None,
@@ -488,6 +668,7 @@ def _collect_weekly_data(
             now=now or datetime.now(timezone.utc),
             contract_event_emitter=contract_event_emitter,
             account_email=account_email,
+            locale=locale,
         )
 
     quality_metrics: QualityMetricsSnapshot | None = None
@@ -666,9 +847,15 @@ def _collect_weekly_data(
     )
 
 
-def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
+def _build_weekly_digest_text(
+    data: WeeklyDigestData, locale: str = DEFAULT_LOCALE
+) -> str:
     lines = [
-        f"За неделю {data.total_emails} писем. Главное:"
+        _locale_text(
+            locale,
+            en=f"Over the week {data.total_emails} emails. Highlights:",
+            ru=f"За неделю {data.total_emails} писем. Главное:",
+        )
     ]
     highlights: list[str] = []
     business_summary = data.business_summary or {}
@@ -682,11 +869,19 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         if payable_total > 0:
             total = f"{payable_total:,}".replace(",", " ")
             highlights.append(
-                f"• К оплате сейчас: {payable_count} документов на {total} ₽"
+                _locale_text(
+                    locale,
+                    en=f"• Ready to pay now: {payable_count} documents for {total} ₽",
+                    ru=f"• К оплате сейчас: {payable_count} документов на {total} ₽",
+                )
             )
         else:
             highlights.append(
-                f"• К оплате сейчас: {payable_count} документов"
+                _locale_text(
+                    locale,
+                    en=f"• Ready to pay now: {payable_count} documents",
+                    ru=f"• К оплате сейчас: {payable_count} документов",
+                )
             )
     attention_parts: list[str] = []
     contract_review_count = int(
@@ -697,27 +892,47 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
     )
     if contract_review_count > 0:
         attention_parts.append(
-            f"{contract_review_count} договоров"
+            _locale_text(
+                locale,
+                en=f"{contract_review_count} contracts",
+                ru=f"{contract_review_count} договоров",
+            )
         )
     if reconciliation_attention_count > 0:
         attention_parts.append(
-            f"{reconciliation_attention_count} актов сверки"
+            _locale_text(
+                locale,
+                en=f"{reconciliation_attention_count} reconciliations",
+                ru=f"{reconciliation_attention_count} актов сверки",
+            )
         )
     documents_waiting = int(
         business_summary.get("documents_waiting_attention_count") or 0
     )
     if attention_parts:
         highlights.append(
-            f"• Ждут внимания: {', '.join(attention_parts)}"
+            _locale_text(
+                locale,
+                en=f"• Waiting for attention: {', '.join(attention_parts)}",
+                ru=f"• Ждут внимания: {', '.join(attention_parts)}",
+            )
         )
     elif documents_waiting > 0:
         highlights.append(
-            f"• Ждут внимания: {documents_waiting} документов"
+            _locale_text(
+                locale,
+                en=f"• Waiting for attention: {documents_waiting} documents",
+                ru=f"• Ждут внимания: {documents_waiting} документов",
+            )
         )
     overdue_count = int(data.commitment_counts.get("overdue") or 0)
     if overdue_count > 0:
         highlights.append(
-            f"• {overdue_count} обязательства просрочены"
+            _locale_text(
+                locale,
+                en=f"• {overdue_count} commitments are overdue",
+                ru=f"• {overdue_count} обязательства просрочены",
+            )
         )
     if data.silence_risk:
         contact = _safe_text(
@@ -727,7 +942,11 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         days = int(data.silence_risk.get("days_silent") or 0)
         if days > 0:
             highlights.append(
-                f"• От {contact} — молчание {days} дней (риск)"
+                _locale_text(
+                    locale,
+                    en=f"• No reply from {contact} for {days} days (risk)",
+                    ru=f"• От {contact} — молчание {days} дней (риск)",
+                )
             )
     top_issuers = business_summary.get("top_issuers") or []
     if data.total_emails >= 3 and top_issuers:
@@ -739,7 +958,11 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
             for item in top_issuers[:2]
         ]
         highlights.append(
-            f"• Самые активные контрагенты: {', '.join(labels)}"
+            _locale_text(
+                locale,
+                en=f"• Most active counterparties: {', '.join(labels)}",
+                ru=f"• Самые активные контрагенты: {', '.join(labels)}",
+            )
         )
     elif data.total_emails >= 3 and data.relationship_top_senders:
         top = data.relationship_top_senders[0]
@@ -750,27 +973,41 @@ def _build_weekly_digest_text(data: WeeklyDigestData) -> str:
         top_count = int(top.get("emails_count") or 0)
         if top_count > 0:
             highlights.append(
-                f"• Топ контакт: {top_sender} ({top_count} писем)"
+                _locale_text(
+                    locale,
+                    en=f"• Top contact: {top_sender} ({top_count} emails)",
+                    ru=f"• Топ контакт: {top_sender} ({top_count} писем)",
+                )
             )
     if data.total_emails >= 3 and data.relationship_trend:
         highlights.append(
-            f"• Тренд отношений: {data.relationship_trend}"
+            _locale_text(
+                locale,
+                en=f"• Relationship trend: {_humanize_relationship_trend(data.relationship_trend, locale)}",
+                ru=f"• Тренд отношений: {_humanize_relationship_trend(data.relationship_trend, locale)}",
+            )
         )
 
     if not highlights:
         highlights.append(
-            "• Спокойная неделя: критичных сигналов не было."
+            _locale_text(
+                locale,
+                en="• Quiet week: no critical signals.",
+                ru="• Спокойная неделя: критичных сигналов не было.",
+            )
         )
     lines.extend(highlights[:4])
 
-    progress_line = _format_weekly_accuracy_progress(data.weekly_accuracy_progress)
+    progress_line = _format_weekly_accuracy_progress(
+        data.weekly_accuracy_progress, locale=locale
+    )
     if progress_line:
         lines.append("")
         lines.append(progress_line)
 
     if data.attention_economics is not None:
         lines.append("")
-        lines.extend(format_attention_block(data.attention_economics))
+        lines.extend(_format_attention_block_localized(data.attention_economics, locale))
     return "\n".join(lines)
 
 def _format_share_accuracy(progress: WeeklyAccuracyProgress | None) -> str:
@@ -782,28 +1019,56 @@ def _format_share_accuracy(progress: WeeklyAccuracyProgress | None) -> str:
     return f"{accuracy_pct}%"
 
 
-def _build_shareable_weekly_card(weekly_data: WeeklyDigestData) -> str:
-    invoice_line = f"{weekly_data.invoice_count} invoices detected"
+def _build_shareable_weekly_card(
+    weekly_data: WeeklyDigestData, locale: str = DEFAULT_LOCALE
+) -> str:
+    invoice_line = _locale_text(
+        locale,
+        en=f"{weekly_data.invoice_count} invoices detected",
+        ru=f"{weekly_data.invoice_count} счетов обнаружено",
+    )
     if weekly_data.invoice_total_rub is not None and weekly_data.invoice_total_rub > 0:
         invoice_line = f"{invoice_line} ({weekly_data.invoice_total_rub} ₽)"
     return "\n".join(
         [
-            "📊 My Mail Week",
-            f"{weekly_data.total_emails} emails processed",
+            _locale_text(locale, en="📊 My Mail Week", ru="📊 Моя почтовая неделя"),
+            _locale_text(
+                locale,
+                en=f"{weekly_data.total_emails} emails processed",
+                ru=f"{weekly_data.total_emails} писем обработано",
+            ),
             invoice_line,
-            f"{weekly_data.contract_count} contracts waiting",
-            f"accuracy: {_format_share_accuracy(weekly_data.weekly_accuracy_progress)}",
-            "powered by letterbot · letterbot.ru",
+            _locale_text(
+                locale,
+                en=f"{weekly_data.contract_count} contracts waiting",
+                ru=f"{weekly_data.contract_count} договоров ждут",
+            ),
+            _locale_text(
+                locale,
+                en=f"accuracy: {_format_share_accuracy(weekly_data.weekly_accuracy_progress)}",
+                ru=f"точность: {_format_share_accuracy(weekly_data.weekly_accuracy_progress)}",
+            ),
+            _locale_text(
+                locale,
+                en="powered by letterbot · letterbot.ru",
+                ru="работает на letterbot · letterbot.ru",
+            ),
         ]
     )
 
 
-def _build_shareable_card_keyboard(share_text: str) -> dict[str, object]:
+def _build_shareable_card_keyboard(
+    share_text: str, locale: str = DEFAULT_LOCALE
+) -> dict[str, object]:
     return {
         "inline_keyboard": [
             [
                 {
-                    "text": "📤 Поделиться отчётом",
+                    "text": _locale_text(
+                        locale,
+                        en="📤 Share report",
+                        ru="📤 Поделиться отчётом",
+                    ),
                     "switch_inline_query_current_chat": share_text,
                 }
             ]
@@ -832,6 +1097,7 @@ def maybe_send_weekly_digest(
     current_time = now or datetime.now(timezone.utc)
     config = _load_weekly_digest_config()
     week_key = _iso_week_key(current_time)
+    _locale = _resolve_outbound_ui_locale()
 
     if not _is_due(current_time, config):
         logger.info(
@@ -887,6 +1153,7 @@ def maybe_send_weekly_digest(
         include_notification_sla=include_notification_sla,
         include_weekly_accuracy_report=include_weekly_accuracy_report,
         weekly_accuracy_window_days=weekly_accuracy_window_days,
+        locale=_locale,
         event_emitter=event_emitter,
         contract_event_emitter=contract_event_emitter,
         now=current_time,
@@ -899,13 +1166,17 @@ def maybe_send_weekly_digest(
             result=data.attention_economics,
         )
 
-    digest_text = _build_weekly_digest_text(data)
-    share_card = _build_shareable_weekly_card(data)
+    digest_text = _build_weekly_digest_text(data, locale=_locale)
+    share_card = _build_shareable_weekly_card(data, locale=_locale)
     share_card_lines = share_card.splitlines()
     if share_card_lines:
         share_card_lines[-1] = "Powered by LetterBot.ru"
         share_card = "\n".join(share_card_lines)
-    digest_text = f"{digest_text}\n\nShare this report\n{share_card}"
+    digest_text = (
+        f"{digest_text}\n\n"
+        f"{_locale_text(_locale, en='Share this report', ru='Поделиться отчётом')}\n"
+        f"{share_card}"
+    )
     payload = TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",
@@ -916,7 +1187,7 @@ def maybe_send_weekly_digest(
             "shareable_weekly_card": share_card,
             "shareable_weekly_qr_url": "https://letterbot.ru",
         },
-        reply_markup=_build_shareable_card_keyboard(share_card),
+        reply_markup=_build_shareable_card_keyboard(share_card, locale=_locale),
     )
 
     try:

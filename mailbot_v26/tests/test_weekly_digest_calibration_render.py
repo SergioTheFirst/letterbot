@@ -30,7 +30,7 @@ def _base_weekly_kwargs() -> dict[str, object]:
 
 def test_weekly_digest_empty_state_is_human_and_short() -> None:
     data = weekly_digest.WeeklyDigestData(**_base_weekly_kwargs())
-    text = weekly_digest._build_weekly_digest_text(data)
+    text = weekly_digest._build_weekly_digest_text(data, locale="ru")
     assert text.splitlines()[0] == "За неделю 0 писем. Главное:"
     assert "• Спокойная неделя: критичных сигналов не было." in text
     assert "Предложения к калибровке" not in text
@@ -44,7 +44,7 @@ def test_weekly_digest_renders_invoice_highlight_with_amount() -> None:
             "invoice_total_rub": 387000,
         }
     )
-    text = weekly_digest._build_weekly_digest_text(data)
+    text = weekly_digest._build_weekly_digest_text(data, locale="ru")
     assert "• К оплате сейчас: 3 документов на 387 000 ₽" in text
 
 
@@ -55,7 +55,7 @@ def test_weekly_digest_renders_contract_highlight() -> None:
             "contract_count": 2,
         }
     )
-    text = weekly_digest._build_weekly_digest_text(data)
+    text = weekly_digest._build_weekly_digest_text(data, locale="ru")
     assert "• Ждут внимания: 2 договоров" in text
 
 
@@ -66,7 +66,7 @@ def test_weekly_digest_renders_silence_risk_highlight() -> None:
             "silence_risk": {"contact": "Ивановой", "days_silent": 9},
         }
     )
-    text = weekly_digest._build_weekly_digest_text(data)
+    text = weekly_digest._build_weekly_digest_text(data, locale="ru")
     assert "• От Ивановой — молчание 9 дней (риск)" in text
 
 
@@ -84,7 +84,7 @@ def test_weekly_digest_progress_does_not_render_without_signal() -> None:
             ),
         }
     )
-    text = weekly_digest._build_weekly_digest_text(data)
+    text = weekly_digest._build_weekly_digest_text(data, locale="ru")
     assert "Твой прогресс:" not in text
 
 

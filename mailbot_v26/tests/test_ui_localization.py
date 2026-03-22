@@ -96,7 +96,7 @@ def test_digest_ru_has_no_english_codes() -> None:
         digest_action_templates_enabled=False,
     )
 
-    text = daily_digest._build_digest_text(data)  # type: ignore[attr-defined]
+    text = daily_digest._build_digest_text(data, locale="ru")  # type: ignore[attr-defined]
 
     assert "Trust" not in text
     assert "Delivery SLA" not in text
@@ -121,7 +121,7 @@ def test_weekly_digest_ru_labels() -> None:
         previous_week_sla=_sample_sla(),
     )
 
-    text = weekly_digest._build_weekly_digest_text(data)  # type: ignore[attr-defined]
+    text = weekly_digest._build_weekly_digest_text(data, locale="ru")  # type: ignore[attr-defined]
 
     assert "Trust" not in text
     assert "Delivery SLA" not in text
