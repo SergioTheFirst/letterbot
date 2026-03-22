@@ -81,7 +81,7 @@
  [],
  False,
  False,
- 1774166364,
+ 1774174350,
  [('run.exe',
    'C:\\pro\\letterbot\\.venv\\lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\run.exe',
    'EXECUTABLE')],
