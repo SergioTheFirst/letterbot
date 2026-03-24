@@ -43,11 +43,11 @@ LetterBot removes the triage step from your plate:
 ### How it looks in Telegram
 
 ```
-🟡💰 Invoice — Romashka LLC
+🟡💰 Invoice — MacroHard LLC
 Pay the invoice
 87,500 ₽ · due Apr 15 · 📎 invoice.xlsx
 
-[🔴 Urgent] [🟡 Important] [🔵 Low]
+[🔴 High] [🟡 Medium] [🔵 Low]
 [⏰ Snooze 2h] [📅 Tomorrow]
 ```
 
@@ -260,7 +260,7 @@ LetterBot снимает с вас этап сортировки:
 ### Как это выглядит в Telegram
 
 ```
-🟡💰 Счёт — ООО «Купаж»
+🟡💰 Счёт — ООО «Поставщик»
 Оплатить счёт
 87 500 ₽ · срок до 15.04 · 📎 invoice.xlsx
 
