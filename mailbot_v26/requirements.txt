@@ -14,7 +14,7 @@ python-docx>=1.1.2
 pdfminer.six>=20221105
 
 langdetect>=1.0.9
-nltk>=3.8.1
+nltk>=3.9.4
 pyttsx3>=2.90
 
 python-dotenv>=1.0.1
