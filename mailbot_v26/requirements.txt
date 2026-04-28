@@ -2,7 +2,7 @@
 
 imapclient==2.2.0
 PyYAML>=6.0.1
-requests>=2.31.0
+requests>=2.33.1
 
 # Used by exports / reports in some setups (wheels exist for Py3.10)
 numpy>=1.23.0
