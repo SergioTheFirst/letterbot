@@ -39,7 +39,7 @@
     </form>
   </div>
 
-  <div class="card" id="relationships-data" data-graph='{{ graph_json | safe }}'>
+  <div class="card" id="relationships-data" data-graph='{{ graph | tojson }}'>
     <div class="section-title">
       <h2>Contact graph</h2>
       <div class="hint">Trust and communication volume by sender.</div>

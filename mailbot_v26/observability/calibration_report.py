@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,14 +23,52 @@ class _CacheEntry:
 
 
 _CACHE: dict[tuple[str, int, int], _CacheEntry] = {}
-_CACHE_FILE = Path("logs/priority_calibration_cache.json")
+_CACHE_FILE_NAME = "priority_calibration_cache.json"
+_WATERMARK_EVENT_TYPES = (
+    EventType.DECISION_TRACE_RECORDED.value,
+    EventType.PRIORITY_CORRECTION_RECORDED.value,
+    EventType.SURPRISE_DETECTED.value,
+)
 
 
-def _load_cache_file() -> dict[str, object] | None:
+def _cache_file_path(db_path: Path) -> Path:
+    # Anchored next to the DB, not the process CWD.
+    return Path(db_path).resolve().parent / "logs" / _CACHE_FILE_NAME
+
+
+def _connect_read_only(db_path: Path) -> sqlite3.Connection:
+    # mode=ro never creates a missing DB and never writes (the web calls this).
+    uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+    return sqlite3.connect(uri, uri=True)
+
+
+def _current_watermark(db_path: Path, since_ts: float) -> float | None:
+    """Newest in-window ts_utc of the report's event types (None if unreadable)."""
     try:
-        if not _CACHE_FILE.exists():
+        conn = _connect_read_only(db_path)
+        try:
+            newest = 0.0
+            for event_type in _WATERMARK_EVENT_TYPES:
+                row = conn.execute(
+                    "SELECT MAX(ts_utc) FROM events_v1 "
+                    "WHERE event_type = ? AND ts_utc >= ?",
+                    (event_type, since_ts),
+                ).fetchone()
+                if row and row[0] is not None:
+                    newest = max(newest, float(row[0]))
+            return newest
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        logger.warning("calibration_report_watermark_failed", error=str(exc))
+        return None
+
+
+def _load_cache_file(cache_file: Path) -> dict[str, object] | None:
+    try:
+        if not cache_file.exists():
             return None
-        raw = _CACHE_FILE.read_text(encoding="utf-8")
+        raw = cache_file.read_text(encoding="utf-8")
         payload = json.loads(raw)
     except (OSError, json.JSONDecodeError, ValueError):
         return None
@@ -38,14 +77,14 @@ def _load_cache_file() -> dict[str, object] | None:
     return None
 
 
-def _write_cache_file(payload: dict[str, object]) -> None:
+def _write_cache_file(cache_file: Path, payload: dict[str, object]) -> None:
     try:
-        _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _CACHE_FILE.write_text(
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(
             json.dumps(payload, ensure_ascii=False), encoding="utf-8"
         )
-    except OSError:
-        return
+    except OSError as exc:
+        logger.warning("calibration_report_cache_write_failed", error=str(exc))
 
 
 def compute_priority_calibration_report(
@@ -60,13 +99,21 @@ def compute_priority_calibration_report(
     now_ts = float(now_ts_utc) if now_ts_utc is not None else time.time()
     since_ts = now_ts - resolved_days * 24 * 60 * 60
     cache_key = (str(db_path), resolved_days, resolved_max_rows)
+    cache_file_path = _cache_file_path(db_path)
 
+    # A cached report is valid only while the newest in-window event is the
+    # one it was built from; any newer event (or one leaving the window)
+    # changes the watermark and forces a rebuild.
+    current_watermark = _current_watermark(db_path, since_ts)
     cached = _CACHE.get(cache_key)
-    if cached is not None and cached.watermark:
-        if cached.watermark >= since_ts:
-            return cached.report
+    if (
+        cached is not None
+        and cached.watermark
+        and cached.watermark == current_watermark
+    ):
+        return cached.report
 
-    cache_file = _load_cache_file()
+    cache_file = _load_cache_file(cache_file_path)
     if cache_file:
         file_key = "|".join(str(part) for part in cache_key)
         cached_entry = cache_file.get(file_key)
@@ -75,7 +122,7 @@ def compute_priority_calibration_report(
             file_report = cached_entry.get("report")
             if (
                 file_watermark
-                and file_watermark >= since_ts
+                and file_watermark == current_watermark
                 and isinstance(file_report, dict)
             ):
                 _CACHE[cache_key] = _CacheEntry(file_watermark, file_report)
@@ -85,7 +132,7 @@ def compute_priority_calibration_report(
     correction_rows: list[tuple[float, int | None, str]] = []
     surprise_rows: list[tuple[float, int | None]] = []
     try:
-        with sqlite3.connect(db_path) as conn:
+        with closing(_connect_read_only(db_path)) as conn:
             trace_rows = conn.execute(
                 """
                 SELECT ts_utc, email_id, payload_json
@@ -303,6 +350,7 @@ def compute_priority_calibration_report(
 
     _CACHE[cache_key] = _CacheEntry(max_ts, report)
     _write_cache_file(
+        cache_file_path,
         {
             "|".join(str(part) for part in cache_key): {
                 "watermark": max_ts,

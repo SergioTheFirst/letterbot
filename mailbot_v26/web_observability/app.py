@@ -15,8 +15,10 @@ import math
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import sys
+import threading
 import time
 from collections import Counter, deque
 from dataclasses import dataclass
@@ -166,31 +168,60 @@ class SupportSettings:
     text: str = ""
 
 
+_TTL_CACHE_MAX_ENTRIES = 256
+
+
 class _TTLCache:
-    def __init__(self, ttl_seconds: float) -> None:
+    """TTL cache bounded in size.
+
+    Keys often carry a DB change token or a time bucket, so stale keys are never
+    requested again; ``set`` prunes expired entries and evicts the oldest ones
+    beyond ``max_entries`` so memory stays bounded in a long-running process.
+    """
+
+    def __init__(
+        self, ttl_seconds: float, max_entries: int = _TTL_CACHE_MAX_ENTRIES
+    ) -> None:
         self._ttl_seconds = max(0.0, ttl_seconds)
+        self._max_entries = max(1, int(max_entries))
+        # Insertion order == store order (set re-inserts), so the oldest is first.
         self._items: dict[tuple[object, ...], tuple[float, object]] = {}
+        self._lock = threading.Lock()
 
     def get(self, key: tuple[object, ...]) -> object | None:
         if not self._ttl_seconds:
             return None
-        item = self._items.get(key)
-        if not item:
-            return None
-        stored_at, value = item
-        if time.monotonic() - stored_at > self._ttl_seconds:
-            self._items.pop(key, None)
-            return None
-        return value
+        with self._lock:
+            item = self._items.get(key)
+            if not item:
+                return None
+            stored_at, value = item
+            if time.monotonic() - stored_at > self._ttl_seconds:
+                self._items.pop(key, None)
+                return None
+            return value
 
     def set(self, key: tuple[object, ...], value: object) -> None:
         if not self._ttl_seconds:
             return
-        self._items[key] = (time.monotonic(), value)
+        now = time.monotonic()
+        with self._lock:
+            self._items.pop(key, None)
+            self._items[key] = (now, value)
+            while self._items:
+                oldest_key = next(iter(self._items))
+                stored_at, _ = self._items[oldest_key]
+                if (
+                    len(self._items) <= self._max_entries
+                    and now - stored_at <= self._ttl_seconds
+                ):
+                    break
+                del self._items[oldest_key]
 
 
 STATUS_STRIP_REFRESH_MS = 10_000
 HEALTH_REFRESH_MS = 30_000
+DASHBOARD_REFRESH_MS = 15_000
 STATUS_STRIP_STALE_SECONDS = 900.0
 PROCESSING_SPANS_STALE_SECONDS = 900.0
 
@@ -212,7 +243,9 @@ _DASHBOARD_CACHE: dict[str, Any] = {
     "payload": None,
     "key": None,
 }
-_DASHBOARD_CACHE_TTL = 10.0
+# The key already carries the DB change token; the entry must outlive one
+# cockpit poll interval or the next poll can never hit it.
+_DASHBOARD_CACHE_TTL = 2 * DASHBOARD_REFRESH_MS / 1000.0
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -642,14 +675,13 @@ def _render_stub_html(
             rows.append(
                 """
                 <tr data-email-id="{email_id}">
-                  <td>{priority}</td><td>{sender}</td><td>{subject}</td><td>{doc_kind}</td>
+                  <td>{priority}</td><td>{sender}</td><td>{doc_kind}</td>
                   <td>{amount}</td><td>{due_date}</td><td>{action}</td><td>{confidence}</td><td>{received}</td>
                 </tr>
                 """.format(
                     email_id=html.escape(str(row.get("message_id") or row.get("email_id") or "")),
                     priority=html.escape(str(row.get("priority_label") or "")),
                     sender=html.escape(str(row.get("sender_display") or "")),
-                    subject=html.escape(str(row.get("subject") or "")),
                     doc_kind=html.escape(str(row.get("doc_kind_label") or "")),
                     amount=html.escape(str(row.get("amount_display") or "")),
                     due_date=html.escape(str(row.get("due_date") or "")),
@@ -659,7 +691,7 @@ def _render_stub_html(
                 )
             )
         header_row = (
-            "<tr><th>Priority</th><th>Sender</th><th>Subject</th><th>Doc kind</th>"
+            "<tr><th>Priority</th><th>Sender</th><th>Doc kind</th>"
             "<th>Amount</th><th>Due date</th><th>Action</th><th>Confidence</th><th>Received</th></tr>"
         )
         detail_block = ""
@@ -1518,6 +1550,12 @@ def _sanitize_sender_label(value: object) -> str:
     return _sanitize_email_label(value, fallback="Sender hidden") if value else ""
 
 
+def _mask_emails_in_text(value: object) -> str:
+    """Keep a label readable but mask any e-mail address inside it."""
+    text = str(value or "").strip()
+    return WEB_EMAIL_PATTERN.sub(lambda match: _mask_email_address(match.group(0)), text)
+
+
 def _sanitize_account_label(value: object) -> str:
     return _sanitize_email_label(value, fallback="Account hidden") if value else ""
 
@@ -1526,36 +1564,6 @@ def _sanitize_email_preview(value: object) -> str:
     if not value:
         return ""
     return WEB_EMAIL_REDACTED_PREVIEW
-
-
-def _flatten_render_text(value: object, *, limit: int = 240) -> str:
-    def _flatten(node: object) -> list[str]:
-        if node is None:
-            return []
-        if isinstance(node, (list, tuple, set)):
-            parts: list[str] = []
-            for item in node:
-                parts.extend(_flatten(item))
-            return parts
-        if isinstance(node, Mapping):
-            parts: list[str] = []
-            for item in node.values():
-                parts.extend(_flatten(item))
-            return parts
-        text = str(node).strip()
-        if not text:
-            return []
-        try:
-            parsed = json.loads(text)
-        except (TypeError, ValueError):
-            return [text]
-        if parsed == node:
-            return [text]
-        return _flatten(parsed)
-
-    combined = " ".join(part for part in _flatten(value) if part)
-    compact = " ".join(combined.split())
-    return _clamp_text(compact, limit)
 
 
 def _sanitize_archive_row(row: Mapping[str, object]) -> dict[str, object]:
@@ -2550,8 +2558,14 @@ def _load_web_ui_secrets(config_dir: Path) -> tuple[str, float]:
         "general", "web_secret_key", fallback=""
     )
     if not secret_key:
-        logger.warning("WEB_SECRET_KEY missing; using deterministic local fallback key")
-        secret_key = "letterbot-local-web-secret"
+        # Never a shared constant: that would let anyone forge sessions on every
+        # install. A random key lives only in this process (sessions reset on
+        # restart) and is never written to disk.
+        logger.warning(
+            "WEB_SECRET_KEY missing; using a random per-process key "
+            "(web sessions reset on restart)"
+        )
+        secret_key = secrets.token_hex(32)
     try:
         attention_cost = float(
             parser.get("general", "attention_cost_per_hour", fallback="0")
@@ -3639,6 +3653,92 @@ def _is_loopback_bind(bind: str) -> bool:
         return False
 
 
+_LOOPBACK_HOST_NAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+_WILDCARD_BIND_HOSTS = frozenset({"", "0.0.0.0", "::"})
+_LAN_HOST_NAMES_REFRESH_SECONDS = 60.0
+
+
+def _split_host_header(raw: str) -> tuple[str, str | None] | None:
+    """Split a Host header into (lowercase hostname, port); None if malformed."""
+    value = str(raw or "").strip().lower()
+    if not value:
+        return None
+    if value.startswith("["):
+        host, closed, rest = value[1:].partition("]")
+        if not closed or not host:
+            return None
+        if not rest:
+            return host, None
+        if rest.startswith(":") and len(rest) > 1:
+            return host, rest[1:]
+        return None
+    host, has_port, port = value.partition(":")
+    if not host or ":" in port or (has_port and not port):
+        return None
+    return host, (port if has_port else None)
+
+
+def _lan_host_names() -> frozenset[str]:
+    """This machine's LAN addresses and hostname, for the LAN-mode Host allowlist."""
+    names: set[str] = set()
+    try:
+        primary = get_primary_ipv4()
+    except Exception as exc:
+        logger.warning("WEB_UI_LAN_HOSTS_PRIMARY_FAILED error=%s", exc)
+        primary = None
+    if primary:
+        names.add(str(primary).lower())
+    try:
+        hostname = socket.gethostname()
+        names.add(hostname.lower())
+        for info in socket.getaddrinfo(hostname, None):
+            names.add(str(info[4][0]).split("%", 1)[0].lower())
+    except OSError as exc:
+        logger.warning("WEB_UI_LAN_HOSTS_RESOLVE_FAILED error=%s", exc)
+    names.discard("")
+    return frozenset(names)
+
+
+def _lan_host_allowed(app: Flask, hostname: str) -> bool:
+    now = time.monotonic()
+    cached = app.config.get("WEB_UI_LAN_HOST_NAMES")
+    if isinstance(cached, tuple):
+        computed_at, names = cached
+        if hostname in names:
+            return True
+        # A miss re-reads the addresses (DHCP may change them), at most once a minute.
+        if now - computed_at < _LAN_HOST_NAMES_REFRESH_SECONDS:
+            return False
+    names = _lan_host_names()
+    app.config["WEB_UI_LAN_HOST_NAMES"] = (now, names)
+    return hostname in names
+
+
+def _host_header_allowed(app: Flask) -> bool:
+    """DNS-rebinding guard: answer only Host names this server is reachable as."""
+    if USING_FLASK_STUB:
+        return True
+    parsed = _split_host_header(request.host)
+    if parsed is None:
+        return False
+    hostname, port = parsed
+    if port is not None:
+        allowed_ports = {str(app.config.get("WEB_UI_PORT") or "")}
+        server_port = str(request.environ.get("SERVER_PORT") or "")
+        if server_port:
+            allowed_ports.add(server_port)
+        if port not in allowed_ports:
+            return False
+    if hostname in _LOOPBACK_HOST_NAMES:
+        return True
+    bind = str(app.config.get("WEB_UI_BIND") or "").strip().lower().strip("[]")
+    if bind not in _WILDCARD_BIND_HOSTS and hostname == bind:
+        return True
+    if not app.config.get("WEB_UI_ALLOWED_CIDRS"):
+        return False
+    return _lan_host_allowed(app, hostname)
+
+
 def _resolve_yaml_config_path(
     config_path: Path | None, config_dir: Path
 ) -> Path | None:
@@ -3820,6 +3920,14 @@ def create_app(
 
     @app.before_request
     def _guard_request():
+        # Before the loopback smoke bypass: a rebinding page talks from loopback.
+        if not _host_header_allowed(app):
+            logger.warning(
+                "WEB_UI_HOST_REJECTED host=%r path=%s",
+                str(request.host)[:100],
+                request.path,
+            )
+            return _text_response("Bad Request: unexpected Host header", 400)
         remote_addr = _request_remote_addr()
         if _local_smoke_bypass_allowed(app, remote_addr):
             return None
@@ -4078,60 +4186,6 @@ def create_app(
             if isinstance(engineer_payload, Mapping)
             else []
         )
-        top_senders: list[dict[str, object]] = []
-        silent_contacts: list[dict[str, object]] = []
-        stalled_threads: list[dict[str, object]] = []
-        if account_emails:
-            try:
-                top_senders = analytics.cockpit_top_senders(
-                    account_emails, days=30, limit=3
-                )
-            except Exception:
-                top_senders = []
-            try:
-                silent_contacts = analytics.cockpit_silent_contacts(
-                    account_emails,
-                    silent_days=14,
-                    days=90,
-                    min_msgs=3,
-                    limit=3,
-                )
-            except Exception:
-                silent_contacts = []
-            try:
-                stalled_threads = analytics.cockpit_stalled_threads(
-                    account_emails, days=30, limit=3
-                )
-            except Exception:
-                stalled_threads = []
-
-        top_senders = [
-            {
-                **item,
-                "display_name": _flatten_render_text(item.get("display_name")),
-            }
-            for item in top_senders
-            if isinstance(item, Mapping)
-        ]
-        silent_contacts = [
-            {
-                **item,
-                "display_name": _flatten_render_text(item.get("display_name")),
-            }
-            for item in silent_contacts
-            if isinstance(item, Mapping)
-        ]
-        stalled_threads = [
-            {
-                **item,
-                "from_email": _flatten_render_text(item.get("from_email")),
-                "subject": _flatten_render_text(item.get("subject")),
-                "snippet": _flatten_render_text(item.get("snippet")),
-            }
-            for item in stalled_threads
-            if isinstance(item, Mapping)
-        ]
-
         open_commitments = 0
         commitments_url = None
         if account_emails and hasattr(analytics, "commitment_status_counts"):
@@ -4266,9 +4320,6 @@ def create_app(
             latency_distribution=latency_distribution,
             open_commitments=open_commitments,
             commitments_url=commitments_url,
-            top_senders=top_senders,
-            silent_contacts=silent_contacts,
-            stalled_threads=stalled_threads,
             quality_summary=quality_summary,
             dashboard_preview=dashboard_preview,
             dashboard_preview_events=dashboard_preview_events,
@@ -4280,6 +4331,7 @@ def create_app(
             support_methods=app.config["SUPPORT_SETTINGS"].methods[:1],
             hide_limit=True,
             status_refresh_ms=STATUS_STRIP_REFRESH_MS,
+            dashboard_refresh_ms=DASHBOARD_REFRESH_MS,
             share_url=share_url,
         )
 
@@ -4351,7 +4403,6 @@ def create_app(
                     confidence_band=confidence_band,
                     page=page,
                     per_page=ARCHIVE_PAGE_SIZE,
-                    reveal_pii=reveal_pii,
                 )
                 _COCKPIT_CACHE.set(cache_key, archive_payload)
         else:
@@ -4426,7 +4477,6 @@ def create_app(
             selected_detail = _archive_detail_payload(
                 account_emails=account_emails,
                 message_id=selected_message_id,
-                reveal_pii=reveal_pii,
             )
             if selected_detail is None:
                 error_message = error_message or "Interpretation not found for this message."
@@ -5747,9 +5797,9 @@ def create_app(
     def _archive_item_from_events(
         interpretation_row: Mapping[str, object],
         received_row: Mapping[str, object] | None,
-        *,
-        reveal_pii: bool,
     ) -> dict[str, object]:
+        # CONSTITUTION: the web never shows raw subjects or senders, whatever the
+        # PII toggle says. Rows carry the issuer label or a masked sender only.
         interpretation_payload = (
             json.loads(str(interpretation_row.get("payload_json") or "{}"))
             if interpretation_row.get("payload_json")
@@ -5771,10 +5821,11 @@ def create_app(
             or received_payload.get("from_email")
             or ""
         ).strip()
-        issuer_display = str(interpretation_payload.get("issuer_label") or "").strip()
-        sender_display = issuer_display or sender_email
-        if not reveal_pii and sender_display == sender_email:
-            sender_display = _sanitize_sender_label(sender_email)
+        # issuer_profile falls back to the full address for generic mail domains.
+        issuer_display = _mask_emails_in_text(interpretation_payload.get("issuer_label"))
+        sender_display = (
+            issuer_display or _sanitize_sender_label(sender_email) or "Sender hidden"
+        )
         doc_kind = _archive_doc_kind(interpretation_payload.get("doc_kind"))
         priority_bucket = _archive_priority_bucket(interpretation_payload.get("priority"))
         confidence = _safe_float(interpretation_payload.get("confidence")) or 0.0
@@ -5784,9 +5835,6 @@ def create_app(
             else interpretation_row.get("ts_utc")
         )
         received_dt = _parse_datetime_value(received_ts)
-        subject_full = str(received_payload.get("subject") or "").strip()
-        if not subject_full:
-            subject_full = "—"
         action_label = _archive_action_label(
             interpretation_payload.get("action"), doc_kind=doc_kind
         )
@@ -5795,11 +5843,8 @@ def create_app(
         item = {
             "message_id": message_id,
             "email_id": message_id,
-            "sender_email": sender_email,
-            "sender_display": sender_display or "Sender hidden",
-            "issuer_display": issuer_display or sender_display or sender_email,
-            "subject": _clamp_text(subject_full, 80),
-            "subject_full": subject_full,
+            "sender_display": sender_display,
+            "issuer_display": issuer_display or sender_display,
             "doc_kind": doc_kind,
             "doc_kind_label": _archive_doc_kind_label(doc_kind),
             "amount": interpretation_payload.get("amount"),
@@ -5839,7 +5884,6 @@ def create_app(
         confidence_band: str,
         page: int,
         per_page: int,
-        reveal_pii: bool,
     ) -> dict[str, object]:
         if not account_emails or window_days <= 0:
             return {"items": [], "total": 0, "page": 1, "pages": 1}
@@ -5868,10 +5912,11 @@ def create_app(
             _archive_item_from_events(
                 interpretation_row=row,
                 received_row=latest_received.get(email_id),
-                reveal_pii=reveal_pii,
             )
             for email_id, row in latest_interpretations.items()
         ]
+        # Match only what the row already displays (issuer label / masked
+        # sender), so the filter cannot probe whether a raw address exists.
         sender_search = sender_filter.strip().lower()
         filtered: list[dict[str, object]] = []
         for item in items:
@@ -5879,7 +5924,6 @@ def create_app(
                 haystack = " ".join(
                     [
                         str(item.get("sender_display") or ""),
-                        str(item.get("sender_email") or ""),
                         str(item.get("issuer_display") or ""),
                     ]
                 ).lower()
@@ -5919,7 +5963,6 @@ def create_app(
         *,
         account_emails: list[str],
         message_id: int,
-        reveal_pii: bool,
     ) -> dict[str, object] | None:
         interpretation_rows = _scoped_event_rows(
             account_emails=account_emails,
@@ -5938,7 +5981,6 @@ def create_app(
         item = _archive_item_from_events(
             interpretation_row=interpretation_rows[0],
             received_row=received_rows[0] if received_rows else None,
-            reveal_pii=reveal_pii,
         )
         return {
             "message_id": item["message_id"],
@@ -6729,9 +6771,6 @@ def create_app(
         if confidence_band not in ARCHIVE_CONFIDENCE_FILTERS:
             confidence_band = ""
         per_page = max(1, min(int(request.args.get("per_page") or ARCHIVE_PAGE_SIZE), 100))
-        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
-            dashboard_vars.pii
-        )
         return jsonify(
             _archive_api_payload(
                 account_emails=account_emails,
@@ -6742,7 +6781,6 @@ def create_app(
                 confidence_band=confidence_band,
                 page=_parse_page(request.args.get("page"), default=1),
                 per_page=per_page,
-                reveal_pii=reveal_pii,
             )
         )
 
@@ -6750,13 +6788,9 @@ def create_app(
     def api_archive_detail(message_id: int):
         dashboard_vars = _dashboard_vars()
         account_emails = _resolve_account_scope(dashboard_vars)
-        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
-            dashboard_vars.pii
-        )
         payload = _archive_detail_payload(
             account_emails=account_emails,
             message_id=message_id,
-            reveal_pii=reveal_pii,
         )
         if payload is None:
             return jsonify({"error": "message_not_found"}), 404
@@ -7515,16 +7549,6 @@ def create_app(
         )
         mode = _resolve_cockpit_mode(request, session)
 
-        summary = _health_summary_payload(
-            account_emails=account_emails,
-            window_days=window_days,
-            reveal_pii=reveal_pii,
-            mode=mode,
-        )
-        current = summary.get("current") if isinstance(summary, Mapping) else None
-        status_strip = (
-            summary.get("status_strip") if isinstance(summary, Mapping) else None
-        )
         incidents = _health_incidents_payload(
             account_emails=account_emails,
             window_days=window_days,
@@ -7798,7 +7822,6 @@ def create_app(
             if error_message
             else ""
         )
-        graph_json = json.dumps(graph or {}, ensure_ascii=False)
         return _render_template(
             app,
             "relationships.html",
@@ -7814,7 +7837,7 @@ def create_app(
             account_emails_value=",".join(account_emails),
             window_options=window_options,
             limit_value=limit_value,
-            graph_json=graph_json,
+            graph=graph or {},
         )
 
     @app.route("/relationships/contact", methods=["GET"])
@@ -7847,7 +7870,6 @@ def create_app(
             if error_message
             else ""
         )
-        detail_json = json.dumps(detail or {}, ensure_ascii=False)
         return _render_template(
             app,
             "relationships_contact.html",
@@ -7863,7 +7885,7 @@ def create_app(
             account_emails_value=",".join(account_emails),
             window_options=window_options,
             contact_id=html.escape(contact_id),
-            detail_json=detail_json,
+            detail=detail or {},
         )
 
     return app
