@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -16,8 +17,8 @@ from mailbot_v26.config_loader import resolve_account_scope
 from mailbot_v26.insights.anomaly_engine import compute_anomalies
 from mailbot_v26.insights.attention_economics import (
     AttentionEconomicsResult,
+    AttentionEntity,
     compute_attention_economics,
-    format_attention_block,
 )
 from mailbot_v26.insights.quality_metrics import (
     QualityMetricsSnapshot,
