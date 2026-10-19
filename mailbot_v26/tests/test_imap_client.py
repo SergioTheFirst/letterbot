@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -7,6 +7,11 @@ from mailbot_v26.config_loader import AccountConfig
 from mailbot_v26 import imap_client
 from mailbot_v26.imap_client import ResilientIMAP
 from mailbot_v26.state_manager import StateManager
+
+# imapclient with normalise_times=True converts INTERNALDATE to naive local
+# system time. The fake pins that "local" zone to +03:00 so the A9 bug
+# (naive local time read as UTC) reproduces in any CI timezone.
+_FAKE_LOCAL_TZ = timezone(timedelta(hours=3))
 
 
 class _FakeIMAPClient:
@@ -18,9 +23,10 @@ class _FakeIMAPClient:
         self.folder = None
         self._uids: list[int] = []
         self._data: dict[int, dict[bytes, object]] = {}
-        self.search_calls: list[list[str]] = []
+        self.search_calls: list[list[object]] = []
         self.select_calls: list[tuple[str, bool]] = []
         self.uidvalidity: int | None = None
+        self.normalise_times = True
 
     def set_messages(self, messages: dict[int, dict[bytes, object]]) -> None:
         self._uids = sorted(messages.keys())
@@ -46,12 +52,17 @@ class _FakeIMAPClient:
             else:
                 matched = []
         if "SINCE" in criteria:
-            since = datetime.strptime(
-                criteria[criteria.index("SINCE") + 1],
-                "%d-%b-%Y",
-            ).date()
+            raw_since = criteria[criteria.index("SINCE") + 1]
+            if isinstance(raw_since, datetime):
+                since = raw_since.date()
+            elif isinstance(raw_since, date):
+                since = raw_since
+            else:
+                since = datetime.strptime(raw_since, "%d-%b-%Y").date()
             filtered = []
             for uid in matched:
+                # RFC 3501 SINCE: internal date disregarding time and timezone,
+                # i.e. the date in the message's own (server) timezone.
                 internaldate = self._data[uid].get(b"INTERNALDATE")
                 if isinstance(internaldate, datetime) and internaldate.date() >= since:
                     filtered.append(uid)
@@ -59,7 +70,18 @@ class _FakeIMAPClient:
         return matched
 
     def fetch(self, uids, fields):  # type: ignore[override]
-        return {uid: self._data[uid] for uid in uids}
+        return {uid: self._present(self._data[uid]) for uid in uids}
+
+    def _present(self, item: dict[bytes, object]) -> dict[bytes, object]:
+        internaldate = item.get(b"INTERNALDATE")
+        if (
+            self.normalise_times
+            and isinstance(internaldate, datetime)
+            and internaldate.tzinfo is not None
+        ):
+            naive_local = internaldate.astimezone(_FAKE_LOCAL_TZ).replace(tzinfo=None)
+            return {**item, b"INTERNALDATE": naive_local}
+        return dict(item)
 
     def folder_status(self, folder, items):  # type: ignore[override]
         _ = (folder, items)
@@ -662,3 +684,110 @@ def test_mailbox_is_always_selected_read_only(
     assert payload == b"new"
     assert len(fake_client.select_calls) >= 2
     assert all(readonly is True for _, readonly in fake_client.select_calls)
+
+
+# ---- WP2d: batched header FETCH, logout per cycle, per-client timeout, A9 ----
+
+
+def _install_fake(
+    monkeypatch, fake_client: _FakeIMAPClient, captured_kwargs: list | None = None
+) -> None:
+    def _factory(*args, **kwargs):
+        if captured_kwargs is not None:
+            captured_kwargs.append(dict(kwargs))
+        return fake_client
+
+    monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: _factory)
+
+
+def test_server_west_of_utc_mail_just_after_start_is_fetched(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    # A9: SINCE compares the server-local date of INTERNALDATE. A -05:00
+    # server files a 03:30 UTC message under the previous day, so SINCE on the
+    # UTC start date skipped it.
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 3, 0, 0, tzinfo=timezone.utc)
+    server_tz = timezone(timedelta(hours=-5))
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"prestart",
+                b"INTERNALDATE": datetime(2024, 1, 1, 21, 30, tzinfo=server_tz),
+            },
+            2: {
+                b"RFC822": b"after-start",
+                b"INTERNALDATE": datetime(2024, 1, 1, 22, 30, tzinfo=server_tz),
+            },
+        }
+    )
+    _install_fake(monkeypatch, fake_client)
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(account, state, start_time=start_time)
+    messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [2]
+    assert fake_client.search_calls[1] == ["UID", "1:*", "SINCE", date(2024, 1, 1)]
+
+
+def test_naive_local_internaldate_not_mistaken_for_utc(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    # A9: with normalise_times=True imapclient returns naive local times, which
+    # _safe_dt then read as UTC (a +03:00 PC saw a 09:30Z message as 12:30Z).
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 11, 0, 0, tzinfo=timezone.utc)
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"prestart",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 30, tzinfo=_FAKE_LOCAL_TZ),
+            },
+            2: {
+                b"RFC822": b"after-start",
+                b"INTERNALDATE": datetime(2024, 1, 2, 14, 30, tzinfo=_FAKE_LOCAL_TZ),
+            },
+        }
+    )
+    _install_fake(monkeypatch, fake_client)
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(account, state, start_time=start_time)
+    messages = client.fetch_new_messages()
+
+    assert fake_client.normalise_times is False
+    assert [uid for uid, _ in messages] == [2]
+
+
+def test_uidvalidity_resync_since_is_date_with_one_day_margin(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    fake_client.uidvalidity = 20
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"m1",
+                b"INTERNALDATE": datetime(2024, 1, 2, 8, 0, tzinfo=timezone.utc),
+            },
+        }
+    )
+    _install_fake(monkeypatch, fake_client)
+    state = StateManager(tmp_path / "state.json")
+    state.update_last_uid(account.login, 777)
+    state.update_uidvalidity(account.login, 10, mailbox="INBOX")
+
+    client = ResilientIMAP(
+        account,
+        state,
+        start_time=start_time,
+        first_run_bootstrap_hours=24,
+        first_run_bootstrap_max_messages=5,
+    )
+    messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [1]
+    # cutoff 2024-01-01 12:00Z minus one day of server-timezone margin
+    assert fake_client.search_calls[1] == ["UID", "1:*", "SINCE", date(2023, 12, 31)]

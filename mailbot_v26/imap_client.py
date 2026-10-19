@@ -93,6 +93,14 @@ def _parse_rfc822_size(fetch_data: Dict[bytes, Any]) -> Optional[int]:
     return None
 
 
+def _since_criteria(cutoff_utc: datetime) -> list[Any]:
+    # RFC 3501 SINCE compares the date of INTERNALDATE in the server's own
+    # timezone, so a server west of UTC files mail just after cutoff under the
+    # previous day. Search one day earlier; the exact cutoff is applied to the
+    # timezone-aware INTERNALDATE afterwards (A9).
+    return ["SINCE", (cutoff_utc - timedelta(days=1)).date()]
+
+
 def _imapclient_available() -> bool:
     return (_imap_client_cls is not None) or (IMAPClient is not None)
 
@@ -194,6 +202,15 @@ class ResilientIMAP:
                         port=self.account.port,
                         ssl=self.account.ssl,
                     )
+            try:
+                # Aware INTERNALDATE: naive local times were later read as UTC (A9).
+                client.normalise_times = False
+            except Exception as exc:
+                log.warning(
+                    "imap_normalise_times_unsupported host=%s error=%s",
+                    self.account.host,
+                    type(exc).__name__,
+                )
             client.login(self.account.user, self.account.password)
             # readonly (EXAMINE): fetching RFC822 must not set \Seen in the user's mailbox
             client.select_folder(self.account.mailbox, readonly=True)
@@ -264,7 +281,7 @@ class ResilientIMAP:
 
     def _resolve_search_scope(
         self, start_time_utc: datetime
-    ) -> tuple[list[str], Optional[datetime], bool]:
+    ) -> tuple[list[Any], Optional[datetime], bool]:
         if self._allow_prestart_emails:
             return [], None, False
         if (
@@ -273,8 +290,8 @@ class ResilientIMAP:
             and self._bootstrap_max_messages > 0
         ):
             cutoff = start_time_utc - timedelta(hours=self._bootstrap_hours)
-            return ["SINCE", cutoff.strftime("%d-%b-%Y")], cutoff, True
-        return ["SINCE", start_time_utc.strftime("%d-%b-%Y")], start_time_utc, False
+            return _since_criteria(cutoff), cutoff, True
+        return _since_criteria(start_time_utc), start_time_utc, False
 
     def _with_retries(self, fn, *args, **kwargs):
         last_exc: Optional[Exception] = None
@@ -496,7 +513,7 @@ class ResilientIMAP:
             and self._bootstrap_max_messages > 0
         ):
             internaldate_cutoff = start_time_utc - timedelta(hours=self._bootstrap_hours)
-            search_scope = ["SINCE", internaldate_cutoff.strftime("%d-%b-%Y")]
+            search_scope = _since_criteria(internaldate_cutoff)
             bootstrap_active = True
         scoped_criteria = [*base_criteria, *search_scope]
         scoped_uids = sorted(
