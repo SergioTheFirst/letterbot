@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 
 import mailbot_v26.start as start_module
@@ -154,6 +155,16 @@ def _install_common_patches(monkeypatch, accounts, tmp_path):
     )
     monkeypatch.setattr(start_module, "time", start_module.time)
     monkeypatch.setattr(start_module.time, "sleep", lambda *_args, **_kwargs: None)
+    # On a fresh DB run_backfill waits out SQLite's 5 s busy timeout (it emits
+    # from a second connection while its own write is open); record the call
+    # instead so each main() run here stays well under a second.
+    backfill_calls = []
+    monkeypatch.setattr(
+        start_module,
+        "maybe_backfill_events",
+        lambda db_path, **_kwargs: backfill_calls.append(Path(db_path)),
+    )
+    return backfill_calls
 
 
 def _build_imap(responses, call_log=None):
@@ -197,12 +208,13 @@ def test_polling_loop_runs_three_cycles_on_empty_inbox(monkeypatch, tmp_path, ca
     )
     responses = {account.login: [[], [], []]}
     monkeypatch.setattr(start_module, "ResilientIMAP", _build_imap(responses))
-    _install_common_patches(monkeypatch, [account], tmp_path)
+    backfill_calls = _install_common_patches(monkeypatch, [account], tmp_path)
 
     caplog.set_level(logging.INFO, logger="mailbot")
     start_module.main(max_cycles=3)
 
     _assert_cycle_logs(caplog)
+    assert backfill_calls == [tmp_path / "mailbot.sqlite"]
 
 
 def test_polling_loop_continues_after_imap_exception(monkeypatch, tmp_path, caplog):
