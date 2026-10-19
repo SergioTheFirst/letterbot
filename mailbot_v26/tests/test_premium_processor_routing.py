@@ -145,6 +145,11 @@ def test_premium_flag_on_routes_to_premium_processor(monkeypatch, tmp_path) -> N
 
     def fake_premium(**kwargs):
         called["account_email"] = kwargs.get("account_email")
+        # Premium sends under the start-owned delivery guard; an email counts
+        # as done only when that send succeeded (no-send falls back to legacy).
+        guard = kwargs["delivery_guard"]
+        assert guard.before_send() is None
+        guard.after_send(DeliveryResult(delivered=True, retryable=False))
 
     monkeypatch.setattr(
         "mailbot_v26.start.processor_module.process_message", fake_premium

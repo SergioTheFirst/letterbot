@@ -103,7 +103,11 @@ from mailbot_v26.insights.trust_score import TrustScoreCalculator
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.observability import get_logger
-from mailbot_v26.telegram_utils import escape_tg_html
+from mailbot_v26.telegram_utils import (
+    cap_telegram_text,
+    escape_tg_html,
+    telegram_text_units,
+)
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.decision_trace_v1 import (
@@ -176,7 +180,11 @@ from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
-from mailbot_v26.worker.telegram_sender import DeliveryResult, edit_telegram_message
+from mailbot_v26.worker.telegram_sender import (
+    DeliveryResult,
+    edit_telegram_message,
+    should_retry_minimal_payload,
+)
 from mailbot_v26.llm.request_queue import (
     BackgroundLLMWorker,
     LLMRequest,
@@ -812,6 +820,18 @@ def _apply_delivery_sla(
         first_payload = minimal_payload
     result = send_func(first_payload)
     elapsed_to_first_send_seconds = max(0.0, monotonic() - processing_started_at)
+    if delivery_mode == "final_first_send" and should_retry_minimal_payload(result):
+        # Telegram refused the full payload (not shown): one minimal push under
+        # the same delivery key, never edited afterwards.
+        rejected_status = result.status_code
+        delivery_mode = "minimal_after_reject"
+        result = send_func(minimal_payload)
+        logger.warning(
+            "telegram_minimal_retry_after_reject",
+            rejected_status_code=rejected_status,
+            retry_delivered=result.delivered,
+            retry_status_code=result.status_code,
+        )
     edit_applied = False
     if delivery_mode == "minimal_then_edit" and result.delivered:
         message_id = result.message_id
@@ -826,6 +846,65 @@ def _apply_delivery_sla(
         delivery_mode=delivery_mode,
         elapsed_to_first_send_seconds=elapsed_to_first_send_seconds,
         edit_applied=edit_applied,
+    )
+
+
+def _report_delivery_unknown(
+    *,
+    delivery_result: DeliveryResult,
+    account_email: str,
+    email_id: int,
+    telegram_chat_id: str,
+    entity_id: str | None,
+    received_at: datetime,
+    delivery_ts: float,
+) -> None:
+    """The message may be in the chat: make it visible, never resend or retry."""
+    from mailbot_v26.pipeline.delivery_guard import (
+        DELIVERY_UNKNOWN,
+        delivery_unknown_error_class,
+    )
+
+    error_class = delivery_unknown_error_class(delivery_result.error)
+    logger.error(
+        "telegram_delivery_unknown",
+        email_id=email_id,
+        chat_id=telegram_chat_id,
+        error_class=error_class,
+    )
+    change = system_health.update_component(
+        "Telegram", False, reason=DELIVERY_UNKNOWN
+    )
+    _notify_system_mode_change(
+        change=change,
+        chat_id=telegram_chat_id,
+        account_email=account_email,
+    )
+    event_emitter.emit(
+        type="telegram_delivery_failed",
+        timestamp=received_at,
+        email_id=email_id,
+        payload={
+            "error": DELIVERY_UNKNOWN,
+            "delivery_state": "unknown",
+            "error_class": error_class,
+        },
+    )
+    _emit_contract_event(
+        EventType.TELEGRAM_FAILED,
+        ts_utc=delivery_ts,
+        account_id=account_email,
+        entity_id=entity_id,
+        email_id=email_id,
+        payload={
+            "delivered": False,
+            "error": DELIVERY_UNKNOWN,
+            "delivery_state": "unknown",
+            "error_class": error_class,
+            "occurred_at_utc": delivery_ts,
+            "mode": delivery_result.mode,
+            "retry_count": delivery_result.retry_count,
+        },
     )
 
 
@@ -966,6 +1045,7 @@ def _maybe_alert_notification_sla(
     sla_result: NotificationSLAResult | None,
     consecutive_failures: int,
     telegram_delivered: bool | None = None,
+    telegram_bot_token: str | None = None,
 ) -> None:
     if telegram_delivered is False:
         return
@@ -1011,18 +1091,22 @@ def _maybe_alert_notification_sla(
         html_text=escape_tg_html(alert_text),
         priority="\U0001f534",
         metadata={
+            "bot_token": telegram_bot_token or "",
             "chat_id": telegram_chat_id,
             "account_email": account_email,
         },
     )
     try:
         result = enqueue_tg(email_id=0, payload=payload)
-        if result is not None and not result.delivered:
+        if result is None or not result.delivered:
+            # Not remembered: the cooldown starts only once an alert got through.
             logger.warning(
                 "notification_sla_alert_send_failed",
-                error=result.error or "send_failed",
+                error=(result.error if result is not None else None) or "send_failed",
             )
+            return
         notification_alert_store.save_alert(fingerprint, now=now_dt)
+        logger.info("notification_sla_alert_sent", reasons=reasons)
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("notification_sla_alert_failed", error=str(exc))
 
@@ -2544,10 +2628,8 @@ def _build_premium_clarity_text(
 
 
 def _trim_telegram_body(text: str) -> str:
-    cleaned = text.strip()
-    if len(cleaned) <= _TELEGRAM_BODY_LIMIT:
-        return cleaned
-    return f"{cleaned[: _TELEGRAM_BODY_LIMIT - 1]}…"
+    # Whole lines + plain-text cut: a raw char cut could split a tag or entity.
+    return cap_telegram_text(text.strip(), limit=_TELEGRAM_BODY_LIMIT)
 
 
 def _looks_like_subject_only(text: str, subject: str) -> bool:
@@ -5255,6 +5337,15 @@ def build_telegram_payload(
         },
     )
     telegram_text = _normalize_mojibake_text(telegram_text)
+    capped_text = cap_telegram_text(telegram_text)
+    if capped_text != telegram_text:
+        logger.warning(
+            "telegram_text_capped",
+            email_id=context.email_id,
+            original_units=telegram_text_units(telegram_text),
+            capped_units=telegram_text_units(capped_text),
+        )
+        telegram_text = capped_text
     metadata = {
         "subject": context.subject,
         "sender": context.from_email,
@@ -6764,17 +6855,26 @@ def _notify_system_mode_change(
     if change is None:
         return
     try:
-        send_system_notice(
+        sent = send_system_notice(
             chat_id=chat_id,
             notice_text=system_health.system_notice(change),
             account_email=account_email,
         )
-        logger.info(
-            "system_mode_notice_sent",
-            chat_id=chat_id,
-            account_email=account_email,
-            mode=change.current.value,
-        )
+        if sent:
+            logger.info(
+                "system_mode_notice_sent",
+                chat_id=chat_id,
+                account_email=account_email,
+                mode=change.current.value,
+            )
+        else:
+            logger.info(
+                "system_mode_notice_skipped",
+                chat_id=chat_id,
+                account_email=account_email,
+                mode=change.current.value,
+                reason="unconfigured",
+            )
     except Exception as exc:  # pragma: no cover - optional notification
         logger.error(
             "system_mode_notice_failed",
@@ -7703,8 +7803,13 @@ def process_message(
     rfc_message_id: str | None = None,
     in_reply_to: str | None = None,
     references: str | None = None,
+    delivery_guard: Any = None,
 ) -> None:
     """
+    delivery_guard: optional pipeline.delivery_guard.EmailDeliveryGuard; when
+    given, the Telegram POST happens only under its reservation and the caller
+    settles the email by guard.outcome.
+
     Главный pipeline:
     PARSE в†’ LLM в†’ (SAVE TO DB) в†’ TELEGRAM
 
@@ -9292,10 +9397,17 @@ def process_message(
             )
 
         def _send_payload(message_payload: TelegramPayload) -> DeliveryResult:
-            return _coerce_delivery_result(
+            if delivery_guard is not None:
+                blocked = delivery_guard.before_send()
+                if blocked is not None:
+                    return blocked
+            sent = _coerce_delivery_result(
                 enqueue_tg(email_id=message_id, payload=message_payload),
                 email_id=message_id,
             )
+            if delivery_guard is not None:
+                delivery_guard.after_send(sent)
+            return sent
 
         sla_outcome = _apply_delivery_sla(
             processing_started_at=processing_started_at,
@@ -9314,7 +9426,29 @@ def process_message(
         try:
             if delivery_result is None:
                 raise RuntimeError("telegram_delivery_result_missing")
-            if not delivery_result.delivered:
+            if (
+                delivery_guard is not None
+                and delivery_guard.outcome == "duplicate"
+            ):
+                # Already delivered earlier (confirmed): nothing was posted now.
+                logger.info(
+                    "telegram_delivery_skipped_duplicate",
+                    email_id=message_id,
+                    chat_id=telegram_chat_id,
+                )
+            elif delivery_result.maybe_delivered and not delivery_result.delivered:
+                _report_delivery_unknown(
+                    delivery_result=delivery_result,
+                    account_email=account_email,
+                    email_id=message_id,
+                    telegram_chat_id=telegram_chat_id,
+                    entity_id=(
+                        entity_resolution.entity_id if entity_resolution else None
+                    ),
+                    received_at=received_at,
+                    delivery_ts=delivery_ts,
+                )
+            elif not delivery_result.delivered:
                 if delivery_result.retryable:
                     raise RuntimeError(
                         delivery_result.error or "Telegram delivery failed"
@@ -9461,6 +9595,7 @@ def process_message(
             sla_result=policy_decision.notification_sla,
             consecutive_failures=consecutive_tg_failures,
             telegram_delivered=telegram_delivered,
+            telegram_bot_token=telegram_bot_token,
         )
         span.record_stage("send", int((time.perf_counter() - send_start) * 1000))
     except Exception as exc:

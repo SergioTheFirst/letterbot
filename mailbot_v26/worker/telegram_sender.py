@@ -4,19 +4,33 @@ import importlib.util
 import logging
 import json
 import re
+import ssl
 from dataclasses import dataclass
 
 from mailbot_v26.observability.redact import redact_secrets
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
+from mailbot_v26.telegram_utils import cap_telegram_text, telegram_text_units
 from mailbot_v26.text.mojibake import normalize_mojibake_text
 
 requests_spec = importlib.util.find_spec("requests")
 if requests_spec is None:
     requests = None
+    _requests_exceptions = None
+    _urllib3_exceptions = None
 else:
     import requests
+    from requests import exceptions as _requests_exceptions
+
+    try:
+        from urllib3 import exceptions as _urllib3_exceptions
+    except ImportError:  # pragma: no cover - urllib3 ships with requests
+        _urllib3_exceptions = None
 
 log = logging.getLogger(__name__)
+
+_SEND_NOT_SENT_RETRYABLE = "not_sent_retryable"
+_SEND_NOT_SENT_FINAL = "not_sent_final"
+_SEND_MAYBE_DELIVERED = "maybe_delivered"
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,10 +41,162 @@ class DeliveryResult:
     mode: str = "html"
     retry_count: int = 0
     message_id: int | None = None
+    status_code: int | None = None
+    retry_after: float | None = None
+    # Telegram may have shown the message (request sent, reply lost): never resend.
+    maybe_delivered: bool = False
 
 
 def _is_retryable_status(status_code: int) -> bool:
     return status_code >= 500 or status_code == 429
+
+
+_RETRY_AFTER_MIN_SECONDS = 1.0
+_RETRY_AFTER_MAX_SECONDS = 3600.0
+
+
+def _coerce_retry_after(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        seconds = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if seconds != seconds:  # NaN
+        return None
+    return min(_RETRY_AFTER_MAX_SECONDS, max(_RETRY_AFTER_MIN_SECONDS, seconds))
+
+
+def _parse_retry_after(resp: "requests.Response") -> float | None:
+    """Seconds Telegram asks to wait after a 429 (parameters.retry_after, else the
+    Retry-After header), clamped to 1..3600; None when the reply names none."""
+    if getattr(resp, "status_code", None) != 429:
+        return None
+    json_loader = getattr(resp, "json", None)
+    if callable(json_loader):
+        try:
+            body = json_loader()
+        except (ValueError, json.JSONDecodeError):
+            body = None
+        parameters = body.get("parameters") if isinstance(body, dict) else None
+        if isinstance(parameters, dict):
+            seconds = _coerce_retry_after(parameters.get("retry_after"))
+            if seconds is not None:
+                return seconds
+    headers = getattr(resp, "headers", None)
+    if headers is None:
+        return None
+    try:
+        header_value = headers.get("Retry-After")
+    except AttributeError:
+        return None
+    return _coerce_retry_after(header_value)
+
+
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    """exc plus what it wraps (args[0], urllib3 .reason, __cause__/__context__)."""
+    chain: list[BaseException] = []
+    pending: list[object] = [exc]
+    while pending and len(chain) < 16:
+        current = pending.pop(0)
+        if not isinstance(current, BaseException) or any(
+            current is seen for seen in chain
+        ):
+            continue
+        chain.append(current)
+        args = getattr(current, "args", ())
+        pending.extend(
+            [
+                args[0] if args else None,
+                getattr(current, "reason", None),
+                current.__cause__,
+                current.__context__,
+            ]
+        )
+    return chain
+
+
+def _wraps_connect_failure(exc: BaseException) -> bool:
+    if _urllib3_exceptions is None:
+        return False
+    args = getattr(exc, "args", ())
+    wrapped = args[0] if args else None
+    if not isinstance(wrapped, _urllib3_exceptions.MaxRetryError):
+        return False
+    return isinstance(
+        wrapped.reason,
+        (
+            _urllib3_exceptions.NewConnectionError,
+            _urllib3_exceptions.ConnectTimeoutError,
+        ),
+    )
+
+
+def _classify_send_exception(exc: BaseException) -> str:
+    """Whether a failed sendMessage POST can have reached Telegram.
+
+    Only errors raised before the request left this machine count as not sent;
+    anything else (read timeout, reset after sending, unknown) may have been
+    delivered and must never be resent.
+    """
+    rexc = _requests_exceptions
+    if rexc is None:
+        return _SEND_MAYBE_DELIVERED
+    if isinstance(exc, (rexc.InvalidURL, rexc.MissingSchema, rexc.InvalidHeader)):
+        return _SEND_NOT_SENT_FINAL
+    if isinstance(exc, rexc.ReadTimeout):
+        return _SEND_MAYBE_DELIVERED
+    if isinstance(exc, (rexc.ConnectTimeout, rexc.ProxyError)):
+        return _SEND_NOT_SENT_RETRYABLE
+    if isinstance(exc, rexc.SSLError):
+        if any(
+            isinstance(item, ssl.SSLCertVerificationError)
+            for item in _exception_chain(exc)
+        ):
+            return _SEND_NOT_SENT_RETRYABLE
+        return _SEND_MAYBE_DELIVERED
+    if isinstance(exc, rexc.ConnectionError) and _wraps_connect_failure(exc):
+        return _SEND_NOT_SENT_RETRYABLE
+    return _SEND_MAYBE_DELIVERED
+
+
+def _send_exception_result(exc: BaseException, *, mode: str) -> DeliveryResult:
+    # requests puts the URL (with /bot<TOKEN>/) into the exception text.
+    error_text = redact_secrets(exc)
+    kind = _classify_send_exception(exc)
+    if kind == _SEND_MAYBE_DELIVERED:
+        log.error(
+            "Telegram send outcome unknown (%s): %s", type(exc).__name__, error_text
+        )
+        result = DeliveryResult(
+            delivered=False,
+            retryable=False,
+            error=f"delivery_unknown:{type(exc).__name__}",
+            mode=mode,
+            retry_count=1,
+            message_id=None,
+            maybe_delivered=True,
+        )
+    else:
+        log.error("Telegram send exception: %s", error_text)
+        result = DeliveryResult(
+            delivered=False,
+            retryable=kind == _SEND_NOT_SENT_RETRYABLE,
+            error=error_text,
+            mode=mode,
+            retry_count=1,
+            message_id=None,
+        )
+    log.info(
+        "tg_delivery_final",
+        extra={
+            "delivered": False,
+            "retryable": result.retryable,
+            "maybe_delivered": result.maybe_delivered,
+            "error": result.error,
+        },
+    )
+    return result
 
 
 def _strip_html_tags(text: str) -> str:
@@ -41,9 +207,39 @@ def _sanitize_user_facing_text(text: str) -> str:
     return normalize_mojibake_text(text)
 
 
+def _cap_outgoing_text(text: str, *, kind: str) -> str:
+    # Safety net: callers cap already; an over-long text would be a lost 400.
+    capped = cap_telegram_text(text)
+    if capped != text:
+        log.warning(
+            "telegram_text_capped kind=%s original_units=%s capped_units=%s",
+            kind,
+            telegram_text_units(text),
+            telegram_text_units(capped),
+        )
+    return capped
+
+
 def _looks_like_parse_error(error_text: str) -> bool:
     lowered = (error_text or "").lower()
     return "unsupported start tag" in lowered or "can't parse" in lowered
+
+
+def should_retry_minimal_payload(result: DeliveryResult) -> bool:
+    """Telegram refused this payload (400): one minimal-payload retry may pass.
+
+    Only a definite, non-retryable 400 qualifies. Not "chat not found" (any
+    text fails), not a markup parse error (send_telegram already salvaged it
+    as plain text), never 401/403/404, 429/5xx or a maybe-delivered result.
+    """
+    if result.delivered or result.maybe_delivered or result.retryable:
+        return False
+    if result.status_code != 400 or result.mode == "plain_salvage":
+        return False
+    error_text = (result.error or "").lower()
+    return "chat not found" not in error_text and not _looks_like_parse_error(
+        error_text
+    )
 
 
 def _is_message_not_modified(status_code: int, error_text: str) -> bool:
@@ -124,6 +320,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             message_id=None,
         )
 
+    normalized_text = _cap_outgoing_text(normalized_text, kind="send")
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
     try:
@@ -135,25 +332,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             reply_markup=payload.reply_markup,
         )
     except Exception as exc:
-        # requests puts the URL (with /bot<TOKEN>/) into the exception text.
-        error_text = redact_secrets(exc)
-        log.error("Telegram send exception: %s", error_text)
-        log.info(
-            "tg_delivery_final",
-            extra={
-                "delivered": False,
-                "retryable": True,
-                "error": error_text,
-            },
-        )
-        return DeliveryResult(
-            delivered=False,
-            retryable=True,
-            error=error_text,
-            mode="html",
-            retry_count=1,
-            message_id=None,
-        )
+        return _send_exception_result(exc, mode="html")
 
     if resp.status_code != 200:
         log.error(
@@ -175,24 +354,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                     reply_markup=payload.reply_markup,
                 )
             except Exception as exc:
-                error_text = redact_secrets(exc)
-                log.error("Telegram salvage exception: %s", error_text)
-                log.info(
-                    "tg_delivery_final",
-                    extra={
-                        "delivered": False,
-                        "retryable": True,
-                        "error": error_text,
-                    },
-                )
-                return DeliveryResult(
-                    delivered=False,
-                    retryable=True,
-                    error=error_text,
-                    mode="plain_salvage",
-                    retry_count=1,
-                    message_id=None,
-                )
+                return _send_exception_result(exc, mode="plain_salvage")
             if salvage_resp.status_code == 200:
                 salvage_message_id = _extract_message_id(salvage_resp)
                 log.info(
@@ -215,6 +377,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                     mode="plain_salvage",
                     retry_count=1,
                     message_id=salvage_message_id,
+                    status_code=salvage_resp.status_code,
                 )
             log.error(
                 "Telegram salvage HTTP error %s: %s",
@@ -222,12 +385,14 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                 salvage_resp.text,
             )
             retryable = _is_retryable_status(salvage_resp.status_code)
+            retry_after = _parse_retry_after(salvage_resp)
             log.info(
                 "tg_delivery_final",
                 extra={
                     "delivered": False,
                     "retryable": retryable,
                     "error": salvage_resp.text,
+                    "retry_after": retry_after,
                 },
             )
             return DeliveryResult(
@@ -237,14 +402,18 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                 mode="plain_salvage",
                 retry_count=1,
                 message_id=None,
+                status_code=salvage_resp.status_code,
+                retry_after=retry_after,
             )
         retryable = _is_retryable_status(resp.status_code)
+        retry_after = _parse_retry_after(resp)
         log.info(
             "tg_delivery_final",
             extra={
                 "delivered": False,
                 "retryable": retryable,
                 "error": resp.text,
+                "retry_after": retry_after,
             },
         )
         return DeliveryResult(
@@ -254,6 +423,8 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             mode="html",
             retry_count=0,
             message_id=None,
+            status_code=resp.status_code,
+            retry_after=retry_after,
         )
 
     message_id = _extract_message_id(resp)
@@ -273,6 +444,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
         mode="html",
         retry_count=0,
         message_id=message_id,
+        status_code=resp.status_code,
     )
 
 
@@ -301,6 +473,7 @@ def edit_telegram_message(
     if requests is None:
         log.error("Telegram edit failed: requests module not available")
         return False
+    normalized_text = _cap_outgoing_text(normalized_text, kind="edit")
     url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
     payload: dict[str, object] = {
         "chat_id": chat_id,

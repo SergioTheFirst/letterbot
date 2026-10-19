@@ -32,9 +32,17 @@ from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.mime_utils import decode_bytes, decode_mime_header
 from mailbot_v26.text.sanitize import sanitize_text
-from mailbot_v26.telegram_utils import telegram_safe
+from mailbot_v26.telegram_utils import (
+    cap_telegram_text,
+    telegram_safe,
+    telegram_text_units,
+)
 from mailbot_v26.ui.i18n import DEFAULT_LOCALE
-from mailbot_v26.worker.telegram_sender import DeliveryResult, send_telegram
+from mailbot_v26.worker.telegram_sender import (
+    DeliveryResult,
+    send_telegram,
+    should_retry_minimal_payload,
+)
 
 try:  # local import to avoid circular typing issues
     from mailbot_v26.config_loader import (
@@ -727,8 +735,17 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
         locale=locale,
     )
 
+    safe_text = telegram_safe(telegram_text.strip())
+    html_text = cap_telegram_text(safe_text)
+    if html_text != safe_text:
+        logger.warning(
+            "telegram_text_capped email_id=%s original_units=%s capped_units=%s",
+            ctx.email_id,
+            telegram_text_units(safe_text),
+            telegram_text_units(html_text),
+        )
     payload = TelegramPayload(
-        html_text=telegram_safe(telegram_text.strip()),
+        html_text=html_text,
         priority=priority,
         metadata={
             "bot_token": _PIPELINE_CONFIG.keys.telegram_bot_token,
@@ -743,6 +760,27 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
         ),
     )
     result = send_telegram(payload)
+    if should_retry_minimal_payload(result):
+        # Telegram refused the full text (not shown): one minimal push under the
+        # caller's delivery reservation; a second refusal settles as failed.
+        rejected_status = result.status_code
+        minimal_payload = processor_module._build_minimal_telegram_payload(
+            priority=priority,
+            from_email=pretty_sender,
+            subject=pretty_subject,
+            attachments=attachments,
+            metadata=dict(payload.metadata),
+            reply_markup=payload.reply_markup,
+        )
+        result = send_telegram(minimal_payload)
+        logger.warning(
+            "telegram_minimal_retry_after_reject email_id=%s rejected_status_code=%s "
+            "retry_delivered=%s retry_status_code=%s",
+            ctx.email_id,
+            rejected_status,
+            result.delivered,
+            result.status_code,
+        )
     if not result.delivered:
         return result
     logger.info("[PIPELINE] email_id=%s stage=TG done", ctx.email_id)

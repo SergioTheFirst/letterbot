@@ -136,7 +136,8 @@ def test_telegram_retry_on_http_failure(
         remaining = storage.conn.execute("SELECT COUNT(*) FROM queue").fetchone()[0]
     assert remaining == 1
     assert "telegram_delivery_retry" in caplog.text
-    assert "error_class=RuntimeError" in caplog.text
+    # WP1c: a retryable send raises TelegramRetryableError (carries retry_after).
+    assert "error_class=TelegramRetryableError" in caplog.text
     assert "next_retry_at_utc=" in caplog.text
     _cleanup_pipeline(email_id)
 

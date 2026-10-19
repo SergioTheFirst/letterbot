@@ -312,6 +312,9 @@ _STRINGS_RU = {
     "inbound.status.sla": (
         "Оперативность уведомлений (24ч): доставка {delivery}, ошибки {errors}"
     ),
+    "inbound.status.delivery_unknown": (
+        "Неподтверждённые доставки в Telegram (24ч): {count}"
+    ),
     "inbound.status.digest": "Дайджесты: {digest}",
     "inbound.status.autopriority": "Автоприоритет: {mode}",
     "inbound.status.flags": (
@@ -334,6 +337,7 @@ _STRINGS_RU = {
     "inbound.doctor.status_ok": "ОК",
     "inbound.doctor.status_warn": "ПРЕДУПРЕЖДЕНИЕ",
     "inbound.doctor.status_fail": "ОШИБКА",
+    "tg.attachments.more": "… и ещё {count}",
 }
 
 
@@ -414,6 +418,7 @@ _STRINGS_EN = {
     "inbound.status.title": "System status",
     "inbound.status.mode": "Mode: {mode}",
     "inbound.status.sla": "Notification SLA (24h): delivery {delivery}, errors {errors}",
+    "inbound.status.delivery_unknown": "Unconfirmed Telegram deliveries (24h): {count}",
     "inbound.status.digest": "Digests: {digest}",
     "inbound.status.autopriority": "Auto-priority: {mode}",
     "inbound.status.flags": "Flags: preview={preview}, anomalies={anomalies}, quality={quality}",
@@ -434,6 +439,7 @@ _STRINGS_EN = {
     "inbound.doctor.status_ok": "OK",
     "inbound.doctor.status_warn": "WARNING",
     "inbound.doctor.status_fail": "ERROR",
+    "tg.attachments.more": "… and {count} more",
 }
 
 

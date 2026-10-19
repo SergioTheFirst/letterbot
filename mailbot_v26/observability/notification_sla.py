@@ -38,6 +38,8 @@ class NotificationSLAResult:
     undelivered_24h: int
     delivered_24h: int
     total_24h: int
+    # Emails whose Telegram message may or may not have arrived (DELIVERY_UNKNOWN).
+    unknown_24h: int = 0
 
     def degraded_reasons(self) -> list[str]:
         reasons: list[str] = []
@@ -136,17 +138,26 @@ def compute_notification_sla(
             continue
 
     delivery_events: dict[int, tuple[bool, float, str, int, str | None]] = {}
+    delivered_ids: set[int] = set()
+    unknown_ids_24h: set[int] = set()
     for row in deliveries_rows_7d + failed_rows_7d:
         email_id = row.get("email_id")
         ts_utc = row.get("ts_utc")
         if email_id is None or ts_utc is None:
             continue
         payload = _safe_payload(analytics, row)
+        if row.get("event_type") == EventType.TELEGRAM_DELIVERED.value:
+            delivered_ids.add(int(email_id))
+        elif payload.get("delivery_state") == "unknown" and float(ts_utc) >= start_24h:
+            unknown_ids_24h.add(int(email_id))
         delivered = bool(
             payload.get(
                 "delivered", row.get("event_type") == EventType.TELEGRAM_DELIVERED.value
             )
         )
+        previous = delivery_events.get(int(email_id))
+        if previous is not None and previous[0] and not delivered:
+            continue  # a delivery wins over any failure for the same email
         occurred = float(payload.get("occurred_at_utc", ts_utc))
         mode = str(payload.get("mode") or "html").strip() or "html"
         retry_count = int(payload.get("retry_count") or 0)
@@ -180,11 +191,10 @@ def compute_notification_sla(
                     if mode == "plain_salvage":
                         salvage_24h += 1
             elif detected_ts >= start_24h and (detected_ts <= cutoff_ts):
+                # One reason per undelivered email.
                 undelivered_24h += 1
-                if error_reason:
-                    error_reasons[error_reason] = error_reasons.get(error_reason, 0) + 1
-            if detected_ts >= start_24h and error_reason:
-                error_reasons[error_reason] = error_reasons.get(error_reason, 0) + 1
+                reason = error_reason or "unknown"
+                error_reasons[reason] = error_reasons.get(reason, 0) + 1
         else:
             if detected_ts >= start_24h and detected_ts <= cutoff_ts:
                 undelivered_24h += 1
@@ -203,11 +213,7 @@ def compute_notification_sla(
     p50_24h, p90_24h, p99_24h = _latencies(delivered_latencies_24h)
     p50_7d, p90_7d, p99_7d = _latencies(delivered_latencies_7d)
 
-    error_rate_24h = (
-        (undelivered_24h + sum(error_reasons.values())) / total_24h
-        if total_24h
-        else 0.0
-    )
+    error_rate_24h = undelivered_24h / total_24h if total_24h else 0.0
 
     result = NotificationSLAResult(
         delivery_rate_24h=delivery_rate_24h,
@@ -224,6 +230,7 @@ def compute_notification_sla(
         undelivered_24h=undelivered_24h,
         delivered_24h=delivered_24h,
         total_24h=total_24h,
+        unknown_24h=len(unknown_ids_24h - delivered_ids),
     )
 
     logger.info(
