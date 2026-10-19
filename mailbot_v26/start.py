@@ -68,6 +68,7 @@ from mailbot_v26.pipeline.processor import (
 )
 from mailbot_v26.pipeline.delivery_guard import (
     DELIVERY_UNKNOWN,
+    DUPLICATE_SUPPRESSED,
     EmailDeliveryGuard,
     delivery_unknown_error_class,
 )
@@ -1050,6 +1051,111 @@ def _settle_email_delivery(
     return False
 
 
+def _rebuild_pipeline_context(
+    *,
+    storage: Storage,
+    config: BotConfig,
+    email_id: int,
+    stage: str,
+) -> PipelineContext | None:
+    """Rebuild a pipeline context lost with the in-memory caches (restart).
+
+    Stub until WP2b refetches the message by UID; None keeps the existing
+    "no pipeline context" retry path.
+    """
+    return None
+
+
+def _finish_reserved_queue_item(
+    *,
+    storage: Storage,
+    queue_id: int,
+    email_id: int,
+    stage: str,
+    attempts: int,
+    ctx: PipelineContext | None,
+) -> bool:
+    """A19: True when the email's delivery is already reserved and the item is done.
+
+    Runs right after claim_next, before any context work. A confirmed delivery
+    finishes the item without sending; an unconfirmed reservation (crash between
+    the reservation and the POST, or a failed release) becomes DELIVERY_UNKNOWN.
+    Neither is dead-lettered nor gets a "delivery failed" notice. A failed
+    status write propagates so the caller retries the bookkeeping.
+    """
+    delivery_key = _build_telegram_delivery_key(email_id=email_id, kind="email")
+    try:
+        state = storage.get_telegram_delivery_state(delivery_key, email_id)
+    except Exception:
+        # The delivery guard still fails closed before any POST.
+        logger.exception(
+            "telegram_delivery_claim_check_failed email_id=%s stage=%s",
+            email_id,
+            stage,
+        )
+        return False
+    if state is None:
+        return False
+    if state == "confirmed":
+        storage.mark_done(queue_id)
+        _cleanup_pipeline_cache(email_id)
+        logger.info(
+            "telegram_delivery_skipped_duplicate email_id=%s stage=%s delivery_key=%s source=claim_check",
+            email_id,
+            stage,
+            delivery_key,
+        )
+        event_emitter.emit(
+            type="telegram_delivery_skipped_duplicate",
+            timestamp=datetime.now(timezone.utc),
+            email_id=email_id,
+            payload={"delivery_key": delivery_key, "kind": "email", "stage": stage},
+        )
+        return True
+    # Same class the delivery guard reports for an unconfirmed reservation.
+    error_class = delivery_unknown_error_class(DUPLICATE_SUPPRESSED)
+    storage.set_email_delivery_unknown(email_id, f"{DELIVERY_UNKNOWN}:{error_class}")
+    storage.mark_done(queue_id)
+    _cleanup_pipeline_cache(email_id)
+    logger.error(
+        "telegram_delivery_unknown email_id=%s stage=%s attempts=%s error_class=%s source=claim_check",
+        email_id,
+        stage,
+        attempts,
+        error_class,
+    )
+    # No Telegram health change: the reservation is from an earlier run.
+    payload: dict[str, object] = {
+        "attempts": attempts,
+        "error": DELIVERY_UNKNOWN,
+        "delivery_state": "unknown",
+        "error_class": error_class,
+        "stage": stage,
+    }
+    event_emitter.emit(
+        type="telegram_delivery_failed",
+        timestamp=datetime.now(timezone.utc),
+        email_id=email_id,
+        payload=dict(payload),
+    )
+    account_id = ctx.account_email if ctx is not None else None
+    if not account_id:
+        try:
+            account_id = storage.get_email_account(email_id)
+        except Exception:
+            logger.exception(
+                "telegram_delivery_account_lookup_failed email_id=%s", email_id
+            )
+    _emit_contract_event(
+        event_type=EventType.TELEGRAM_FAILED,
+        ts_utc=datetime.now(timezone.utc).timestamp(),
+        account_id=account_id or "unknown",
+        email_id=email_id,
+        payload={**payload, "delivered": False},
+    )
+    return True
+
+
 def _acquire_instance_lock_or_exit(db_path: Path) -> InstanceLock:
     """Single worker per database: a second instance would notify twice."""
     try:
@@ -1090,11 +1196,42 @@ def _process_queue(
         attempts = item["attempts"]
         delivery_guard: EmailDeliveryGuard | None = None
         ctx = PIPELINE_CACHE.get(email_id)
+        try:
+            if _finish_reserved_queue_item(
+                storage=storage,
+                queue_id=queue_id,
+                email_id=email_id,
+                stage=stage,
+                attempts=attempts,
+                ctx=ctx,
+            ):
+                continue
+        except Exception as settle_exc:
+            # Telegram already has (or may have) the message: retry only the
+            # bookkeeping, never dead-letter or notify for it.
+            logger.exception(
+                "telegram_delivery_settle_failed email_id=%s stage=%s source=claim_check",
+                email_id,
+                stage,
+            )
+            try:
+                storage.mark_error(
+                    queue_id, str(settle_exc), _queue_backoff_seconds(attempts)
+                )
+            except Exception:
+                logger.exception("Failed to mark error for queue_id %s", queue_id)
+            continue
         if ctx:
             ctx.attempts = attempts  # type: ignore[attr-defined]
 
         try:
             print(f"[QUEUE] Claimed {stage} for email_id={email_id} attempt={attempts}")
+            if ctx is None:
+                ctx = _rebuild_pipeline_context(
+                    storage=storage, config=config, email_id=email_id, stage=stage
+                )
+                if ctx is not None:
+                    ctx.attempts = attempts  # type: ignore[attr-defined]
             if ctx is None:
                 raise RuntimeError(f"No pipeline context for email {email_id}")
 

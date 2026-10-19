@@ -363,6 +363,13 @@ class Storage:
                 (error, self._now(), email_id),
             )
 
+    def get_email_account(self, email_id: int) -> str | None:
+        row = self.conn.execute(
+            "SELECT account_email FROM emails WHERE id = ?;",
+            (email_id,),
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+
     def list_due_snoozes(
         self, *, now_iso: str, limit: int = 20
     ) -> List[Dict[str, Any]]:
