@@ -54,7 +54,8 @@ def _load_auto_priority_gate_parser(config_path: Path) -> configparser.ConfigPar
         return parser
 
     try:
-        parser.read(config_path, encoding="utf-8")
+        # utf-8-sig: Notepad's "UTF-8 with BOM" must parse like plain UTF-8.
+        parser.read(config_path, encoding="utf-8-sig")
         return parser
     except (configparser.MissingSectionHeaderError, configparser.ParsingError) as exc:
         _LOGGER.warning(
@@ -68,7 +69,7 @@ def _load_auto_priority_gate_parser(config_path: Path) -> configparser.ConfigPar
         )
         _LOGGER.debug("auto_priority_gate_ini_parse_failed", exc_info=exc)
         try:
-            raw_text = config_path.read_text(encoding="utf-8")
+            raw_text = config_path.read_text(encoding="utf-8-sig")
         except OSError as read_exc:
             _LOGGER.warning(
                 "Failed to read %s after parse error; using deterministic defaults.",

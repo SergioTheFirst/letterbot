@@ -419,6 +419,9 @@ def run_backfill(
                     total_attempted += stats.attempted
 
             _mark_backfill_done(conn)
+            # Release the write lock before the emitter opens its own
+            # connection; otherwise it waits out the busy timeout and fails.
+            conn.commit()
             event_emitter.emit(
                 type="events_backfill_done",
                 timestamp=datetime.now(timezone.utc),

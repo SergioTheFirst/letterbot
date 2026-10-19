@@ -147,7 +147,8 @@ def _run_startup_preflight(config_dir: Path) -> tuple[bool, list[str], list[str]
         return False, critical, warnings
 
     parser = configparser.ConfigParser()
-    parser.read(accounts_path, encoding="utf-8")
+    # utf-8-sig: Notepad's "UTF-8 with BOM" must parse like plain UTF-8.
+    parser.read(accounts_path, encoding="utf-8-sig")
     imap_sections = [
         section_name
         for section_name in parser.sections()

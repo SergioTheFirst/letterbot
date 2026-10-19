@@ -547,7 +547,9 @@ class ResilientIMAP:
             if size is not None and size > max_bytes:
                 header_map = (
                     self._with_retries(
-                        lambda client: client.fetch([uid], ["BODY.PEEK[HEADER]"])
+                        lambda client, uid=uid: client.fetch(
+                            [uid], ["BODY.PEEK[HEADER]"]
+                        )
                     )
                     or {}
                 )

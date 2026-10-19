@@ -143,6 +143,9 @@ CREATE TABLE IF NOT EXISTS decision_traces (
     compressed BOOLEAN DEFAULT FALSE
 );
 
+CREATE INDEX IF NOT EXISTS idx_decision_traces_created_at
+    ON decision_traces(created_at);
+
 CREATE TABLE IF NOT EXISTS entities (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
