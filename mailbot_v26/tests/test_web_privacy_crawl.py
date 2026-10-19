@@ -33,16 +33,7 @@ API_TOKEN = "crawl-token"
 # Routes that still leak and cannot be fixed inside the web lane.
 # path -> reason. Keep this empty unless the leak lives in a module the web
 # lane does not own.
-KNOWN_VIOLATORS: dict[str, str] = {
-    "/api/dashboard": (
-        "top_contacts[].sender_email(s) come raw from storage/analytics.py "
-        "top_sender_relationship_profiles (finding C8), and top_issuers[]."
-        "issuer_label/issuer_key carry the raw address for generic-domain "
-        "senders (analytics business_summary). The server-side mask is the "
-        "QW14 analytics part owned by the DIG lane. Remove this entry once "
-        "that lands."
-    ),
-}
+KNOWN_VIOLATORS: dict[str, str] = {}
 
 
 def _insert_event(
@@ -213,6 +204,25 @@ def test_no_route_shows_raw_subject_or_sender(tmp_path: Path, allow_pii: bool) -
     assert unexpected == {}
     stale = sorted(path for path in KNOWN_VIOLATORS if path not in leaks)
     assert stale == [], f"KNOWN_VIOLATORS entries no longer leak: {stale}"
+
+
+def test_dashboard_top_issuers_mask_generic_sender(tmp_path: Path) -> None:
+    db_path = _seed_db(tmp_path)
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        first = client.get("/api/dashboard").get_json()["top_issuers"]
+        second = client.get("/api/dashboard").get_json()["top_issuers"]
+
+    generic = [item for item in first if item["issuer_label"] == "s…@gmail.com"]
+    assert len(generic) == 1, first
+    issuer_key = str(generic[0]["issuer_key"])
+    assert "@" not in issuer_key
+    assert SECRET_ISSUER_SENDER not in issuer_key
+    assert issuer_key.startswith("email-sha256:")
+    # Stable across requests, so the key still works as a client-side id.
+    assert [item["issuer_key"] for item in first] == [
+        item["issuer_key"] for item in second
+    ]
 
 
 def test_archive_sender_filter_cannot_probe_raw_address(tmp_path: Path) -> None:

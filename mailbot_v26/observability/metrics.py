@@ -37,7 +37,9 @@ class MetricsAggregator:
     _cached_at: float = field(default=0.0, init=False, repr=False, compare=False)
 
     def _connect_readonly(self) -> sqlite3.Connection:
-        return sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        # as_uri() escapes '#', '?' and '%' that would otherwise split the URI.
+        uri = Path(self.path).resolve().as_uri() + "?mode=ro"
+        return sqlite3.connect(uri, uri=True)
 
     def snapshot(self) -> dict[str, dict[str, float]]:
         now = self.clock()

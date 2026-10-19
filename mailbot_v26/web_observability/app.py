@@ -4,6 +4,7 @@ import argparse
 import base64
 import csv
 import configparser
+import hashlib
 import hmac
 import html
 import io
@@ -249,7 +250,9 @@ _DASHBOARD_CACHE_TTL = 2 * DASHBOARD_REFRESH_MS / 1000.0
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    # as_uri() escapes '#', '?' and '%' that would otherwise split the URI.
+    uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
     try:
         conn.execute("PRAGMA busy_timeout = 750")
         conn.execute("PRAGMA query_only = ON")
@@ -314,11 +317,6 @@ def _render_stub_html(
     account_email = html.escape(str(context.get("account_email") or ""))
     lane_value = (
         html.escape(str(context.get("lane") or "")) if "lane" in context else ""
-    )
-    share_url = (
-        html.escape(str(context.get("share_url") or ""))
-        if "share_url" in context
-        else ""
     )
 
     def _options(values: list[int], selected: int) -> str:
@@ -1556,6 +1554,21 @@ def _mask_emails_in_text(value: object) -> str:
     return WEB_EMAIL_PATTERN.sub(lambda match: _mask_email_address(match.group(0)), text)
 
 
+def _display_safe_issuer(item: Mapping[str, object]) -> dict[str, object]:
+    """Web copy of a top-issuer profile without the raw sender address.
+
+    For generic mail domains issuer_profile keys and labels the issuer by the
+    full address; analytics keeps it for the Telegram digest, the web masks it.
+    """
+    safe = dict(item)
+    safe["issuer_label"] = _mask_emails_in_text(item.get("issuer_label"))
+    issuer_key = str(item.get("issuer_key") or "")
+    if WEB_EMAIL_PATTERN.search(issuer_key):
+        digest = hashlib.sha256(issuer_key.encode("utf-8")).hexdigest()[:16]
+        safe["issuer_key"] = f"email-sha256:{digest}"
+    return safe
+
+
 def _sanitize_account_label(value: object) -> str:
     return _sanitize_email_label(value, fallback="Account hidden") if value else ""
 
@@ -1712,7 +1725,7 @@ def _load_local_smoke_bypass_from_ini(config_dir: Path) -> bool:
         if not candidate.exists():
             continue
         try:
-            parser.read(candidate, encoding="utf-8")
+            parser.read(candidate, encoding="utf-8-sig")
         except (OSError, configparser.Error) as exc:
             logger.warning(
                 "web_ui_smoke_bypass_read_failed path=%s error=%s", candidate, exc
@@ -2359,9 +2372,6 @@ def _dashboard_processed_rows_view(
             or _parse_datetime_value(email_row.get("created_at"))
             or event_dt
         )
-        sender_email = str(
-            payload.get("sender_email") or email_row.get("from_email") or ""
-        ).strip()
         issuer_label = _clamp_text(_scrub_pii_line(payload.get("issuer_label") or ""), 64)
         sender_display = issuer_label or "Sender hidden"
         priority_bucket = _archive_priority_bucket(
@@ -2447,12 +2457,12 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
         if not settings_path.exists():
             return SupportSettings(enabled=False, show_in_nav=False, methods=[])
         try:
-            parser.read(settings_path, encoding="utf-8")
+            parser.read(settings_path, encoding="utf-8-sig")
         except (OSError, configparser.Error) as exc:
             logger.warning(
-                "support_settings_ini_load_failed",
-                path=str(settings_path),
-                error=str(exc),
+                "support_settings_ini_load_failed path=%s error=%s",
+                settings_path,
+                exc,
             )
             return SupportSettings(enabled=False, show_in_nav=False, methods=[])
         if not parser.has_section("support"):
@@ -2472,7 +2482,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
                 qr_uri = _image_data_uri(qr_path)
             except Exception as exc:
                 logger.warning(
-                    "support_qr_load_failed", path=str(qr_path), error=str(exc)
+                    "support_qr_load_failed path=%s error=%s", qr_path, exc
                 )
                 qr_uri = ""
         method = SupportMethod(
@@ -2498,7 +2508,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
     try:
         raw = load_yaml_config(config_path)
     except Exception as exc:
-        logger.warning("support_config_load_failed", error=str(exc))
+        logger.warning("support_config_load_failed error=%s", exc)
         return _from_ini(settings_path)
     if not isinstance(raw, dict):
         return _from_ini(settings_path)
@@ -2528,7 +2538,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
                 qr_uri = _image_data_uri(qr_path)
             except Exception as exc:
                 logger.warning(
-                    "support_qr_load_failed", path=str(qr_path), error=str(exc)
+                    "support_qr_load_failed path=%s error=%s", qr_path, exc
                 )
                 qr_uri = ""
         methods.append(
@@ -2551,7 +2561,7 @@ def _load_web_ui_secrets(config_dir: Path) -> tuple[str, float]:
     config_path = config_dir / "config.ini"
     if config_path.exists():
         try:
-            parser.read(config_path, encoding="utf-8")
+            parser.read(config_path, encoding="utf-8-sig")
         except (OSError, configparser.Error):
             logger.warning("Failed to read config.ini from %s", config_path)
     secret_key = os.environ.get("WEB_SECRET_KEY") or parser.get(
@@ -3900,7 +3910,7 @@ def create_app(
                     str(Path(config_dir) / "settings.ini"),
                     str(Path(config_dir) / "config.ini"),
                 ],
-                encoding="utf-8",
+                encoding="utf-8-sig",
             )
             ui_locale = get_locale(parser)
         except Exception:
@@ -3939,13 +3949,10 @@ def create_app(
             "api_cockpit_decision_trace_health",
         }
         if request.endpoint in cockpit_endpoints:
-            try:
-                headers = request.headers
-            except Exception:
-                headers = {}
-            header_token = (
-                headers.get("X-Api-Token") if isinstance(headers, Mapping) else None
-            )
+            # Werkzeug EnvironHeaders is not a collections.abc.Mapping, so no
+            # isinstance check; the Flask stub request has no headers at all.
+            headers = getattr(request, "headers", None)
+            header_token = headers.get("X-Api-Token") if headers is not None else None
             token = header_token or request.args.get("token")
             if not _cockpit_token_ok(token, app.config["COCKPIT_API_TOKEN"]):
                 return Response("Forbidden", status=403)
@@ -5429,9 +5436,10 @@ def create_app(
                                 for key, value in business_summary.items()
                                 if key != "top_issuers"
                             }
-                            payload["top_issuers"] = list(
-                                business_summary.get("top_issuers") or []
-                            )
+                            payload["top_issuers"] = [
+                                _display_safe_issuer(item)
+                                for item in business_summary.get("top_issuers") or []
+                            ]
                         try:
                             payload["top_contacts"] = (
                                 analytics.top_sender_relationship_profiles(

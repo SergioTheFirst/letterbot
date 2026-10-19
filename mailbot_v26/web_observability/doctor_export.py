@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import platform
+import re
 import sqlite3
 import sys
 import zipfile
@@ -30,6 +31,28 @@ SECRET_KEY_MARKERS = (
     "smtp_password",
     "telegram_token",
 )
+SUPPORT_VALUE_PLACEHOLDER = "<redacted>"
+# An e-mail address; the first local-part char and the domain survive masking.
+_SUPPORT_EMAIL_RE = re.compile(
+    r"(?<![A-Za-z0-9._%+-])([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*"
+    r"@([A-Za-z0-9.-]+\.[A-Za-z]{2,})"
+)
+# ``subject=...`` / ``from=...`` log fields: the value runs to the next
+# ``key=`` field or the end of the line (quoted values end at the quote).
+_SUPPORT_KEYED_VALUE_RE = re.compile(
+    r"\b(subject|from)=(?:\"[^\"\n]*\"|'[^'\n]*'|[^\n]*?)"
+    r"(?=[ \t]+[A-Za-z_][\w.-]*=|$)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _scrub_support_text(text: str) -> str:
+    """Mask secrets, mail subjects/senders and e-mail addresses for the zip."""
+    scrubbed = redact_secrets(text)
+    scrubbed = _SUPPORT_KEYED_VALUE_RE.sub(
+        lambda match: f"{match.group(1)}={SUPPORT_VALUE_PLACEHOLDER}", scrubbed
+    )
+    return _SUPPORT_EMAIL_RE.sub("\\1\u2026@\\2", scrubbed)
 
 
 def _is_secret_key(key: str) -> bool:
@@ -57,7 +80,20 @@ def _tail_text(path: Path, max_lines: int) -> str:
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         all_lines = handle.readlines()
     selected = all_lines[-max_lines:]
-    return redact_secrets("".join(selected))
+    return _scrub_support_text("".join(selected))
+
+
+def _add_log_to_archive(
+    archive: zipfile.ZipFile, path: Path, metadata_lines: list[str]
+) -> None:
+    """Add one log file to the zip, always scrubbed and never copied raw."""
+    arcname = f"logs/{path.name}"
+    if path.stat().st_size > MAX_LOG_BYTES:
+        archive.writestr(arcname, _tail_text(path, TAIL_LINE_LIMIT))
+        metadata_lines.append(f"{arcname}: truncated_to_tail_lines={TAIL_LINE_LIMIT}")
+        return
+    text = path.read_text(encoding="utf-8", errors="replace")
+    archive.writestr(arcname, _scrub_support_text(text))
 
 
 def _latest_health_snapshot(db_path: Path) -> dict[str, Any]:
@@ -68,7 +104,8 @@ def _latest_health_snapshot(db_path: Path) -> dict[str, Any]:
         "ORDER BY ts_utc DESC LIMIT 1"
     )
     try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+        with sqlite3.connect(uri, uri=True) as conn:
             row = conn.execute(query).fetchone()
     except sqlite3.Error:
         return {}
@@ -163,29 +200,13 @@ def build_diagnostics_zip(
     out = io.BytesIO()
     with zipfile.ZipFile(out, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         if log_path.exists():
-            if log_path.stat().st_size > MAX_LOG_BYTES:
-                archive.writestr(
-                    f"logs/{log_path.name}", _tail_text(log_path, TAIL_LINE_LIMIT)
-                )
-                metadata_lines.append(
-                    f"logs/{log_path.name}: truncated_to_tail_lines={TAIL_LINE_LIMIT}"
-                )
-            else:
-                archive.write(log_path, arcname=f"logs/{log_path.name}")
+            _add_log_to_archive(archive, log_path, metadata_lines)
         else:
             missing_sources.append(str(log_path))
 
         rotated = log_path.with_name(f"{log_path.name}.1")
         if rotated.exists():
-            if rotated.stat().st_size > MAX_LOG_BYTES:
-                archive.writestr(
-                    f"logs/{rotated.name}", _tail_text(rotated, TAIL_LINE_LIMIT)
-                )
-                metadata_lines.append(
-                    f"logs/{rotated.name}: truncated_to_tail_lines={TAIL_LINE_LIMIT}"
-                )
-            else:
-                archive.write(rotated, arcname=f"logs/{rotated.name}")
+            _add_log_to_archive(archive, rotated, metadata_lines)
 
         archive.writestr(
             "health/health.json",
