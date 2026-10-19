@@ -7,6 +7,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Protocol, TextIO
 
+from mailbot_v26.observability.redact import RedactingFormatter
+
 _CONFIGURED = False
 _FILE_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 _PLAIN_FORMAT = "%(message)s"
@@ -86,7 +88,7 @@ def _configure_file_handler(
     backup_count: int,
 ) -> None:
     resolved = log_path.resolve()
-    formatter = logging.Formatter(_FILE_FORMAT)
+    formatter = RedactingFormatter(_FILE_FORMAT)
     for handler in root_logger.handlers:
         if not _is_letterbot_file_handler(handler):
             continue
@@ -127,7 +129,7 @@ def configure_logging(
 
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
-    console_formatter = logging.Formatter(
+    console_formatter = RedactingFormatter(
         _FILE_FORMAT if console_stream is not None else _PLAIN_FORMAT
     )
     _configure_console_handler(

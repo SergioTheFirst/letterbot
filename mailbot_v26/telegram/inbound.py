@@ -28,6 +28,7 @@ from mailbot_v26.observability.decision_trace_store import load_latest_decision_
 from mailbot_v26.observability.decision_trace_view import build_decision_trace_summary
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.observability.notification_sla import compute_notification_sla
+from mailbot_v26.observability.redact import redact_secrets
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.pipeline import tg_renderer
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
@@ -70,7 +71,6 @@ _CALLBACK_PREFIXES = ("mb:prio:", "prio:")
 _TOGGLE_PREFIXES = ("mb:toggle:", "toggle:")
 _HELP_PREFIXES = ("mb:help:", "help:")
 _UI_LOCALE = DEFAULT_LOCALE
-_TELEGRAM_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
 _SENSITIVE_KV_RE = re.compile(
     r"(?i)\b(token|password|secret|api[_-]?key)\b\s*[:=]\s*([^\s,;]+)"
 )
@@ -125,7 +125,7 @@ def _safe_log_text(value: object, *, limit: int = 160) -> str:
     text = _clean_text(str(value or ""))
     if not text:
         return ""
-    text = _TELEGRAM_TOKEN_RE.sub("bot<redacted>", text)
+    text = redact_secrets(text)
     text = _SENSITIVE_KV_RE.sub(r"\1=<redacted>", text)
     if len(text) > limit:
         return text[:limit] + "..."
@@ -1408,24 +1408,66 @@ class TelegramInboundProcessor:
             locale=_UI_LOCALE,
         )
         try:
-            edit_telegram_message(
+            edited = edit_telegram_message(
                 bot_token=self.bot_token,
                 chat_id=chat_id,
                 message_id=message_id_int,
                 html_text=full_text,
                 reply_markup=reply_markup,
             )
-            logger.info(
-                "tg_priority_edit_ok",
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("tg_priority_edit_failed", error=str(exc))
+            return _ui_text("Can't edit the message", "Не могу отредактировать")
+        if not edited:
+            logger.error(
+                "tg_priority_edit_failed",
                 email_id=email_id,
                 chat_id=chat_id,
                 message_id=message_id_int,
                 priority=new_priority,
+                error="edit_rejected",
+            )
+            return _ui_text("Can't edit the message", "Не могу отредактировать")
+        logger.info(
+            "tg_priority_edit_ok",
+            email_id=email_id,
+            chat_id=chat_id,
+            message_id=message_id_int,
+            priority=new_priority,
+        )
+        return _ui_text("Priority updated", "Приоритет обновлён")
+
+    def _edit_inline_message(
+        self,
+        *,
+        chat_id: str,
+        message_id: int,
+        email_id: int,
+        html_text: str,
+        reply_markup: dict[str, object] | None,
+    ) -> bool:
+        """Edit a notification in place; log (never hide) a rejected edit."""
+        try:
+            edited = edit_telegram_message(
+                bot_token=self.bot_token,
+                chat_id=chat_id,
+                message_id=message_id,
+                html_text=html_text,
+                reply_markup=reply_markup,
             )
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("tg_priority_edit_failed", error=str(exc))
-            return _ui_text("Can't edit the message", "Не могу отредактировать")
-        return _ui_text("Priority updated", "Приоритет обновлён")
+            logger.error("telegram_inbound_edit_failed", error=str(exc))
+            return False
+        if not edited:
+            logger.error(
+                "telegram_inbound_edit_failed",
+                email_id=email_id,
+                chat_id=chat_id,
+                message_id=message_id,
+                error="edit_rejected",
+            )
+            return False
+        return True
 
     def _open_priority_menu(
         self,
@@ -1483,16 +1525,13 @@ class TelegramInboundProcessor:
             show_decision_trace=self.show_decision_trace,
             locale=_UI_LOCALE,
         )
-        try:
-            edit_telegram_message(
-                bot_token=self.bot_token,
-                chat_id=chat_id,
-                message_id=message_id_int,
-                html_text=full_text,
-                reply_markup=reply_markup,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("telegram_inbound_edit_failed", error=str(exc))
+        self._edit_inline_message(
+            chat_id=chat_id,
+            message_id=message_id_int,
+            email_id=email_id,
+            html_text=full_text,
+            reply_markup=reply_markup,
+        )
 
     def _close_priority_menu(
         self,
@@ -1551,16 +1590,13 @@ class TelegramInboundProcessor:
             expanded=expanded,
             locale=_UI_LOCALE,
         )
-        try:
-            edit_telegram_message(
-                bot_token=self.bot_token,
-                chat_id=chat_id,
-                message_id=message_id_int,
-                html_text=full_text,
-                reply_markup=reply_markup,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("telegram_inbound_edit_failed", error=str(exc))
+        self._edit_inline_message(
+            chat_id=chat_id,
+            message_id=message_id_int,
+            email_id=email_id,
+            html_text=full_text,
+            reply_markup=reply_markup,
+        )
 
     def _open_snooze_menu(
         self,
@@ -1717,16 +1753,13 @@ class TelegramInboundProcessor:
                 expanded=expanded,
                 locale=_UI_LOCALE,
             )
-        try:
-            edit_telegram_message(
-                bot_token=self.bot_token,
-                chat_id=chat_id,
-                message_id=message_id_int,
-                html_text=full_text,
-                reply_markup=reply_markup,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("telegram_inbound_edit_failed", error=str(exc))
+        self._edit_inline_message(
+            chat_id=chat_id,
+            message_id=message_id_int,
+            email_id=email_id,
+            html_text=full_text,
+            reply_markup=reply_markup,
+        )
 
     def _toggle_decision_trace(
         self,
@@ -1786,16 +1819,13 @@ class TelegramInboundProcessor:
             expanded=expanded,
             locale=_UI_LOCALE,
         )
-        try:
-            edit_telegram_message(
-                bot_token=self.bot_token,
-                chat_id=chat_id,
-                message_id=message_id_int,
-                html_text=full_text,
-                reply_markup=reply_markup,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("telegram_inbound_edit_failed", error=str(exc))
+        self._edit_inline_message(
+            chat_id=chat_id,
+            message_id=message_id_int,
+            email_id=email_id,
+            html_text=full_text,
+            reply_markup=reply_markup,
+        )
 
     def _apply_toggle(self, chat_id: str, payload: dict[str, str]) -> None:
         flag = payload.get("flag")

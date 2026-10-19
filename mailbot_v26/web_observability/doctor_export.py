@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from mailbot_v26.integrity import verify_shipped_files
+from mailbot_v26.observability.redact import redact_secrets
 from mailbot_v26.version import __version__
 
 REDACTED = "***REDACTED***"
@@ -56,7 +57,7 @@ def _tail_text(path: Path, max_lines: int) -> str:
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         all_lines = handle.readlines()
     selected = all_lines[-max_lines:]
-    return "".join(selected)
+    return redact_secrets("".join(selected))
 
 
 def _latest_health_snapshot(db_path: Path) -> dict[str, Any]:

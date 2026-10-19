@@ -751,7 +751,7 @@ def _process_queue(
     processor: MessageProcessor,
     flags: FeatureFlags,
 ) -> None:
-    _process_due_snoozes(storage=storage, config=config)
+    _process_due_snoozes_guarded(storage=storage, config=config)
     max_tg_attempts = MAX_TELEGRAM_STAGE_ATTEMPTS
     max_pipeline_attempts = MAX_PIPELINE_STAGE_ATTEMPTS
     while True:
@@ -821,6 +821,7 @@ def _process_queue(
                     and storage.is_telegram_delivered(email_id)
                 ):
                     storage.mark_done(queue_id)
+                    _cleanup_pipeline_cache(email_id)
                     logger.info(
                         "telegram_delivery_skipped_duplicate account_id=%s email_id=%s delivery_key=%s",
                         ctx.account_email if ctx else "",
@@ -899,9 +900,7 @@ def _process_queue(
                             )
                     storage.set_email_delivery_failed(email_id, error)
                     storage.mark_done(queue_id)
-                    PIPELINE_INBOUND_CACHE.pop(email_id, None)
-                    PIPELINE_CACHE.pop(email_id, None)
-                    PIPELINE_RAW_CACHE.pop(email_id, None)
+                    _cleanup_pipeline_cache(email_id)
                     error_class = "DeliveryError"
                     logger.error(
                         "telegram_delivery_failed email_id=%s attempts=%s error_class=%s error=%s",
@@ -922,6 +921,7 @@ def _process_queue(
                     )
             else:
                 storage.mark_done(queue_id)
+                _cleanup_pipeline_cache(email_id)
                 logger.warning("Unknown stage %s for email %s", stage, email_id)
         except Exception as queue_exc:
             logger.exception("Queue handling error for email %s", email_id)
@@ -936,6 +936,7 @@ def _process_queue(
                         logger.exception(
                             "Failed to mark delivery failed for queue_id %s", queue_id
                         )
+                    _cleanup_pipeline_cache(email_id)
                     account = (
                         _get_account_by_login(config, ctx.account_email)
                         if ctx
@@ -1066,7 +1067,7 @@ def _process_queue(
                 attempts,
                 backoff,
             )
-    _process_due_snoozes(storage=storage, config=config)
+    _process_due_snoozes_guarded(storage=storage, config=config)
 
 
 def _render_snooze_reminder_text(
@@ -1280,6 +1281,14 @@ def _build_snooze_return_text(
     if not prefix_lines:
         return existing
     return "\n\n".join(["\n".join(prefix_lines), existing])
+
+
+def _process_due_snoozes_guarded(*, storage: Storage, config: BotConfig) -> None:
+    """Run snooze delivery without letting one failure abort the queue."""
+    try:
+        _process_due_snoozes(storage=storage, config=config)
+    except Exception:
+        logger.exception("snooze_processing_failed")
 
 
 def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
@@ -2057,9 +2066,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                         try:
                             _process_queue(storage, config, processor, flags)
                         except Exception:
+                            # Queued rows stay in the queue and are retried by
+                            # its own attempt/backoff logic; no blanket fail-open.
                             logger.exception("Queue dispatcher failure")
-                            for ctx in list(PIPELINE_CACHE.values()):
-                                _fail_open_process(config, processor, ctx)
 
                     run_digest_tick(
                         now=datetime.now(timezone.utc),
