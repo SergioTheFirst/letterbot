@@ -187,7 +187,6 @@ def build_notification_keyboard(
         return None
 
     normalized_doc_kind = str(doc_kind or "").strip().lower()
-    normalized_priority = str(priority or "").strip()
 
     rows = _feedback_rows(normalized_doc_kind, normalized_key, locale=locale)
     if normalized_doc_kind in _ACTIONABLE_DOC_KINDS or normalized_mode == "full":
