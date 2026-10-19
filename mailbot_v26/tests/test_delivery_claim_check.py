@@ -195,6 +195,7 @@ def test_unreadable_delivery_state_falls_through_to_the_guarded_path(
     assert "telegram_delivery_claim_check_failed" in caplog.text
     assert len(telegram.accepted) == 1
     assert _queue_rows(storage) == []
+    assert _email_row(storage, email_id)[2]
 
 
 def test_missing_context_goes_through_the_rebuild_hook(
