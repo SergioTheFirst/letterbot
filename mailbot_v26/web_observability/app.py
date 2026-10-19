@@ -3939,13 +3939,8 @@ def create_app(
             "api_cockpit_decision_trace_health",
         }
         if request.endpoint in cockpit_endpoints:
-            try:
-                headers = request.headers
-            except Exception:
-                headers = {}
-            header_token = (
-                headers.get("X-Api-Token") if isinstance(headers, Mapping) else None
-            )
+            # Werkzeug EnvironHeaders is not a collections.abc.Mapping.
+            header_token = request.headers.get("X-Api-Token")
             token = header_token or request.args.get("token")
             if not _cockpit_token_ok(token, app.config["COCKPIT_API_TOKEN"]):
                 return Response("Forbidden", status=403)

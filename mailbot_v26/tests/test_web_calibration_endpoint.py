@@ -67,3 +67,38 @@ def test_calibration_endpoint_pii_free(tmp_path: Path, monkeypatch) -> None:
     assert "models" in payload
     raw = json.dumps(payload)
     assert "@" not in raw
+
+
+def _token_app(tmp_path: Path, monkeypatch):
+    db_path = tmp_path / "calibration_token.sqlite"
+    KnowledgeDB(db_path)
+    monkeypatch.setenv("WEB_OBSERVABILITY_TOKEN", "secret-token")
+    return create_app(db_path=db_path, password="pass", secret_key="secret")
+
+
+def test_calibration_endpoint_accepts_header_token_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _token_app(tmp_path, monkeypatch).test_client()
+
+    resp = client.get(
+        "/api/v1/cockpit/calibration?days=30",
+        headers={"X-Api-Token": "secret-token"},
+    )
+
+    assert resp.status_code == 200
+
+
+def test_calibration_endpoint_rejects_wrong_header_token(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _token_app(tmp_path, monkeypatch).test_client()
+
+    wrong = client.get(
+        "/api/v1/cockpit/calibration?days=30",
+        headers={"X-Api-Token": "wrong-token"},
+    )
+    missing = client.get("/api/v1/cockpit/calibration?days=30")
+
+    assert wrong.status_code == 403
+    assert missing.status_code == 403
