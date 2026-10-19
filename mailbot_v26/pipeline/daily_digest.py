@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -16,8 +17,8 @@ from mailbot_v26.config_loader import resolve_account_scope
 from mailbot_v26.insights.anomaly_engine import compute_anomalies
 from mailbot_v26.insights.attention_economics import (
     AttentionEconomicsResult,
+    AttentionEntity,
     compute_attention_economics,
-    format_attention_block,
 )
 from mailbot_v26.insights.quality_metrics import (
     QualityMetricsSnapshot,
@@ -660,7 +661,9 @@ def _build_digest_text(data: DigestData, locale: str = DEFAULT_LOCALE) -> str:
         for item in data.deferred_items:
             sender = item.get("sender") or ""
             summary = item.get("summary") or item.get("subject") or ""
-            label_parts = [part for part in [sender, summary] if part]
+            label_parts = [
+                escape_tg_html(str(part)) for part in [sender, summary] if part
+            ]
             if label_parts:
                 lines.append(f"  - {' — '.join(label_parts)}")
     if data.uncertainty_queue_items:
@@ -1036,7 +1039,7 @@ def _has_digest_content(data: DigestData) -> bool:
         return True
     if data.anomaly_alerts:
         return True
-    if data.quality_metrics is not None:
+    if data.quality_metrics is not None and data.quality_metrics.corrections_total > 0:
         return True
     if data.attention_economics is not None:
         return True

@@ -27,6 +27,33 @@ _REL_INVOICE_RE = re.compile(r"(сч[её]т|invoice|оплат)", re.IGNORECASE
 _REL_CONTRACT_RE = re.compile(
     r"(договор|contract|подпис|signature|sign)", re.IGNORECASE
 )
+# Aggregate-only fields of a sender profile that are safe to show in the web UI.
+_DISPLAY_SAFE_PROFILE_FIELDS = (
+    "emails_count",
+    "invoice_count",
+    "contract_count",
+    "overdue_count",
+    "last_contact_days",
+    "trust_score",
+)
+
+
+def _mask_sender_for_display(value: object) -> str:
+    """Mask a sender address as ``a…@domain`` (same shape as cockpit maskEmail)."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    local, separator, domain = text.partition("@")
+    masked_local = f"{local[:1]}…"
+    return f"{masked_local}@{domain}" if separator else masked_local
+
+
+def _display_safe_sender_profile(profile: Mapping[str, object]) -> dict[str, object]:
+    safe = {
+        key: profile[key] for key in _DISPLAY_SAFE_PROFILE_FIELDS if key in profile
+    }
+    safe["sender_email"] = _mask_sender_for_display(profile.get("sender_email"))
+    return safe
 
 
 @dataclass(frozen=True, slots=True)
@@ -4636,7 +4663,13 @@ class KnowledgeAnalytics:
         days: int = 7,
         limit: int = 5,
         now: datetime | None = None,
+        include_raw_senders: bool = False,
     ) -> list[dict[str, object]]:
+        """Top sender profiles; masked aggregates unless raw senders are requested.
+
+        The default (masked) shape feeds the web dashboard, which must never
+        receive raw sender addresses; local Telegram digests opt into raw ones.
+        """
         account_ids = self._normalize_account_scope(account_email, account_emails)
         if not account_ids or days <= 0 or limit <= 0:
             return []
@@ -4702,7 +4735,9 @@ class KnowledgeAnalytics:
                 )
                 if profile is not None:
                     profiles.append(profile)
-            return profiles
+            if include_raw_senders:
+                return profiles
+            return [_display_safe_sender_profile(profile) for profile in profiles]
         except sqlite3.OperationalError:
             return []
 

@@ -671,7 +671,7 @@ def test_api_dashboard_returns_top_contacts(tmp_path: Path) -> None:
     data = resp.get_json()
     assert isinstance(data["top_contacts"], list)
     assert data["top_contacts"]
-    assert data["top_contacts"][0]["sender_email"] == "alice@example.com"
+    assert data["top_contacts"][0]["sender_email"] == "a…@example.com"
 
 
 def test_dashboard_uses_interpretation_events_only(tmp_path: Path) -> None:

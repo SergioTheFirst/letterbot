@@ -10,8 +10,8 @@ from mailbot_v26.insights.anomaly_engine import compute_anomalies
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.insights.attention_economics import (
     AttentionEconomicsResult,
+    AttentionEntity,
     compute_attention_economics,
-    format_attention_block,
 )
 from mailbot_v26.insights.quality_metrics import (
     QualityMetricsSnapshot,
@@ -785,6 +785,7 @@ def _collect_weekly_data(
             days=7,
             limit=3,
             now=now,
+            include_raw_senders=True,
         )
         if relationship_top_senders:
             avg_trust = sum(

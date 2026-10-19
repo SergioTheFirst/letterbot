@@ -45,6 +45,7 @@ from mailbot_v26.observability.metrics import (
     SystemGates,
 )
 from mailbot_v26.pipeline import daily_digest, weekly_digest
+from mailbot_v26.pipeline.processor import _resolve_outbound_ui_locale
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
@@ -478,16 +479,25 @@ def _resolve_weekly_support_footer(
 
 
 def _has_weekly_content(data: weekly_digest.WeeklyDigestData) -> bool:
+    # Analytics return zero-valued dicts ({"created": 0, ...}, {"up": [], ...})
+    # and an always-present quality snapshot, so test values, not presence.
     return bool(
         data.total_emails
         or data.deferred_emails
         or data.attention_entities
-        or data.commitment_counts
+        or any(int(value or 0) > 0 for value in data.commitment_counts.values())
         or data.overdue_commitments
-        or data.trust_deltas
+        or any(data.trust_deltas.values())
         or data.anomaly_alerts
-        or data.quality_metrics is not None
+        or (
+            data.quality_metrics is not None
+            and data.quality_metrics.corrections_total > 0
+        )
         or data.attention_economics is not None
+        or (
+            data.silence_risk is not None
+            and int(data.silence_risk.get("days_silent") or 0) > 0
+        )
         or (
             data.weekly_accuracy_report is not None
             and int(data.weekly_accuracy_report.get("priority_corrections") or 0) >= 3
@@ -497,14 +507,61 @@ def _has_weekly_content(data: weekly_digest.WeeklyDigestData) -> bool:
     )
 
 
+# Per-window markers (runtime_overrides) so a due window without content is
+# evaluated once instead of on every scheduler tick until the window ends.
+_DAILY_NO_CONTENT_KEY = "digest:daily_no_content_day"
+_WEEKLY_NO_CONTENT_KEY = "digest:weekly_no_content_week"
+_WEEKLY_SKIP_STATE_KEY = "digest:weekly_skip_state"
+
+
+def _digest_marker_key(prefix: str, account_email: str) -> str:
+    return f"{prefix}:{account_email.strip().lower()}"
+
+
+def _daily_window_key(now: datetime) -> str:
+    return f"{now.year:04d}-{now.month:02d}-{now.day:02d}"
+
+
+def _emit_weekly_skip_on_change(
+    *,
+    storage: DigestStorage,
+    marker_store: RuntimeOverrideStore,
+    account_email: str,
+    week_key: str,
+    reason: str,
+    now: datetime,
+) -> None:
+    if not storage.event_emitter:
+        return
+    state_key = _digest_marker_key(_WEEKLY_SKIP_STATE_KEY, account_email)
+    state = f"{week_key}:{reason}"
+    if marker_store.get_value(state_key) == state:
+        return
+    storage.event_emitter.emit(
+        type="weekly_digest_skipped",
+        timestamp=now,
+        email_id=0,
+        payload={
+            "reason": reason,
+            "week_key": week_key,
+            "account_email": account_email,
+        },
+    )
+    marker_store.set_value(state_key, state)
+
+
 def _build_daily_payload(
     *,
     account_email: str,
     chat_id: str,
     bot_token: str,
     data: daily_digest.DigestData,
+    locale: str | None = None,
 ) -> TelegramPayload:
-    digest_text = append_watermark(daily_digest._build_digest_text(data), html=True)
+    resolved_locale = locale or _resolve_outbound_ui_locale()
+    digest_text = append_watermark(
+        daily_digest._build_digest_text(data, locale=resolved_locale), html=True
+    )
     return TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",
@@ -524,8 +581,10 @@ def _build_weekly_payload(
     week_key: str,
     data: weekly_digest.WeeklyDigestData,
     support_footer: str = "",
+    locale: str | None = None,
 ) -> TelegramPayload:
-    digest_text = weekly_digest._build_weekly_digest_text(data)
+    resolved_locale = locale or _resolve_outbound_ui_locale()
+    digest_text = weekly_digest._build_weekly_digest_text(data, locale=resolved_locale)
     if support_footer:
         digest_text = f"{digest_text}\n{support_footer}"
     digest_text = append_watermark(digest_text, html=True)
@@ -777,6 +836,19 @@ def _run_daily_digest(
         )
         return
 
+    marker_store = RuntimeOverrideStore(storage.knowledge_db.path)
+    day_key = _daily_window_key(now)
+    no_content_key = _digest_marker_key(_DAILY_NO_CONTENT_KEY, account_email)
+    if marker_store.get_value(no_content_key) == day_key:
+        logger.info(
+            "digest_tick_checked",
+            digest_type="daily",
+            decision="skipped",
+            reason="no_content_already_evaluated",
+            account_email=account_email,
+        )
+        return
+
     if flags.ENABLE_SILENCE_AS_SIGNAL in {"shadow", "enabled"}:
         if storage.contract_event_emitter is not None:
             try:
@@ -791,6 +863,7 @@ def _run_daily_digest(
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.error("silence_detector_failed", error=str(exc))
 
+    locale = _resolve_outbound_ui_locale()
     data = daily_digest._collect_digest_data(
         analytics=storage.analytics,
         account_email=account_email,
@@ -811,11 +884,13 @@ def _run_daily_digest(
         trust_bootstrap_config=trust_bootstrap_config.settings,
         include_regret_minimization=flags.ENABLE_REGRET_MINIMIZATION,
         regret_minimization_config=regret_minimization_config.settings,
+        locale=locale,
         now=now,
         contract_event_emitter=storage.contract_event_emitter,
     )
     has_content = daily_digest._has_digest_content(data)
     if not has_content:
+        marker_store.set_value(no_content_key, day_key)
         logger.info(
             "digest_tick_checked",
             digest_type="daily",
@@ -854,6 +929,7 @@ def _run_daily_digest(
         chat_id=chat_id,
         bot_token=bot_token,
         data=data,
+        locale=locale,
     )
 
     try:
@@ -935,6 +1011,7 @@ def _run_weekly_digest(
     include_weekly_calibration_report: bool = False,
 ) -> None:
     week_key = weekly_digest._iso_week_key(now)
+    marker_store = RuntimeOverrideStore(storage.knowledge_db.path)
 
     if not _is_weekly_due(now, config):
         logger.info(
@@ -945,17 +1022,14 @@ def _run_weekly_digest(
             account_email=account_email,
             week_key=week_key,
         )
-        if storage.event_emitter:
-            storage.event_emitter.emit(
-                type="weekly_digest_skipped",
-                timestamp=now,
-                email_id=0,
-                payload={
-                    "reason": "not_due",
-                    "week_key": week_key,
-                    "account_email": account_email,
-                },
-            )
+        _emit_weekly_skip_on_change(
+            storage=storage,
+            marker_store=marker_store,
+            account_email=account_email,
+            week_key=week_key,
+            reason="not_due",
+            now=now,
+        )
         return
 
     if storage.analytics.has_weekly_digest_sent(
@@ -970,17 +1044,26 @@ def _run_weekly_digest(
             account_email=account_email,
             week_key=week_key,
         )
-        if storage.event_emitter:
-            storage.event_emitter.emit(
-                type="weekly_digest_skipped",
-                timestamp=now,
-                email_id=0,
-                payload={
-                    "reason": "already_sent",
-                    "week_key": week_key,
-                    "account_email": account_email,
-                },
-            )
+        _emit_weekly_skip_on_change(
+            storage=storage,
+            marker_store=marker_store,
+            account_email=account_email,
+            week_key=week_key,
+            reason="already_sent",
+            now=now,
+        )
+        return
+
+    no_content_key = _digest_marker_key(_WEEKLY_NO_CONTENT_KEY, account_email)
+    if marker_store.get_value(no_content_key) == week_key:
+        logger.info(
+            "digest_tick_checked",
+            digest_type="weekly",
+            decision="skipped",
+            reason="no_content_already_evaluated",
+            account_email=account_email,
+            week_key=week_key,
+        )
         return
 
     logger.info(
@@ -991,6 +1074,7 @@ def _run_weekly_digest(
         week_key=week_key,
     )
 
+    locale = _resolve_outbound_ui_locale()
     data = weekly_digest._collect_weekly_data(
         analytics=storage.analytics,
         account_email=account_email,
@@ -1004,11 +1088,31 @@ def _run_weekly_digest(
         weekly_calibration_window_days=weekly_calibration_window_days,
         weekly_calibration_top_n=weekly_calibration_top_n,
         weekly_calibration_min_corrections=weekly_calibration_min_corrections,
+        locale=locale,
         event_emitter=storage.event_emitter,
         contract_event_emitter=storage.contract_event_emitter,
         now=now,
     )
-    has_content = True
+    has_content = _has_weekly_content(data)
+    if not has_content:
+        marker_store.set_value(no_content_key, week_key)
+        logger.info(
+            "digest_tick_checked",
+            digest_type="weekly",
+            decision="skipped",
+            reason="no_content",
+            account_email=account_email,
+            week_key=week_key,
+        )
+        _emit_weekly_skip_on_change(
+            storage=storage,
+            marker_store=marker_store,
+            account_email=account_email,
+            week_key=week_key,
+            reason="no_content",
+            now=now,
+        )
+        return
 
     policy_decision = _evaluate_policy(
         policy_inputs=policy_inputs,
@@ -1026,17 +1130,14 @@ def _run_weekly_digest(
             week_key=week_key,
             system_mode=policy_decision.mode.value,
         )
-        if storage.event_emitter:
-            storage.event_emitter.emit(
-                type="weekly_digest_skipped",
-                timestamp=now,
-                email_id=0,
-                payload={
-                    "reason": "policy_denied",
-                    "week_key": week_key,
-                    "account_email": account_email,
-                },
-            )
+        _emit_weekly_skip_on_change(
+            storage=storage,
+            marker_store=marker_store,
+            account_email=account_email,
+            week_key=week_key,
+            reason="policy_denied",
+            now=now,
+        )
         return
     support_footer = ""
     support_cfg = _load_support_telegram_config()
@@ -1062,6 +1163,7 @@ def _run_weekly_digest(
         week_key=week_key,
         data=data,
         support_footer=support_footer,
+        locale=locale,
     )
 
     try:
