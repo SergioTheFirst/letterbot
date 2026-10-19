@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
-from mailbot_v26.config.paths import resolve_config_paths
+from mailbot_v26.config.paths import default_config_dir, resolve_config_paths
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class FeatureFlags:
         self.AUTO_PRIORITY_CONFIDENCE_THRESHOLD = 0.6
         self.AUTO_ACTION_CONFIDENCE_THRESHOLD = 0.75
 
-        config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
+        config_dir = base_dir or default_config_dir()
         resolved = resolve_config_paths(config_dir)
         config_path = resolved.settings_path
         if not config_path.exists():

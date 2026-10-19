@@ -28,6 +28,9 @@ def test_build_and_verify_scripts_use_letterbot_contract() -> None:
     run_dist = _read("run_dist.bat")
 
     assert "dist\\Letterbot" in build
+    assert "Letterbot-Setup.exe" in build
+    assert "mailbot_v26.tools.build_windows_installer" in build
+    assert ".venv exists, but its Python runtime cannot start." in build
     assert "Letterbot.exe" in run_dist
     assert "settings.ini.example" in build
     assert "accounts.ini.example" in build

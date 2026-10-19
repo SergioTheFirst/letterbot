@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from .paths import default_config_dir
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ class CommitmentChainDigestConfig:
 def load_commitment_chain_digest_config(
     config_dir: Path | None = None,
 ) -> CommitmentChainDigestConfig:
-    config_path = (config_dir or Path(__file__).resolve().parent) / "config.ini"
+    config_path = (config_dir or default_config_dir()) / "config.ini"
     parser = read_user_ini_with_defaults(
         config_path,
         logger=_LOGGER,

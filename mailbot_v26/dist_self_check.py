@@ -39,5 +39,5 @@ def validate_dist_runtime(
     return (
         False,
         "[ERROR] Dist package is incomplete. Missing: "
-        f"{missing_list}. Re-extract full Letterbot ZIP and run run.bat.",
+        f"{missing_list}. Reinstall or re-extract the full LetterBot.ru release and run run.bat.",
     )

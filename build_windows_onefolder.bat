@@ -17,6 +17,14 @@ if not exist "%VENV_PY%" (
     exit /b 1
 )
 
+"%VENV_PY%" -c "import sys; print(sys.executable)" >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: .venv exists, but its Python runtime cannot start.
+    echo Recreate .venv by running letterbot.bat again.
+    echo If that does not help, delete .venv and let letterbot.bat rebuild it.
+    exit /b 1
+)
+
 "%VENV_PY%" -m PyInstaller --version >nul 2>nul
 if errorlevel 1 (
     echo ERROR: PyInstaller not available in .venv.
@@ -39,15 +47,6 @@ if not exist "%DIST_DIR%\mailbot_v26\config" mkdir "%DIST_DIR%\mailbot_v26\confi
 
 if exist "%REPO_ROOT%\mailbot_v26\config\settings.ini.example" (
     copy /Y "%REPO_ROOT%\mailbot_v26\config\settings.ini.example" "%DIST_DIR%\mailbot_v26\config\settings.ini.example" >nul
-) else (
-    echo WARNING: mailbot_v26\config\settings.ini.example not found.
-)
-
-if exist "%REPO_ROOT%\mailbot_v26\config\accounts.ini.example" (
-    copy /Y "%REPO_ROOT%\mailbot_v26\config\accounts.ini.example" "%DIST_DIR%\mailbot_v26\config\accounts.ini.example" >nul
-) else (
-    echo WARNING: mailbot_v26\config\accounts.ini.example not found.
-)
 ) else (
     echo WARNING: mailbot_v26\config\settings.ini.example not found.
 )
@@ -97,6 +96,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem Single-file installer (dist\Letterbot-Setup.exe) is opt-in until it is
+rem proven on release runners: set LETTERBOT_BUILD_INSTALLER=1 to build it.
+if not "%LETTERBOT_BUILD_INSTALLER%"=="1" goto build_done
+"%VENV_PY%" -m mailbot_v26.tools.build_windows_installer "%DIST_DIR%" "%REPO_ROOT%\dist\Letterbot-Setup.exe"
+if errorlevel 1 (
+    echo ERROR: Windows installer build failed.
+    exit /b 1
+)
+echo   Installer: %REPO_ROOT%\dist\Letterbot-Setup.exe
+
+:build_done
 echo =============================================
 echo   Build complete: %DIST_DIR%
 echo =============================================

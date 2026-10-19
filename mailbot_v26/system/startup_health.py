@@ -15,6 +15,7 @@ from mailbot_v26.llm import router as llm_router
 from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.ui.branding import append_watermark
 from mailbot_v26.worker.telegram_sender import ping_telegram
+from mailbot_v26.config.paths import default_config_dir
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +240,7 @@ class LaunchReportBuilder:
         config_dir: Path | None = None,
     ) -> None:
         self._version_label = version_label
-        self._config_dir = config_dir or Path(__file__).resolve().parents[1] / "config"
+        self._config_dir = config_dir or default_config_dir()
 
     def build(
         self,

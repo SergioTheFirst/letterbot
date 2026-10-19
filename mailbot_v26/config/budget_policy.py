@@ -7,6 +7,7 @@ from pathlib import Path
 
 from mailbot_v26.budgets.gate import BudgetGateConfig
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from .paths import default_config_dir
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class BudgetUsageConfig:
 
 
 def load_budget_gate_config(base_dir: Path | None = None) -> BudgetGateConfig:
-    config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
+    config_dir = base_dir or default_config_dir()
     config_path = config_dir / "config.ini"
     parser = read_user_ini_with_defaults(
         config_path,
@@ -49,7 +50,7 @@ def load_budget_gate_config(base_dir: Path | None = None) -> BudgetGateConfig:
 
 
 def load_budget_usage_config(base_dir: Path | None = None) -> BudgetUsageConfig:
-    config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
+    config_dir = base_dir or default_config_dir()
     config_path = config_dir / "config.ini"
     parser = read_user_ini_with_defaults(
         config_path,

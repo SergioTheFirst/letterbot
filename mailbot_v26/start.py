@@ -46,7 +46,7 @@ from mailbot_v26.config_loader import (
     load_telegram_ui_config,
     validate_telegram_contract,
 )
-from mailbot_v26.config.paths import resolve_config_paths
+from mailbot_v26.config.paths import app_root, resolve_config_paths, runtime_log_path
 from mailbot_v26.account_identity import logins_match, normalize_login
 from mailbot_v26.config_yaml import (
     ConfigError as YamlConfigError,
@@ -58,7 +58,7 @@ from mailbot_v26.config_yaml import (
 )
 from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthcheck
 from mailbot_v26.imap_client import ResilientIMAP
-from mailbot_v26.integrity import verify_manifest
+from mailbot_v26.integrity import verify_shipped_files
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline.processor import (
     InboundMessage,
@@ -98,7 +98,7 @@ from mailbot_v26.tools.backfill_events import maybe_backfill_events
 from mailbot_v26.version import __version__
 
 CURRENT_DIR = Path(__file__).resolve().parent
-LOG_PATH = CURRENT_DIR / "mailbot.log"
+LOG_PATH = runtime_log_path()
 # Backward-compatible start-module exports used by tests and tools.
 _START_COMPAT_EXPORTS = (_extract_body, _extract_attachments, _extract_attachment_text)
 RUN_STARTED_AT_UTC = datetime.now(timezone.utc)
@@ -189,20 +189,32 @@ def _run_startup_preflight(config_dir: Path) -> tuple[bool, list[str], list[str]
 def _print_startup_preflight_failure(
     config_dir: Path, critical: list[str], warnings: list[str]
 ) -> None:
+    command_target = f'python -m mailbot_v26 init-config --config-dir "{config_dir.resolve()}"'
+    ready_target = (
+        "python -m mailbot_v26 config-ready "
+        f'--config-dir "{config_dir.resolve()}" --verbose'
+    )
+    if bool(getattr(sys, "frozen", False)):
+        executable_name = Path(sys.executable).name or "Letterbot.exe"
+        command_target = (
+            f'{executable_name} init-config --config-dir "{config_dir.resolve()}"'
+        )
+        ready_target = (
+            f'{executable_name} config-ready --config-dir "{config_dir.resolve()}" '
+            "--verbose"
+        )
     print("[ERROR] Configuration is not ready for startup.")
     print(f"[ERROR] Config dir: {config_dir.resolve()}")
     for item in critical:
         print(f"[ERROR] {item}")
     for item in warnings:
         print(f"[WARN] {item}")
-    print(
-        "[NEXT] Run: "
-        f'python -m mailbot_v26 init-config --config-dir "{config_dir.resolve()}"'
-    )
-    print(
-        "[NEXT] Fill settings.ini and accounts.ini placeholders, then run "
-        f'python -m mailbot_v26 config-ready --config-dir "{config_dir.resolve()}" --verbose'
-    )
+    print(f"[NEXT] Run: {command_target}")
+    if bool(getattr(sys, "frozen", False)):
+        run_bat_path = Path(sys.executable).resolve().parent / "run.bat"
+        if run_bat_path.exists():
+            print(f'[NEXT] Or run: "{run_bat_path}"')
+    print("[NEXT] Fill settings.ini and accounts.ini placeholders, then run " f"{ready_target}")
 
 
 def _ensure_runtime_dirs(*, db_path: Path, log_path: Path) -> None:
@@ -248,17 +260,20 @@ def _get_account_by_login(config: BotConfig, login: str) -> Optional["AccountCon
 
 
 def _check_build_integrity() -> None:
-    manifest_path = REPO_ROOT / "manifest.sha256.json"
+    # The manifest sits next to Letterbot.exe (app_root), not under _internal.
+    root = app_root()
+    manifest_path = root / "manifest.sha256.json"
     if not manifest_path.exists():
         return
     try:
-        ok, changed_files = verify_manifest(REPO_ROOT, manifest_path)
+        # Shipped files only: logs/state/data created at runtime are not the build.
+        tampered = verify_shipped_files(root, manifest_path)
     except Exception:
         logger.exception("integrity_manifest_failed")
         print("WARNING: build files modified (see log)")
         return
-    if not ok:
-        logger.warning("integrity_manifest_changed files=%s", changed_files)
+    if tampered:
+        logger.warning("integrity_manifest_changed files=%s", tampered)
         print("WARNING: build files modified (see log)")
 
 
@@ -1358,18 +1373,6 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         print(dist_error)
         sys.exit(2)
 
-    print("\n" + "=" * 60)
-    print(f"LETTERBOT.RU {__version__} - STARTING")
-    print("=" * 60)
-    print(f"Log file: {LOG_PATH}\n")
-
-    logger.info("=== LetterBot.ru %s started ===", __version__)
-    _check_build_integrity()
-    try:
-        processor_module.system_snapshotter.log_startup()
-    except Exception as exc:  # pragma: no cover - optional observability
-        logger.error("system_health_snapshot_failed error=%s", exc)
-
     storage: Storage | None = None
     runtime_health = AccountRuntimeHealthManager(
         CURRENT_DIR / "data" / "runtime_health.json",
@@ -1418,9 +1421,31 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             processor_module.configure_processor_locale(_get_locale(_p))
         except Exception:
             pass
-        processor_module.configure_processor_db_path(config.storage.db_path)
-        configure_digest_config_dir(resolved_config_dir)
-        flags = FeatureFlags(base_dir=resolved_config_dir)
+        try:
+            processor_module.configure_processor_db_path(config.storage.db_path)
+            configure_digest_config_dir(resolved_config_dir)
+            flags = FeatureFlags(base_dir=resolved_config_dir)
+        except OSError as exc:
+            logger.exception("startup_storage_init_failed")
+            print(f"[ERROR] Cannot open the database or data folder: {exc}")
+            print(
+                "[ERROR] Make sure the Letterbot folder is writable "
+                "(do not install into Program Files) and restart."
+            )
+            sys.exit(2)
+
+        print("\n" + "=" * 60)
+        print(f"LETTERBOT.RU {__version__} - STARTING")
+        print("=" * 60)
+        print(f"Log file: {LOG_PATH}\n")
+
+        logger.info("=== LetterBot.ru %s started ===", __version__)
+        _check_build_integrity()
+        try:
+            processor_module.system_snapshotter.log_startup()
+        except Exception as exc:  # pragma: no cover - optional observability
+            logger.error("system_health_snapshot_failed error=%s", exc)
+
         logger.info("Configuration loaded: %d accounts", len(config.accounts))
 
         telegram_errors = validate_telegram_contract(

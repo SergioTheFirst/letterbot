@@ -16,6 +16,7 @@ from mailbot_v26.insights.commitment_tracker import Commitment, extract_deadline
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.observability.decision_trace_v1 import compute_model_fingerprint
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from mailbot_v26.config.paths import default_config_dir
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +90,7 @@ class VipSenderMatcher:
 
 _PRIORITY_CONFIG_SECTION = "priority_v2"
 _VIP_CONFIG_SECTION = "vip_senders"
-_DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+_DEFAULT_CONFIG_DIR = default_config_dir()
 _LOGGER = logging.getLogger(__name__)
 
 

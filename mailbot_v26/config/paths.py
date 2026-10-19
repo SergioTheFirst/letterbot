@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,9 +16,25 @@ class ConfigPaths:
     two_file_mode: bool
 
 
+def app_root() -> Path:
+    """Folder that contains mailbot_v26/: the exe folder when frozen, else the repo root."""
+    if bool(getattr(sys, "frozen", False)):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[2]
+
+
+def default_config_dir() -> Path:
+    """Canonical config folder (<app_root>/mailbot_v26/config) in source and frozen mode."""
+    return app_root() / "mailbot_v26" / "config"
+
+
+def runtime_log_path() -> Path:
+    """mailbot.log written by the worker (package folder; <exe>/_internal/mailbot_v26 when frozen)."""
+    return Path(__file__).resolve().parents[1] / "mailbot.log"
+
+
 def resolve_config_paths(config_dir: Path | None = None) -> ConfigPaths:
-    default_config_dir = Path(__file__).resolve().parents[1] / "config"
-    selected_dir = config_dir if config_dir is not None else default_config_dir
+    selected_dir = config_dir if config_dir is not None else default_config_dir()
 
     yaml_candidates: list[Path]
     if selected_dir.is_file():
@@ -41,5 +58,10 @@ def resolve_config_paths(config_dir: Path | None = None) -> ConfigPaths:
         two_file_mode=accounts_path.exists(),
     )
 
-
-__all__ = ["ConfigPaths", "resolve_config_paths"]
+__all__ = [
+    "ConfigPaths",
+    "app_root",
+    "default_config_dir",
+    "resolve_config_paths",
+    "runtime_log_path",
+]

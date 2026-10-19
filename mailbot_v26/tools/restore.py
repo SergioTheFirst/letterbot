@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mailbot_v26.tools.backup import create_backup
+from mailbot_v26.config.paths import app_root
 
 
 @dataclass(frozen=True)
@@ -14,7 +15,8 @@ class RestoreResult:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    # Exe folder when frozen (config lives in <exe>\mailbot_v26\config), repo root otherwise.
+    return app_root()
 
 
 def _is_safe_member(member: str) -> bool:

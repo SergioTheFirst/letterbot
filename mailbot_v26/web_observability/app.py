@@ -58,7 +58,7 @@ from mailbot_v26.config_loader import (
     load_web_config,
     load_web_ui_password_from_ini,
 )
-from mailbot_v26.config.paths import resolve_config_paths
+from mailbot_v26.config.paths import app_root, resolve_config_paths, runtime_log_path
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.config_yaml import (
     ConfigError as YamlConfigError,
@@ -3859,11 +3859,12 @@ def create_app(
         if not manifest_path.exists():
             manifest_status = "NO_MANIFEST"
         else:
-            from mailbot_v26.integrity import verify_manifest
+            from mailbot_v26.integrity import verify_shipped_files
 
             try:
-                ok, _changed_files = verify_manifest(dist_root, manifest_path)
-            except Exception:
+                ok = not verify_shipped_files(dist_root, manifest_path)
+            except Exception as exc:
+                logger.warning("doctor_manifest_check_failed error=%s", exc)
                 ok = False
             manifest_status = "OK" if ok else "MODIFIED"
         return _render_template(
@@ -7967,7 +7968,6 @@ def main() -> None:
             "WEB_UI_FIREWALL_HINT Firewall may block incoming connections; see docs."
         )
 
-    project_root = Path(__file__).resolve().parents[2]
     app = create_app(
         db_path=db_path,
         password=password,
@@ -7977,8 +7977,8 @@ def main() -> None:
         allow_cidrs=web_ui.allow_cidrs,
         config_dir=config_dir,
         config_path=config_path,
-        log_path=project_root / "mailbot.log",
-        dist_root=project_root,
+        log_path=runtime_log_path(),
+        dist_root=app_root(),
         web_ui_bind=bind_address,
         web_ui_port=int(port),
         allow_local_smoke_bypass=local_smoke_bypass_enabled,
@@ -8043,8 +8043,8 @@ def start_web_in_thread(
                 attention_cost_per_hour=attention_cost,
                 config_dir=config_dir,
                 config_path=None,
-                log_path=Path(config_dir).parent / "mailbot.log",
-                dist_root=Path(config_dir).parent,
+                log_path=runtime_log_path(),
+                dist_root=app_root(),
                 web_ui_bind=host,
                 web_ui_port=int(port),
                 allow_local_smoke_bypass=True,

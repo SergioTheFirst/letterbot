@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
+from mailbot_v26.config.paths import app_root
 from mailbot_v26.config_loader import ConfigError, load_storage_config
 from mailbot_v26.events.contract import EventType
 
@@ -85,7 +86,8 @@ class CleanupResult:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    # Exe folder when frozen (config lives in <exe>/mailbot_v26/config), repo root otherwise.
+    return app_root()
 
 
 def _resolve_db_path(base_dir: Path) -> Path:

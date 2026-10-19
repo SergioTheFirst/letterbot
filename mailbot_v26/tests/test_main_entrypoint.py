@@ -23,6 +23,30 @@ def test_module_entrypoint_runs_start(monkeypatch):
     assert str(called["config_dir"]) == "."
 
 
+def test_module_entrypoint_uses_dist_config_dir_when_frozen(
+    monkeypatch, tmp_path: Path
+) -> None:
+    called = {}
+    dist_dir = tmp_path / "dist" / "Letterbot"
+    config_dir = dist_dir / "mailbot_v26" / "config"
+    config_dir.mkdir(parents=True)
+
+    def fake_main(config_dir=None):
+        called["config_dir"] = config_dir
+
+    monkeypatch.setattr(mailbot_v26.start, "main", fake_main)
+    monkeypatch.setattr(
+        mailbot_v26.deps, "require_runtime_for", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(dist_dir / "Letterbot.exe"))
+    monkeypatch.setattr(sys, "argv", ["Letterbot.exe"])
+
+    runpy.run_module("mailbot_v26", run_name="__main__")
+
+    assert Path(called["config_dir"]) == config_dir
+
+
 def test_module_entrypoint_config_ready_command(monkeypatch):
     called = {}
 

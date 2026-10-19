@@ -12,6 +12,7 @@ from mailbot_v26.config_loader import ConfigError, load_storage_config
 from mailbot_v26.insights.quality_metrics import compute_quality_metrics
 from mailbot_v26.observability.notification_sla import compute_notification_sla
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.config.paths import app_root
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,8 @@ class ExportResult:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    # Exe folder when frozen (config lives in <exe>\mailbot_v26\config), repo root otherwise.
+    return app_root()
 
 
 def _resolve_db_path(base_dir: Path) -> Path:

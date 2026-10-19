@@ -1,7 +1,7 @@
-﻿# Production Gates (Windows one-folder ZIP)
+# Production Gates (Windows desktop installer)
 
 ## G1 - First-run succeeds
-- User can unpack `Letterbot.zip`, run `run.bat`, fill `accounts.ini`, and reach steady state.
+- User can run `Letterbot-Setup.exe`, let it install `%LOCALAPPDATA%\Letterbot`, launch `run.bat`, fill `accounts.ini`, and reach steady state.
 - First run bootstraps `settings.ini` and `accounts.ini` from `*.example`.
 
 ## G2 - Config errors are actionable
@@ -16,6 +16,7 @@
 
 ## G5 - Build reproducibility
 - `build_windows_onefolder.bat` produces `dist/Letterbot`.
+- `build_windows_onefolder.bat` also produces `dist/Letterbot-Setup.exe`.
 - Required contract files:
   - `Letterbot.exe`
   - `run.bat`

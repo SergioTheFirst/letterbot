@@ -91,3 +91,20 @@ def verify_manifest(root_dir: Path, manifest_path: Path) -> tuple[bool, list[str
         current.pop(ignore, None)
     changed = _collect_changed(expected, current, ignored)
     return not changed, changed
+
+
+def verify_shipped_files(root_dir: Path, manifest_path: Path) -> list[str]:
+    """Return shipped files (listed in the manifest) that are modified or missing.
+
+    Unlike verify_manifest (the strict build-time contract), files the app
+    creates at runtime next to the build - logs, state, databases - are not
+    reported and are never hashed, so this stays fast on installed builds.
+    """
+    root_dir = Path(root_dir)
+    expected = _load_manifest(Path(manifest_path))
+    tampered: list[str] = []
+    for rel, expected_hash in sorted(expected.items()):
+        path = root_dir / rel
+        if not path.is_file() or _hash_file(path) != expected_hash:
+            tampered.append(rel)
+    return tampered

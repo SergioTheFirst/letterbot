@@ -74,3 +74,27 @@ def test_verify_manifest_detects_modified_shipped_file(tmp_path: Path) -> None:
     ok, changed = verify_manifest(tmp_path, manifest_path)
     assert not ok
     assert "payload.txt" in changed
+
+
+def test_verify_shipped_files_ignores_runtime_files_but_flags_tampering(
+    tmp_path: Path,
+) -> None:
+    from mailbot_v26.integrity import verify_shipped_files
+
+    _write(tmp_path / "Letterbot.exe", "exe")
+    _write(tmp_path / "_internal" / "lib.pyd", "lib")
+    manifest_path = tmp_path / "manifest.sha256.json"
+    manifest_path.write_text(json.dumps(compute_manifest(tmp_path)), encoding="utf-8")
+    # Runtime files created next to an installed build are not tampering.
+    _write(tmp_path / "_internal" / "mailbot_v26" / "mailbot.log.1", "log")
+    _write(tmp_path / "_internal" / "data" / "mailbot.sqlite", "db")
+
+    assert verify_shipped_files(tmp_path, manifest_path) == []
+
+    _write(tmp_path / "_internal" / "lib.pyd", "patched")
+    (tmp_path / "Letterbot.exe").unlink()
+
+    assert verify_shipped_files(tmp_path, manifest_path) == [
+        "Letterbot.exe",
+        "_internal/lib.pyd",
+    ]

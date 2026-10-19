@@ -31,6 +31,23 @@ def test_release_smoke_workflow_exists() -> None:
     assert "build_windows_onefolder.bat" in text
     assert "verify_dist.bat" in text
     assert "dist\\\\Letterbot\\\\run.bat" in text or "dist\\Letterbot\\run.bat" in text
+    assert "dist\\\\Letterbot-Setup.exe" in text or "dist\\Letterbot-Setup.exe" in text
+    assert "Letterbot-windows-installer-smoke" in text
+
+
+def test_ci_windows_artifacts_are_onefolder_zip_and_smoked_installer() -> None:
+    text = _read(".github/workflows/ci.yml")
+
+    assert "build_windows_onefolder.bat" in text
+    assert "verify_dist.bat" in text
+    assert "Compress-Archive dist/Letterbot dist/Letterbot.zip" in text
+    assert "Letterbot-windows-onefolder" in text
+    assert "dist\\\\Letterbot-Setup.exe" in text or "dist\\Letterbot-Setup.exe" in text
+    assert "Letterbot-windows-installer" in text
+    # The installer is proven end to end: quiet install, then verify the installed tree.
+    assert '-ArgumentList "/Q" -Wait' in text
+    assert "mailbot_v26.tools.verify_dist $target" in text
+    assert "timeout-minutes" in text
 
 
 def test_dependabot_config_exists_and_covers_pip_and_actions() -> None:
@@ -79,6 +96,7 @@ def test_release_docs_reference_current_windows_contract() -> None:
         assert "run.bat" in text
         assert "Letterbot.exe" in text
         assert "manifest.sha256.json" in text
+        assert "Letterbot-Setup.exe" in text
         assert "install_and_run.bat" not in text
         assert "update_and_run.bat" not in text
         assert "MANIFEST.json" not in text

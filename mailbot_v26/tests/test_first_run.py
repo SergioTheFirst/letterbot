@@ -48,6 +48,25 @@ def test_first_run_missing_config_gives_clear_message(tmp_path: Path, capsys) ->
     assert "init-config" in output
 
 
+def test_first_run_missing_config_frozen_message_is_dist_actionable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dist_dir = tmp_path / "dist" / "Letterbot"
+    dist_dir.mkdir(parents=True)
+    (dist_dir / "run.bat").write_text("@echo off\r\n", encoding="utf-8")
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr("sys.executable", str(dist_dir / "Letterbot.exe"))
+
+    ready, critical, warnings = start_module._run_startup_preflight(tmp_path)  # noqa: SLF001
+    start_module._print_startup_preflight_failure(tmp_path, critical, warnings)  # noqa: SLF001
+
+    output = capsys.readouterr().out
+    assert ready is False
+    assert "Letterbot.exe init-config" in output
+    assert "Letterbot.exe config-ready" in output
+    assert "run.bat" in output
+
+
 def test_first_run_no_config_creates_accounts_ini(tmp_path: Path) -> None:
     result = init_config(tmp_path)
 
@@ -254,5 +273,34 @@ def test_graceful_exit_on_missing_config_no_traceback(
 
     output = capsys.readouterr().out
     assert exc_info.value.code == 2
+    assert "LETTERBOT.RU" not in output
     assert "Configuration is not ready for startup." in output
+    assert "Traceback" not in output
+
+
+def test_unwritable_storage_gives_friendly_exit_not_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    _write_valid_two_file_config(tmp_path)
+    monkeypatch.setattr(
+        start_module, "require_runtime_for", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        start_module, "validate_dist_runtime", lambda **_kwargs: (True, "")
+    )
+    monkeypatch.setattr(start_module, "_check_build_integrity", lambda: None)
+
+    def _denied(_db_path: Path) -> None:
+        raise PermissionError(13, "Access is denied", str(tmp_path / "data"))
+
+    monkeypatch.setattr(
+        start_module.processor_module, "configure_processor_db_path", _denied
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        start_module.main(config_dir=tmp_path, max_cycles=0)
+
+    output = capsys.readouterr().out
+    assert exc_info.value.code == 2
+    assert "Cannot open the database or data folder" in output
     assert "Traceback" not in output

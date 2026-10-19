@@ -4,6 +4,7 @@ import configparser
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from .paths import default_config_dir
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ class AutoPriorityGateConfig:
 def load_auto_priority_gate_config(
     base_dir: Path | None = None,
 ) -> AutoPriorityGateConfig:
-    config_dir = base_dir or Path(__file__).resolve().parents[1] / "config"
+    config_dir = base_dir or default_config_dir()
     config_path = config_dir / "config.ini"
     parser = _load_auto_priority_gate_parser(config_path)
     if not parser.has_section("auto_priority_gate"):

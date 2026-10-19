@@ -11,7 +11,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from mailbot_v26.integrity import verify_manifest
+from mailbot_v26.integrity import verify_shipped_files
 from mailbot_v26.version import __version__
 
 REDACTED = "***REDACTED***"
@@ -91,7 +91,8 @@ def _manifest_status(dist_root: Path) -> dict[str, Any]:
     if not manifest_path.exists():
         return {"status": "NO_MANIFEST", "changed_files": []}
     try:
-        ok, changed = verify_manifest(dist_root, manifest_path)
+        changed = verify_shipped_files(dist_root, manifest_path)
+        ok = not changed
     except Exception as exc:
         return {
             "status": "MODIFIED",

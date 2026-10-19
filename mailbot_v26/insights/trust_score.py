@@ -4,12 +4,12 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from mailbot_v26.config.paths import default_config_dir
 
-_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.ini"
+_CONFIG_PATH = default_config_dir() / "config.ini"
 
 _QUALITY_OK = "OK"
 _QUALITY_LOW = "LOW_DATA"

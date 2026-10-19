@@ -11,12 +11,13 @@
 5. Run `letterbot.bat` again.
 6. Web UI is available at `http://127.0.0.1:8787/` when enabled.
 
-### 2) Dist mode (one-folder build)
+### 2) Desktop bundle (installer)
 
 Current dist contract:
 
+- public installer: `Letterbot-Setup.exe`
 - source-repo dist helper: `run_dist.bat`
-- extracted ZIP launcher: `run.bat`
+- installed launcher: `run.bat`
 - executable: `Letterbot.exe`
 - integrity manifest: `manifest.sha256.json`
 - config directory: `mailbot_v26\config\`
@@ -27,11 +28,11 @@ Current dist contract:
 
 Steps:
 
-1. Extract `Letterbot.zip`.
-2. Open the extracted `Letterbot` folder.
-3. Run `run.bat`.
+1. Close Letterbot if it is running, then run `Letterbot-Setup.exe`.
+2. Wait until it installs the app into `%LOCALAPPDATA%\Letterbot`.
+3. Let the installer launch `run.bat`.
 4. Fill `mailbot_v26\config\accounts.ini`.
-5. Run `run.bat` again.
+5. Run `%LOCALAPPDATA%\Letterbot\run.bat` again if needed.
 
 ### 3) Windows SmartScreen
 

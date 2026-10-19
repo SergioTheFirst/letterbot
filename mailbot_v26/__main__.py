@@ -6,7 +6,17 @@ from pathlib import Path
 
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.version import get_version
-from mailbot_v26.config_loader import CONFIG_DIR
+from mailbot_v26.config.paths import resolve_config_paths
+
+
+def _default_command_config_dir() -> str:
+    return str(resolve_config_paths().config_dir)
+
+
+def _default_runtime_config_dir() -> str:
+    if bool(getattr(sys, "frozen", False)):
+        return _default_command_config_dir()
+    return "."
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -26,21 +36,21 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     doctor_parser.add_argument(
         "--config-dir",
-        default=str(CONFIG_DIR),
+        default=_default_command_config_dir(),
         help="Config directory.",
     )
     init_parser = subparsers.add_parser(
         "init-config", help="Create configuration templates."
     )
     init_parser.add_argument(
-        "--config-dir", default=str(CONFIG_DIR), help="Config directory."
+        "--config-dir", default=_default_command_config_dir(), help="Config directory."
     )
     migrate_parser = subparsers.add_parser(
         "migrate-config",
         help="Migrate legacy config files to settings.ini/accounts.ini.",
     )
     migrate_parser.add_argument(
-        "--config-dir", default=str(CONFIG_DIR), help="Config directory."
+        "--config-dir", default=_default_command_config_dir(), help="Config directory."
     )
     validate_parser = subparsers.add_parser(
         "validate-config", help="Validate configuration files."
@@ -57,7 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     validate_parser.add_argument(
         "--config-dir",
-        default=str(CONFIG_DIR),
+        default=_default_command_config_dir(),
         help="Config directory.",
     )
     ready_parser = subparsers.add_parser(
@@ -66,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ready_parser.add_argument(
         "--config-dir",
-        default=str(CONFIG_DIR),
+        default=_default_command_config_dir(),
         help="Config directory.",
     )
     ready_parser.add_argument(
@@ -97,7 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("version", help="Print version and exit.")
     parser.add_argument(
         "--config-dir",
-        default=".",
+        default=_default_runtime_config_dir(),
         help="Config directory for default runtime start.",
     )
     return parser

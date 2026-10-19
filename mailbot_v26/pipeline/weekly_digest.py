@@ -4,7 +4,6 @@ import configparser
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Sequence
 
 from mailbot_v26.insights.anomaly_engine import compute_anomalies
@@ -33,10 +32,11 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics, WeeklyAccuracyProg
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
 from mailbot_v26.ui.i18n import DEFAULT_LOCALE, humanize_severity
+from mailbot_v26.config.paths import default_config_dir
 
 logger = get_logger("mailbot")
 
-_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.ini"
+_CONFIG_PATH = default_config_dir() / "config.ini"
 _LOGGER = logging.getLogger(__name__)
 
 _WEEKDAY_ALIASES = {

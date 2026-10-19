@@ -9,7 +9,7 @@ from typing import Callable, Iterable
 
 from mailbot_v26.behavior.silence_detector import run_silence_scan
 from mailbot_v26.config_loader import resolve_account_scope
-from mailbot_v26.config.paths import resolve_config_paths
+from mailbot_v26.config.paths import default_config_dir, resolve_config_paths
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.regret_minimization import (
     RegretMinimizationConfig,
@@ -57,7 +57,7 @@ from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.ui.branding import append_watermark
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
-_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.ini"
+_CONFIG_PATH = default_config_dir() / "config.ini"
 _LOGGER = logging.getLogger(__name__)
 _runtime_flag_store = RuntimeFlagStore()
 _system_orchestrator = SystemOrchestrator()

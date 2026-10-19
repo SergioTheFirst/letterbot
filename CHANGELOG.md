@@ -34,13 +34,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- None.
+- Single-file Windows installer `dist/Letterbot-Setup.exe` built on top of the verified `dist/Letterbot` one-folder bundle; ships only manifest-listed files, refuses to run while Letterbot is running, and shows its errors (log: `%TEMP%\Letterbot-install.log`).
 
 ### Changed
-- None.
+- CI publishes both `Letterbot.zip` and the smoke-installed `Letterbot-Setup.exe`; locally the installer is built only with `LETTERBOT_BUILD_INSTALLER=1`.
 
 ### Fixed
-- None.
+- Packaged `Letterbot.exe` now reads feature flags, policy settings, backup/restore/export/cleanup paths and the doctor manifest from `<exe>\mailbot_v26\config` / the exe folder instead of `_internal`.
+- Startup with an unwritable data folder exits with a clear message instead of a traceback.
 
 ### Security
 - None.
