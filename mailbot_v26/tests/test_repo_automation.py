@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import configparser
 from pathlib import Path
 
 
@@ -17,7 +18,12 @@ def test_ci_workflow_exists_and_runs_quality_gates() -> None:
     assert "windows-latest" in text
     assert 'python-version: "3.10"' in text or "matrix.python-version" in text
     assert "python -m compileall mailbot_v26 -q" in text
-    assert "python -m pytest mailbot_v26/tests/ -q --tb=short" in text
+    # Plain pytest runs every pytest.ini testpath, so the root tests/ suite runs too.
+    assert "python -m pytest -q --tb=short" in text
+    assert "python -m pytest mailbot_v26/tests" not in text
+    pytest_ini = configparser.ConfigParser()
+    pytest_ini.read_string(_read("pytest.ini"))
+    assert set(pytest_ini["pytest"]["testpaths"].split()) >= {"tests", "mailbot_v26/tests"}
     assert "python -m mailbot_v26.tools.eval_golden_corpus" in text
     assert "python -m mailbot_v26.tools.cleanup --status" in text
 
