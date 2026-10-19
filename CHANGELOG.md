@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Packaged `Letterbot.exe` now reads feature flags, policy settings, backup/restore/export/cleanup paths and the doctor manifest from `<exe>\mailbot_v26\config` / the exe folder instead of `_internal`.
 - Startup with an unwritable data folder exits with a clear message instead of a traceback.
+- Letterbot no longer marks incoming emails as read (mailbox is opened read-only).
 
 ### Security
 - None.
