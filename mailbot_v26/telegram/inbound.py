@@ -28,6 +28,7 @@ from mailbot_v26.observability.decision_trace_store import load_latest_decision_
 from mailbot_v26.observability.decision_trace_view import build_decision_trace_summary
 from mailbot_v26.observability.event_emitter import EventEmitter
 from mailbot_v26.observability.notification_sla import compute_notification_sla
+from mailbot_v26.observability.redact import redact_secrets
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.pipeline import tg_renderer
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
@@ -70,7 +71,6 @@ _CALLBACK_PREFIXES = ("mb:prio:", "prio:")
 _TOGGLE_PREFIXES = ("mb:toggle:", "toggle:")
 _HELP_PREFIXES = ("mb:help:", "help:")
 _UI_LOCALE = DEFAULT_LOCALE
-_TELEGRAM_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
 _SENSITIVE_KV_RE = re.compile(
     r"(?i)\b(token|password|secret|api[_-]?key)\b\s*[:=]\s*([^\s,;]+)"
 )
@@ -125,7 +125,7 @@ def _safe_log_text(value: object, *, limit: int = 160) -> str:
     text = _clean_text(str(value or ""))
     if not text:
         return ""
-    text = _TELEGRAM_TOKEN_RE.sub("bot<redacted>", text)
+    text = redact_secrets(text)
     text = _SENSITIVE_KV_RE.sub(r"\1=<redacted>", text)
     if len(text) > limit:
         return text[:limit] + "..."

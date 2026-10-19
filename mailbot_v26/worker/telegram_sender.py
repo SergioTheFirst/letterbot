@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from mailbot_v26.observability.redact import redact_secrets
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.text.mojibake import normalize_mojibake_text
 
@@ -127,19 +128,21 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             reply_markup=payload.reply_markup,
         )
     except Exception as exc:
-        log.error("Telegram send exception: %s", exc)
+        # requests puts the URL (with /bot<TOKEN>/) into the exception text.
+        error_text = redact_secrets(exc)
+        log.error("Telegram send exception: %s", error_text)
         log.info(
             "tg_delivery_final",
             extra={
                 "delivered": False,
                 "retryable": True,
-                "error": str(exc),
+                "error": error_text,
             },
         )
         return DeliveryResult(
             delivered=False,
             retryable=True,
-            error=str(exc),
+            error=error_text,
             mode="html",
             retry_count=1,
             message_id=None,
@@ -165,19 +168,20 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                     reply_markup=payload.reply_markup,
                 )
             except Exception as exc:
-                log.error("Telegram salvage exception: %s", exc)
+                error_text = redact_secrets(exc)
+                log.error("Telegram salvage exception: %s", error_text)
                 log.info(
                     "tg_delivery_final",
                     extra={
                         "delivered": False,
                         "retryable": True,
-                        "error": str(exc),
+                        "error": error_text,
                     },
                 )
                 return DeliveryResult(
                     delivered=False,
                     retryable=True,
-                    error=str(exc),
+                    error=error_text,
                     mode="plain_salvage",
                     retry_count=1,
                     message_id=None,
@@ -298,7 +302,7 @@ def edit_telegram_message(
     try:
         resp = requests.post(url, json=payload, timeout=15)
     except Exception as exc:
-        log.error("Telegram edit exception: %s", exc)
+        log.error("Telegram edit exception: %s", redact_secrets(exc))
         return False
     if resp.status_code != 200:
         log.error(
@@ -332,8 +336,9 @@ def ping_telegram(bot_token: str) -> tuple[bool, str]:
     try:
         resp = requests.get(url, timeout=10)
     except Exception as exc:
-        log.error("Telegram ping exception: %s", exc)
-        return False, f"exception: {exc}"
+        error_text = redact_secrets(exc)
+        log.error("Telegram ping exception: %s", error_text)
+        return False, f"exception: {error_text}"
 
     if resp.status_code != 200:
         log.error("Telegram ping HTTP error %s: %s", resp.status_code, resp.text)
