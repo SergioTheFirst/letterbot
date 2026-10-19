@@ -4,6 +4,7 @@ import importlib.util
 import logging
 import json
 import re
+import ssl
 from dataclasses import dataclass
 
 from mailbot_v26.observability.redact import redact_secrets
@@ -13,10 +14,22 @@ from mailbot_v26.text.mojibake import normalize_mojibake_text
 requests_spec = importlib.util.find_spec("requests")
 if requests_spec is None:
     requests = None
+    _requests_exceptions = None
+    _urllib3_exceptions = None
 else:
     import requests
+    from requests import exceptions as _requests_exceptions
+
+    try:
+        from urllib3 import exceptions as _urllib3_exceptions
+    except ImportError:  # pragma: no cover - urllib3 ships with requests
+        _urllib3_exceptions = None
 
 log = logging.getLogger(__name__)
+
+_SEND_NOT_SENT_RETRYABLE = "not_sent_retryable"
+_SEND_NOT_SENT_FINAL = "not_sent_final"
+_SEND_MAYBE_DELIVERED = "maybe_delivered"
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,10 +40,120 @@ class DeliveryResult:
     mode: str = "html"
     retry_count: int = 0
     message_id: int | None = None
+    status_code: int | None = None
+    retry_after: float | None = None
+    # Telegram may have shown the message (request sent, reply lost): never resend.
+    maybe_delivered: bool = False
 
 
 def _is_retryable_status(status_code: int) -> bool:
     return status_code >= 500 or status_code == 429
+
+
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    """exc plus what it wraps (args[0], urllib3 .reason, __cause__/__context__)."""
+    chain: list[BaseException] = []
+    pending: list[object] = [exc]
+    while pending and len(chain) < 16:
+        current = pending.pop(0)
+        if not isinstance(current, BaseException) or any(
+            current is seen for seen in chain
+        ):
+            continue
+        chain.append(current)
+        args = getattr(current, "args", ())
+        pending.extend(
+            [
+                args[0] if args else None,
+                getattr(current, "reason", None),
+                current.__cause__,
+                current.__context__,
+            ]
+        )
+    return chain
+
+
+def _wraps_connect_failure(exc: BaseException) -> bool:
+    if _urllib3_exceptions is None:
+        return False
+    args = getattr(exc, "args", ())
+    wrapped = args[0] if args else None
+    if not isinstance(wrapped, _urllib3_exceptions.MaxRetryError):
+        return False
+    return isinstance(
+        wrapped.reason,
+        (
+            _urllib3_exceptions.NewConnectionError,
+            _urllib3_exceptions.ConnectTimeoutError,
+        ),
+    )
+
+
+def _classify_send_exception(exc: BaseException) -> str:
+    """Whether a failed sendMessage POST can have reached Telegram.
+
+    Only errors raised before the request left this machine count as not sent;
+    anything else (read timeout, reset after sending, unknown) may have been
+    delivered and must never be resent.
+    """
+    rexc = _requests_exceptions
+    if rexc is None:
+        return _SEND_MAYBE_DELIVERED
+    if isinstance(exc, (rexc.InvalidURL, rexc.MissingSchema, rexc.InvalidHeader)):
+        return _SEND_NOT_SENT_FINAL
+    if isinstance(exc, rexc.ReadTimeout):
+        return _SEND_MAYBE_DELIVERED
+    if isinstance(exc, (rexc.ConnectTimeout, rexc.ProxyError)):
+        return _SEND_NOT_SENT_RETRYABLE
+    if isinstance(exc, rexc.SSLError):
+        if any(
+            isinstance(item, ssl.SSLCertVerificationError)
+            for item in _exception_chain(exc)
+        ):
+            return _SEND_NOT_SENT_RETRYABLE
+        return _SEND_MAYBE_DELIVERED
+    if isinstance(exc, rexc.ConnectionError) and _wraps_connect_failure(exc):
+        return _SEND_NOT_SENT_RETRYABLE
+    return _SEND_MAYBE_DELIVERED
+
+
+def _send_exception_result(exc: BaseException, *, mode: str) -> DeliveryResult:
+    # requests puts the URL (with /bot<TOKEN>/) into the exception text.
+    error_text = redact_secrets(exc)
+    kind = _classify_send_exception(exc)
+    if kind == _SEND_MAYBE_DELIVERED:
+        log.error(
+            "Telegram send outcome unknown (%s): %s", type(exc).__name__, error_text
+        )
+        result = DeliveryResult(
+            delivered=False,
+            retryable=False,
+            error=f"delivery_unknown:{type(exc).__name__}",
+            mode=mode,
+            retry_count=1,
+            message_id=None,
+            maybe_delivered=True,
+        )
+    else:
+        log.error("Telegram send exception: %s", error_text)
+        result = DeliveryResult(
+            delivered=False,
+            retryable=kind == _SEND_NOT_SENT_RETRYABLE,
+            error=error_text,
+            mode=mode,
+            retry_count=1,
+            message_id=None,
+        )
+    log.info(
+        "tg_delivery_final",
+        extra={
+            "delivered": False,
+            "retryable": result.retryable,
+            "maybe_delivered": result.maybe_delivered,
+            "error": result.error,
+        },
+    )
+    return result
 
 
 def _strip_html_tags(text: str) -> str:
@@ -135,25 +258,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             reply_markup=payload.reply_markup,
         )
     except Exception as exc:
-        # requests puts the URL (with /bot<TOKEN>/) into the exception text.
-        error_text = redact_secrets(exc)
-        log.error("Telegram send exception: %s", error_text)
-        log.info(
-            "tg_delivery_final",
-            extra={
-                "delivered": False,
-                "retryable": True,
-                "error": error_text,
-            },
-        )
-        return DeliveryResult(
-            delivered=False,
-            retryable=True,
-            error=error_text,
-            mode="html",
-            retry_count=1,
-            message_id=None,
-        )
+        return _send_exception_result(exc, mode="html")
 
     if resp.status_code != 200:
         log.error(
@@ -175,24 +280,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                     reply_markup=payload.reply_markup,
                 )
             except Exception as exc:
-                error_text = redact_secrets(exc)
-                log.error("Telegram salvage exception: %s", error_text)
-                log.info(
-                    "tg_delivery_final",
-                    extra={
-                        "delivered": False,
-                        "retryable": True,
-                        "error": error_text,
-                    },
-                )
-                return DeliveryResult(
-                    delivered=False,
-                    retryable=True,
-                    error=error_text,
-                    mode="plain_salvage",
-                    retry_count=1,
-                    message_id=None,
-                )
+                return _send_exception_result(exc, mode="plain_salvage")
             if salvage_resp.status_code == 200:
                 salvage_message_id = _extract_message_id(salvage_resp)
                 log.info(
@@ -215,6 +303,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                     mode="plain_salvage",
                     retry_count=1,
                     message_id=salvage_message_id,
+                    status_code=salvage_resp.status_code,
                 )
             log.error(
                 "Telegram salvage HTTP error %s: %s",
@@ -237,6 +326,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                 mode="plain_salvage",
                 retry_count=1,
                 message_id=None,
+                status_code=salvage_resp.status_code,
             )
         retryable = _is_retryable_status(resp.status_code)
         log.info(
@@ -254,6 +344,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             mode="html",
             retry_count=0,
             message_id=None,
+            status_code=resp.status_code,
         )
 
     message_id = _extract_message_id(resp)
@@ -273,6 +364,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
         mode="html",
         retry_count=0,
         message_id=message_id,
+        status_code=resp.status_code,
     )
 
 

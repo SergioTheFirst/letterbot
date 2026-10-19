@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 import requests
+import urllib3
 
 from mailbot_v26.observability import logger as observability_logger
 from mailbot_v26.observability.redact import RedactingFormatter, redact_secrets
@@ -23,9 +24,14 @@ URL_PATH = f"/bot{TOKEN}/sendMessage"
 
 
 def _connection_error() -> requests.ConnectionError:
+    # Shaped like requests' "connection refused": a MaxRetryError wrapping
+    # NewConnectionError (not sent, retryable) whose text carries the URL.
     return requests.ConnectionError(
-        "HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries "
-        f"exceeded with url: {URL_PATH} (Caused by NewConnectionError('boom'))"
+        urllib3.exceptions.MaxRetryError(
+            "HTTPSConnectionPool(host='api.telegram.org', port=443)",
+            URL_PATH,
+            reason=urllib3.exceptions.NewConnectionError(None, "boom"),
+        )
     )
 
 
