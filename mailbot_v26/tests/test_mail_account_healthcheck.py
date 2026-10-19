@@ -15,6 +15,8 @@ from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
 class FakeIMAPClient:
+    select_calls: list[tuple[str, bool]] = []
+
     def __init__(self, host: str, port: int, ssl: bool) -> None:
         self.host = host
         self.port = port
@@ -24,7 +26,8 @@ class FakeIMAPClient:
         if self.host == "imap.bad":
             raise RuntimeError("auth failed")
 
-    def select_folder(self, name: str) -> None:
+    def select_folder(self, name: str, readonly: bool = False) -> None:
+        FakeIMAPClient.select_calls.append((name, readonly))
         if self.host == "imap.broken":
             raise RuntimeError("select failed")
 
@@ -79,6 +82,29 @@ def test_all_accounts_ok_no_telegram_warning(monkeypatch, tmp_path: Path) -> Non
 
     assert len(messages) == 0
     assert [account.login for account in accounts_to_poll] == ["ok@example.com"]
+
+
+def test_healthcheck_selects_inbox_readonly(monkeypatch) -> None:
+    monkeypatch.setattr(FakeIMAPClient, "select_calls", [])
+    monkeypatch.setattr(mail_accounts, "_imap_client_cls", lambda: FakeIMAPClient)
+
+    results = mail_accounts.check_mail_accounts(
+        [
+            AccountConfig(
+                account_id="A",
+                login="ok@example.com",
+                password="pw",
+                host="imap.ok",
+                port=993,
+                use_ssl=True,
+                telegram_chat_id="chat",
+            ),
+        ]
+    )
+
+    assert results[0].status == "OK"
+    # A read-write SELECT would clear the session \Recent flag for other clients.
+    assert FakeIMAPClient.select_calls == [("INBOX", True)]
 
 
 def test_failed_account_sends_warning(monkeypatch, tmp_path: Path) -> None:

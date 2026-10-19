@@ -65,7 +65,7 @@ def check_mail_accounts(
                 account.username or account.login,
                 account.password,
             )
-            client.select_folder("INBOX")
+            client.select_folder("INBOX", readonly=True)
             results.append(
                 MailAccountHealth(
                     account_id=account.account_id,
