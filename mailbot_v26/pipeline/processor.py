@@ -1045,6 +1045,7 @@ def _maybe_alert_notification_sla(
     sla_result: NotificationSLAResult | None,
     consecutive_failures: int,
     telegram_delivered: bool | None = None,
+    telegram_bot_token: str | None = None,
 ) -> None:
     if telegram_delivered is False:
         return
@@ -1090,18 +1091,22 @@ def _maybe_alert_notification_sla(
         html_text=escape_tg_html(alert_text),
         priority="\U0001f534",
         metadata={
+            "bot_token": telegram_bot_token or "",
             "chat_id": telegram_chat_id,
             "account_email": account_email,
         },
     )
     try:
         result = enqueue_tg(email_id=0, payload=payload)
-        if result is not None and not result.delivered:
+        if result is None or not result.delivered:
+            # Not remembered: the cooldown starts only once an alert got through.
             logger.warning(
                 "notification_sla_alert_send_failed",
-                error=result.error or "send_failed",
+                error=(result.error if result is not None else None) or "send_failed",
             )
+            return
         notification_alert_store.save_alert(fingerprint, now=now_dt)
+        logger.info("notification_sla_alert_sent", reasons=reasons)
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("notification_sla_alert_failed", error=str(exc))
 
@@ -6850,17 +6855,26 @@ def _notify_system_mode_change(
     if change is None:
         return
     try:
-        send_system_notice(
+        sent = send_system_notice(
             chat_id=chat_id,
             notice_text=system_health.system_notice(change),
             account_email=account_email,
         )
-        logger.info(
-            "system_mode_notice_sent",
-            chat_id=chat_id,
-            account_email=account_email,
-            mode=change.current.value,
-        )
+        if sent:
+            logger.info(
+                "system_mode_notice_sent",
+                chat_id=chat_id,
+                account_email=account_email,
+                mode=change.current.value,
+            )
+        else:
+            logger.info(
+                "system_mode_notice_skipped",
+                chat_id=chat_id,
+                account_email=account_email,
+                mode=change.current.value,
+                reason="unconfigured",
+            )
     except Exception as exc:  # pragma: no cover - optional notification
         logger.error(
             "system_mode_notice_failed",
@@ -9581,6 +9595,7 @@ def process_message(
             sla_result=policy_decision.notification_sla,
             consecutive_failures=consecutive_tg_failures,
             telegram_delivered=telegram_delivered,
+            telegram_bot_token=telegram_bot_token,
         )
         span.record_stage("send", int((time.perf_counter() - send_start) * 1000))
     except Exception as exc:

@@ -155,6 +155,9 @@ def compute_notification_sla(
                 "delivered", row.get("event_type") == EventType.TELEGRAM_DELIVERED.value
             )
         )
+        previous = delivery_events.get(int(email_id))
+        if previous is not None and previous[0] and not delivered:
+            continue  # a delivery wins over any failure for the same email
         occurred = float(payload.get("occurred_at_utc", ts_utc))
         mode = str(payload.get("mode") or "html").strip() or "html"
         retry_count = int(payload.get("retry_count") or 0)
@@ -188,11 +191,10 @@ def compute_notification_sla(
                     if mode == "plain_salvage":
                         salvage_24h += 1
             elif detected_ts >= start_24h and (detected_ts <= cutoff_ts):
+                # One reason per undelivered email.
                 undelivered_24h += 1
-                if error_reason:
-                    error_reasons[error_reason] = error_reasons.get(error_reason, 0) + 1
-            if detected_ts >= start_24h and error_reason:
-                error_reasons[error_reason] = error_reasons.get(error_reason, 0) + 1
+                reason = error_reason or "unknown"
+                error_reasons[reason] = error_reasons.get(reason, 0) + 1
         else:
             if detected_ts >= start_24h and detected_ts <= cutoff_ts:
                 undelivered_24h += 1
@@ -211,11 +213,7 @@ def compute_notification_sla(
     p50_24h, p90_24h, p99_24h = _latencies(delivered_latencies_24h)
     p50_7d, p90_7d, p99_7d = _latencies(delivered_latencies_7d)
 
-    error_rate_24h = (
-        (undelivered_24h + sum(error_reasons.values())) / total_24h
-        if total_24h
-        else 0.0
-    )
+    error_rate_24h = undelivered_24h / total_24h if total_24h else 0.0
 
     result = NotificationSLAResult(
         delivery_rate_24h=delivery_rate_24h,

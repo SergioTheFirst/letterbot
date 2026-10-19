@@ -78,15 +78,16 @@ def send_system_notice(
     chat_id: str,
     notice_text: str,
     account_email: str,
-) -> None:
+) -> bool:
     """
     Optional system-mode notice for Telegram.
 
-    Uses plain text only; formatting/sending is deferred to production.
+    Not wired to a sender: nothing is posted, so it returns False (not sent).
+    The notice text is never logged.
     """
     logger.info(
         "telegram_system_notice_unconfigured",
         chat_id=chat_id,
         account_email=account_email,
-        notice_text=notice_text,
     )
+    return False
