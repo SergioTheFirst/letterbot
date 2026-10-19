@@ -43,6 +43,8 @@ class EventEmitter:
                     CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts
                     ON events_v1(event_type, ts_utc);
                     """)
+                # Legacy exact duplicate of idx_events_v1_event_type_ts.
+                conn.execute("DROP INDEX IF EXISTS idx_events_type_ts;")
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_events_v1_account_ts
                     ON events_v1(account_id, ts_utc);
