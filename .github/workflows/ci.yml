@@ -38,7 +38,7 @@ jobs:
         run: python -m compileall mailbot_v26 -q
 
       - name: Run full test suite
-        run: python -m pytest mailbot_v26/tests/ -q --tb=short
+        run: python -m pytest -q --tb=short
 
       - name: Run golden corpus
         run: python -m mailbot_v26.tools.eval_golden_corpus
