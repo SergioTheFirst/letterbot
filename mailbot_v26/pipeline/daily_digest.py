@@ -661,7 +661,9 @@ def _build_digest_text(data: DigestData, locale: str = DEFAULT_LOCALE) -> str:
         for item in data.deferred_items:
             sender = item.get("sender") or ""
             summary = item.get("summary") or item.get("subject") or ""
-            label_parts = [part for part in [sender, summary] if part]
+            label_parts = [
+                escape_tg_html(str(part)) for part in [sender, summary] if part
+            ]
             if label_parts:
                 lines.append(f"  - {' — '.join(label_parts)}")
     if data.uncertainty_queue_items:
