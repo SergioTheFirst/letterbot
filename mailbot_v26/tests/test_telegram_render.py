@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import sys
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +16,8 @@ from mailbot_v26.telegram.render_contract import (
 )
 from mailbot_v26.text.mojibake import normalize_mojibake_text
 
-_SNAPSHOT_DIR = Path("mailbot_v26/tests/fixtures/telegram_snapshots")
+_SNAPSHOT_DIR = Path(__file__).resolve().parent / "fixtures" / "telegram_snapshots"
+_UPDATE_SNAPSHOTS_ENV = "LETTERBOT_UPDATE_SNAPSHOTS"
 _BAD_MOJIBAKE_TOKENS = ("Р Р†Р вЂљ", "Р В РЎвЂўР РЋРІР‚С™", "РЎР‚РЎСџ", "вЂ")
 
 
@@ -50,10 +53,15 @@ def _snapshot_path(name: str) -> Path:
 
 def _assert_snapshot(name: str, text: str) -> None:
     path = _snapshot_path(name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
+    if os.environ.get(_UPDATE_SNAPSHOTS_ENV) == "1":
+        # Deliberate regeneration only; review the fixture diff before committing.
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         return
+    assert path.is_file(), (
+        f"Telegram snapshot fixture {path} is missing; record it deliberately with "
+        f"{_UPDATE_SNAPSHOTS_ENV}=1"
+    )
     assert path.read_text(encoding="utf-8").rstrip("\n") == text.rstrip("\n")
 
 
@@ -250,3 +258,36 @@ def test_render_full_payload_has_no_watermark() -> None:
     result = render_email_notification(_full_request())
 
     assert "Powered by LetterBot.ru" not in result.text
+
+
+def test_missing_snapshot_fixture_fails_instead_of_being_written(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "_SNAPSHOT_DIR", tmp_path)
+    monkeypatch.delenv("LETTERBOT_UPDATE_SNAPSHOTS", raising=False)
+
+    with pytest.raises(AssertionError, match="LETTERBOT_UPDATE_SNAPSHOTS=1"):
+        _assert_snapshot("not_recorded_yet", "text")
+
+    assert not (tmp_path / "not_recorded_yet.txt").exists()
+
+
+def test_snapshot_fixture_is_written_only_on_explicit_opt_in(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "_SNAPSHOT_DIR", tmp_path)
+    monkeypatch.setenv("LETTERBOT_UPDATE_SNAPSHOTS", "1")
+
+    _assert_snapshot("recorded", "line one\nline two")
+
+    assert (tmp_path / "recorded.txt").read_text(encoding="utf-8") == (
+        "line one\nline two"
+    )
+
+
+def test_snapshot_dir_does_not_depend_on_the_working_directory(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert _snapshot_path("full").is_file()
