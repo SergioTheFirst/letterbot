@@ -27,7 +27,7 @@ class _OversizeIMAPClient:
     def login(self, login: str, password: str) -> None:
         return None
 
-    def select_folder(self, folder: str) -> None:
+    def select_folder(self, folder: str, readonly: bool = False) -> None:
         return None
 
     def search(self, criteria):  # type: ignore[override]

@@ -19,6 +19,7 @@ class _FakeIMAPClient:
         self._uids: list[int] = []
         self._data: dict[int, dict[bytes, object]] = {}
         self.search_calls: list[list[str]] = []
+        self.select_calls: list[tuple[str, bool]] = []
         self.uidvalidity: int | None = None
 
     def set_messages(self, messages: dict[int, dict[bytes, object]]) -> None:
@@ -28,8 +29,9 @@ class _FakeIMAPClient:
     def login(self, login: str, password: str) -> None:
         self.logged_in = True
 
-    def select_folder(self, folder: str) -> None:
+    def select_folder(self, folder: str, readonly: bool = False) -> None:
         self.folder = folder
+        self.select_calls.append((folder, readonly))
 
     def search(self, criteria) -> list[int]:  # type: ignore[override]
         if not criteria:
@@ -629,3 +631,34 @@ def test_uidvalidity_change_triggers_bounded_resync_not_full_replay(
     assert client.last_uidvalidity_changed is True
     assert client.last_bootstrap_active is True
     assert client.last_resync_reason == "uidvalidity_change"
+
+
+def test_mailbox_is_always_selected_read_only(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    # A8: fetching RFC822 from a read-write selection sets \Seen in the
+    # user's mailbox. Every selection, including reconnects, must be read-only.
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"new",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, 0, tzinfo=timezone.utc),
+            },
+        }
+    )
+    monkeypatch.setattr(
+        imap_client, "_imap_client_cls", lambda: (lambda *args, **kwargs: fake_client)
+    )
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(account, state, start_time=start_time)
+    messages = client.fetch_new_messages()
+    client.close()
+    payload = client.fetch_full_rfc822(1)
+
+    assert [uid for uid, _ in messages] == [1]
+    assert payload == b"new"
+    assert len(fake_client.select_calls) >= 2
+    assert all(readonly is True for _, readonly in fake_client.select_calls)

@@ -195,7 +195,8 @@ class ResilientIMAP:
                         ssl=self.account.ssl,
                     )
             client.login(self.account.user, self.account.password)
-            client.select_folder(self.account.mailbox)
+            # readonly (EXAMINE): fetching RFC822 must not set \Seen in the user's mailbox
+            client.select_folder(self.account.mailbox, readonly=True)
             return client
         except Exception as e:
             raise IMAPError(f"Не удалось подключиться к IMAP: {e}") from e
