@@ -24,6 +24,15 @@ except Exception:  # pragma: no cover
 
 log = logging.getLogger(__name__)
 
+# UIDs per header FETCH: one round trip per chunk instead of one per message.
+HEADER_FETCH_CHUNK = 200
+_HEADER_FETCH_FIELDS = [
+    "RFC822.SIZE",
+    "INTERNALDATE",
+    "BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]",
+]
+_HEADER_FIELDS_RESPONSE_PREFIX = b"BODY[HEADER.FIELDS"
+
 
 class IMAPError(RuntimeError):
     pass
@@ -91,6 +100,28 @@ def _parse_rfc822_size(fetch_data: Dict[bytes, Any]) -> Optional[int]:
             except Exception:
                 return None
     return None
+
+
+def _parse_message_id(fetch_data: Dict[Any, Any]) -> Optional[str]:
+    # Response key is b"BODY[HEADER.FIELDS (MESSAGE-ID)]"; some servers quote
+    # the field name, so match on the prefix.
+    raw: Any = None
+    for key, value in fetch_data.items():
+        key_bytes = key.encode("ascii", "replace") if isinstance(key, str) else key
+        if isinstance(key_bytes, bytes) and key_bytes.upper().startswith(
+            _HEADER_FIELDS_RESPONSE_PREFIX
+        ):
+            raw = value
+            break
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8", "replace")
+    if not isinstance(raw, (bytes, bytearray)):
+        return None
+    value = email.message_from_bytes(bytes(raw)).get("Message-ID")
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    return text or None
 
 
 def _since_criteria(cutoff_utc: datetime) -> list[Any]:
@@ -163,6 +194,7 @@ class ResilientIMAP:
         self._last_uidvalidity_changed = False
         self._last_resync_reason = "normal_poll"
         self._last_bootstrap_active = False
+        self._last_message_ids: Dict[int, Optional[str]] = {}
         self.connect_timeout = float(connect_timeout)
         self.io_timeout = float(io_timeout)
         self.retries = int(retries)
@@ -248,6 +280,12 @@ class ResilientIMAP:
     @property
     def last_bootstrap_active(self) -> bool:
         return self._last_bootstrap_active
+
+    @property
+    def last_message_ids(self) -> Dict[int, Optional[str]]:
+        """UID -> Message-ID (None when absent) for every UID whose headers the
+        last fetch_new_messages() call fetched."""
+        return dict(self._last_message_ids)
 
     def _fetch_uidvalidity(self) -> Optional[int]:
         def _status(client) -> Optional[int]:
@@ -348,15 +386,14 @@ class ResilientIMAP:
         self, uids: Sequence[int]
     ) -> Dict[int, Dict[bytes, Any]]:
         """
-        Забираем заголовки (RFC822.HEADER) + размер (RFC822.SIZE) без тела.
+        Одним FETCH на все uids: размер (RFC822.SIZE), INTERNALDATE и
+        заголовок Message-ID, без тела. Ошибка после ретраев -> IMAPError.
         """
         if not uids:
             return {}
 
         def _fetch(client):
-            return client.fetch(
-                list(uids), ["RFC822.HEADER", "RFC822.SIZE", "INTERNALDATE"]
-            )
+            return client.fetch(list(uids), list(_HEADER_FETCH_FIELDS))
 
         data = self._with_retries(_fetch) or {}
         # imapclient ключи uids -> dict
@@ -378,6 +415,10 @@ class ResilientIMAP:
             raise IMAPError(
                 f"Письмо UID={uid} слишком большое: {size} bytes > limit {max_bytes} bytes"
             )
+        return self._fetch_rfc822_body(uid)
+
+    def _fetch_rfc822_body(self, uid: int) -> bytes:
+        """RFC822 body of a UID whose size is already known to be within limit."""
 
         def _fetch(client):
             data = client.fetch([int(uid)], [b"RFC822"])
@@ -463,6 +504,7 @@ class ResilientIMAP:
         self._last_uidvalidity_changed = False
         self._last_resync_reason = "normal_poll"
         self._last_bootstrap_active = False
+        self._last_message_ids = {}
         start_time_utc = self._start_time_utc or _utcnow()
         state_login = normalize_login(self.account.user)
         range_start = 1
@@ -531,21 +573,33 @@ class ResilientIMAP:
             self._last_resync_reason = "normal_poll"
 
         eligible: list[tuple[int, dict[bytes, Any], Optional[datetime]]] = []
-        for uid in scoped_uids:
-            try:
-                meta = self.fetch_headers_and_size([uid]).get(uid, {})
-            except Exception:
-                continue
-            internal_date = _safe_dt(
-                meta.get(b"INTERNALDATE") or meta.get("INTERNALDATE")
-            )
-            if (
-                internaldate_cutoff
-                and internal_date
-                and internal_date < internaldate_cutoff
-            ):
-                continue
-            eligible.append((uid, meta, internal_date))
+        message_ids: Dict[int, Optional[str]] = {}
+        # Batched header FETCH; a chunk that still fails after retries raises
+        # IMAPError before any state write, so the cursor does not move.
+        for chunk_start in range(0, len(scoped_uids), HEADER_FETCH_CHUNK):
+            chunk = scoped_uids[chunk_start : chunk_start + HEADER_FETCH_CHUNK]
+            headers_map = self.fetch_headers_and_size(chunk)
+            for uid in chunk:
+                meta = headers_map.get(uid, {})
+                message_ids[uid] = _parse_message_id(meta)
+                internal_date = _safe_dt(
+                    meta.get(b"INTERNALDATE") or meta.get("INTERNALDATE")
+                )
+                if (
+                    internaldate_cutoff
+                    and internal_date
+                    and internal_date < internaldate_cutoff
+                ):
+                    continue
+                eligible.append((uid, meta, internal_date))
+        self._last_message_ids = message_ids
+        log.debug(
+            "imap_header_fetch mailbox=%s uids=%d batches=%d eligible=%d",
+            self.account.mailbox,
+            len(scoped_uids),
+            (len(scoped_uids) + HEADER_FETCH_CHUNK - 1) // HEADER_FETCH_CHUNK,
+            len(eligible),
+        )
 
         fetch_cap = max(0, int(limit))
         if bootstrap_active:
@@ -581,8 +635,14 @@ class ResilientIMAP:
                 messages.append((uid, synthetic.as_bytes()))
                 continue
             try:
-                raw = self.fetch_full_rfc822(uid)
-            except Exception:
+                raw = self._fetch_rfc822_body(uid)
+            except Exception as exc:
+                log.warning(
+                    "imap_body_fetch_failed mailbox=%s uid=%s error=%s",
+                    self.account.mailbox,
+                    uid,
+                    type(exc).__name__,
+                )
                 continue
             messages.append((uid, raw))
 

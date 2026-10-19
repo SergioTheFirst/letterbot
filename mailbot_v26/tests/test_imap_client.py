@@ -5,13 +5,22 @@ import pytest
 
 from mailbot_v26.config_loader import AccountConfig
 from mailbot_v26 import imap_client
-from mailbot_v26.imap_client import ResilientIMAP
+from mailbot_v26.imap_client import IMAPError, ResilientIMAP
 from mailbot_v26.state_manager import StateManager
 
 # imapclient with normalise_times=True converts INTERNALDATE to naive local
 # system time. The fake pins that "local" zone to +03:00 so the A9 bug
 # (naive local time read as UTC) reproduces in any CI timezone.
 _FAKE_LOCAL_TZ = timezone(timedelta(hours=3))
+_HEADER_FIELDS_KEY = b"BODY[HEADER.FIELDS (MESSAGE-ID)]"
+
+
+def _is_header_fetch(fields) -> bool:
+    return any("RFC822.SIZE" in str(field) for field in fields)
+
+
+def _is_body_fetch(fields) -> bool:
+    return any(field in (b"RFC822", "RFC822") for field in fields)
 
 
 class _FakeIMAPClient:
@@ -25,8 +34,10 @@ class _FakeIMAPClient:
         self._data: dict[int, dict[bytes, object]] = {}
         self.search_calls: list[list[object]] = []
         self.select_calls: list[tuple[str, bool]] = []
+        self.fetch_calls: list[tuple[list[int], list[object]]] = []
         self.uidvalidity: int | None = None
         self.normalise_times = True
+        self.header_fetch_error: Exception | None = None
 
     def set_messages(self, messages: dict[int, dict[bytes, object]]) -> None:
         self._uids = sorted(messages.keys())
@@ -70,6 +81,9 @@ class _FakeIMAPClient:
         return matched
 
     def fetch(self, uids, fields):  # type: ignore[override]
+        self.fetch_calls.append((list(uids), list(fields)))
+        if self.header_fetch_error is not None and _is_header_fetch(fields):
+            raise self.header_fetch_error
         return {uid: self._present(self._data[uid]) for uid in uids}
 
     def _present(self, item: dict[bytes, object]) -> dict[bytes, object]:
@@ -698,6 +712,132 @@ def _install_fake(
         return fake_client
 
     monkeypatch.setattr(imap_client, "_imap_client_cls", lambda: _factory)
+
+
+def _header_fetches(fake_client: _FakeIMAPClient) -> list[list[int]]:
+    return [uids for uids, fields in fake_client.fetch_calls if _is_header_fetch(fields)]
+
+
+def _body_fetches(fake_client: _FakeIMAPClient) -> list[list[int]]:
+    return [uids for uids, fields in fake_client.fetch_calls if _is_body_fetch(fields)]
+
+
+def _message_id_header(uid: int) -> bytes:
+    return f"Message-ID: <m{uid}@example.com>\r\n\r\n".encode("ascii")
+
+
+def test_header_fetch_is_batched_in_chunks_of_200(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    # A13: one header FETCH per UID (plus a second size probe per body) made a
+    # 300-message poll cost 350 round trips.
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+    fake_client.set_messages(
+        {
+            uid: {
+                b"RFC822": b"m%d" % uid,
+                b"RFC822.SIZE": 10,
+                b"INTERNALDATE": start_time + timedelta(seconds=uid),
+                _HEADER_FIELDS_KEY: _message_id_header(uid),
+            }
+            for uid in range(1, 301)
+        }
+    )
+    _install_fake(monkeypatch, fake_client)
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(account, state, start_time=start_time)
+    messages = client.fetch_new_messages(limit=50)
+
+    header_fetches = _header_fetches(fake_client)
+    assert [len(chunk) for chunk in header_fetches] == [200, 100]
+    assert [uid for chunk in header_fetches for uid in chunk] == list(range(1, 301))
+    header_fields = next(
+        fields for _, fields in fake_client.fetch_calls if _is_header_fetch(fields)
+    )
+    assert "BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]" in header_fields
+    assert "INTERNALDATE" in header_fields
+    assert "RFC822.HEADER" not in header_fields
+    assert [uid for uid, _ in messages] == list(range(1, 51))
+    # body fetch uses the size from the batch: no extra per-message size probe
+    assert _body_fetches(fake_client) == [[uid] for uid in range(1, 51)]
+    assert len(fake_client.fetch_calls) == 2 + 50
+
+
+def test_message_ids_recorded_from_header_batch(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"one",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 5, tzinfo=timezone.utc),
+                _HEADER_FIELDS_KEY: _message_id_header(1),
+            },
+            2: {
+                b"RFC822": b"two",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 6, tzinfo=timezone.utc),
+                _HEADER_FIELDS_KEY: b"\r\n",
+            },
+            3: {
+                b"RFC822": b"three",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 7, tzinfo=timezone.utc),
+                # some servers quote the field name in the response key
+                b'BODY[HEADER.FIELDS ("MESSAGE-ID")]': (
+                    b"message-id:\r\n  <m3@example.com>\r\n\r\n"
+                ),
+            },
+        }
+    )
+    _install_fake(monkeypatch, fake_client)
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(account, state, start_time=start_time)
+    messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [1, 2, 3]
+    assert len(_header_fetches(fake_client)) == 1
+    assert client.last_message_ids == {
+        1: "<m1@example.com>",
+        2: None,
+        3: "<m3@example.com>",
+    }
+
+
+def test_header_batch_failure_raises_and_keeps_cursor(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    # A per-UID header failure used to be skipped while the cursor jumped past
+    # it: the message was lost. A batch failing after retries must raise.
+    monkeypatch.setattr(imap_client.time, "sleep", lambda _seconds: None)
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+    fake_client.set_messages(
+        {
+            2: {
+                b"RFC822": b"two",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 5, tzinfo=timezone.utc),
+            },
+            3: {
+                b"RFC822": b"three",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 6, tzinfo=timezone.utc),
+            },
+        }
+    )
+    fake_client.header_fetch_error = OSError("connection reset")
+    _install_fake(monkeypatch, fake_client)
+    state = StateManager(tmp_path / "state.json")
+    state.update_last_uid(account.login, 1)
+
+    client = ResilientIMAP(account, state, start_time=start_time)
+    with pytest.raises(IMAPError):
+        client.fetch_new_messages()
+
+    assert state.get_last_uid(account.login) == 1
+    assert _body_fetches(fake_client) == []
 
 
 def test_server_west_of_utc_mail_just_after_start_is_fetched(
