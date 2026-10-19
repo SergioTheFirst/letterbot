@@ -102,3 +102,26 @@ def test_calibration_endpoint_rejects_wrong_header_token(
 
     assert wrong.status_code == 403
     assert missing.status_code == 403
+
+
+def test_cockpit_guard_accepts_query_token_without_request_headers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # The Flask stub request (no Flask installed) has no headers attribute.
+    from mailbot_v26.web_observability import app as app_module
+    from mailbot_v26.web_observability.flask_stub import Request as StubRequest
+
+    app = _token_app(tmp_path, monkeypatch)
+    guard = next(
+        func
+        for func in app.before_request_funcs[None]
+        if func.__name__ == "_guard_request"
+    )
+    stub_request = StubRequest(
+        "GET", "/api/v1/cockpit/calibration", {"token": "secret-token"}, {}
+    )
+    stub_request.endpoint = "api_cockpit_calibration"
+    monkeypatch.setattr(app_module, "USING_FLASK_STUB", True)
+    monkeypatch.setattr(app_module, "request", stub_request)
+
+    assert guard() is None

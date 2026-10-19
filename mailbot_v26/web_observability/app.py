@@ -3949,8 +3949,10 @@ def create_app(
             "api_cockpit_decision_trace_health",
         }
         if request.endpoint in cockpit_endpoints:
-            # Werkzeug EnvironHeaders is not a collections.abc.Mapping.
-            header_token = request.headers.get("X-Api-Token")
+            # Werkzeug EnvironHeaders is not a collections.abc.Mapping, so no
+            # isinstance check; the Flask stub request has no headers at all.
+            headers = getattr(request, "headers", None)
+            header_token = headers.get("X-Api-Token") if headers is not None else None
             token = header_token or request.args.get("token")
             if not _cockpit_token_ok(token, app.config["COCKPIT_API_TOKEN"]):
                 return Response("Forbidden", status=403)
