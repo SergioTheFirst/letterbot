@@ -4,7 +4,7 @@ import sqlite3
 import subprocess
 import zipfile
 from contextlib import closing
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -135,7 +135,8 @@ def test_restore_refuses_while_letterbot_running(
 
     assert '"state": 2' in (tmp_path / "state.json").read_text(encoding="utf-8")
     command = fake_tasklist.calls[-1]
-    executable = Path(command[0])
+    # Windows path semantics on every CI OS (the check itself only runs on Windows).
+    executable = PureWindowsPath(command[0])
     assert executable.is_absolute()
     assert executable.name.lower() == "tasklist.exe"
     assert executable.parent.name.lower() == "system32"
