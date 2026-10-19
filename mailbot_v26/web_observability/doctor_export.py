@@ -104,7 +104,8 @@ def _latest_health_snapshot(db_path: Path) -> dict[str, Any]:
         "ORDER BY ts_utc DESC LIMIT 1"
     )
     try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+        with sqlite3.connect(uri, uri=True) as conn:
             row = conn.execute(query).fetchone()
     except sqlite3.Error:
         return {}

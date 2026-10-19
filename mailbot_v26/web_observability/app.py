@@ -250,7 +250,9 @@ _DASHBOARD_CACHE_TTL = 2 * DASHBOARD_REFRESH_MS / 1000.0
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    # as_uri() escapes '#', '?' and '%' that would otherwise split the URI.
+    uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
     try:
         conn.execute("PRAGMA busy_timeout = 750")
         conn.execute("PRAGMA query_only = ON")

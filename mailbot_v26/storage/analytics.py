@@ -138,7 +138,9 @@ class KnowledgeAnalytics:
         self._query_only = bool(read_only)
 
     def _connect_readonly(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        # as_uri() escapes '#', '?' and '%' that would otherwise split the URI.
+        uri = self.path.resolve().as_uri() + "?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
         try:
             conn.execute("PRAGMA busy_timeout = 750")
         except sqlite3.Error:
