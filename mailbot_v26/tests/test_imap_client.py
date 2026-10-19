@@ -1,3 +1,5 @@
+import logging
+import socket
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -37,6 +39,8 @@ class _FakeIMAPClient:
         self.fetch_calls: list[tuple[list[int], list[object]]] = []
         self.uidvalidity: int | None = None
         self.normalise_times = True
+        self.logout_calls = 0
+        self.logout_error: Exception | None = None
         self.header_fetch_error: Exception | None = None
 
     def set_messages(self, messages: dict[int, dict[bytes, object]]) -> None:
@@ -96,6 +100,11 @@ class _FakeIMAPClient:
             naive_local = internaldate.astimezone(_FAKE_LOCAL_TZ).replace(tzinfo=None)
             return {**item, b"INTERNALDATE": naive_local}
         return dict(item)
+
+    def logout(self) -> None:
+        self.logout_calls += 1
+        if self.logout_error is not None:
+            raise self.logout_error
 
     def folder_status(self, folder, items):  # type: ignore[override]
         _ = (folder, items)
@@ -838,6 +847,95 @@ def test_header_batch_failure_raises_and_keeps_cursor(
 
     assert state.get_last_uid(account.login) == 1
     assert _body_fetches(fake_client) == []
+    assert fake_client.logout_calls >= 1
+
+
+def test_fetch_logs_out_after_each_cycle(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    # A22: a new ResilientIMAP per poll never logged out, leaking sessions.
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"new",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, tzinfo=timezone.utc),
+            },
+        }
+    )
+    _install_fake(monkeypatch, fake_client)
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(account, state, start_time=start_time)
+    client.fetch_new_messages()
+    assert fake_client.logout_calls == 1
+    client.fetch_new_messages()
+    assert fake_client.logout_calls == 2
+
+
+def test_close_logs_failed_logout(
+    monkeypatch, tmp_path: Path, account: AccountConfig, caplog
+) -> None:
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"new",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, tzinfo=timezone.utc),
+            },
+        }
+    )
+    fake_client.logout_error = OSError("socket already closed")
+    _install_fake(monkeypatch, fake_client)
+    state = StateManager(tmp_path / "state.json")
+
+    client = ResilientIMAP(account, state, start_time=start_time)
+    with caplog.at_level(logging.WARNING, logger=imap_client.__name__):
+        messages = client.fetch_new_messages()
+
+    assert [uid for uid, _ in messages] == [1]
+    assert any("imap_logout_failed" in rec.getMessage() for rec in caplog.records)
+
+
+def test_connect_uses_per_client_socket_timeout(
+    monkeypatch, tmp_path: Path, account: AccountConfig
+) -> None:
+    # socket.setdefaulttimeout() changed the timeout of every socket in the
+    # process; the timeout belongs to the IMAP client only.
+    imapclient_module = pytest.importorskip("imapclient")
+    fake_client = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    start_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+    fake_client.set_messages(
+        {
+            1: {
+                b"RFC822": b"new",
+                b"INTERNALDATE": datetime(2024, 1, 2, 12, 15, tzinfo=timezone.utc),
+            },
+        }
+    )
+    captured: list[dict] = []
+    _install_fake(monkeypatch, fake_client, captured)
+    state = StateManager(tmp_path / "state.json")
+    previous_default = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(None)
+    try:
+        client = ResilientIMAP(
+            account,
+            state,
+            start_time=start_time,
+            connect_timeout=7.0,
+            io_timeout=42.0,
+        )
+        client.fetch_new_messages()
+        assert socket.getdefaulttimeout() is None
+    finally:
+        socket.setdefaulttimeout(previous_default)
+
+    timeout = captured[0]["timeout"]
+    assert isinstance(timeout, imapclient_module.SocketTimeout)
+    assert (timeout.connect, timeout.read) == (7.0, 42.0)
 
 
 def test_server_west_of_utc_mail_just_after_start_is_fetched(

@@ -21,6 +21,11 @@ try:
 except Exception:  # pragma: no cover
     IMAPClient = None  # type: ignore
 
+try:
+    from imapclient import SocketTimeout  # type: ignore
+except Exception:  # pragma: no cover
+    SocketTimeout = None  # type: ignore
+
 
 log = logging.getLogger(__name__)
 
@@ -214,8 +219,10 @@ class ResilientIMAP:
         if cls is None:
             raise IMAPError("IMAPClient недоступен.")
 
-        # socket timeout влияет на connect/recv
-        socket.setdefaulttimeout(self.io_timeout)
+        # Per-client connect/read timeouts; never the process-wide socket default.
+        timeout: Any = self.connect_timeout
+        if SocketTimeout is not None:
+            timeout = SocketTimeout(connect=self.connect_timeout, read=self.io_timeout)
 
         try:
             try:
@@ -223,9 +230,13 @@ class ResilientIMAP:
                     self.account.host,
                     port=self.account.port,
                     ssl=self.account.ssl,
-                    timeout=self.connect_timeout,
+                    timeout=timeout,
                 )
             except TypeError:
+                log.warning(
+                    "imap_client_timeout_unsupported host=%s: connecting without a socket timeout",
+                    self.account.host,
+                )
                 try:
                     client = cls(self.account.host, self.account.port, self.account.ssl)
                 except TypeError:
@@ -256,14 +267,20 @@ class ResilientIMAP:
         return self._client
 
     def close(self) -> None:
+        client = self._client
+        self._client = None
+        if client is None:
+            return
         try:
-            if self._client is not None:
-                try:
-                    self._client.logout()
-                except Exception:
-                    pass
-        finally:
-            self._client = None
+            client.logout()
+        except Exception as exc:
+            # imaplib closes the socket even when LOGOUT fails; report, don't raise.
+            log.warning(
+                "imap_logout_failed host=%s error=%s: %s",
+                self.account.host,
+                type(exc).__name__,
+                exc,
+            )
 
     @property
     def last_fetch_included_prestart(self) -> bool:
@@ -500,6 +517,13 @@ class ResilientIMAP:
                 yield uid, msg
 
     def fetch_new_messages(self, *, limit: int = 50) -> List[Tuple[int, bytes]]:
+        # One IMAP session per poll cycle: always LOGOUT, even when the fetch fails.
+        try:
+            return self._fetch_new_messages(limit=limit)
+        finally:
+            self.close()
+
+    def _fetch_new_messages(self, *, limit: int) -> List[Tuple[int, bytes]]:
         self._last_fetch_included_prestart = False
         self._last_uidvalidity_changed = False
         self._last_resync_reason = "normal_poll"
