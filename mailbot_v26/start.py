@@ -91,6 +91,12 @@ from mailbot_v26.telegram import (
 )
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.storage.self_check import run_self_check
+from mailbot_v26.system.instance_lock import (
+    InstanceLock,
+    InstanceLockError,
+    acquire_instance_lock,
+    instance_lock_path,
+)
 from mailbot_v26.system.startup_health import (
     LaunchReportBuilder,
     StartupHealthChecker,
@@ -1009,6 +1015,26 @@ def _settle_email_delivery(
     return False
 
 
+def _acquire_instance_lock_or_exit(db_path: Path) -> InstanceLock:
+    """Single worker per database: a second instance would notify twice."""
+    try:
+        lock = acquire_instance_lock(db_path)
+    except InstanceLockError as exc:
+        logger.error("single_instance_lock_failed error=%s", exc)
+        print(f"[ERROR] Cannot check whether Letterbot is already running: {exc}")
+        sys.exit(2)
+    if lock is None:
+        lock_path = instance_lock_path(db_path)
+        logger.error("single_instance_lock_held lock=%s", lock_path)
+        print(
+            f"[ERROR] Letterbot is already running (lock: {lock_path}). "
+            "Close the other Letterbot window, then start again."
+        )
+        sys.exit(2)
+    logger.info("single_instance_lock_acquired lock=%s", lock.path)
+    return lock
+
+
 def _process_queue(
     storage: Storage,
     config: BotConfig,
@@ -1590,6 +1616,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
         sys.exit(2)
 
     storage: Storage | None = None
+    instance_lock: InstanceLock | None = None
     runtime_health = AccountRuntimeHealthManager(
         CURRENT_DIR / "data" / "runtime_health.json",
         locale_resolver=lambda: processor_module._resolve_outbound_ui_locale(),
@@ -1621,6 +1648,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             config_path = None
             raw_config = {}
             config = config_result
+        instance_lock = _acquire_instance_lock_or_exit(Path(config.storage.db_path))
         processor_module.configure_processor_config_dir(resolved_config_dir)
         try:
             from mailbot_v26.ui.i18n import get_locale as _get_locale
@@ -2312,6 +2340,8 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
     finally:
         if storage:
             storage.close()
+        if instance_lock is not None:
+            instance_lock.release()
 
 
 def _build_parser() -> argparse.ArgumentParser:

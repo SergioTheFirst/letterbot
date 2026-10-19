@@ -9,6 +9,7 @@ from pathlib import Path
 
 from mailbot_v26.tools.backup import MASKED_VALUE, create_backup
 from mailbot_v26.config.paths import app_root
+from mailbot_v26.system.instance_lock import InstanceLockError, is_instance_running
 
 _IS_WINDOWS = os.name == "nt"
 _DB_MEMBER = "data/mailbot.sqlite"
@@ -62,8 +63,23 @@ def _tasklist_path() -> Path:
     return Path(system_root) / "System32" / "tasklist.exe"
 
 
-def ensure_letterbot_stopped() -> None:
-    """Raise RestoreRefusedError while Letterbot.exe runs (fails closed if unknown)."""
+def ensure_letterbot_stopped(db_path: Path | None = None) -> None:
+    """Raise RestoreRefusedError while Letterbot runs (fails closed if unknown).
+
+    db_path: the database restore would replace; its worker instance lock is
+    checked first (also catches a worker started from source), then tasklist.
+    """
+    if db_path is not None:
+        try:
+            running = is_instance_running(db_path)
+        except InstanceLockError as exc:
+            raise RestoreRefusedError(
+                f"Could not verify that Letterbot is stopped ({exc}); restore not started."
+            ) from exc
+        if running:
+            raise RestoreRefusedError(
+                "Letterbot is running. Close Letterbot (worker and web UI) and run restore again."
+            )
     if not _IS_WINDOWS:
         return
     command = [
@@ -171,7 +187,7 @@ def restore_from_backup(
     skipped: list[str] = []
     warnings: list[str] = []
 
-    ensure_letterbot_stopped()
+    ensure_letterbot_stopped(db_path=root / _DB_MEMBER)
     with zipfile.ZipFile(archive_path, "r") as archive:
         for info in archive.infolist():
             member = info.filename
@@ -197,7 +213,7 @@ def run_restore(archive_path: str) -> None:
     if not path.exists():
         raise SystemExit(f"Backup archive not found: {path}")
     try:
-        ensure_letterbot_stopped()
+        ensure_letterbot_stopped(db_path=_repo_root() / _DB_MEMBER)
     except RestoreRefusedError as exc:
         raise SystemExit(f"[ERROR] {exc}") from exc
 
