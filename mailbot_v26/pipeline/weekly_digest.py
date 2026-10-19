@@ -785,6 +785,7 @@ def _collect_weekly_data(
             days=7,
             limit=3,
             now=now,
+            include_raw_senders=True,
         )
         if relationship_top_senders:
             avg_trust = sum(

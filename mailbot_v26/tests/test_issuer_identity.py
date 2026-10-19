@@ -221,6 +221,7 @@ def test_relationship_profile_grouping_uses_new_key(tmp_path: Path) -> None:
         days=7,
         limit=5,
         now=now,
+        include_raw_senders=True,
     )
 
     assert len(profiles) == 1
