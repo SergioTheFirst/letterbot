@@ -2468,9 +2468,9 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
             parser.read(settings_path, encoding="utf-8-sig")
         except (OSError, configparser.Error) as exc:
             logger.warning(
-                "support_settings_ini_load_failed",
-                path=str(settings_path),
-                error=str(exc),
+                "support_settings_ini_load_failed path=%s error=%s",
+                settings_path,
+                exc,
             )
             return SupportSettings(enabled=False, show_in_nav=False, methods=[])
         if not parser.has_section("support"):
@@ -2490,7 +2490,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
                 qr_uri = _image_data_uri(qr_path)
             except Exception as exc:
                 logger.warning(
-                    "support_qr_load_failed", path=str(qr_path), error=str(exc)
+                    "support_qr_load_failed path=%s error=%s", qr_path, exc
                 )
                 qr_uri = ""
         method = SupportMethod(
@@ -2516,7 +2516,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
     try:
         raw = load_yaml_config(config_path)
     except Exception as exc:
-        logger.warning("support_config_load_failed", error=str(exc))
+        logger.warning("support_config_load_failed error=%s", exc)
         return _from_ini(settings_path)
     if not isinstance(raw, dict):
         return _from_ini(settings_path)
@@ -2546,7 +2546,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
                 qr_uri = _image_data_uri(qr_path)
             except Exception as exc:
                 logger.warning(
-                    "support_qr_load_failed", path=str(qr_path), error=str(exc)
+                    "support_qr_load_failed path=%s error=%s", qr_path, exc
                 )
                 qr_uri = ""
         methods.append(

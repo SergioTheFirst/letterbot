@@ -45,6 +45,29 @@ def test_support_settings_read_bom_settings_ini(tmp_path: Path) -> None:
     assert len(settings.methods) == 1
 
 
+def test_support_settings_degrade_on_malformed_settings_ini(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "settings.ini").write_text("enabled = true\n", encoding="utf-8")
+
+    settings = _load_support_settings(tmp_path / "config.yaml")
+
+    assert settings.enabled is False
+    assert "support_settings_ini_load_failed" in caplog.text
+
+
+def test_support_settings_degrade_on_malformed_config_yaml(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("support: [unclosed\n", encoding="utf-8")
+
+    settings = _load_support_settings(config_path)
+
+    assert settings.enabled is False
+    assert "support_config_load_failed" in caplog.text
+
+
 def test_smoke_bypass_reads_bom_settings_ini(tmp_path: Path) -> None:
     _write_bom_ini(
         tmp_path / "settings.ini", "[web_ui]\nallow_local_smoke_bypass = true\n"
