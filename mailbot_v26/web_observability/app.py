@@ -15,6 +15,7 @@ import math
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import sys
 import threading
@@ -3646,6 +3647,92 @@ def _is_loopback_bind(bind: str) -> bool:
         return False
 
 
+_LOOPBACK_HOST_NAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+_WILDCARD_BIND_HOSTS = frozenset({"", "0.0.0.0", "::"})
+_LAN_HOST_NAMES_REFRESH_SECONDS = 60.0
+
+
+def _split_host_header(raw: str) -> tuple[str, str | None] | None:
+    """Split a Host header into (lowercase hostname, port); None if malformed."""
+    value = str(raw or "").strip().lower()
+    if not value:
+        return None
+    if value.startswith("["):
+        host, closed, rest = value[1:].partition("]")
+        if not closed or not host:
+            return None
+        if not rest:
+            return host, None
+        if rest.startswith(":") and len(rest) > 1:
+            return host, rest[1:]
+        return None
+    host, has_port, port = value.partition(":")
+    if not host or ":" in port or (has_port and not port):
+        return None
+    return host, (port if has_port else None)
+
+
+def _lan_host_names() -> frozenset[str]:
+    """This machine's LAN addresses and hostname, for the LAN-mode Host allowlist."""
+    names: set[str] = set()
+    try:
+        primary = get_primary_ipv4()
+    except Exception as exc:
+        logger.warning("WEB_UI_LAN_HOSTS_PRIMARY_FAILED error=%s", exc)
+        primary = None
+    if primary:
+        names.add(str(primary).lower())
+    try:
+        hostname = socket.gethostname()
+        names.add(hostname.lower())
+        for info in socket.getaddrinfo(hostname, None):
+            names.add(str(info[4][0]).split("%", 1)[0].lower())
+    except OSError as exc:
+        logger.warning("WEB_UI_LAN_HOSTS_RESOLVE_FAILED error=%s", exc)
+    names.discard("")
+    return frozenset(names)
+
+
+def _lan_host_allowed(app: Flask, hostname: str) -> bool:
+    now = time.monotonic()
+    cached = app.config.get("WEB_UI_LAN_HOST_NAMES")
+    if isinstance(cached, tuple):
+        computed_at, names = cached
+        if hostname in names:
+            return True
+        # A miss re-reads the addresses (DHCP may change them), at most once a minute.
+        if now - computed_at < _LAN_HOST_NAMES_REFRESH_SECONDS:
+            return False
+    names = _lan_host_names()
+    app.config["WEB_UI_LAN_HOST_NAMES"] = (now, names)
+    return hostname in names
+
+
+def _host_header_allowed(app: Flask) -> bool:
+    """DNS-rebinding guard: answer only Host names this server is reachable as."""
+    if USING_FLASK_STUB:
+        return True
+    parsed = _split_host_header(request.host)
+    if parsed is None:
+        return False
+    hostname, port = parsed
+    if port is not None:
+        allowed_ports = {str(app.config.get("WEB_UI_PORT") or "")}
+        server_port = str(request.environ.get("SERVER_PORT") or "")
+        if server_port:
+            allowed_ports.add(server_port)
+        if port not in allowed_ports:
+            return False
+    if hostname in _LOOPBACK_HOST_NAMES:
+        return True
+    bind = str(app.config.get("WEB_UI_BIND") or "").strip().lower().strip("[]")
+    if bind not in _WILDCARD_BIND_HOSTS and hostname == bind:
+        return True
+    if not app.config.get("WEB_UI_ALLOWED_CIDRS"):
+        return False
+    return _lan_host_allowed(app, hostname)
+
+
 def _resolve_yaml_config_path(
     config_path: Path | None, config_dir: Path
 ) -> Path | None:
@@ -3827,6 +3914,14 @@ def create_app(
 
     @app.before_request
     def _guard_request():
+        # Before the loopback smoke bypass: a rebinding page talks from loopback.
+        if not _host_header_allowed(app):
+            logger.warning(
+                "WEB_UI_HOST_REJECTED host=%r path=%s",
+                str(request.host)[:100],
+                request.path,
+            )
+            return _text_response("Bad Request: unexpected Host header", 400)
         remote_addr = _request_remote_addr()
         if _local_smoke_bypass_allowed(app, remote_addr):
             return None
