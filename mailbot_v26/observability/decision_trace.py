@@ -43,6 +43,10 @@ class DecisionTraceWriter:
                         compressed BOOLEAN DEFAULT FALSE
                     );
                     """)
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_decision_traces_created_at "
+                    "ON decision_traces(created_at)"
+                )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("decision_trace_init_failed", error=str(exc))
 
