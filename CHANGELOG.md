@@ -43,9 +43,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Packaged `Letterbot.exe` now reads feature flags, policy settings, backup/restore/export/cleanup paths and the doctor manifest from `<exe>\mailbot_v26\config` / the exe folder instead of `_internal`.
 - Startup with an unwritable data folder exits with a clear message instead of a traceback.
 - Letterbot no longer marks incoming emails as read (mailbox is opened read-only).
+- No more duplicate-notification storm when the queue dispatcher hits an error; a broken snooze row no longer stops queue processing.
+- Daily and weekly digests are no longer sent on days/weeks without content, follow `/langru`, and escape sender/subject text.
+- Telegram button edits that Telegram rejects are no longer reported as "Priority updated"; "message is not modified" counts as success.
+- Pipeline caches are released on every terminal path (no memory growth from duplicate or failed emails).
+- Backup takes a consistent database snapshot; restore refuses while Letterbot runs, never overwrites config with masked `***` values and removes stale `-wal`/`-shm` files.
+- Config files saved by Notepad as "UTF-8 with BOM" are read correctly; ANSI files give a clear error instead of silently loading defaults.
+- Launch scripts (`run.bat`, `update_and_run.bat`, `open_config_folder.bat`) are ASCII-only and the config retry loop no longer reopens Notepad after a correct edit.
+
+### Performance
+- Text normalization is memoized (bounded) and the per-email metrics snapshot is reused within a poll cycle, with a new `decision_traces(created_at)` index; duplicate indexes on `emails(priority)` and `events_v1(event_type, ts_utc)` are dropped.
+- Web cache is bounded, discarded dashboard queries are removed, and hidden browser tabs stop polling.
 
 ### Security
-- None.
+- Telegram bot tokens are redacted from logs (including tracebacks), stored delivery errors, failure notices and the diagnostics zip.
+- Web archive and dashboard no longer expose raw email subjects or sender addresses; reflected XSS on the relationships pages fixed.
+- Web UI rejects unknown `Host` headers (DNS rebinding); the session secret is random per process when not configured; the calibration report opens the database read-only.
 
 ## [28.0.0-rc] - 2026-03-21
 

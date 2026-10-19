@@ -55,3 +55,8 @@ config.local.yaml
 # Build artifacts 
 dist/ 
 build/ 
+
+# SQLite sidecar files and tool worktrees
+*.sqlite-wal
+*.sqlite-shm
+.claude/worktrees/
