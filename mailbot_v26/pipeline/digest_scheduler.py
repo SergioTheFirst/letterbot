@@ -45,6 +45,7 @@ from mailbot_v26.observability.metrics import (
     SystemGates,
 )
 from mailbot_v26.pipeline import daily_digest, weekly_digest
+from mailbot_v26.pipeline.processor import _resolve_outbound_ui_locale
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
@@ -555,8 +556,12 @@ def _build_daily_payload(
     chat_id: str,
     bot_token: str,
     data: daily_digest.DigestData,
+    locale: str | None = None,
 ) -> TelegramPayload:
-    digest_text = append_watermark(daily_digest._build_digest_text(data), html=True)
+    resolved_locale = locale or _resolve_outbound_ui_locale()
+    digest_text = append_watermark(
+        daily_digest._build_digest_text(data, locale=resolved_locale), html=True
+    )
     return TelegramPayload(
         html_text=telegram_safe(digest_text),
         priority="🔵",
@@ -576,8 +581,10 @@ def _build_weekly_payload(
     week_key: str,
     data: weekly_digest.WeeklyDigestData,
     support_footer: str = "",
+    locale: str | None = None,
 ) -> TelegramPayload:
-    digest_text = weekly_digest._build_weekly_digest_text(data)
+    resolved_locale = locale or _resolve_outbound_ui_locale()
+    digest_text = weekly_digest._build_weekly_digest_text(data, locale=resolved_locale)
     if support_footer:
         digest_text = f"{digest_text}\n{support_footer}"
     digest_text = append_watermark(digest_text, html=True)
@@ -856,6 +863,7 @@ def _run_daily_digest(
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.error("silence_detector_failed", error=str(exc))
 
+    locale = _resolve_outbound_ui_locale()
     data = daily_digest._collect_digest_data(
         analytics=storage.analytics,
         account_email=account_email,
@@ -876,6 +884,7 @@ def _run_daily_digest(
         trust_bootstrap_config=trust_bootstrap_config.settings,
         include_regret_minimization=flags.ENABLE_REGRET_MINIMIZATION,
         regret_minimization_config=regret_minimization_config.settings,
+        locale=locale,
         now=now,
         contract_event_emitter=storage.contract_event_emitter,
     )
@@ -920,6 +929,7 @@ def _run_daily_digest(
         chat_id=chat_id,
         bot_token=bot_token,
         data=data,
+        locale=locale,
     )
 
     try:
@@ -1064,6 +1074,7 @@ def _run_weekly_digest(
         week_key=week_key,
     )
 
+    locale = _resolve_outbound_ui_locale()
     data = weekly_digest._collect_weekly_data(
         analytics=storage.analytics,
         account_email=account_email,
@@ -1077,6 +1088,7 @@ def _run_weekly_digest(
         weekly_calibration_window_days=weekly_calibration_window_days,
         weekly_calibration_top_n=weekly_calibration_top_n,
         weekly_calibration_min_corrections=weekly_calibration_min_corrections,
+        locale=locale,
         event_emitter=storage.event_emitter,
         contract_event_emitter=storage.contract_event_emitter,
         now=now,
@@ -1151,6 +1163,7 @@ def _run_weekly_digest(
         week_key=week_key,
         data=data,
         support_footer=support_footer,
+        locale=locale,
     )
 
     try:
