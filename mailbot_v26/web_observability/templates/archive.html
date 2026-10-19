@@ -24,7 +24,7 @@
       </div>
       <div class="filter-group">
         <label for="sender">Sender / contact</label>
-        <input id="sender" name="sender" type="text" value="{{ sender_filter }}" placeholder="issuer or email">
+        <input id="sender" name="sender" type="text" value="{{ sender_filter }}" placeholder="issuer name">
       </div>
       <div class="filter-group">
         <label for="priority">Priority</label>
@@ -86,7 +86,6 @@
         <tr>
           <th>Priority</th>
           <th>Sender</th>
-          <th>Subject</th>
           <th>Doc kind</th>
           <th>Amount</th>
           <th>Due date</th>
@@ -102,7 +101,6 @@
             <span class="badge {{ row.priority_class }}" aria-label="{{ row.priority_label }}">●</span>
           </td>
           <td><span class="truncate">{{ row.sender_display }}</span></td>
-          <td><span class="truncate" title="{{ row.subject_full }}">{{ row.subject }}</span></td>
           <td><span class="badge muted">{{ row.doc_kind_label }}</span></td>
           <td>{{ row.amount_display }}</td>
           <td>{{ row.due_date }}</td>

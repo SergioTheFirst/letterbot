@@ -642,14 +642,13 @@ def _render_stub_html(
             rows.append(
                 """
                 <tr data-email-id="{email_id}">
-                  <td>{priority}</td><td>{sender}</td><td>{subject}</td><td>{doc_kind}</td>
+                  <td>{priority}</td><td>{sender}</td><td>{doc_kind}</td>
                   <td>{amount}</td><td>{due_date}</td><td>{action}</td><td>{confidence}</td><td>{received}</td>
                 </tr>
                 """.format(
                     email_id=html.escape(str(row.get("message_id") or row.get("email_id") or "")),
                     priority=html.escape(str(row.get("priority_label") or "")),
                     sender=html.escape(str(row.get("sender_display") or "")),
-                    subject=html.escape(str(row.get("subject") or "")),
                     doc_kind=html.escape(str(row.get("doc_kind_label") or "")),
                     amount=html.escape(str(row.get("amount_display") or "")),
                     due_date=html.escape(str(row.get("due_date") or "")),
@@ -659,7 +658,7 @@ def _render_stub_html(
                 )
             )
         header_row = (
-            "<tr><th>Priority</th><th>Sender</th><th>Subject</th><th>Doc kind</th>"
+            "<tr><th>Priority</th><th>Sender</th><th>Doc kind</th>"
             "<th>Amount</th><th>Due date</th><th>Action</th><th>Confidence</th><th>Received</th></tr>"
         )
         detail_block = ""
@@ -1516,6 +1515,12 @@ def _sanitize_email_label(value: object, *, fallback: str) -> str:
 
 def _sanitize_sender_label(value: object) -> str:
     return _sanitize_email_label(value, fallback="Sender hidden") if value else ""
+
+
+def _mask_emails_in_text(value: object) -> str:
+    """Keep a label readable but mask any e-mail address inside it."""
+    text = str(value or "").strip()
+    return WEB_EMAIL_PATTERN.sub(lambda match: _mask_email_address(match.group(0)), text)
 
 
 def _sanitize_account_label(value: object) -> str:
@@ -4351,7 +4356,6 @@ def create_app(
                     confidence_band=confidence_band,
                     page=page,
                     per_page=ARCHIVE_PAGE_SIZE,
-                    reveal_pii=reveal_pii,
                 )
                 _COCKPIT_CACHE.set(cache_key, archive_payload)
         else:
@@ -4426,7 +4430,6 @@ def create_app(
             selected_detail = _archive_detail_payload(
                 account_emails=account_emails,
                 message_id=selected_message_id,
-                reveal_pii=reveal_pii,
             )
             if selected_detail is None:
                 error_message = error_message or "Interpretation not found for this message."
@@ -5747,9 +5750,9 @@ def create_app(
     def _archive_item_from_events(
         interpretation_row: Mapping[str, object],
         received_row: Mapping[str, object] | None,
-        *,
-        reveal_pii: bool,
     ) -> dict[str, object]:
+        # CONSTITUTION: the web never shows raw subjects or senders, whatever the
+        # PII toggle says. Rows carry the issuer label or a masked sender only.
         interpretation_payload = (
             json.loads(str(interpretation_row.get("payload_json") or "{}"))
             if interpretation_row.get("payload_json")
@@ -5771,10 +5774,11 @@ def create_app(
             or received_payload.get("from_email")
             or ""
         ).strip()
-        issuer_display = str(interpretation_payload.get("issuer_label") or "").strip()
-        sender_display = issuer_display or sender_email
-        if not reveal_pii and sender_display == sender_email:
-            sender_display = _sanitize_sender_label(sender_email)
+        # issuer_profile falls back to the full address for generic mail domains.
+        issuer_display = _mask_emails_in_text(interpretation_payload.get("issuer_label"))
+        sender_display = (
+            issuer_display or _sanitize_sender_label(sender_email) or "Sender hidden"
+        )
         doc_kind = _archive_doc_kind(interpretation_payload.get("doc_kind"))
         priority_bucket = _archive_priority_bucket(interpretation_payload.get("priority"))
         confidence = _safe_float(interpretation_payload.get("confidence")) or 0.0
@@ -5784,9 +5788,6 @@ def create_app(
             else interpretation_row.get("ts_utc")
         )
         received_dt = _parse_datetime_value(received_ts)
-        subject_full = str(received_payload.get("subject") or "").strip()
-        if not subject_full:
-            subject_full = "—"
         action_label = _archive_action_label(
             interpretation_payload.get("action"), doc_kind=doc_kind
         )
@@ -5795,11 +5796,8 @@ def create_app(
         item = {
             "message_id": message_id,
             "email_id": message_id,
-            "sender_email": sender_email,
-            "sender_display": sender_display or "Sender hidden",
-            "issuer_display": issuer_display or sender_display or sender_email,
-            "subject": _clamp_text(subject_full, 80),
-            "subject_full": subject_full,
+            "sender_display": sender_display,
+            "issuer_display": issuer_display or sender_display,
             "doc_kind": doc_kind,
             "doc_kind_label": _archive_doc_kind_label(doc_kind),
             "amount": interpretation_payload.get("amount"),
@@ -5839,7 +5837,6 @@ def create_app(
         confidence_band: str,
         page: int,
         per_page: int,
-        reveal_pii: bool,
     ) -> dict[str, object]:
         if not account_emails or window_days <= 0:
             return {"items": [], "total": 0, "page": 1, "pages": 1}
@@ -5868,10 +5865,11 @@ def create_app(
             _archive_item_from_events(
                 interpretation_row=row,
                 received_row=latest_received.get(email_id),
-                reveal_pii=reveal_pii,
             )
             for email_id, row in latest_interpretations.items()
         ]
+        # Match only what the row already displays (issuer label / masked
+        # sender), so the filter cannot probe whether a raw address exists.
         sender_search = sender_filter.strip().lower()
         filtered: list[dict[str, object]] = []
         for item in items:
@@ -5879,7 +5877,6 @@ def create_app(
                 haystack = " ".join(
                     [
                         str(item.get("sender_display") or ""),
-                        str(item.get("sender_email") or ""),
                         str(item.get("issuer_display") or ""),
                     ]
                 ).lower()
@@ -5919,7 +5916,6 @@ def create_app(
         *,
         account_emails: list[str],
         message_id: int,
-        reveal_pii: bool,
     ) -> dict[str, object] | None:
         interpretation_rows = _scoped_event_rows(
             account_emails=account_emails,
@@ -5938,7 +5934,6 @@ def create_app(
         item = _archive_item_from_events(
             interpretation_row=interpretation_rows[0],
             received_row=received_rows[0] if received_rows else None,
-            reveal_pii=reveal_pii,
         )
         return {
             "message_id": item["message_id"],
@@ -6729,9 +6724,6 @@ def create_app(
         if confidence_band not in ARCHIVE_CONFIDENCE_FILTERS:
             confidence_band = ""
         per_page = max(1, min(int(request.args.get("per_page") or ARCHIVE_PAGE_SIZE), 100))
-        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
-            dashboard_vars.pii
-        )
         return jsonify(
             _archive_api_payload(
                 account_emails=account_emails,
@@ -6742,7 +6734,6 @@ def create_app(
                 confidence_band=confidence_band,
                 page=_parse_page(request.args.get("page"), default=1),
                 per_page=per_page,
-                reveal_pii=reveal_pii,
             )
         )
 
@@ -6750,13 +6741,9 @@ def create_app(
     def api_archive_detail(message_id: int):
         dashboard_vars = _dashboard_vars()
         account_emails = _resolve_account_scope(dashboard_vars)
-        reveal_pii = bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")) and bool(
-            dashboard_vars.pii
-        )
         payload = _archive_detail_payload(
             account_emails=account_emails,
             message_id=message_id,
-            reveal_pii=reveal_pii,
         )
         if payload is None:
             return jsonify({"error": "message_not_found"}), 404
