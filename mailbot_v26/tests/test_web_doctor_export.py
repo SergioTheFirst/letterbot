@@ -5,15 +5,62 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from mailbot_v26.integrity import compute_manifest
 from mailbot_v26.tests._web_helpers import login_with_csrf, post_doctor_export_with_csrf
+from mailbot_v26.web_observability import doctor_export
 from mailbot_v26.web_observability.app import create_app
 from mailbot_v26.web_observability.doctor_export import build_diagnostics_zip
+
+_FAKE_BOT_TOKEN = "123456789:" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+_SENSITIVE_LOG = (
+    "2026-10-01 ERROR telegram send failed: "
+    f"https://api.telegram.org/bot{_FAKE_BOT_TOKEN}/sendMessage\n"
+    f"2026-10-01 ERROR bare token leaked {_FAKE_BOT_TOKEN}\n"
+    "2026-10-01 WARNING LLM stage is not configured; "
+    "subject=Invoice 42 for ACME from=ivan.petrov@example.com attachments=2\n"
+    "2026-10-01 INFO reply from jane.doe@corp.example.org recorded\n"
+)
 
 
 def _read_zip(payload: bytes) -> dict[str, bytes]:
     with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
         return {name: archive.read(name) for name in archive.namelist()}
+
+
+def _assert_log_scrubbed(text: str) -> None:
+    assert _FAKE_BOT_TOKEN not in text
+    assert _FAKE_BOT_TOKEN.split(":", 1)[1] not in text
+    assert "ivan.petrov@example.com" not in text
+    assert "jane.doe@corp.example.org" not in text
+    assert "Invoice 42 for ACME" not in text
+    assert "j…@corp.example.org" in text
+    assert "attachments=2" in text
+
+
+@pytest.mark.parametrize("truncate", [False, True])
+def test_doctor_zip_scrubs_log_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, truncate: bool
+) -> None:
+    if truncate:
+        monkeypatch.setattr(doctor_export, "MAX_LOG_BYTES", 16)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("app_name: test\n", encoding="utf-8")
+    log_path = tmp_path / "mailbot.log"
+    log_path.write_text(_SENSITIVE_LOG, encoding="utf-8")
+    log_path.with_name("mailbot.log.1").write_text(_SENSITIVE_LOG, encoding="utf-8")
+
+    payload = build_diagnostics_zip(
+        config_path=config_path,
+        log_path=log_path,
+        db_path=tmp_path / "mailbot.sqlite",
+        dist_root=tmp_path,
+    )
+
+    files = _read_zip(payload)
+    for name in ("logs/mailbot.log", "logs/mailbot.log.1"):
+        _assert_log_scrubbed(files[name].decode("utf-8"))
 
 
 def test_doctor_redacts_secrets(tmp_path: Path) -> None:
