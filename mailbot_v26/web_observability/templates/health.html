@@ -163,7 +163,7 @@
           });
       };
       document.addEventListener('letterbot:page-visible', refresh);
-      setInterval(refresh, {{ status_refresh_ms }});
+      setInterval(() => { if (!document.hidden) refresh(); }, {{ status_refresh_ms }});
     })();
 
     (function() {
@@ -185,7 +185,7 @@
           });
       };
       document.addEventListener('letterbot:page-visible', refresh);
-      setInterval(refresh, {{ health_refresh_ms }});
+      setInterval(() => { if (!document.hidden) refresh(); }, {{ health_refresh_ms }});
     })();
   </script>
   <script>

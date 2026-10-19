@@ -17,6 +17,7 @@ import re
 import secrets
 import sqlite3
 import sys
+import threading
 import time
 from collections import Counter, deque
 from dataclasses import dataclass
@@ -166,31 +167,60 @@ class SupportSettings:
     text: str = ""
 
 
+_TTL_CACHE_MAX_ENTRIES = 256
+
+
 class _TTLCache:
-    def __init__(self, ttl_seconds: float) -> None:
+    """TTL cache bounded in size.
+
+    Keys often carry a DB change token or a time bucket, so stale keys are never
+    requested again; ``set`` prunes expired entries and evicts the oldest ones
+    beyond ``max_entries`` so memory stays bounded in a long-running process.
+    """
+
+    def __init__(
+        self, ttl_seconds: float, max_entries: int = _TTL_CACHE_MAX_ENTRIES
+    ) -> None:
         self._ttl_seconds = max(0.0, ttl_seconds)
+        self._max_entries = max(1, int(max_entries))
+        # Insertion order == store order (set re-inserts), so the oldest is first.
         self._items: dict[tuple[object, ...], tuple[float, object]] = {}
+        self._lock = threading.Lock()
 
     def get(self, key: tuple[object, ...]) -> object | None:
         if not self._ttl_seconds:
             return None
-        item = self._items.get(key)
-        if not item:
-            return None
-        stored_at, value = item
-        if time.monotonic() - stored_at > self._ttl_seconds:
-            self._items.pop(key, None)
-            return None
-        return value
+        with self._lock:
+            item = self._items.get(key)
+            if not item:
+                return None
+            stored_at, value = item
+            if time.monotonic() - stored_at > self._ttl_seconds:
+                self._items.pop(key, None)
+                return None
+            return value
 
     def set(self, key: tuple[object, ...], value: object) -> None:
         if not self._ttl_seconds:
             return
-        self._items[key] = (time.monotonic(), value)
+        now = time.monotonic()
+        with self._lock:
+            self._items.pop(key, None)
+            self._items[key] = (now, value)
+            while self._items:
+                oldest_key = next(iter(self._items))
+                stored_at, _ = self._items[oldest_key]
+                if (
+                    len(self._items) <= self._max_entries
+                    and now - stored_at <= self._ttl_seconds
+                ):
+                    break
+                del self._items[oldest_key]
 
 
 STATUS_STRIP_REFRESH_MS = 10_000
 HEALTH_REFRESH_MS = 30_000
+DASHBOARD_REFRESH_MS = 15_000
 STATUS_STRIP_STALE_SECONDS = 900.0
 PROCESSING_SPANS_STALE_SECONDS = 900.0
 
@@ -212,7 +242,9 @@ _DASHBOARD_CACHE: dict[str, Any] = {
     "payload": None,
     "key": None,
 }
-_DASHBOARD_CACHE_TTL = 10.0
+# The key already carries the DB change token; the entry must outlive one
+# cockpit poll interval or the next poll can never hit it.
+_DASHBOARD_CACHE_TTL = 2 * DASHBOARD_REFRESH_MS / 1000.0
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -1531,36 +1563,6 @@ def _sanitize_email_preview(value: object) -> str:
     if not value:
         return ""
     return WEB_EMAIL_REDACTED_PREVIEW
-
-
-def _flatten_render_text(value: object, *, limit: int = 240) -> str:
-    def _flatten(node: object) -> list[str]:
-        if node is None:
-            return []
-        if isinstance(node, (list, tuple, set)):
-            parts: list[str] = []
-            for item in node:
-                parts.extend(_flatten(item))
-            return parts
-        if isinstance(node, Mapping):
-            parts: list[str] = []
-            for item in node.values():
-                parts.extend(_flatten(item))
-            return parts
-        text = str(node).strip()
-        if not text:
-            return []
-        try:
-            parsed = json.loads(text)
-        except (TypeError, ValueError):
-            return [text]
-        if parsed == node:
-            return [text]
-        return _flatten(parsed)
-
-    combined = " ".join(part for part in _flatten(value) if part)
-    compact = " ".join(combined.split())
-    return _clamp_text(compact, limit)
 
 
 def _sanitize_archive_row(row: Mapping[str, object]) -> dict[str, object]:
@@ -4083,60 +4085,6 @@ def create_app(
             if isinstance(engineer_payload, Mapping)
             else []
         )
-        top_senders: list[dict[str, object]] = []
-        silent_contacts: list[dict[str, object]] = []
-        stalled_threads: list[dict[str, object]] = []
-        if account_emails:
-            try:
-                top_senders = analytics.cockpit_top_senders(
-                    account_emails, days=30, limit=3
-                )
-            except Exception:
-                top_senders = []
-            try:
-                silent_contacts = analytics.cockpit_silent_contacts(
-                    account_emails,
-                    silent_days=14,
-                    days=90,
-                    min_msgs=3,
-                    limit=3,
-                )
-            except Exception:
-                silent_contacts = []
-            try:
-                stalled_threads = analytics.cockpit_stalled_threads(
-                    account_emails, days=30, limit=3
-                )
-            except Exception:
-                stalled_threads = []
-
-        top_senders = [
-            {
-                **item,
-                "display_name": _flatten_render_text(item.get("display_name")),
-            }
-            for item in top_senders
-            if isinstance(item, Mapping)
-        ]
-        silent_contacts = [
-            {
-                **item,
-                "display_name": _flatten_render_text(item.get("display_name")),
-            }
-            for item in silent_contacts
-            if isinstance(item, Mapping)
-        ]
-        stalled_threads = [
-            {
-                **item,
-                "from_email": _flatten_render_text(item.get("from_email")),
-                "subject": _flatten_render_text(item.get("subject")),
-                "snippet": _flatten_render_text(item.get("snippet")),
-            }
-            for item in stalled_threads
-            if isinstance(item, Mapping)
-        ]
-
         open_commitments = 0
         commitments_url = None
         if account_emails and hasattr(analytics, "commitment_status_counts"):
@@ -4271,9 +4219,6 @@ def create_app(
             latency_distribution=latency_distribution,
             open_commitments=open_commitments,
             commitments_url=commitments_url,
-            top_senders=top_senders,
-            silent_contacts=silent_contacts,
-            stalled_threads=stalled_threads,
             quality_summary=quality_summary,
             dashboard_preview=dashboard_preview,
             dashboard_preview_events=dashboard_preview_events,
@@ -4285,6 +4230,7 @@ def create_app(
             support_methods=app.config["SUPPORT_SETTINGS"].methods[:1],
             hide_limit=True,
             status_refresh_ms=STATUS_STRIP_REFRESH_MS,
+            dashboard_refresh_ms=DASHBOARD_REFRESH_MS,
             share_url=share_url,
         )
 
@@ -7502,16 +7448,6 @@ def create_app(
         )
         mode = _resolve_cockpit_mode(request, session)
 
-        summary = _health_summary_payload(
-            account_emails=account_emails,
-            window_days=window_days,
-            reveal_pii=reveal_pii,
-            mode=mode,
-        )
-        current = summary.get("current") if isinstance(summary, Mapping) else None
-        status_strip = (
-            summary.get("status_strip") if isinstance(summary, Mapping) else None
-        )
         incidents = _health_incidents_payload(
             account_emails=account_emails,
             window_days=window_days,

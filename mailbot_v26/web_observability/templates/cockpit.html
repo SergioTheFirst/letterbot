@@ -450,8 +450,8 @@
       });
       refreshStatus();
       refreshDashboard();
-      setInterval(refreshStatus, {{ status_refresh_ms }});
-      setInterval(refreshDashboard, 15000);
+      setInterval(() => { if (!document.hidden) refreshStatus(); }, {{ status_refresh_ms }});
+      setInterval(() => { if (!document.hidden) refreshDashboard(); }, {{ dashboard_refresh_ms }});
     })();
   </script>
 {% endblock %}
