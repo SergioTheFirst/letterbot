@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import sqlite3
 import tempfile
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +15,8 @@ from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.paths import app_root
 
 DEFAULT_RETENTION = 14
+# Placeholder written instead of secrets; restore refuses config members containing it.
+MASKED_VALUE = "***"
 
 
 @dataclass(frozen=True)
@@ -39,9 +43,8 @@ def _resolve_db_path(base_dir: Path) -> Path:
         return base_dir / "data" / "mailbot.sqlite"
 
 
-def _default_paths(base_dir: Path) -> list[Path]:
+def _state_paths(base_dir: Path) -> list[Path]:
     return [
-        _resolve_db_path(base_dir),
         base_dir / "state.json",
         base_dir / "mailbot_v26" / "runtime_flags.json",
         base_dir / "mailbot_v26" / "data" / "runtime_health.json",
@@ -65,16 +68,30 @@ def _mask_config(path: Path) -> str:
     for section in parser.sections():
         for option in parser.options(section):
             if _should_mask(option):
-                parser.set(section, option, "***")
+                parser.set(section, option, MASKED_VALUE)
     buffer = io.StringIO()
     parser.write(buffer)
     return buffer.getvalue()
 
 
+def _snapshot_db(source: Path, target: Path) -> None:
+    # Online backup API: a consistent copy that includes committed WAL pages,
+    # safe while the worker keeps the database open.
+    with closing(sqlite3.connect(str(source), timeout=30)) as src:
+        with closing(sqlite3.connect(str(target))) as dst:
+            src.backup(dst)
+
+
 def _collect_backup_files(base_dir: Path, temp_dir: Path) -> list[tuple[Path, str]]:
     entries: list[tuple[Path, str]] = []
 
-    for path in _default_paths(base_dir):
+    db_path = _resolve_db_path(base_dir)
+    if db_path.exists():
+        snapshot = temp_dir / "db_snapshot.sqlite"
+        _snapshot_db(db_path, snapshot)
+        entries.append((snapshot, db_path.relative_to(base_dir).as_posix()))
+
+    for path in _state_paths(base_dir):
         if path.exists():
             entries.append((path, path.relative_to(base_dir).as_posix()))
 
