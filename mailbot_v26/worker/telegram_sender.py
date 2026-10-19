@@ -51,6 +51,48 @@ def _is_retryable_status(status_code: int) -> bool:
     return status_code >= 500 or status_code == 429
 
 
+_RETRY_AFTER_MIN_SECONDS = 1.0
+_RETRY_AFTER_MAX_SECONDS = 3600.0
+
+
+def _coerce_retry_after(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        seconds = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if seconds != seconds:  # NaN
+        return None
+    return min(_RETRY_AFTER_MAX_SECONDS, max(_RETRY_AFTER_MIN_SECONDS, seconds))
+
+
+def _parse_retry_after(resp: "requests.Response") -> float | None:
+    """Seconds Telegram asks to wait after a 429 (parameters.retry_after, else the
+    Retry-After header), clamped to 1..3600; None when the reply names none."""
+    if getattr(resp, "status_code", None) != 429:
+        return None
+    json_loader = getattr(resp, "json", None)
+    if callable(json_loader):
+        try:
+            body = json_loader()
+        except (ValueError, json.JSONDecodeError):
+            body = None
+        parameters = body.get("parameters") if isinstance(body, dict) else None
+        if isinstance(parameters, dict):
+            seconds = _coerce_retry_after(parameters.get("retry_after"))
+            if seconds is not None:
+                return seconds
+    headers = getattr(resp, "headers", None)
+    if headers is None:
+        return None
+    try:
+        header_value = headers.get("Retry-After")
+    except AttributeError:
+        return None
+    return _coerce_retry_after(header_value)
+
+
 def _exception_chain(exc: BaseException) -> list[BaseException]:
     """exc plus what it wraps (args[0], urllib3 .reason, __cause__/__context__)."""
     chain: list[BaseException] = []
@@ -343,12 +385,14 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                 salvage_resp.text,
             )
             retryable = _is_retryable_status(salvage_resp.status_code)
+            retry_after = _parse_retry_after(salvage_resp)
             log.info(
                 "tg_delivery_final",
                 extra={
                     "delivered": False,
                     "retryable": retryable,
                     "error": salvage_resp.text,
+                    "retry_after": retry_after,
                 },
             )
             return DeliveryResult(
@@ -359,14 +403,17 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                 retry_count=1,
                 message_id=None,
                 status_code=salvage_resp.status_code,
+                retry_after=retry_after,
             )
         retryable = _is_retryable_status(resp.status_code)
+        retry_after = _parse_retry_after(resp)
         log.info(
             "tg_delivery_final",
             extra={
                 "delivered": False,
                 "retryable": retryable,
                 "error": resp.text,
+                "retry_after": retry_after,
             },
         )
         return DeliveryResult(
@@ -377,6 +424,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             retry_count=0,
             message_id=None,
             status_code=resp.status_code,
+            retry_after=retry_after,
         )
 
     message_id = _extract_message_id(resp)

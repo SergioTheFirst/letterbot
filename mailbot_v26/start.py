@@ -5,6 +5,7 @@ from __future__ import annotations
 import configparser
 import logging
 import argparse
+import math
 import sqlite3
 import sys
 import time
@@ -116,6 +117,30 @@ RUN_STARTED_AT_UTC = datetime.now(timezone.utc)
 REPO_ROOT = CURRENT_DIR.parent
 MAX_PIPELINE_STAGE_ATTEMPTS = 3
 MAX_TELEGRAM_STAGE_ATTEMPTS = 3
+MAX_QUEUE_BACKOFF_SECONDS = 600
+
+
+class TelegramRetryableError(RuntimeError):
+    """Telegram did not take the message; retry no sooner than retry_after."""
+
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _queue_backoff_seconds(attempts: int, exc: BaseException | None = None) -> int:
+    """Exponential queue backoff, stretched to Telegram's retry_after (429)."""
+    backoff = min(MAX_QUEUE_BACKOFF_SECONDS, 10 * (2**attempts))
+    retry_after = getattr(exc, "retry_after", None)
+    if isinstance(exc, TelegramRetryableError) and retry_after:
+        backoff = max(backoff, int(math.ceil(retry_after)))
+    return backoff
+
+
+def _not_before_after(seconds: float) -> str:
+    """Queue not_before: naive-UTC isoformat, the format claim_next compares (F11)."""
+    moment = datetime.now(timezone.utc) + timedelta(seconds=math.ceil(seconds))
+    return moment.replace(tzinfo=None).isoformat()
 
 
 def _configure_logging() -> None:
@@ -1115,9 +1140,22 @@ def _process_queue(
                             delivery_guard.outcome,
                             delivery_guard.error or "",
                         )
+                llm_not_before: str | None = None
+                retry_after = (
+                    delivery_guard.retry_after if delivery_guard is not None else None
+                )
+                if retry_after:
+                    # Telegram asked to wait (429): the legacy chain starts after it.
+                    llm_not_before = _not_before_after(retry_after)
+                    logger.warning(
+                        "premium_fallback_delayed email_id=%s retry_after_seconds=%s not_before_utc=%s",
+                        email_id,
+                        retry_after,
+                        llm_not_before,
+                    )
                 stage_parse(ctx)
                 storage.mark_done(queue_id)
-                storage.enqueue_stage(email_id, "LLM")
+                storage.enqueue_stage(email_id, "LLM", not_before=llm_not_before)
             elif stage == "LLM":
                 stage_llm(ctx)
                 storage.mark_done(queue_id)
@@ -1144,8 +1182,9 @@ def _process_queue(
                     emit_events=True,
                 ):
                     # Definitely not sent (or no reservation): TG backoff retries.
-                    raise RuntimeError(
-                        delivery_guard.error or "telegram delivery failed"
+                    raise TelegramRetryableError(
+                        delivery_guard.error or "telegram delivery failed",
+                        retry_after=delivery_guard.retry_after,
                     )
             else:
                 storage.mark_done(queue_id)
@@ -1153,7 +1192,7 @@ def _process_queue(
                 logger.warning("Unknown stage %s for email %s", stage, email_id)
         except Exception as queue_exc:
             logger.exception("Queue handling error for email %s", email_id)
-            backoff = min(600, 10 * (2**attempts))
+            backoff = _queue_backoff_seconds(attempts, queue_exc)
             if delivery_guard is not None and delivery_guard.is_settled:
                 # Telegram already has (or may have) the message; only the
                 # bookkeeping failed. Retry that later; the guard blocks a resend.
