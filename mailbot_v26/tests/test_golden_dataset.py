@@ -90,10 +90,10 @@ def test_golden_dataset_accuracy(monkeypatch, tmp_path) -> None:
     for case in cases:
         expected = expected_map[case.id]
 
-        def _fake_run_llm_stage(**kwargs):
+        def _fake_run_llm_stage(*, _expected=expected, **kwargs):
             return SimpleNamespace(
-                priority=expected.priority,
-                action_line=expected.action_line,
+                priority=_expected.priority,
+                action_line=_expected.action_line,
                 body_summary="Краткое описание письма.",
                 attachment_summaries=[],
                 llm_provider="gigachat",
@@ -105,8 +105,8 @@ def test_golden_dataset_accuracy(monkeypatch, tmp_path) -> None:
         monkeypatch.setattr(processor, "run_llm_stage", _fake_run_llm_stage)
         captured: dict[str, object] = {}
 
-        def _enqueue_tg(*, email_id: int, payload) -> None:
-            captured["payload"] = payload
+        def _enqueue_tg(*, email_id: int, payload, _captured=captured) -> None:
+            _captured["payload"] = payload
 
         monkeypatch.setattr(processor, "enqueue_tg", _enqueue_tg)
 
