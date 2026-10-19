@@ -206,8 +206,34 @@ def _normalize_token(token: str) -> str:
     return _normalized_lower(str(token or "")).strip()
 
 
+# _normalized_lower is pure (the mojibake normalizer reads only constants) and is
+# called on the same email texts by dozens of rules, so results are memoized.
+# Both caches are bounded so the long-running worker keeps a fixed footprint;
+# texts above _NORMALIZED_LOWER_CACHE_MAX_CHARS are never cached.
+_NORMALIZED_LOWER_SHORT_MAX_CHARS = 8192
+_NORMALIZED_LOWER_CACHE_MAX_CHARS = 262_144
+
+
 def _normalized_lower(text: str) -> str:
     source = str(text or "")
+    if len(source) <= _NORMALIZED_LOWER_SHORT_MAX_CHARS:
+        return _normalized_lower_short(source)
+    if len(source) <= _NORMALIZED_LOWER_CACHE_MAX_CHARS:
+        return _normalized_lower_long(source)
+    return _normalized_lower_uncached(source)
+
+
+@lru_cache(maxsize=256)
+def _normalized_lower_short(source: str) -> str:
+    return _normalized_lower_uncached(source)
+
+
+@lru_cache(maxsize=8)
+def _normalized_lower_long(source: str) -> str:
+    return _normalized_lower_uncached(source)
+
+
+def _normalized_lower_uncached(source: str) -> str:
     normalized = _normalize_mojibake_text_impl(source)
     if any(marker in normalized for marker in ("Р", "С", "рџ", "вЂ", "Ð", "Ñ")):
         for encoding in ("cp1251", "latin-1", "cp1252"):
@@ -7835,7 +7861,7 @@ def process_message(
             "subject": subject,
             "attachments_count": len(attachments),
             "body_chars": len(body_text or ""),
-            "word_count": len(re.findall(r"\w+", body_text or "")),
+            "word_count": len(re.findall(r"\b\w+\b", body_text or "")),
             "occurred_at_utc": received_at.timestamp(),
             "thread_key": thread_key,
         }

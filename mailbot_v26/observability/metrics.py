@@ -1,28 +1,66 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from mailbot_v26.observability import get_logger
 
 logger = get_logger("mailbot")
 
+# Policy gates read this snapshot for every processed email; reusing it for a
+# short window keeps one poll cycle from rescanning decision_traces and events
+# several times. Gates may lag new data by at most this many seconds.
+METRICS_SNAPSHOT_TTL_SECONDS = 30.0
+
+_EMPTY_WINDOW_METRICS = {
+    "shadow_accuracy": 0.0,
+    "preview_accept_rate": 0.0,
+    "commitment_fulfillment_rate": 0.0,
+    "llm_failure_rate": 0.0,
+    "fallback_usage_rate": 0.0,
+    "telegram_delivery_success_rate": 0.0,
+    "empty_summary_rate": 0.0,
+}
+
 
 @dataclass(slots=True)
 class MetricsAggregator:
     path: Path
+    ttl_seconds: float = METRICS_SNAPSHOT_TTL_SECONDS
+    clock: Callable[[], float] = time.monotonic
+    _cached_snapshot: dict[str, dict[str, float]] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _cached_at: float = field(default=0.0, init=False, repr=False, compare=False)
 
     def _connect_readonly(self) -> sqlite3.Connection:
         return sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
 
     def snapshot(self) -> dict[str, dict[str, float]]:
-        return {
+        now = self.clock()
+        cached = self._cached_snapshot
+        if cached is not None and 0 <= now - self._cached_at < self.ttl_seconds:
+            return _copy_snapshot(cached)
+        windows = {
             "days_7": self._window_metrics(days=7),
             "days_30": self._window_metrics(days=30),
         }
+        if any(metrics is None for metrics in windows.values()):
+            # A failed window is reported as zeros but never cached, so the
+            # next email retries instead of reusing a degraded snapshot.
+            self._cached_snapshot = None
+            return {
+                key: dict(metrics if metrics is not None else _EMPTY_WINDOW_METRICS)
+                for key, metrics in windows.items()
+            }
+        self._cached_snapshot = windows
+        self._cached_at = now
+        return _copy_snapshot(windows)
 
-    def _window_metrics(self, *, days: int) -> dict[str, float]:
+    def _window_metrics(self, *, days: int) -> dict[str, float] | None:
         try:
             with self._connect_readonly() as conn:
                 conn.row_factory = sqlite3.Row
@@ -114,15 +152,7 @@ class MetricsAggregator:
                     empty_summary = 0
         except Exception as exc:
             logger.error("metrics_aggregation_failed", error=str(exc), window_days=days)
-            return {
-                "shadow_accuracy": 0.0,
-                "preview_accept_rate": 0.0,
-                "commitment_fulfillment_rate": 0.0,
-                "llm_failure_rate": 0.0,
-                "fallback_usage_rate": 0.0,
-                "telegram_delivery_success_rate": 0.0,
-                "empty_summary_rate": 0.0,
-            }
+            return None
 
         return {
             "shadow_accuracy": _safe_rate(shadow_match, shadow_total),
@@ -195,6 +225,12 @@ class SystemHealthSnapshotter:
             gates_passed=evaluation.passed,
             gates_failed=evaluation.failed_reasons,
         )
+
+
+def _copy_snapshot(
+    snapshot: dict[str, dict[str, float]],
+) -> dict[str, dict[str, float]]:
+    return {key: dict(metrics) for key, metrics in snapshot.items()}
 
 
 def _safe_rate(numerator: int, denominator: int) -> float:
