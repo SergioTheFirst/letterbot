@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from mailbot_v26.observability.redact import redact_secrets
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
+from mailbot_v26.telegram_utils import cap_telegram_text, telegram_text_units
 from mailbot_v26.text.mojibake import normalize_mojibake_text
 
 requests_spec = importlib.util.find_spec("requests")
@@ -164,6 +165,19 @@ def _sanitize_user_facing_text(text: str) -> str:
     return normalize_mojibake_text(text)
 
 
+def _cap_outgoing_text(text: str, *, kind: str) -> str:
+    # Safety net: callers cap already; an over-long text would be a lost 400.
+    capped = cap_telegram_text(text)
+    if capped != text:
+        log.warning(
+            "telegram_text_capped kind=%s original_units=%s capped_units=%s",
+            kind,
+            telegram_text_units(text),
+            telegram_text_units(capped),
+        )
+    return capped
+
+
 def _looks_like_parse_error(error_text: str) -> bool:
     lowered = (error_text or "").lower()
     return "unsupported start tag" in lowered or "can't parse" in lowered
@@ -247,6 +261,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             message_id=None,
         )
 
+    normalized_text = _cap_outgoing_text(normalized_text, kind="send")
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
     try:
@@ -393,6 +408,7 @@ def edit_telegram_message(
     if requests is None:
         log.error("Telegram edit failed: requests module not available")
         return False
+    normalized_text = _cap_outgoing_text(normalized_text, kind="edit")
     url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
     payload: dict[str, object] = {
         "chat_id": chat_id,

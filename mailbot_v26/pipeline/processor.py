@@ -103,7 +103,11 @@ from mailbot_v26.insights.trust_score import TrustScoreCalculator
 from mailbot_v26.events.contract import EventType, EventV1
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.observability import get_logger
-from mailbot_v26.telegram_utils import escape_tg_html
+from mailbot_v26.telegram_utils import (
+    cap_telegram_text,
+    escape_tg_html,
+    telegram_text_units,
+)
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.observability.decision_trace import DecisionTraceWriter
 from mailbot_v26.observability.decision_trace_v1 import (
@@ -2603,10 +2607,8 @@ def _build_premium_clarity_text(
 
 
 def _trim_telegram_body(text: str) -> str:
-    cleaned = text.strip()
-    if len(cleaned) <= _TELEGRAM_BODY_LIMIT:
-        return cleaned
-    return f"{cleaned[: _TELEGRAM_BODY_LIMIT - 1]}…"
+    # Whole lines + plain-text cut: a raw char cut could split a tag or entity.
+    return cap_telegram_text(text.strip(), limit=_TELEGRAM_BODY_LIMIT)
 
 
 def _looks_like_subject_only(text: str, subject: str) -> bool:
@@ -5314,6 +5316,15 @@ def build_telegram_payload(
         },
     )
     telegram_text = _normalize_mojibake_text(telegram_text)
+    capped_text = cap_telegram_text(telegram_text)
+    if capped_text != telegram_text:
+        logger.warning(
+            "telegram_text_capped",
+            email_id=context.email_id,
+            original_units=telegram_text_units(telegram_text),
+            capped_units=telegram_text_units(capped_text),
+        )
+        telegram_text = capped_text
     metadata = {
         "subject": context.subject,
         "sender": context.from_email,

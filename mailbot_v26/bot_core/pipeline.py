@@ -32,7 +32,11 @@ from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
 from mailbot_v26.text.mime_utils import decode_bytes, decode_mime_header
 from mailbot_v26.text.sanitize import sanitize_text
-from mailbot_v26.telegram_utils import telegram_safe
+from mailbot_v26.telegram_utils import (
+    cap_telegram_text,
+    telegram_safe,
+    telegram_text_units,
+)
 from mailbot_v26.ui.i18n import DEFAULT_LOCALE
 from mailbot_v26.worker.telegram_sender import DeliveryResult, send_telegram
 
@@ -727,8 +731,17 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
         locale=locale,
     )
 
+    safe_text = telegram_safe(telegram_text.strip())
+    html_text = cap_telegram_text(safe_text)
+    if html_text != safe_text:
+        logger.warning(
+            "telegram_text_capped email_id=%s original_units=%s capped_units=%s",
+            ctx.email_id,
+            telegram_text_units(safe_text),
+            telegram_text_units(html_text),
+        )
     payload = TelegramPayload(
-        html_text=telegram_safe(telegram_text.strip()),
+        html_text=html_text,
         priority=priority,
         metadata={
             "bot_token": _PIPELINE_CONFIG.keys.telegram_bot_token,
