@@ -37,6 +37,12 @@ jobs:
       - name: Compile check
         run: python -m compileall mailbot_v26 -q
 
+      - name: Lint (ruff)
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install "ruff==0.15.5"
+          python -m ruff check mailbot_v26 tests conftest.py --select F821,F811,F841,B023,PLE
+
       - name: Run full test suite
         run: python -m pytest -q --tb=short
 

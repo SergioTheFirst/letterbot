@@ -13,7 +13,8 @@
 Run these commands locally:
 
 - `python -m compileall mailbot_v26 -q`
-- `python -m pytest mailbot_v26/tests/ -q --tb=short`
+- `python -m pytest -q --tb=short` (runs both `mailbot_v26/tests/` and `tests/` from `pytest.ini`)
+- `python -m ruff check mailbot_v26 tests conftest.py --select F821,F811,F841,B023,PLE` (CI lint gate; dev-only tool: `python -m pip install "ruff==0.15.5"`)
 - `python -m mailbot_v26.tools.eval_golden_corpus`
 - `python -m mailbot_v26.tools.eval_golden_corpus --report`
 

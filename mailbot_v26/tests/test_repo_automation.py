@@ -28,6 +28,29 @@ def test_ci_workflow_exists_and_runs_quality_gates() -> None:
     assert "python -m mailbot_v26.tools.cleanup --status" in text
 
 
+def test_ci_test_job_runs_pinned_ruff_gate_on_linux() -> None:
+    test_job = _read(".github/workflows/ci.yml").split("build_windows:", 1)[0]
+
+    assert "- name: Lint (ruff)" in test_job
+    step = test_job.split("- name: Lint (ruff)", 1)[1].split("- name:", 1)[0]
+    assert "if: runner.os == 'Linux'" in step
+    assert 'python -m pip install "ruff==0.15.5"' in step
+    assert (
+        "ruff check mailbot_v26 tests conftest.py --select F821,F811,F841,B023,PLE"
+        in step
+    )
+    # ruff is a dev-only CI tool, never a runtime dependency.
+    assert "ruff" not in _read("requirements.txt").lower()
+
+
+def test_contributing_lists_the_ci_test_command() -> None:
+    text = _read("CONTRIBUTING.md")
+
+    assert "`python -m pytest -q --tb=short`" in text
+    assert "python -m pytest mailbot_v26/tests" not in text
+    assert "ruff==0.15.5" in text
+
+
 def test_release_smoke_workflow_exists() -> None:
     text = _read(".github/workflows/release-smoke.yml")
 
