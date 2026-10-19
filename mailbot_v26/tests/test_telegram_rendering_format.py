@@ -23,8 +23,8 @@ def test_attachments_block_formatting_and_truncation() -> None:
     long_text = "a" * 300
     attachments = [
         {"filename": "report.pdf", "text": "summary"},
-        {"filename": "scan.png", "text": ""},
         {"filename": "notes.txt", "text": long_text},
+        {"filename": "scan.png", "text": ""},
     ]
 
     rendered = format_attachments_block(attachments)
@@ -32,9 +32,11 @@ def test_attachments_block_formatting_and_truncation() -> None:
     assert rendered.startswith("Attachments: 3 (PDF×1, PNG×1, TXT×1)")
     assert "report.pdf — <i>summary</i>" in rendered
     assert "<i>report.pdf" not in rendered
-    assert "\nscan.png\n" in f"\n{rendered}\n"
     assert "notes.txt — <i>" in rendered
     assert "....</i>" in rendered
+    # D-P2-2 (CONSTITUTION III.6): 3+ attachments list the first 2 + overflow.
+    assert "scan.png" not in rendered
+    assert rendered.endswith("\n… and 1 more")
     assert "\n\n" not in rendered
 
 

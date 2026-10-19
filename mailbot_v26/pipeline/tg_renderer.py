@@ -8,10 +8,12 @@ from typing import Any, Iterable
 from mailbot_v26.text.clean_email import clean_email_body
 from mailbot_v26.text.mojibake import normalize_mojibake_text
 from mailbot_v26.telegram_utils import escape_tg_html
-from mailbot_v26.ui.i18n import DEFAULT_LOCALE
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE, t
 from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.text.sanitize import is_binaryish
 
+# CONSTITUTION III.6: list up to 2 attachments, then "… and N more".
+MAX_LISTED_ATTACHMENTS = 2
 _ATTACHMENT_SNIPPET_LIMIT = 240
 _BASE64_FRAGMENT = re.compile(r"[A-Za-z0-9+/]{80,}={0,2}")
 _TOKEN_RE = re.compile(r"[a-zа-я0-9]+", re.IGNORECASE)
@@ -846,12 +848,16 @@ def format_narrative_block(
 
 
 def format_attachments_block(
-    attachments: list[dict[str, Any]], *, locale: str = DEFAULT_LOCALE
+    attachments: list[dict[str, Any]],
+    *,
+    locale: str = DEFAULT_LOCALE,
+    max_items: int = MAX_LISTED_ATTACHMENTS,
 ) -> str:
     if not attachments:
         return ""
+    # The header counts every attachment; only the first max_items are listed.
     lines = [_attachment_type_summary(attachments, locale=locale)]
-    for attachment in attachments:
+    for attachment in attachments[:max_items]:
         filename = _escape_dynamic(
             attachment.get("filename") or _attachment_name_fallback(locale)
         )
@@ -877,6 +883,15 @@ def format_attachments_block(
             lines.append(f"{filename} — <i>{safe_text}</i>")
         else:
             lines.append(f"{filename}")
+    hidden = len(attachments) - max_items
+    if hidden > 0:
+        lines.append(
+            t(
+                "tg.attachments.more",
+                locale="en" if _is_english_locale(locale) else "ru",
+                count=hidden,
+            )
+        )
     return "\n".join(lines)
 
 
@@ -1055,7 +1070,6 @@ def build_minimal_telegram_text(
     from_email: str,
     subject: str,
     attachments: list[dict[str, Any]],
-    max_attachment_names: int = 3,
     locale: str = DEFAULT_LOCALE,
 ) -> str:
     base_text = build_tg_short_template(
@@ -1067,7 +1081,7 @@ def build_minimal_telegram_text(
     if not attachments:
         return base_text
     minimal_attachments: list[dict[str, Any]] = []
-    for attachment in attachments[:max_attachment_names]:
+    for attachment in attachments:
         minimal_attachments.append(
             {
                 "filename": attachment.get("filename") or _attachment_name_fallback(locale),
@@ -1078,11 +1092,6 @@ def build_minimal_telegram_text(
             }
         )
     attachments_block = format_attachments_block(minimal_attachments, locale=locale)
-    if len(attachments) > max_attachment_names:
-        attachments_block = (
-            f"{attachments_block}\n"
-            f"… {_localized_text(locale, en='and', ru='и ещё')} {len(attachments) - len(minimal_attachments)} {_localized_text(locale, en='more', ru='ещё')}"
-        )
     return dedup_rendered_text("\n\n".join([base_text, attachments_block]))
 
 
