@@ -248,6 +248,7 @@ def test_scheduler_weekly_iso_logic(monkeypatch, tmp_path) -> None:
 
     config = _build_config(tmp_path)
     storage = _build_storage(tmp_path)
+    _seed_deferred_email(storage.knowledge_db, storage.contract_event_emitter)
 
     sent: list[dict[str, object]] = []
 
@@ -387,6 +388,7 @@ def test_scheduler_dedup_chat_id_weekly_event_payload(monkeypatch, tmp_path) -> 
         ],
     )
     storage = _build_storage(tmp_path)
+    _seed_deferred_email(storage.knowledge_db, storage.contract_event_emitter)
 
     sent: list[dict[str, object]] = []
 

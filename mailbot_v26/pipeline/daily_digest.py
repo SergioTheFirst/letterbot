@@ -1037,7 +1037,7 @@ def _has_digest_content(data: DigestData) -> bool:
         return True
     if data.anomaly_alerts:
         return True
-    if data.quality_metrics is not None:
+    if data.quality_metrics is not None and data.quality_metrics.corrections_total > 0:
         return True
     if data.attention_economics is not None:
         return True
