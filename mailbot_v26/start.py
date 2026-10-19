@@ -65,6 +65,11 @@ from mailbot_v26.pipeline.processor import (
     MessageProcessor,
     event_emitter,
 )
+from mailbot_v26.pipeline.delivery_guard import (
+    DELIVERY_UNKNOWN,
+    EmailDeliveryGuard,
+    delivery_unknown_error_class,
+)
 from mailbot_v26.features.flags import FeatureFlags
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.pipeline import processor as processor_module
@@ -523,6 +528,7 @@ def _run_premium_processor(
     inbound: InboundMessage,
     raw: bytes | None,
     config: BotConfig,
+    delivery_guard: EmailDeliveryGuard | None = None,
 ) -> None:
     message_obj = message_from_bytes(raw) if raw else None
     from_header = decode_mime_header(message_obj.get("From", "")) if message_obj else ""
@@ -566,14 +572,25 @@ def _run_premium_processor(
         rfc_message_id=rfc_message_id or None,
         in_reply_to=in_reply_to or None,
         references=references or None,
+        delivery_guard=delivery_guard,
     )
 
 
 def _fail_open_process(
-    config: BotConfig, processor: MessageProcessor, ctx: Optional[PipelineContext]
+    config: BotConfig,
+    processor: MessageProcessor,
+    ctx: Optional[PipelineContext],
+    storage: Storage | None = None,
 ) -> None:
     if ctx is None:
         logger.error("Fail-open skipped: missing context")
+        return
+    if storage is None:
+        # Never POST without a delivery reservation (one email -> one message).
+        logger.error(
+            "Fail-open skipped for email %s: no delivery log to reserve the send",
+            ctx.email_id,
+        )
         return
 
     inbound = PIPELINE_INBOUND_CACHE.get(ctx.email_id)
@@ -611,12 +628,34 @@ def _fail_open_process(
         bot_token=config.keys.telegram_bot_token,
         chat_id=account.telegram_chat_id,
     )
-    result = send_telegram(payload)
-    ok = result.delivered
-    status = "OK" if ok else "FAIL"
-    logger.error(
-        "Fail-open Telegram send status for email %s: %s", ctx.email_id, status
+    guard = _new_email_delivery_guard(
+        storage=storage, config=config, ctx=ctx, email_id=ctx.email_id
     )
+    if guard.before_send() is None:
+        guard.after_send(send_telegram(payload))
+    logger.error(
+        "Fail-open Telegram send status for email %s: %s",
+        ctx.email_id,
+        guard.outcome,
+    )
+    # No queue item is left to retry a fail-open send: retryable counts as failed.
+    try:
+        _settle_email_delivery(
+            storage=storage,
+            config=config,
+            guard=guard,
+            ctx=ctx,
+            queue_id=None,
+            attempts=int(getattr(ctx, "attempts", 0) or 0),
+            emit_events=True,
+            retryable_is_final=True,
+        )
+    except Exception:
+        logger.exception(
+            "telegram_delivery_settle_failed email_id=%s outcome=%s path=fail_open",
+            ctx.email_id,
+            guard.outcome,
+        )
 
 
 def _emit_contract_event(
@@ -746,6 +785,230 @@ def _build_telegram_delivery_key(
     return f"{kind}:{base_key}"
 
 
+def _new_email_delivery_guard(
+    *,
+    storage: Storage,
+    config: BotConfig,
+    ctx: PipelineContext,
+    email_id: int,
+) -> EmailDeliveryGuard:
+    account = _get_account_by_login(config, ctx.account_email)
+    return EmailDeliveryGuard(
+        storage,
+        email_id=email_id,
+        account_id=ctx.account_email,
+        chat_id=account.telegram_chat_id if account else None,
+        delivery_key=_build_telegram_delivery_key(email_id=email_id, kind="email"),
+    )
+
+
+def _settle_write(action, *args, email_id: int, what: str) -> None:
+    """Status write after a send: log a failure, never retry the send for it."""
+    try:
+        action(*args)
+    except Exception:
+        logger.exception(
+            "telegram_delivery_settle_failed email_id=%s write=%s", email_id, what
+        )
+
+
+def _record_delivery_unknown(
+    *,
+    storage: Storage,
+    config: BotConfig,
+    guard: EmailDeliveryGuard,
+    ctx: PipelineContext,
+    attempts: int,
+    emit_events: bool,
+) -> None:
+    email_id = guard.email_id
+    error_class = delivery_unknown_error_class(guard.error)
+    _settle_write(
+        storage.set_email_delivery_unknown,
+        email_id,
+        f"{DELIVERY_UNKNOWN}:{error_class}",
+        email_id=email_id,
+        what="set_email_delivery_unknown",
+    )
+    logger.error(
+        "telegram_delivery_unknown email_id=%s attempts=%s error_class=%s",
+        email_id,
+        attempts,
+        error_class,
+    )
+    if not emit_events:
+        return  # the premium processor already reported it
+    account = _get_account_by_login(config, ctx.account_email)
+    change = processor_module.system_health.update_component(
+        "Telegram", False, reason=DELIVERY_UNKNOWN
+    )
+    processor_module._notify_system_mode_change(
+        change=change,
+        chat_id=account.telegram_chat_id if account else "",
+        account_email=ctx.account_email,
+    )
+    payload: dict[str, object] = {
+        "attempts": attempts,
+        "error": DELIVERY_UNKNOWN,
+        "delivery_state": "unknown",
+        "error_class": error_class,
+    }
+    event_emitter.emit(
+        type="telegram_delivery_failed",
+        timestamp=datetime.now(timezone.utc),
+        email_id=email_id,
+        payload=dict(payload),
+    )
+    _emit_contract_event(
+        event_type=EventType.TELEGRAM_FAILED,
+        ts_utc=datetime.now(timezone.utc).timestamp(),
+        account_id=ctx.account_email,
+        email_id=email_id,
+        payload={**payload, "delivered": False},
+    )
+
+
+def _record_delivery_failed(
+    *,
+    storage: Storage,
+    config: BotConfig,
+    guard: EmailDeliveryGuard,
+    ctx: PipelineContext,
+    attempts: int,
+) -> None:
+    email_id = guard.email_id
+    error = guard.error or "telegram delivery failed"
+    account = _get_account_by_login(config, ctx.account_email)
+    if account:
+        locale = processor_module._resolve_outbound_ui_locale()
+        notice = _telegram_delivery_failed_notice(locale=locale)
+        payload = _build_system_payload(
+            text=notice,
+            bot_token=config.keys.telegram_bot_token,
+            chat_id=account.telegram_chat_id,
+            priority="🔴",
+        )
+        fallback_result = send_telegram(payload)
+        if not fallback_result.delivered:
+            logger.error(
+                "telegram_delivery_failed_notice_failed email_id=%s attempts=%s locale=%s error=%s",
+                email_id,
+                attempts,
+                locale,
+                fallback_result.error or "",
+            )
+    _settle_write(
+        storage.set_email_delivery_failed,
+        email_id,
+        error,
+        email_id=email_id,
+        what="set_email_delivery_failed",
+    )
+    error_class = "DeliveryError"
+    logger.error(
+        "telegram_delivery_failed email_id=%s attempts=%s error_class=%s error=%s",
+        email_id,
+        attempts,
+        error_class,
+        error,
+    )
+    event_emitter.emit(
+        type="telegram_delivery_failed",
+        timestamp=datetime.now(timezone.utc),
+        email_id=email_id,
+        payload={
+            "attempts": attempts,
+            "error": error,
+            "error_class": error_class,
+        },
+    )
+
+
+def _settle_email_delivery(
+    *,
+    storage: Storage,
+    config: BotConfig,
+    guard: EmailDeliveryGuard,
+    ctx: PipelineContext,
+    queue_id: int | None,
+    attempts: int,
+    emit_events: bool,
+    retryable_is_final: bool = False,
+) -> bool:
+    """Finish the email by guard.outcome; False: nothing final, caller continues.
+
+    emit_events=False for the premium processor, which reports its own
+    delivered/unknown events. A failed mark_done propagates so the queue
+    retries the bookkeeping; the guard keeps that retry from posting again.
+    """
+    email_id = guard.email_id
+    outcome = guard.outcome
+    if outcome == "retryable" and retryable_is_final:
+        outcome = "failed"
+    if outcome == "delivered":
+        if queue_id is not None:
+            storage.mark_done(queue_id)
+        _cleanup_pipeline_cache(email_id)
+        if emit_events:
+            event_emitter.emit(
+                type="telegram_delivery_succeeded",
+                timestamp=datetime.now(timezone.utc),
+                email_id=email_id,
+                payload={"attempt": attempts},
+            )
+            _emit_contract_event(
+                event_type=EventType.TELEGRAM_DELIVERED,
+                ts_utc=datetime.now(timezone.utc).timestamp(),
+                account_id=ctx.account_email,
+                email_id=email_id,
+                payload={"attempt": attempts},
+            )
+        return True
+    if outcome == "duplicate":
+        if queue_id is not None:
+            storage.mark_done(queue_id)
+        _cleanup_pipeline_cache(email_id)
+        logger.info(
+            "telegram_delivery_skipped_duplicate account_id=%s email_id=%s delivery_key=%s",
+            ctx.account_email,
+            email_id,
+            guard.delivery_key,
+        )
+        event_emitter.emit(
+            type="telegram_delivery_skipped_duplicate",
+            timestamp=datetime.now(timezone.utc),
+            email_id=email_id,
+            payload={"delivery_key": guard.delivery_key, "kind": "email"},
+        )
+        return True
+    if outcome == "unknown":
+        _record_delivery_unknown(
+            storage=storage,
+            config=config,
+            guard=guard,
+            ctx=ctx,
+            attempts=attempts,
+            emit_events=emit_events,
+        )
+        if queue_id is not None:
+            storage.mark_done(queue_id)
+        _cleanup_pipeline_cache(email_id)
+        return True
+    if outcome == "failed":
+        _record_delivery_failed(
+            storage=storage,
+            config=config,
+            guard=guard,
+            ctx=ctx,
+            attempts=attempts,
+        )
+        if queue_id is not None:
+            storage.mark_done(queue_id)
+        _cleanup_pipeline_cache(email_id)
+        return True
+    return False
+
+
 def _process_queue(
     storage: Storage,
     config: BotConfig,
@@ -764,6 +1027,7 @@ def _process_queue(
         email_id = item["email_id"]
         stage = item["stage"]
         attempts = item["attempts"]
+        delivery_guard: EmailDeliveryGuard | None = None
         ctx = PIPELINE_CACHE.get(email_id)
         if ctx:
             ctx.attempts = attempts  # type: ignore[attr-defined]
@@ -779,12 +1043,16 @@ def _process_queue(
                     inbound = PIPELINE_INBOUND_CACHE.get(email_id)
                     raw = PIPELINE_RAW_CACHE.get(email_id)
                     if inbound is not None:
+                        delivery_guard = _new_email_delivery_guard(
+                            storage=storage, config=config, ctx=ctx, email_id=email_id
+                        )
                         try:
                             _run_premium_processor(
                                 ctx=ctx,
                                 inbound=inbound,
                                 raw=raw,
                                 config=config,
+                                delivery_guard=delivery_guard,
                             )
                         except Exception as exc:
                             logger.exception(
@@ -792,10 +1060,25 @@ def _process_queue(
                                 email_id,
                                 exc,
                             )
-                        else:
-                            storage.mark_done(queue_id)
-                            _cleanup_pipeline_cache(email_id)
+                        # Settle by what reached Telegram, not by how premium ended.
+                        if _settle_email_delivery(
+                            storage=storage,
+                            config=config,
+                            guard=delivery_guard,
+                            ctx=ctx,
+                            queue_id=queue_id,
+                            attempts=attempts,
+                            emit_events=False,
+                        ):
                             continue
+                        # Nothing final was sent (no-send branch or retryable):
+                        # the legacy chain notifies.
+                        logger.warning(
+                            "premium_processor_fallback email_id=%s outcome=%s error=%s",
+                            email_id,
+                            delivery_guard.outcome,
+                            delivery_guard.error or "",
+                        )
                 stage_parse(ctx)
                 storage.mark_done(queue_id)
                 storage.enqueue_stage(email_id, "LLM")
@@ -804,121 +1087,29 @@ def _process_queue(
                 storage.mark_done(queue_id)
                 storage.enqueue_stage(email_id, "TG")
             elif stage == "TG":
-                account = (
-                    _get_account_by_login(config, ctx.account_email) if ctx else None
+                delivery_guard = _new_email_delivery_guard(
+                    storage=storage, config=config, ctx=ctx, email_id=email_id
                 )
-                delivery_key = _build_telegram_delivery_key(
-                    email_id=email_id, kind="email"
-                )
-                dedup_state = storage.reserve_telegram_delivery(
-                    delivery_key=delivery_key,
-                    email_id=email_id,
-                    account_id=ctx.account_email if ctx else None,
-                    chat_id=account.telegram_chat_id if account else None,
-                    kind="email",
-                )
-                if dedup_state == "duplicate" or (
-                    dedup_state == "unavailable"
-                    and storage.is_telegram_delivered(email_id)
+                if delivery_guard.before_send() is None:
+                    try:
+                        result = stage_tg(ctx)
+                    except Exception:
+                        # Raised before the POST (rendering): nothing was sent.
+                        delivery_guard.abort()
+                        raise
+                    delivery_guard.after_send(result)
+                if not _settle_email_delivery(
+                    storage=storage,
+                    config=config,
+                    guard=delivery_guard,
+                    ctx=ctx,
+                    queue_id=queue_id,
+                    attempts=attempts,
+                    emit_events=True,
                 ):
-                    storage.mark_done(queue_id)
-                    _cleanup_pipeline_cache(email_id)
-                    logger.info(
-                        "telegram_delivery_skipped_duplicate account_id=%s email_id=%s delivery_key=%s",
-                        ctx.account_email if ctx else "",
-                        email_id,
-                        delivery_key,
-                    )
-                    event_emitter.emit(
-                        type="telegram_delivery_skipped_duplicate",
-                        timestamp=datetime.now(timezone.utc),
-                        email_id=email_id,
-                        payload={"delivery_key": delivery_key, "kind": "email"},
-                    )
-                    continue
-                if dedup_state == "unavailable":
-                    logger.warning(
-                        "telegram_delivery_dedup_unavailable email_id=%s account_id=%s delivery_key=%s",
-                        email_id,
-                        ctx.account_email if ctx else "",
-                        delivery_key,
-                    )
-                try:
-                    result = stage_tg(ctx)
-                except Exception:
-                    if dedup_state == "reserved":
-                        storage.release_telegram_delivery(delivery_key=delivery_key)
-                    raise
-                if result.delivered:
-                    storage.mark_telegram_delivered(email_id)
-                    if dedup_state == "reserved":
-                        storage.finalize_telegram_delivery(
-                            delivery_key=delivery_key,
-                            telegram_message_id=(
-                                str(result.message_id)
-                                if result.message_id is not None
-                                else None
-                            ),
-                        )
-                    storage.mark_done(queue_id)
-                    event_emitter.emit(
-                        type="telegram_delivery_succeeded",
-                        timestamp=datetime.now(timezone.utc),
-                        email_id=email_id,
-                        payload={"attempt": attempts},
-                    )
-                    if ctx:
-                        _emit_contract_event(
-                            event_type=EventType.TELEGRAM_DELIVERED,
-                            ts_utc=datetime.now(timezone.utc).timestamp(),
-                            account_id=ctx.account_email,
-                            email_id=email_id,
-                            payload={"attempt": attempts},
-                        )
-                else:
-                    error = result.error or "telegram delivery failed"
-                    if dedup_state == "reserved":
-                        storage.release_telegram_delivery(delivery_key=delivery_key)
-                    if result.retryable:
-                        raise RuntimeError(error)
-                    if account:
-                        locale = processor_module._resolve_outbound_ui_locale()
-                        notice = _telegram_delivery_failed_notice(locale=locale)
-                        payload = _build_system_payload(
-                            text=notice,
-                            bot_token=config.keys.telegram_bot_token,
-                            chat_id=account.telegram_chat_id,
-                            priority="🔴",
-                        )
-                        fallback_result = send_telegram(payload)
-                        if not fallback_result.delivered:
-                            logger.error(
-                                "telegram_delivery_failed_notice_failed email_id=%s attempts=%s locale=%s error=%s",
-                                email_id,
-                                attempts,
-                                locale,
-                                fallback_result.error or "",
-                            )
-                    storage.set_email_delivery_failed(email_id, error)
-                    storage.mark_done(queue_id)
-                    _cleanup_pipeline_cache(email_id)
-                    error_class = "DeliveryError"
-                    logger.error(
-                        "telegram_delivery_failed email_id=%s attempts=%s error_class=%s error=%s",
-                        email_id,
-                        attempts,
-                        error_class,
-                        error,
-                    )
-                    event_emitter.emit(
-                        type="telegram_delivery_failed",
-                        timestamp=datetime.now(timezone.utc),
-                        email_id=email_id,
-                        payload={
-                            "attempts": attempts,
-                            "error": error,
-                            "error_class": error_class,
-                        },
+                    # Definitely not sent (or no reservation): TG backoff retries.
+                    raise RuntimeError(
+                        delivery_guard.error or "telegram delivery failed"
                     )
             else:
                 storage.mark_done(queue_id)
@@ -927,6 +1118,21 @@ def _process_queue(
         except Exception as queue_exc:
             logger.exception("Queue handling error for email %s", email_id)
             backoff = min(600, 10 * (2**attempts))
+            if delivery_guard is not None and delivery_guard.is_settled:
+                # Telegram already has (or may have) the message; only the
+                # bookkeeping failed. Retry that later; the guard blocks a resend.
+                logger.error(
+                    "telegram_delivery_settle_failed email_id=%s stage=%s outcome=%s error=%s",
+                    email_id,
+                    stage,
+                    delivery_guard.outcome,
+                    queue_exc,
+                )
+                try:
+                    storage.mark_error(queue_id, str(queue_exc), backoff)
+                except Exception:
+                    logger.exception("Failed to mark error for queue_id %s", queue_id)
+                continue
             if stage == "TG":
                 if attempts >= max_tg_attempts:
                     error_class = queue_exc.__class__.__name__
@@ -1054,7 +1260,7 @@ def _process_queue(
                     attempt_count=attempts,
                     extra_payload={"stage": stage, "error": str(queue_exc)},
                 )
-                _fail_open_process(config, processor, ctx)
+                _fail_open_process(config, processor, ctx, storage=storage)
                 _cleanup_pipeline_cache(email_id)
                 continue
             try:

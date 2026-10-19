@@ -2219,6 +2219,13 @@ class TelegramInboundProcessor:
                 delivery=_format_percent(sla.delivery_rate_24h),
                 errors=_format_percent(sla.error_rate_24h),
             ),
+        ]
+        unknown_24h = int(getattr(sla, "unknown_24h", 0) or 0)
+        if unknown_24h > 0:
+            status_lines.append(
+                _t("inbound.status.delivery_unknown", count=unknown_24h)
+            )
+        status_lines += [
             _t("inbound.status.digest", digest=digest_flag),
             _t("inbound.status.autopriority", mode=auto_mode),
             _t(

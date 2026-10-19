@@ -332,6 +332,37 @@ class Storage:
                 (delivery_key,),
             )
 
+    def get_telegram_delivery_state(
+        self, delivery_key: str, email_id: int | None
+    ) -> str | None:
+        """None (never reserved), "confirmed" or "unconfirmed" (reserved, no proof).
+
+        Confirmed means Telegram returned the message (message_id) or the email
+        is marked delivered; a reservation without either may or may not have
+        reached the chat.
+        """
+        row = self.conn.execute(
+            "SELECT telegram_message_id FROM telegram_delivery_log WHERE delivery_key = ?;",
+            (delivery_key,),
+        ).fetchone()
+        delivered = email_id is not None and self.is_telegram_delivered(email_id)
+        if delivered or (row is not None and row[0]):
+            return "confirmed"
+        if row is not None:
+            return "unconfirmed"
+        return None
+
+    def set_email_delivery_unknown(self, email_id: int, error: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE emails
+                SET status = 'DELIVERY_UNKNOWN', error_last = ?, updated_at = ?
+                WHERE id = ?;
+                """,
+                (error, self._now(), email_id),
+            )
+
     def list_due_snoozes(
         self, *, now_iso: str, limit: int = 20
     ) -> List[Dict[str, Any]]:

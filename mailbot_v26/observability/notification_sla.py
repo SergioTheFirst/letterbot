@@ -38,6 +38,8 @@ class NotificationSLAResult:
     undelivered_24h: int
     delivered_24h: int
     total_24h: int
+    # Emails whose Telegram message may or may not have arrived (DELIVERY_UNKNOWN).
+    unknown_24h: int = 0
 
     def degraded_reasons(self) -> list[str]:
         reasons: list[str] = []
@@ -136,12 +138,18 @@ def compute_notification_sla(
             continue
 
     delivery_events: dict[int, tuple[bool, float, str, int, str | None]] = {}
+    delivered_ids: set[int] = set()
+    unknown_ids_24h: set[int] = set()
     for row in deliveries_rows_7d + failed_rows_7d:
         email_id = row.get("email_id")
         ts_utc = row.get("ts_utc")
         if email_id is None or ts_utc is None:
             continue
         payload = _safe_payload(analytics, row)
+        if row.get("event_type") == EventType.TELEGRAM_DELIVERED.value:
+            delivered_ids.add(int(email_id))
+        elif payload.get("delivery_state") == "unknown" and float(ts_utc) >= start_24h:
+            unknown_ids_24h.add(int(email_id))
         delivered = bool(
             payload.get(
                 "delivered", row.get("event_type") == EventType.TELEGRAM_DELIVERED.value
@@ -224,6 +232,7 @@ def compute_notification_sla(
         undelivered_24h=undelivered_24h,
         delivered_24h=delivered_24h,
         total_24h=total_24h,
+        unknown_24h=len(unknown_ids_24h - delivered_ids),
     )
 
     logger.info(

@@ -829,6 +829,65 @@ def _apply_delivery_sla(
     )
 
 
+def _report_delivery_unknown(
+    *,
+    delivery_result: DeliveryResult,
+    account_email: str,
+    email_id: int,
+    telegram_chat_id: str,
+    entity_id: str | None,
+    received_at: datetime,
+    delivery_ts: float,
+) -> None:
+    """The message may be in the chat: make it visible, never resend or retry."""
+    from mailbot_v26.pipeline.delivery_guard import (
+        DELIVERY_UNKNOWN,
+        delivery_unknown_error_class,
+    )
+
+    error_class = delivery_unknown_error_class(delivery_result.error)
+    logger.error(
+        "telegram_delivery_unknown",
+        email_id=email_id,
+        chat_id=telegram_chat_id,
+        error_class=error_class,
+    )
+    change = system_health.update_component(
+        "Telegram", False, reason=DELIVERY_UNKNOWN
+    )
+    _notify_system_mode_change(
+        change=change,
+        chat_id=telegram_chat_id,
+        account_email=account_email,
+    )
+    event_emitter.emit(
+        type="telegram_delivery_failed",
+        timestamp=received_at,
+        email_id=email_id,
+        payload={
+            "error": DELIVERY_UNKNOWN,
+            "delivery_state": "unknown",
+            "error_class": error_class,
+        },
+    )
+    _emit_contract_event(
+        EventType.TELEGRAM_FAILED,
+        ts_utc=delivery_ts,
+        account_id=account_email,
+        entity_id=entity_id,
+        email_id=email_id,
+        payload={
+            "delivered": False,
+            "error": DELIVERY_UNKNOWN,
+            "delivery_state": "unknown",
+            "error_class": error_class,
+            "occurred_at_utc": delivery_ts,
+            "mode": delivery_result.mode,
+            "retry_count": delivery_result.retry_count,
+        },
+    )
+
+
 def _priority_confidence_percent(
     *,
     confidence_score: float | None,
@@ -7703,8 +7762,13 @@ def process_message(
     rfc_message_id: str | None = None,
     in_reply_to: str | None = None,
     references: str | None = None,
+    delivery_guard: Any = None,
 ) -> None:
     """
+    delivery_guard: optional pipeline.delivery_guard.EmailDeliveryGuard; when
+    given, the Telegram POST happens only under its reservation and the caller
+    settles the email by guard.outcome.
+
     Главный pipeline:
     PARSE в†’ LLM в†’ (SAVE TO DB) в†’ TELEGRAM
 
@@ -9292,10 +9356,17 @@ def process_message(
             )
 
         def _send_payload(message_payload: TelegramPayload) -> DeliveryResult:
-            return _coerce_delivery_result(
+            if delivery_guard is not None:
+                blocked = delivery_guard.before_send()
+                if blocked is not None:
+                    return blocked
+            sent = _coerce_delivery_result(
                 enqueue_tg(email_id=message_id, payload=message_payload),
                 email_id=message_id,
             )
+            if delivery_guard is not None:
+                delivery_guard.after_send(sent)
+            return sent
 
         sla_outcome = _apply_delivery_sla(
             processing_started_at=processing_started_at,
@@ -9314,7 +9385,29 @@ def process_message(
         try:
             if delivery_result is None:
                 raise RuntimeError("telegram_delivery_result_missing")
-            if not delivery_result.delivered:
+            if (
+                delivery_guard is not None
+                and delivery_guard.outcome == "duplicate"
+            ):
+                # Already delivered earlier (confirmed): nothing was posted now.
+                logger.info(
+                    "telegram_delivery_skipped_duplicate",
+                    email_id=message_id,
+                    chat_id=telegram_chat_id,
+                )
+            elif delivery_result.maybe_delivered and not delivery_result.delivered:
+                _report_delivery_unknown(
+                    delivery_result=delivery_result,
+                    account_email=account_email,
+                    email_id=message_id,
+                    telegram_chat_id=telegram_chat_id,
+                    entity_id=(
+                        entity_resolution.entity_id if entity_resolution else None
+                    ),
+                    received_at=received_at,
+                    delivery_ts=delivery_ts,
+                )
+            elif not delivery_result.delivered:
                 if delivery_result.retryable:
                     raise RuntimeError(
                         delivery_result.error or "Telegram delivery failed"
