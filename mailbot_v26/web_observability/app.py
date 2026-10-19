@@ -4,6 +4,7 @@ import argparse
 import base64
 import csv
 import configparser
+import hashlib
 import hmac
 import html
 import io
@@ -1554,6 +1555,21 @@ def _mask_emails_in_text(value: object) -> str:
     """Keep a label readable but mask any e-mail address inside it."""
     text = str(value or "").strip()
     return WEB_EMAIL_PATTERN.sub(lambda match: _mask_email_address(match.group(0)), text)
+
+
+def _display_safe_issuer(item: Mapping[str, object]) -> dict[str, object]:
+    """Web copy of a top-issuer profile without the raw sender address.
+
+    For generic mail domains issuer_profile keys and labels the issuer by the
+    full address; analytics keeps it for the Telegram digest, the web masks it.
+    """
+    safe = dict(item)
+    safe["issuer_label"] = _mask_emails_in_text(item.get("issuer_label"))
+    issuer_key = str(item.get("issuer_key") or "")
+    if WEB_EMAIL_PATTERN.search(issuer_key):
+        digest = hashlib.sha256(issuer_key.encode("utf-8")).hexdigest()[:16]
+        safe["issuer_key"] = f"email-sha256:{digest}"
+    return safe
 
 
 def _sanitize_account_label(value: object) -> str:
@@ -5424,9 +5440,10 @@ def create_app(
                                 for key, value in business_summary.items()
                                 if key != "top_issuers"
                             }
-                            payload["top_issuers"] = list(
-                                business_summary.get("top_issuers") or []
-                            )
+                            payload["top_issuers"] = [
+                                _display_safe_issuer(item)
+                                for item in business_summary.get("top_issuers") or []
+                            ]
                         try:
                             payload["top_contacts"] = (
                                 analytics.top_sender_relationship_profiles(
