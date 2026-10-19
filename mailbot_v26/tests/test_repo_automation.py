@@ -43,6 +43,14 @@ def test_ci_test_job_runs_pinned_ruff_gate_on_linux() -> None:
     assert "ruff" not in _read("requirements.txt").lower()
 
 
+def test_contributing_lists_the_ci_test_command() -> None:
+    text = _read("CONTRIBUTING.md")
+
+    assert "`python -m pytest -q --tb=short`" in text
+    assert "python -m pytest mailbot_v26/tests" not in text
+    assert "ruff==0.15.5" in text
+
+
 def test_release_smoke_workflow_exists() -> None:
     text = _read(".github/workflows/release-smoke.yml")
 
