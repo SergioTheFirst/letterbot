@@ -339,10 +339,11 @@ def migrate_two_file_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]
             backups.append(backup)
 
     if legacy_keys.exists():
+        # utf-8-sig: Notepad's "UTF-8 with BOM" must parse like plain UTF-8.
         parser = configparser.ConfigParser()
-        parser.read(accounts_path, encoding="utf-8")
+        parser.read(accounts_path, encoding="utf-8-sig")
         legacy = configparser.ConfigParser()
-        legacy.read(legacy_keys, encoding="utf-8")
+        legacy.read(legacy_keys, encoding="utf-8-sig")
         for section in ("telegram", "cloudflare"):
             if section in legacy and section not in parser:
                 parser[section] = dict(legacy[section])
