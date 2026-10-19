@@ -1021,6 +1021,15 @@ def _format_silence_days_label(
     return f"{days} {suffix}"
 
 
+def _has_attention_activity(result: AttentionEconomicsResult | None) -> bool:
+    if result is None:
+        return False
+    return any(
+        entity.message_count > 0 or entity.estimated_read_minutes > 0
+        for entity in result.entities
+    )
+
+
 def _has_digest_content(data: DigestData) -> bool:
     if data.deferred_total > 0:
         return True
@@ -1041,7 +1050,7 @@ def _has_digest_content(data: DigestData) -> bool:
         return True
     if data.quality_metrics is not None and data.quality_metrics.corrections_total > 0:
         return True
-    if data.attention_economics is not None:
+    if _has_attention_activity(data.attention_economics):
         return True
     if data.digest_insights_enabled and data.digest_insights_max_items > 0:
         if data.deadlock_insights or data.silence_insights:
