@@ -818,10 +818,28 @@ def _settle_write(action, *args, email_id: int, what: str) -> None:
         )
 
 
+def _update_telegram_health(
+    guard: EmailDeliveryGuard,
+    ctx: PipelineContext,
+    *,
+    available: bool,
+    reason: str | None = None,
+) -> None:
+    # Same component the premium processor updates, so a later legacy success
+    # also clears a degraded mode set by an unconfirmed delivery.
+    change = processor_module.system_health.update_component(
+        "Telegram", available, reason=reason
+    )
+    processor_module._notify_system_mode_change(
+        change=change,
+        chat_id=guard.chat_id or "",
+        account_email=ctx.account_email,
+    )
+
+
 def _record_delivery_unknown(
     *,
     storage: Storage,
-    config: BotConfig,
     guard: EmailDeliveryGuard,
     ctx: PipelineContext,
     attempts: int,
@@ -844,15 +862,7 @@ def _record_delivery_unknown(
     )
     if not emit_events:
         return  # the premium processor already reported it
-    account = _get_account_by_login(config, ctx.account_email)
-    change = processor_module.system_health.update_component(
-        "Telegram", False, reason=DELIVERY_UNKNOWN
-    )
-    processor_module._notify_system_mode_change(
-        change=change,
-        chat_id=account.telegram_chat_id if account else "",
-        account_email=ctx.account_email,
-    )
+    _update_telegram_health(guard, ctx, available=False, reason=DELIVERY_UNKNOWN)
     payload: dict[str, object] = {
         "attempts": attempts,
         "error": DELIVERY_UNKNOWN,
@@ -956,6 +966,7 @@ def _settle_email_delivery(
             storage.mark_done(queue_id)
         _cleanup_pipeline_cache(email_id)
         if emit_events:
+            _update_telegram_health(guard, ctx, available=True)
             event_emitter.emit(
                 type="telegram_delivery_succeeded",
                 timestamp=datetime.now(timezone.utc),
@@ -990,7 +1001,6 @@ def _settle_email_delivery(
     if outcome == "unknown":
         _record_delivery_unknown(
             storage=storage,
-            config=config,
             guard=guard,
             ctx=ctx,
             attempts=attempts,

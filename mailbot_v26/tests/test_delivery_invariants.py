@@ -306,6 +306,27 @@ def test_read_timeout_after_accept_sends_once_across_retry_fallback_and_restart(
         )
 
 
+def test_legacy_unknown_degrades_telegram_until_the_next_delivery(
+    tmp_path, monkeypatch, telegram, events
+) -> None:
+    from mailbot_v26.system_health import OperationalMode
+
+    config, storage, legacy_processor, flags = _setup(
+        tmp_path, monkeypatch, premium=False
+    )
+    telegram.script = ["read_timeout"]
+    _seed_email(storage, stage="TG", uid=1)
+    start_module._process_queue(storage, config, legacy_processor, flags)
+    assert system_health.mode == OperationalMode.DEGRADED_NO_TELEGRAM
+
+    second = _seed_email(storage, stage="TG", uid=2)
+    start_module._process_queue(storage, config, legacy_processor, flags)
+
+    assert system_health.mode == OperationalMode.FULL
+    assert len(telegram.accepted) == 2
+    assert _email_row(storage, second)[2]
+
+
 # --- definitely-not-sent errors are retried and delivered once ----------------
 
 
