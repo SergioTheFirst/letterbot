@@ -2,8 +2,20 @@ import runpy
 import sys
 from pathlib import Path
 
+import pytest
+
 import mailbot_v26.deps
 import mailbot_v26.start
+
+pytestmark = pytest.mark.filterwarnings(
+    r"error:.*found in sys\.modules after import of package:RuntimeWarning"
+)
+
+
+@pytest.fixture(autouse=True)
+def _drop_imported_main_module(monkeypatch):
+    # Other tests import mailbot_v26.__main__; runpy warns when it is already loaded.
+    monkeypatch.delitem(sys.modules, "mailbot_v26.__main__", raising=False)
 
 
 def test_module_entrypoint_runs_start(monkeypatch):
