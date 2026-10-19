@@ -75,8 +75,8 @@ CREATE INDEX IF NOT EXISTS idx_emails_priority
 CREATE INDEX IF NOT EXISTS idx_email_received_at
     ON emails(received_at);
 
-CREATE INDEX IF NOT EXISTS idx_email_priority
-    ON emails(priority);
+-- Exact duplicate of idx_emails_priority; dropped from existing databases.
+DROP INDEX IF EXISTS idx_email_priority;
 
 CREATE TABLE IF NOT EXISTS attachments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,8 +258,8 @@ CREATE INDEX IF NOT EXISTS idx_events_v1_event_type_ts
 CREATE INDEX IF NOT EXISTS idx_events_ts
     ON events_v1(ts_utc);
 
-CREATE INDEX IF NOT EXISTS idx_events_type_ts
-    ON events_v1(event_type, ts_utc);
+-- Exact duplicate of idx_events_v1_event_type_ts; dropped from existing databases.
+DROP INDEX IF EXISTS idx_events_type_ts;
 
 CREATE INDEX IF NOT EXISTS idx_events_v1_event_account_ts
     ON events_v1(event_type, account_id, ts_utc);
