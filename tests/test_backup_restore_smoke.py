@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import sqlite3
 import zipfile
+from contextlib import closing
 from pathlib import Path
+
+import pytest
 
 from mailbot_v26.tools import backup, restore
 
@@ -11,8 +15,14 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def test_backup_restore_smoke(tmp_path: Path) -> None:
-    _write(tmp_path / "data" / "mailbot.sqlite", "sqlite")
+def test_backup_restore_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Restore checks for a running Letterbot.exe via tasklist; keep the test hermetic.
+    monkeypatch.setattr(restore, "_IS_WINDOWS", False)
+    db_path = tmp_path / "data" / "mailbot.sqlite"
+    db_path.parent.mkdir(parents=True)
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.execute("CREATE TABLE t (v TEXT)")
+        conn.commit()
     _write(tmp_path / "state.json", '{"state": 1}')
     _write(tmp_path / "mailbot_v26" / "runtime_flags.json", '{"enable_gigachat": true}')
     _write(tmp_path / "mailbot_v26" / "data" / "runtime_health.json", '{"ok": true}')

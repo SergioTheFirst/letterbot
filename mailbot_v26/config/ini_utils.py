@@ -8,6 +8,10 @@ _LOGGER = logging.getLogger(__name__)
 _WARNED_CONFIG_ONCE: set[tuple[Path, str]] = set()
 
 
+class IniEncodingError(ValueError):
+    """A user INI file is not UTF-8 text (for example saved as ANSI/cp1251)."""
+
+
 def read_user_ini_with_defaults(
     ini_path: Path,
     *,
@@ -15,7 +19,7 @@ def read_user_ini_with_defaults(
     scope_label: str = "config settings",
     template_path: Path | None = None,
 ) -> configparser.ConfigParser:
-    """Read user-provided INI safely and return an empty parser on any read/parse issue."""
+    """Read user-provided INI; empty parser on read/parse issues, IniEncodingError if not UTF-8."""
     parser = configparser.ConfigParser()
     active_logger = logger or _LOGGER
     resolved_template = template_path or (ini_path.parent / f"{ini_path.name}.example")
@@ -41,6 +45,14 @@ def read_user_ini_with_defaults(
                 template_path=resolved_template,
             )
         return parsed
+    except UnicodeDecodeError as exc:
+        # Never fall back to defaults here: that would silently drop accounts.
+        message = (
+            f"{ini_path} is not saved as UTF-8 ({exc.reason} at byte {exc.start}). "
+            "Open it in Notepad, choose File > Save As, set Encoding to UTF-8 and save."
+        )
+        active_logger.error("%s", message)
+        raise IniEncodingError(message) from exc
     except (
         configparser.MissingSectionHeaderError,
         configparser.ParsingError,
@@ -61,7 +73,8 @@ def _read_ini_with_legacy_support(
     parser: configparser.ConfigParser,
     ini_path: Path,
 ) -> tuple[configparser.ConfigParser, bool]:
-    raw_text = ini_path.read_text(encoding="utf-8")
+    # utf-8-sig: Notepad's "UTF-8 with BOM" must parse like plain UTF-8.
+    raw_text = ini_path.read_text(encoding="utf-8-sig")
     if not raw_text.strip():
         return parser, False
     try:
@@ -108,4 +121,4 @@ def _warn_once(
     )
 
 
-__all__ = ["read_user_ini_with_defaults"]
+__all__ = ["IniEncodingError", "read_user_ini_with_defaults"]

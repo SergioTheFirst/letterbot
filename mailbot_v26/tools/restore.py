@@ -1,17 +1,34 @@
 from __future__ import annotations
 
+import configparser
+import os
+import subprocess
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from mailbot_v26.tools.backup import create_backup
+from mailbot_v26.tools.backup import MASKED_VALUE, create_backup
 from mailbot_v26.config.paths import app_root
+
+_IS_WINDOWS = os.name == "nt"
+_DB_MEMBER = "data/mailbot.sqlite"
+_CONFIG_PREFIX = "mailbot_v26/config/"
+_SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
+_MAX_MEMBER_BYTES = 16 * 1024 * 1024
+_MAX_DB_MEMBER_BYTES = 8 * 1024 * 1024 * 1024
+_COPY_CHUNK_BYTES = 1024 * 1024
+_TASKLIST_TIMEOUT_SECONDS = 30
+
+
+class RestoreRefusedError(RuntimeError):
+    """Restore cannot run safely: Letterbot is running or that cannot be verified."""
 
 
 @dataclass(frozen=True)
 class RestoreResult:
     restored_files: tuple[str, ...]
     skipped_files: tuple[str, ...]
+    warnings: tuple[str, ...] = ()
 
 
 def _repo_root() -> Path:
@@ -40,39 +57,161 @@ def _is_allowed_path(member: str) -> bool:
     return False
 
 
+def _tasklist_path() -> Path:
+    system_root = os.environ.get("SystemRoot") or r"C:\Windows"
+    return Path(system_root) / "System32" / "tasklist.exe"
+
+
+def ensure_letterbot_stopped() -> None:
+    """Raise RestoreRefusedError while Letterbot.exe runs (fails closed if unknown)."""
+    if not _IS_WINDOWS:
+        return
+    command = [
+        str(_tasklist_path()),
+        "/FI",
+        "IMAGENAME eq Letterbot.exe",
+        "/FO",
+        "CSV",
+        "/NH",
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            timeout=_TASKLIST_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RestoreRefusedError(
+            f"Could not verify that Letterbot is stopped ({exc}); restore not started."
+        ) from exc
+    if completed.returncode != 0:
+        raise RestoreRefusedError(
+            "Could not verify that Letterbot is stopped "
+            f"(tasklist exit code {completed.returncode}); restore not started."
+        )
+    # CSV rows carry the quoted image name; the "no tasks" notice is localized.
+    if '"letterbot.exe"' in completed.stdout.decode("ascii", "replace").lower():
+        raise RestoreRefusedError(
+            "Letterbot is running. Close Letterbot (worker and web UI) and run restore again."
+        )
+
+
+def _config_skip_reason(data: bytes) -> str | None:
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        parser.read_string(data.decode("utf-8-sig"))
+    except (UnicodeDecodeError, configparser.Error) as exc:
+        return f"backup copy is not a readable INI file ({type(exc).__name__})"
+    if not parser.sections():
+        return "backup copy has no settings"
+    for section in parser.values():
+        if any(value.strip() == MASKED_VALUE for value in section.values()):
+            return f"backup copy has masked secrets ({MASKED_VALUE})"
+    return None
+
+
+def _extract_to_temp(
+    archive: zipfile.ZipFile, info: zipfile.ZipInfo, destination: Path
+) -> Path:
+    # zipfile stops reading at the declared size (checked against the cap by the caller).
+    temp_path = destination.with_name(f"{destination.name}.restore-tmp")
+    try:
+        with archive.open(info) as source, temp_path.open("wb") as target:
+            while chunk := source.read(_COPY_CHUNK_BYTES):
+                target.write(chunk)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return temp_path
+
+
+def _remove_sqlite_sidecars(db_path: Path) -> None:
+    # A stale -wal/-shm from the replaced database would corrupt the restored one.
+    for suffix in _SQLITE_SIDECARS:
+        sidecar = db_path.with_name(f"{db_path.name}{suffix}")
+        try:
+            sidecar.unlink(missing_ok=True)
+        except OSError as exc:
+            raise RestoreRefusedError(
+                f"Cannot remove {sidecar.name} ({exc}); close Letterbot and run restore again."
+            ) from exc
+
+
+def _restore_member(
+    archive: zipfile.ZipFile, info: zipfile.ZipInfo, destination: Path
+) -> str | None:
+    """Write one allowed member; return a skip reason instead of writing when unsafe."""
+    member = info.filename
+    limit = _MAX_DB_MEMBER_BYTES if member == _DB_MEMBER else _MAX_MEMBER_BYTES
+    if info.file_size > limit:
+        return f"{info.file_size} bytes exceeds the {limit} byte limit"
+    if member.startswith(_CONFIG_PREFIX):
+        reason = _config_skip_reason(archive.read(info))
+        if reason is not None:
+            kept = "current file left unchanged" if destination.exists() else "not created"
+            return f"{reason}; {kept}"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = _extract_to_temp(archive, info, destination)
+    try:
+        if member == _DB_MEMBER:
+            _remove_sqlite_sidecars(destination)
+        os.replace(temp_path, destination)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return None
+
+
 def restore_from_backup(
     archive_path: Path, base_dir: Path | None = None
 ) -> RestoreResult:
     root = base_dir or _repo_root()
     restored: list[str] = []
     skipped: list[str] = []
+    warnings: list[str] = []
 
+    ensure_letterbot_stopped()
     with zipfile.ZipFile(archive_path, "r") as archive:
-        for member in archive.namelist():
+        for info in archive.infolist():
+            member = info.filename
             if not _is_safe_member(member) or not _is_allowed_path(member):
                 skipped.append(member)
                 continue
-            destination = root / member
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(member) as source, destination.open("wb") as target:
-                target.write(source.read())
+            reason = _restore_member(archive, info, root / member)
+            if reason is not None:
+                skipped.append(member)
+                warnings.append(f"{member}: {reason}")
+                continue
             restored.append(member)
 
-    return RestoreResult(restored_files=tuple(restored), skipped_files=tuple(skipped))
+    return RestoreResult(
+        restored_files=tuple(restored),
+        skipped_files=tuple(skipped),
+        warnings=tuple(warnings),
+    )
 
 
 def run_restore(archive_path: str) -> None:
     path = Path(archive_path)
     if not path.exists():
         raise SystemExit(f"Backup archive not found: {path}")
+    try:
+        ensure_letterbot_stopped()
+    except RestoreRefusedError as exc:
+        raise SystemExit(f"[ERROR] {exc}") from exc
 
     print(f"[WARN] Restore will overwrite local data using: {path}")
     confirm = input("Type YES to continue: ").strip()
     if confirm != "YES":
         raise SystemExit("Restore canceled by user.")
 
-    create_backup()
-    result = restore_from_backup(path)
+    safety = create_backup()
+    print(f"[OK] Safety backup (secrets masked): {safety.archive_path}")
+    try:
+        result = restore_from_backup(path)
+    except RestoreRefusedError as exc:
+        raise SystemExit(f"[ERROR] {exc}") from exc
 
     if result.restored_files:
         print("[OK] Restored files:")
@@ -82,6 +221,14 @@ def run_restore(archive_path: str) -> None:
         print("[WARN] Skipped files:")
         for name in result.skipped_files:
             print(f" - {name}")
+    for note in result.warnings:
+        print(f"[WARN] {note}")
 
 
-__all__ = ["RestoreResult", "restore_from_backup", "run_restore"]
+__all__ = [
+    "RestoreRefusedError",
+    "RestoreResult",
+    "ensure_letterbot_stopped",
+    "restore_from_backup",
+    "run_restore",
+]

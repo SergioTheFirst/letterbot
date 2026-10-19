@@ -29,8 +29,8 @@ if errorlevel 1 (
 ) else (
     call :log Checking working tree cleanliness...
     for /f %%I in ('git status --porcelain') do (
-        call :log [WARN] Рабочее дерево не чистое. Обновление отменено, чтобы не потерять изменения.
-        call :log [WARN] Закоммитьте/сохраните изменения и запустите скрипт снова.
+        call :log [WARN] Working tree has local changes. Update canceled so nothing is lost.
+        call :log [WARN] Commit or save your changes, then run this script again.
         call :finish 1
         exit /b 1
     )
