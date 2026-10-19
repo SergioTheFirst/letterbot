@@ -7785,7 +7785,6 @@ def create_app(
             if error_message
             else ""
         )
-        graph_json = json.dumps(graph or {}, ensure_ascii=False)
         return _render_template(
             app,
             "relationships.html",
@@ -7801,7 +7800,7 @@ def create_app(
             account_emails_value=",".join(account_emails),
             window_options=window_options,
             limit_value=limit_value,
-            graph_json=graph_json,
+            graph=graph or {},
         )
 
     @app.route("/relationships/contact", methods=["GET"])
@@ -7834,7 +7833,6 @@ def create_app(
             if error_message
             else ""
         )
-        detail_json = json.dumps(detail or {}, ensure_ascii=False)
         return _render_template(
             app,
             "relationships_contact.html",
@@ -7850,7 +7848,7 @@ def create_app(
             account_emails_value=",".join(account_emails),
             window_options=window_options,
             contact_id=html.escape(contact_id),
-            detail_json=detail_json,
+            detail=detail or {},
         )
 
     return app

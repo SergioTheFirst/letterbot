@@ -11,7 +11,7 @@
   </div>
 
   <div class="card" id="contact-data"
-       data-contact='{{ detail_json | safe }}'
+       data-contact='{{ detail | tojson }}'
        data-contact-id='{{ contact_id | e }}'>
     <div class="section-title">
       <h2>Contact detail</h2>
