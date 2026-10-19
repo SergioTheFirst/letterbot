@@ -46,6 +46,13 @@ def _looks_like_parse_error(error_text: str) -> bool:
     return "unsupported start tag" in lowered or "can't parse" in lowered
 
 
+def _is_message_not_modified(status_code: int, error_text: str) -> bool:
+    # Telegram rejects an edit whose text and markup are unchanged; the message
+    # already shows the requested content, so the edit counts as applied.
+    lowered = (error_text or "").lower()
+    return status_code == 400 and "message is not modified" in lowered
+
+
 def _post_message(
     *,
     url: str,
@@ -277,6 +284,11 @@ def edit_telegram_message(
     html_text: str,
     reply_markup: dict[str, object] | None = None,
 ) -> bool:
+    """Edit a sent message; True when it now shows the requested content.
+
+    Callers must check the result: False means Telegram did not apply the edit
+    (the reason is logged here).
+    """
     normalized_text = _sanitize_user_facing_text(html_text)
     if not bot_token or not chat_id or not message_id or not normalized_text:
         log.error(
@@ -305,6 +317,12 @@ def edit_telegram_message(
         log.error("Telegram edit exception: %s", redact_secrets(exc))
         return False
     if resp.status_code != 200:
+        if _is_message_not_modified(resp.status_code, resp.text):
+            log.info(
+                "tg_edit_not_modified",
+                extra={"chat_id": chat_id, "message_id": message_id},
+            )
+            return True
         log.error(
             "Telegram edit HTTP error %s: %s",
             resp.status_code,

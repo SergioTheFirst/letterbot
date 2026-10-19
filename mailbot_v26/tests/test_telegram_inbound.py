@@ -1382,6 +1382,7 @@ def test_priority_callback_edits_same_message_and_updates_priority_text(
 
     def _fake_edit(**kwargs):
         edited.append(kwargs)
+        return True
 
     callback_acks: list[dict[str, object]] = []
 
