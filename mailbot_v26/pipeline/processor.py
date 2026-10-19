@@ -180,7 +180,11 @@ from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.system_health import OperationalMode, system_health
 from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
 from mailbot_v26.tasks.shadow_actions import ShadowActionEngine
-from mailbot_v26.worker.telegram_sender import DeliveryResult, edit_telegram_message
+from mailbot_v26.worker.telegram_sender import (
+    DeliveryResult,
+    edit_telegram_message,
+    should_retry_minimal_payload,
+)
 from mailbot_v26.llm.request_queue import (
     BackgroundLLMWorker,
     LLMRequest,
@@ -816,6 +820,18 @@ def _apply_delivery_sla(
         first_payload = minimal_payload
     result = send_func(first_payload)
     elapsed_to_first_send_seconds = max(0.0, monotonic() - processing_started_at)
+    if delivery_mode == "final_first_send" and should_retry_minimal_payload(result):
+        # Telegram refused the full payload (not shown): one minimal push under
+        # the same delivery key, never edited afterwards.
+        rejected_status = result.status_code
+        delivery_mode = "minimal_after_reject"
+        result = send_func(minimal_payload)
+        logger.warning(
+            "telegram_minimal_retry_after_reject",
+            rejected_status_code=rejected_status,
+            retry_delivered=result.delivered,
+            retry_status_code=result.status_code,
+        )
     edit_applied = False
     if delivery_mode == "minimal_then_edit" and result.delivered:
         message_id = result.message_id

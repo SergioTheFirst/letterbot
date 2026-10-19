@@ -183,6 +183,23 @@ def _looks_like_parse_error(error_text: str) -> bool:
     return "unsupported start tag" in lowered or "can't parse" in lowered
 
 
+def should_retry_minimal_payload(result: DeliveryResult) -> bool:
+    """Telegram refused this payload (400): one minimal-payload retry may pass.
+
+    Only a definite, non-retryable 400 qualifies. Not "chat not found" (any
+    text fails), not a markup parse error (send_telegram already salvaged it
+    as plain text), never 401/403/404, 429/5xx or a maybe-delivered result.
+    """
+    if result.delivered or result.maybe_delivered or result.retryable:
+        return False
+    if result.status_code != 400 or result.mode == "plain_salvage":
+        return False
+    error_text = (result.error or "").lower()
+    return "chat not found" not in error_text and not _looks_like_parse_error(
+        error_text
+    )
+
+
 def _is_message_not_modified(status_code: int, error_text: str) -> bool:
     # Telegram rejects an edit whose text and markup are unchanged; the message
     # already shows the requested content, so the edit counts as applied.

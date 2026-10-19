@@ -38,7 +38,11 @@ from mailbot_v26.telegram_utils import (
     telegram_text_units,
 )
 from mailbot_v26.ui.i18n import DEFAULT_LOCALE
-from mailbot_v26.worker.telegram_sender import DeliveryResult, send_telegram
+from mailbot_v26.worker.telegram_sender import (
+    DeliveryResult,
+    send_telegram,
+    should_retry_minimal_payload,
+)
 
 try:  # local import to avoid circular typing issues
     from mailbot_v26.config_loader import (
@@ -756,6 +760,27 @@ def stage_tg(ctx: PipelineContext) -> DeliveryResult:
         ),
     )
     result = send_telegram(payload)
+    if should_retry_minimal_payload(result):
+        # Telegram refused the full text (not shown): one minimal push under the
+        # caller's delivery reservation; a second refusal settles as failed.
+        rejected_status = result.status_code
+        minimal_payload = processor_module._build_minimal_telegram_payload(
+            priority=priority,
+            from_email=pretty_sender,
+            subject=pretty_subject,
+            attachments=attachments,
+            metadata=dict(payload.metadata),
+            reply_markup=payload.reply_markup,
+        )
+        result = send_telegram(minimal_payload)
+        logger.warning(
+            "telegram_minimal_retry_after_reject email_id=%s rejected_status_code=%s "
+            "retry_delivered=%s retry_status_code=%s",
+            ctx.email_id,
+            rejected_status,
+            result.delivered,
+            result.status_code,
+        )
     if not result.delivered:
         return result
     logger.info("[PIPELINE] email_id=%s stage=TG done", ctx.email_id)
