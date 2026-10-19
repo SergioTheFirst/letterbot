@@ -318,11 +318,6 @@ def _render_stub_html(
     lane_value = (
         html.escape(str(context.get("lane") or "")) if "lane" in context else ""
     )
-    share_url = (
-        html.escape(str(context.get("share_url") or ""))
-        if "share_url" in context
-        else ""
-    )
 
     def _options(values: list[int], selected: int) -> str:
         opts: list[str] = []
@@ -2377,9 +2372,6 @@ def _dashboard_processed_rows_view(
             or _parse_datetime_value(email_row.get("created_at"))
             or event_dt
         )
-        sender_email = str(
-            payload.get("sender_email") or email_row.get("from_email") or ""
-        ).strip()
         issuer_label = _clamp_text(_scrub_pii_line(payload.get("issuer_label") or ""), 64)
         sender_display = issuer_label or "Sender hidden"
         priority_bucket = _archive_priority_bucket(
