@@ -1730,7 +1730,7 @@ def _load_local_smoke_bypass_from_ini(config_dir: Path) -> bool:
         if not candidate.exists():
             continue
         try:
-            parser.read(candidate, encoding="utf-8")
+            parser.read(candidate, encoding="utf-8-sig")
         except (OSError, configparser.Error) as exc:
             logger.warning(
                 "web_ui_smoke_bypass_read_failed path=%s error=%s", candidate, exc
@@ -2465,7 +2465,7 @@ def _load_support_settings(config_path: Path | None) -> SupportSettings:
         if not settings_path.exists():
             return SupportSettings(enabled=False, show_in_nav=False, methods=[])
         try:
-            parser.read(settings_path, encoding="utf-8")
+            parser.read(settings_path, encoding="utf-8-sig")
         except (OSError, configparser.Error) as exc:
             logger.warning(
                 "support_settings_ini_load_failed",
@@ -2569,7 +2569,7 @@ def _load_web_ui_secrets(config_dir: Path) -> tuple[str, float]:
     config_path = config_dir / "config.ini"
     if config_path.exists():
         try:
-            parser.read(config_path, encoding="utf-8")
+            parser.read(config_path, encoding="utf-8-sig")
         except (OSError, configparser.Error):
             logger.warning("Failed to read config.ini from %s", config_path)
     secret_key = os.environ.get("WEB_SECRET_KEY") or parser.get(
@@ -3918,7 +3918,7 @@ def create_app(
                     str(Path(config_dir) / "settings.ini"),
                     str(Path(config_dir) / "config.ini"),
                 ],
-                encoding="utf-8",
+                encoding="utf-8-sig",
             )
             ui_locale = get_locale(parser)
         except Exception:
