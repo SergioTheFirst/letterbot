@@ -116,8 +116,45 @@ def test_letterbot_bat_bootstrap_exits_after_opening_accounts_ini() -> None:
 
 
 def test_letterbot_bat_is_ascii_safe() -> None:
-    content = (REPO_ROOT / "letterbot.bat").read_bytes()
-    assert all(byte < 128 for byte in content)
+    # cmd.exe parses .bat files in the OEM code page: every root launcher stays ASCII.
+    root_bats = sorted(REPO_ROOT.glob("*.bat"))
+    assert REPO_ROOT / "letterbot.bat" in root_bats
+    for bat in root_bats:
+        content = bat.read_bytes()
+        offenders = [byte for byte in content if byte >= 128]
+        assert not offenders, f"{bat.name}: {len(offenders)} non-ASCII bytes"
+
+
+def _lines_inside_paren_blocks(text: str) -> list[str]:
+    depth = 0
+    inside: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith(")"):
+            depth -= 1
+        if depth > 0:
+            inside.append(line)
+        if line.endswith("(") and not line.lower().startswith(("rem", "::")):
+            depth += 1
+    return inside
+
+
+def test_root_bats_never_read_errorlevel_or_jump_inside_blocks() -> None:
+    # %ERRORLEVEL% inside ( ... ) is expanded when the block is parsed, before
+    # the command runs; a label inside a block breaks the block on goto.
+    for bat in sorted(REPO_ROOT.glob("*.bat")):
+        inside = _lines_inside_paren_blocks(bat.read_text(encoding="utf-8"))
+        for line in inside:
+            assert "%errorlevel%" not in line.lower(), f"{bat.name}: {line}"
+            assert not (
+                line.startswith(":") and not line.startswith("::")
+            ), f"{bat.name}: label inside block: {line}"
+
+
+def test_run_dist_bat_avoids_delayed_expansion() -> None:
+    # Delayed expansion strips "!" from install paths such as C:\Users\Name!\...
+    text = (REPO_ROOT / "run_dist.bat").read_text(encoding="utf-8")
+    assert "enabledelayedexpansion" not in text.lower()
 
 
 def test_letterbot_bat_uses_python_launcher_fallback_chain() -> None:

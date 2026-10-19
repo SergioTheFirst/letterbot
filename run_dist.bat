@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 
@@ -47,32 +47,35 @@ if "%FIRST_RUN%"=="1" (
 
 "%EXE_PATH%" config-ready --config-dir "%CONFIG_DIR%" --verbose
 set "CONFIG_READY_RC=%ERRORLEVEL%"
-if "%CONFIG_READY_RC%"=="2" (
-    echo.
-    echo =============================================
-    echo   LETTERBOT — ТРЕБУЕТСЯ НАСТРОЙКА
-    echo =============================================
-    echo  Заполните обязательные поля IMAP-аккаунта:
-    echo    - login, password, host, port, use_ssl
-    echo.
-    echo  Сейчас откроется accounts.ini. После сохранения закройте Блокнот.
-    set /a CONFIG_READY_ATTEMPTS=0
-    :CONFIG_READY_LOOP
-    set /a CONFIG_READY_ATTEMPTS+=1
-    if !CONFIG_READY_ATTEMPTS! GTR 20 (
-        echo [ERROR] Конфигурация всё ещё не готова после 20 попыток. Бот не запущен.
-        exit /b 2
-    )
+rem Flow uses goto, not a parenthesized block: ERRORLEVEL read inside a block is
+rem expanded before the command runs, and delayed expansion strips "!" from paths.
+if not "%CONFIG_READY_RC%"=="2" goto :CONFIG_READY_DONE
 
-    start /wait notepad.exe "%ACCOUNTS_FILE%"
-    "%EXE_PATH%" config-ready --config-dir "%CONFIG_DIR%" --verbose
-    set "CONFIG_READY_RC=%ERRORLEVEL%"
-    if "!CONFIG_READY_RC!"=="2" (
-        echo [WARN] Попытка !CONFIG_READY_ATTEMPTS! из 20: обязательные поля ещё не заполнены.
-        goto :CONFIG_READY_LOOP
-    )
-)
+echo.
+echo =============================================
+echo   LETTERBOT - SETUP REQUIRED
+echo =============================================
+echo  Fill in the required IMAP account fields:
+echo    - login, password, host, port, use_ssl
+echo.
+echo  accounts.ini opens now. Save it, then close Notepad.
+set /a CONFIG_READY_ATTEMPTS=0
 
+:CONFIG_READY_LOOP
+set /a CONFIG_READY_ATTEMPTS+=1
+if %CONFIG_READY_ATTEMPTS% GTR 20 goto :CONFIG_READY_GAVE_UP
+start /wait notepad.exe "%ACCOUNTS_FILE%"
+"%EXE_PATH%" config-ready --config-dir "%CONFIG_DIR%" --verbose
+set "CONFIG_READY_RC=%ERRORLEVEL%"
+if not "%CONFIG_READY_RC%"=="2" goto :CONFIG_READY_DONE
+echo [WARN] Attempt %CONFIG_READY_ATTEMPTS% of 20: required fields are still empty.
+goto :CONFIG_READY_LOOP
+
+:CONFIG_READY_GAVE_UP
+echo [ERROR] Configuration is still not ready after 20 attempts. Letterbot was not started.
+exit /b 2
+
+:CONFIG_READY_DONE
 echo Running doctor checks ^(warning-first^)...
 "%EXE_PATH%" doctor --config-dir "%CONFIG_DIR%"
 if errorlevel 1 (

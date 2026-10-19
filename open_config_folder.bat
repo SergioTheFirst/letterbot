@@ -4,7 +4,7 @@ set "REPO_ROOT=%~dp0"
 if "%REPO_ROOT:~-1%"=="\" set "REPO_ROOT=%REPO_ROOT:~0,-1%"
 set "CONFIG_DIR=%REPO_ROOT%"
 cd /d "%REPO_ROOT%"
-rem Конфигурационные файлы: settings.ini и accounts.ini в корне репозитория.
+rem Config files: settings.ini and accounts.ini in the repository root.
 
 if not exist "%CONFIG_DIR%" (
     echo ERROR: Config folder not found: %CONFIG_DIR%

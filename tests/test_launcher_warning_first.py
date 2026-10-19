@@ -24,7 +24,7 @@ def test_update_and_run_uses_safe_fetch_reset_and_warns_on_pip_failure() -> None
     assert "git fetch origin main" in content
     assert "git reset --hard origin/main" in content
     assert "git status --porcelain" in content
-    assert "Рабочее дерево не чистое" in content
+    assert "Working tree has local changes. Update canceled" in content
     assert "Dependency installation failed. Continuing" in content
 
 
