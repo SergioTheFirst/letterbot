@@ -2558,8 +2558,14 @@ def _load_web_ui_secrets(config_dir: Path) -> tuple[str, float]:
         "general", "web_secret_key", fallback=""
     )
     if not secret_key:
-        logger.warning("WEB_SECRET_KEY missing; using deterministic local fallback key")
-        secret_key = "letterbot-local-web-secret"
+        # Never a shared constant: that would let anyone forge sessions on every
+        # install. A random key lives only in this process (sessions reset on
+        # restart) and is never written to disk.
+        logger.warning(
+            "WEB_SECRET_KEY missing; using a random per-process key "
+            "(web sessions reset on restart)"
+        )
+        secret_key = secrets.token_hex(32)
     try:
         attention_cost = float(
             parser.get("general", "attention_cost_per_hour", fallback="0")
