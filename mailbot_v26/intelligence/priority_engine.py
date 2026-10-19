@@ -5,6 +5,8 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,7 +39,7 @@ class PriorityEngine:
             return final_priority, priority_reason
 
         try:
-            with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as conn:
+            with sqlite3.connect(sqlite_readonly_uri(self.db_path), uri=True) as conn:
                 if llm_priority == "🟡":
                     if self._count_red_recent(conn, from_email, received_at) >= 3:
                         final_priority = "🔴"

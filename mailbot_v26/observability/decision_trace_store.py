@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from mailbot_v26.events.contract import EventType
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 from mailbot_v26.observability.decision_trace_v1 import (
     DecisionTraceV1,
     from_canonical_json,
@@ -20,7 +21,7 @@ def load_latest_decision_traces(
     if email_id <= 0:
         return []
     if read_only:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(sqlite_readonly_uri(db_path), uri=True)
     else:
         conn = sqlite3.connect(db_path)
     try:

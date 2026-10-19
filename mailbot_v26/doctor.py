@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mailbot_v26.deps import DependencyError, require_runtime_for
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 from mailbot_v26.config_loader import (
     ACCOUNT_ID_PATTERN,
     CONFIG_DIR,
@@ -709,7 +710,7 @@ def _check_sqlite(db_path: object) -> DoctorEntry:
         )
     path = Path(db_path)
     try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+        with sqlite3.connect(sqlite_readonly_uri(path), uri=True) as conn:
             cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table';")
             tables = {row[0] for row in cursor.fetchall()}
     except sqlite3.Error as exc:

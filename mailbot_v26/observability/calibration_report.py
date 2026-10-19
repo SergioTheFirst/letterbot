@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from mailbot_v26.events.contract import EventType
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.decision_trace_v1 import from_canonical_json
 
@@ -38,7 +39,7 @@ def _cache_file_path(db_path: Path) -> Path:
 
 def _connect_read_only(db_path: Path) -> sqlite3.Connection:
     # mode=ro never creates a missing DB and never writes (the web calls this).
-    uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+    uri = sqlite_readonly_uri(db_path)
     return sqlite3.connect(uri, uri=True)
 
 

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from mailbot_v26.integrity import verify_shipped_files
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 from mailbot_v26.observability.redact import redact_secrets
 from mailbot_v26.version import __version__
 
@@ -104,7 +105,7 @@ def _latest_health_snapshot(db_path: Path) -> dict[str, Any]:
         "ORDER BY ts_utc DESC LIMIT 1"
     )
     try:
-        uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+        uri = sqlite_readonly_uri(db_path)
         with sqlite3.connect(uri, uri=True) as conn:
             row = conn.execute(query).fetchone()
     except sqlite3.Error:

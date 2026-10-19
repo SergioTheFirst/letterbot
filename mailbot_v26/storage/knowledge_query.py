@@ -5,6 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable
 
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
+
 logger = logging.getLogger(__name__)
 
 
@@ -13,7 +15,7 @@ class KnowledgeQuery:
         self.path = Path(path)
 
     def _connect_readonly(self) -> sqlite3.Connection:
-        return sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        return sqlite3.connect(sqlite_readonly_uri(self.path), uri=True)
 
     def _execute_select(
         self, query: str, params: Iterable[object] | None = None

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from mailbot_v26.observability import get_logger
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 
 logger = get_logger("mailbot")
 
@@ -38,7 +39,7 @@ class MetricsAggregator:
 
     def _connect_readonly(self) -> sqlite3.Connection:
         # as_uri() escapes '#', '?' and '%' that would otherwise split the URI.
-        uri = Path(self.path).resolve().as_uri() + "?mode=ro"
+        uri = sqlite_readonly_uri(self.path)
         return sqlite3.connect(uri, uri=True)
 
     def snapshot(self) -> dict[str, dict[str, float]]:

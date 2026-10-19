@@ -62,6 +62,7 @@ from mailbot_v26.config_loader import (
     load_web_ui_password_from_ini,
 )
 from mailbot_v26.config.paths import app_root, resolve_config_paths, runtime_log_path
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.config_yaml import (
     ConfigError as YamlConfigError,
@@ -251,7 +252,7 @@ _DASHBOARD_CACHE_TTL = 2 * DASHBOARD_REFRESH_MS / 1000.0
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
     # as_uri() escapes '#', '?' and '%' that would otherwise split the URI.
-    uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+    uri = sqlite_readonly_uri(db_path)
     conn = sqlite3.connect(uri, uri=True)
     try:
         conn.execute("PRAGMA busy_timeout = 750")

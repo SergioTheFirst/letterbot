@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from mailbot_v26.budgets.contract import BudgetPeriod, BudgetType, ResourceBudget
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 from mailbot_v26.domain.issuer_identity import (
     normalize_sender_identity,
     resolve_sender_profile_key,
@@ -139,7 +140,7 @@ class KnowledgeAnalytics:
 
     def _connect_readonly(self) -> sqlite3.Connection:
         # as_uri() escapes '#', '?' and '%' that would otherwise split the URI.
-        uri = self.path.resolve().as_uri() + "?mode=ro"
+        uri = sqlite_readonly_uri(self.path)
         conn = sqlite3.connect(uri, uri=True)
         try:
             conn.execute("PRAGMA busy_timeout = 750")

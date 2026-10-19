@@ -42,6 +42,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
 from urllib.parse import unquote
 
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
+
 # Untraced connect used for the harness's own connections (copy, EXPLAIN, stats).
 _raw_connect = sqlite3.connect
 
@@ -152,7 +154,7 @@ def _same_file(database: object, target: Path) -> bool:
 
 
 def _read_only_uri(path: Path) -> str:
-    return f"{Path(path).resolve().as_uri()}?mode=ro"
+    return sqlite_readonly_uri(path)
 
 
 def _backup_read_only(source: Path, copy_path: Path) -> None:

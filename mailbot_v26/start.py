@@ -1426,11 +1426,12 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                     str(resolved_config_dir / "settings.ini"),
                     str(resolved_config_dir / "config.ini"),
                 ],
-                encoding="utf-8",
+                encoding="utf-8-sig",
             )
             processor_module.configure_processor_locale(_get_locale(_p))
-        except Exception:
-            pass
+        except Exception as exc:
+            # Notifications fall back to the default locale; say why.
+            logger.warning("processor_locale_config_failed error=%s", exc)
         try:
             processor_module.configure_processor_db_path(config.storage.db_path)
             configure_digest_config_dir(resolved_config_dir)

@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("database.sqlite")
@@ -60,7 +62,7 @@ def _check_schema(db_path: Path) -> None:
         return
 
     try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        with sqlite3.connect(sqlite_readonly_uri(db_path), uri=True) as conn:
             columns = _fetch_columns(conn, "emails")
     except Exception as exc:
         logger.error("[SELF-CHECK] Unable to read schema: %s", exc)
@@ -167,7 +169,7 @@ def _log_crm_metrics(db_path: Path) -> None:
         return
 
     try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        with sqlite3.connect(sqlite_readonly_uri(db_path), uri=True) as conn:
             total = _fetch_single_int(conn, "SELECT COUNT(*) FROM emails;")
             priority_counts = {
                 "🔴": _fetch_single_int(
