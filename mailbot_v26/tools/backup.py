@@ -13,12 +13,16 @@ from typing import Iterable
 from mailbot_v26.config_loader import ConfigError, load_storage_config
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.paths import app_root, resolve_db_path
+from mailbot_v26.storage.privacy_key import subject_key_path
 
 DEFAULT_RETENTION = 14
 # Placeholder written instead of secrets; restore refuses config members containing it.
 MASKED_VALUE = "***"
 # Archive name of the database wherever it lives (restore maps it back).
 DB_MEMBER = "data/mailbot.sqlite"
+# Its subject-hash key (<db>.subject.key, WP3a), copied as is: restored
+# events keep comparable subject hashes. Backups stay on this computer.
+SUBJECT_KEY_MEMBER = f"{DB_MEMBER}.subject.key"
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,9 @@ def _collect_backup_files(base_dir: Path, temp_dir: Path) -> list[tuple[Path, st
         snapshot = temp_dir / "db_snapshot.sqlite"
         _snapshot_db(db_path, snapshot)
         entries.append((snapshot, DB_MEMBER))
+    key_path = subject_key_path(db_path)
+    if key_path.is_file():
+        entries.append((key_path, SUBJECT_KEY_MEMBER))
 
     for path in _state_paths(base_dir):
         if path.exists():
@@ -152,6 +159,7 @@ def run_backup() -> None:
 
 __all__ = [
     "DB_MEMBER",
+    "SUBJECT_KEY_MEMBER",
     "BackupResult",
     "create_backup",
     "resolve_app_db_path",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import configparser
 import csv
 import os
+import re
 import sqlite3
 import subprocess
 import zipfile
@@ -13,10 +14,12 @@ from pathlib import Path
 from mailbot_v26.tools.backup import (
     DB_MEMBER,
     MASKED_VALUE,
+    SUBJECT_KEY_MEMBER,
     create_backup,
     resolve_app_db_path,
 )
 from mailbot_v26.config.paths import app_root
+from mailbot_v26.storage.privacy_key import SUBJECT_KEY_BYTES, subject_key_path
 from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 from mailbot_v26.system.instance_lock import InstanceLockError, is_instance_running
 
@@ -29,6 +32,8 @@ _CONFIG_PREFIX = "mailbot_v26/config/"
 _SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
 _MAX_MEMBER_BYTES = 16 * 1024 * 1024
 _MAX_DB_MEMBER_BYTES = 8 * 1024 * 1024 * 1024
+_MAX_KEY_MEMBER_BYTES = 4096
+_SUBJECT_KEY_RE = re.compile(rb"[0-9a-fA-F]{%d}" % (SUBJECT_KEY_BYTES * 2))
 _COPY_CHUNK_BYTES = 1024 * 1024
 _TASKLIST_TIMEOUT_SECONDS = 30
 
@@ -192,6 +197,35 @@ def _db_member_refusal(path: Path) -> str | None:
     return None
 
 
+def _restore_subject_key(
+    archive: zipfile.ZipFile, info: zipfile.ZipInfo, destination: Path
+) -> str | None:
+    """Write the subject-hash key atomically; a skip reason when it is unusable."""
+    kept = "current key left unchanged" if destination.exists() else "not created"
+    if info.file_size > _MAX_KEY_MEMBER_BYTES:
+        return f"{info.file_size} bytes exceeds the {_MAX_KEY_MEMBER_BYTES} byte limit; {kept}"
+    data = archive.read(info)
+    if not _SUBJECT_KEY_RE.fullmatch(data.strip()):
+        return f"backup copy is not a valid subject key; {kept}"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = destination.with_name(f"{destination.name}.restore-tmp")
+    try:
+        fd = os.open(
+            temp_path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0),
+            0o600,
+        )
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, destination)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return None
+
+
 def _remove_sqlite_sidecars(db_path: Path) -> None:
     # A stale -wal/-shm from the replaced database would corrupt the restored one.
     for suffix in _SQLITE_SIDECARS:
@@ -257,12 +291,16 @@ def restore_from_backup(
         members = sorted(archive.infolist(), key=lambda info: info.filename != db_member)
         for info in members:
             member = info.filename
-            is_db = member == db_member
-            if not _is_safe_member(member) or not (is_db or _is_allowed_path(member)):
+            if member == db_member:
+                reason = _restore_member(archive, info, db_path, is_db=True)
+            elif member == SUBJECT_KEY_MEMBER:
+                # Next to the database it belongs to, wherever that lives.
+                reason = _restore_subject_key(archive, info, subject_key_path(db_path))
+            elif _is_safe_member(member) and _is_allowed_path(member):
+                reason = _restore_member(archive, info, root / member)
+            else:
                 skipped.append(member)
                 continue
-            destination = db_path if is_db else root / member
-            reason = _restore_member(archive, info, destination, is_db=is_db)
             if reason is not None:
                 skipped.append(member)
                 warnings.append(f"{member}: {reason}")
