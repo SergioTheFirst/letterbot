@@ -4,9 +4,12 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
+
+# One-time data migrations, recorded in storage_migrations (R4).
+MESSAGE_ID_NORMALIZATION_MIGRATION = "emails_message_id_normalized_v1"
 
 
 def normalize_message_id(value: object) -> str | None:
@@ -108,8 +111,11 @@ class Storage:
             if "uidvalidity" not in email_columns:
                 self.conn.execute("ALTER TABLE emails ADD COLUMN uidvalidity INTEGER;")
             # Message-ID is stored normalized since WP2c; older rows hold the
-            # raw (possibly folded) header.
-            self._normalize_stored_message_ids()
+            # raw (possibly folded) header. The scan cannot use an index, so
+            # it runs once per database (R4).
+            self._run_once(
+                MESSAGE_ID_NORMALIZATION_MIGRATION, self._normalize_stored_message_ids
+            )
             self.conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_emails_account_message_id
                 ON emails(account_email, message_id);
@@ -791,6 +797,29 @@ class Storage:
             raise
         finally:
             cursor.close()
+
+    def _run_once(self, name: str, migration: Callable[[], object]) -> bool:
+        """Run a one-time data migration unless storage_migrations records it
+        (R4). Called inside the schema transaction, so the migration and its
+        marker commit together. True when it ran now."""
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS storage_migrations (
+                name TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );
+            """)
+        done = self.conn.execute(
+            "SELECT 1 FROM storage_migrations WHERE name = ?;", (name,)
+        ).fetchone()
+        if done is not None:
+            return False
+        migration()
+        self.conn.execute(
+            "INSERT INTO storage_migrations (name, applied_at) VALUES (?, ?);",
+            (name, self._now()),
+        )
+        logger.info("storage_migration_applied name=%s", name)
+        return True
 
 
 __all__ = ["Storage", "normalize_message_id"]
