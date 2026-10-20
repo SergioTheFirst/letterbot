@@ -89,7 +89,7 @@ from mailbot_v26.system.truth_guard import (
     assert_not_projection_source,
     mark_as_stale,
 )
-from mailbot_v26.ui.i18n import DEFAULT_LOCALE, get_locale
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE, get_locale, t as i18n_t
 from mailbot_v26.version import get_version
 from mailbot_v26.web_observability.doctor_export import build_diagnostics_zip
 from mailbot_v26.tools.networking import get_primary_ipv4
@@ -7275,6 +7275,13 @@ def create_app(
             }
         )
 
+    def _relationship_user_label() -> str:
+        """Label of the graph node for the user, in the dashboard language."""
+        return i18n_t(
+            "web.relationships.you",
+            locale=str(app.config.get("UI_LOCALE") or DEFAULT_LOCALE),
+        )
+
     @app.route("/api/v1/relationships/graph", methods=["GET"])
     def api_relationships_graph():
         account_email, account_emails, window_days, error = _validate_latency_params(
@@ -7297,6 +7304,7 @@ def create_app(
             account_emails=account_emails,
             window_days=window_days or 30,
             limit=limit or 50,
+            user_label=_relationship_user_label(),
         )
         return jsonify(graph)
 
@@ -8215,6 +8223,7 @@ def create_app(
                 account_emails=account_emails,
                 window_days=window_days or 30,
                 limit=limit or 50,
+                user_label=_relationship_user_label(),
             )
         account_options = _build_select_options(accounts, account_email)
         window_options = _build_window_options(window_days or 30)
