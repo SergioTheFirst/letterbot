@@ -556,6 +556,7 @@ class Storage:
         attachments_count: int | None,
         stage: str = "PARSE",
         uidvalidity: int | None = None,
+        dedupe_message_id: bool = False,
     ) -> tuple[int, bool]:
         """Store a new email and its first queue row in one transaction.
 
@@ -564,6 +565,12 @@ class Storage:
         can no longer leave an email row without its queue row (F5).
         uidvalidity is the epoch of uid, used to refetch after a restart.
         message_id is stored normalized (normalize_message_id).
+
+        dedupe_message_id (UIDVALIDITY resync, WP2c): a settled row with the
+        same Message-ID (see _message_id_rows) is returned as a duplicate,
+        which also skips a second copy in the same batch; an orphan row
+        retired from an old epoch (uid <= 0) is re-attached to uid and
+        enqueued again (created=True). Mail without Message-ID is new.
         """
         now = self._now()
         attach_count = attachments_count if attachments_count is not None else 0
@@ -578,6 +585,37 @@ class Storage:
             if row is not None:
                 self.conn.commit()
                 return int(row[0]), False
+            if dedupe_message_id and message_id is not None:
+                matches = self._message_id_rows(cursor, account_email, message_id)
+                settled = next((m for m in matches if m[2]), None)
+                if settled is not None:
+                    self.conn.commit()
+                    logger.info(
+                        "duplicate_message_id_skipped account_email=%s uid=%s email_id=%s",
+                        account_email,
+                        uid,
+                        settled[0],
+                    )
+                    return settled[0], False
+                orphan = next((m for m in matches if m[1] <= 0), None)
+                if orphan is not None:
+                    cursor.execute(
+                        """
+                        UPDATE emails
+                        SET uid = ?, uidvalidity = ?, status = 'NEW', updated_at = ?
+                        WHERE id = ?;
+                        """,
+                        (uid, uidvalidity, now, orphan[0]),
+                    )
+                    self._insert_first_queue_row(cursor, orphan[0], stage, now)
+                    self.conn.commit()
+                    logger.warning(
+                        "orphan_email_reattached account_email=%s uid=%s email_id=%s",
+                        account_email,
+                        uid,
+                        orphan[0],
+                    )
+                    return orphan[0], True
             cursor.execute(
                 """
                 INSERT INTO emails (
@@ -601,14 +639,7 @@ class Storage:
                 ),
             )
             email_id = int(cursor.lastrowid)
-            cursor.execute(
-                """
-                INSERT OR IGNORE INTO queue (
-                    email_id, stage, attempts, not_before, last_error, created_at, updated_at
-                ) VALUES (?, ?, 0, NULL, NULL, ?, ?);
-                """,
-                (email_id, stage, now, now),
-            )
+            self._insert_first_queue_row(cursor, email_id, stage, now)
             self.conn.commit()
             return email_id, True
         except BaseException:
@@ -714,6 +745,19 @@ class Storage:
         finally:
             cursor.close()
         return any(settled for _id, _uid, settled in rows)
+
+    @staticmethod
+    def _insert_first_queue_row(
+        cursor: sqlite3.Cursor, email_id: int, stage: str, now: str
+    ) -> None:
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO queue (
+                email_id, stage, attempts, not_before, last_error, created_at, updated_at
+            ) VALUES (?, ?, 0, NULL, NULL, ?, ?);
+            """,
+            (email_id, stage, now, now),
+        )
 
 
 __all__ = ["Storage", "normalize_message_id"]

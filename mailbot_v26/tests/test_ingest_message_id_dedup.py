@@ -514,3 +514,140 @@ def test_uidvalidity_change_sends_only_new_mail(monkeypatch, tmp_path: Path) -> 
     assert [event["retired_rows"] for event in _uidvalidity_change_events(
         config.storage.db_path
     )] == [10]
+
+
+# ---- persist during a resync: re-attach, same batch, no Message-ID ----
+
+
+def test_resync_persist_skips_a_settled_message_id(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    old, _ = _store(storage, 1, "<m@x>")
+    _notified(storage, old)
+    storage.retire_uid_epoch(LOGIN, NEW_EPOCH)
+
+    email_id, created = _store(storage, 5, "<m@x>", uidvalidity=NEW_EPOCH, dedupe=True)
+
+    assert (email_id, created) == (old, False)
+    assert _email_count(storage) == 1
+    assert _queued(storage, old) == []
+    assert _row(storage, old)[0] == -old
+
+
+def test_resync_persist_reattaches_an_undelivered_orphan(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    old, _ = _store(storage, 1, "<m@x>")
+    _drop_queue(storage, old)
+    storage.set_email_error(old, "context_unavailable:gone")
+    storage.retire_uid_epoch(LOGIN, NEW_EPOCH)
+
+    email_id, created = _store(
+        storage, 5, "\r\n <m@x>", uidvalidity=NEW_EPOCH, dedupe=True
+    )
+
+    assert (email_id, created) == (old, True)
+    assert _row(storage, old) == (5, NEW_EPOCH, "NEW", "<m@x>")
+    assert _queued(storage, old) == ["PARSE"]
+    assert storage.find_email_id(LOGIN, 5) == old
+    assert _email_count(storage) == 1
+
+
+def test_resync_persist_skips_a_second_copy_in_the_same_batch(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+
+    first, created_first = _store(
+        storage, 3, "<dup@x>", uidvalidity=NEW_EPOCH, dedupe=True
+    )
+    second, created_second = _store(
+        storage, 4, "<dup@x>", uidvalidity=NEW_EPOCH, dedupe=True
+    )
+
+    assert created_first
+    assert (second, created_second) == (first, False)
+    assert _email_count(storage) == 1
+
+
+def test_resync_persist_stores_mail_without_message_id_as_new(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+
+    first, created_first = _store(storage, 3, None, uidvalidity=NEW_EPOCH, dedupe=True)
+    second, created_second = _store(
+        storage, 4, None, uidvalidity=NEW_EPOCH, dedupe=True
+    )
+
+    assert created_first and created_second
+    assert first != second
+
+
+def test_normal_poll_persist_does_not_dedupe_by_message_id(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+
+    first, _ = _store(storage, 3, "<dup@x>")
+    second, created = _store(storage, 4, "<dup@x>")
+
+    assert created
+    assert second != first
+
+
+def test_reattached_orphan_gets_its_pipeline_context(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    orphan, _ = _store(storage, 4, "<m@x>")
+    _drop_queue(storage, orphan)
+    storage.retire_uid_epoch(LOGIN, NEW_EPOCH)
+
+    email_id, created = start_module._persist_inbound_and_enqueue_parse(
+        storage=storage,
+        account_email=LOGIN,
+        uid=9,
+        message_id="<m@x>",
+        from_email="sender@example.com",
+        from_name="Sender",
+        subject="Subject",
+        received_at=None,
+        attachments_count=0,
+        raw_email=b"raw",
+        inbound=InboundMessage(subject="Subject", body="Body", sender="s@example.com"),
+        uidvalidity=NEW_EPOCH,
+        dedupe_message_id=True,
+    )
+
+    assert (email_id, created) == (orphan, True)
+    assert start_module.PIPELINE_CACHE[orphan].uid == 9
+    assert start_module.PIPELINE_RAW_CACHE[orphan] == b"raw"
+
+
+def test_resync_poll_dedupes_copies_and_reattaches_orphans(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Two copies of one new mail arrive in the resync batch, and a mail whose
+    # old row was never notified (orphan) shows up under a new UID.
+    config, sent = _run_resync_poll(
+        monkeypatch,
+        tmp_path,
+        notified={1: "<old1@example.com>"},
+        orphans={2: "<orphan@example.com>"},
+        new_epoch={
+            1: "<old1@example.com>",
+            2: "<copy@example.com>",
+            3: "<copy@example.com>",
+            4: "<orphan@example.com>",
+        },
+    )
+
+    assert _pending_sends(config.storage.db_path) == [
+        (2, "<copy@example.com>"),
+        (4, "<orphan@example.com>"),
+    ]
+    assert sent == []
+    with sqlite3.connect(config.storage.db_path) as conn:
+        rows = conn.execute(
+            "SELECT message_id, COUNT(*) FROM emails GROUP BY message_id ORDER BY 1"
+        ).fetchall()
+    # the orphan row was re-attached, the second copy not stored
+    assert rows == [
+        ("<copy@example.com>", 1),
+        ("<old1@example.com>", 1),
+        ("<orphan@example.com>", 1),
+    ]
+    assert _saved_state(tmp_path)["accounts"][LOGIN]["last_uid"] == 4
+    # re-attached mail is processed from this poll's content
+    assert 4 in {ctx.uid for ctx in start_module.PIPELINE_CACHE.values()}
