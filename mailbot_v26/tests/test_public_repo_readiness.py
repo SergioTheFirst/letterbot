@@ -97,9 +97,12 @@ def test_readme_exists() -> None:
 def test_readme_has_installation_section() -> None:
     text = _read(REPO_ROOT / "README.md")
 
-    assert "## Installation" in text
-    assert "## Configuration" in text
-    assert "## Running LetterBot.ru" in text
+    # Install, configure and run steps are documented in both languages.
+    assert "### Quick Start (Windows" in text
+    assert "### Быстрый старт (Windows" in text
+    assert "accounts.ini" in text
+    assert "run.bat" in text
+    assert "letterbot.bat" in text
 
 
 def test_readme_has_no_real_credentials() -> None:
