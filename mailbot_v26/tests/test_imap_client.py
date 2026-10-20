@@ -156,6 +156,9 @@ def test_fetch_skips_messages_before_start(
 
     client = ResilientIMAP(account, state, start_time=start_time)
     messages = client.fetch_new_messages()
+    # WP2a: the cursor moves only on commit, after the messages are stored
+    assert state.get_last_uid(account.login) == 0
+    client.commit_cursor([uid for uid, _ in messages])
 
     assert [uid for uid, _ in messages] == [2, 3]
     assert state.get_last_uid(account.login) == 3
@@ -191,6 +194,7 @@ def test_baseline_updates_when_only_old(
 
     client = ResilientIMAP(account, state, start_time=start_time)
     messages = client.fetch_new_messages()
+    client.commit_cursor([])
 
     assert messages == []
     assert state.get_last_uid(account.login) == 11
@@ -227,7 +231,8 @@ def test_steady_state_filters_prestart_emails(
     state = StateManager(tmp_path / "state.json")
 
     client = ResilientIMAP(account, state, start_time=start_time)
-    client.fetch_new_messages()
+    first = client.fetch_new_messages()
+    client.commit_cursor([uid for uid, _ in first])
 
     fake_client.search_calls.clear()
     fake_client.set_messages(
@@ -252,6 +257,7 @@ def test_steady_state_filters_prestart_emails(
     )
 
     messages = client.fetch_new_messages()
+    client.commit_cursor([])
 
     assert messages == []
     assert state.get_last_uid(account.login) == 4
@@ -285,6 +291,7 @@ def test_cursor_advances_when_all_skipped(
     )
     client = ResilientIMAP(account, state, start_time=start_time)
     messages = client.fetch_new_messages()
+    client.commit_cursor([])
 
     assert messages == []
     assert state.get_last_uid(account.login) == 3
@@ -355,6 +362,7 @@ def test_fetch_uses_normalized_state_login_key(
         start_time=datetime(2024, 1, 3, 11, 0, 0, tzinfo=timezone.utc),
     )
     messages = client.fetch_new_messages()
+    client.commit_cursor([uid for uid, _ in messages])
 
     assert [uid for uid, _ in messages] == [6]
     assert fake_client.search_calls[0] == ["UID", "6:*"]
@@ -395,6 +403,7 @@ def test_first_run_bootstrap_allows_recent_prestart_messages(
         first_run_bootstrap_max_messages=20,
     )
     messages = client.fetch_new_messages()
+    client.commit_cursor([uid for uid, _ in messages])
 
     assert [uid for uid, _ in messages] == [1, 2]
     assert client.last_fetch_included_prestart is True
@@ -431,6 +440,7 @@ def test_non_first_run_still_blocks_prestart_messages_when_disabled(
         first_run_bootstrap=False,
     )
     messages = client.fetch_new_messages()
+    client.commit_cursor([])
 
     assert messages == []
     assert state.get_last_uid(account.login) == 6
@@ -528,8 +538,10 @@ def test_first_run_bootstrap_is_limited_by_message_count(
         first_run_bootstrap_max_messages=2,
     )
     messages = client.fetch_new_messages()
+    client.commit_cursor([uid for uid, _ in messages])
 
     assert [uid for uid, _ in messages] == [4, 5]
+    # UIDs 1-3 fall outside the newest-N bootstrap window: resolved, not lost
     assert state.get_last_uid(account.login) == 5
 
 
@@ -567,6 +579,7 @@ def test_bootstrap_does_not_duplicate_already_seen_messages(
         first_run_bootstrap_max_messages=20,
     )
     first_pass = client.fetch_new_messages()
+    client.commit_cursor([uid for uid, _ in first_pass])
     second_pass = client.fetch_new_messages()
 
     assert [uid for uid, _ in first_pass] == [1, 2]
@@ -611,6 +624,7 @@ def test_uidvalidity_change_resets_mailbox_state(
         first_run_bootstrap_max_messages=20,
     )
     messages = client.fetch_new_messages()
+    client.commit_cursor([uid for uid, _ in messages])
 
     assert [uid for uid, _ in messages] == [1, 2]
     assert fake_client.search_calls[0] == ["UID", "1:*"]

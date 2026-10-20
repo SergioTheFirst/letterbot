@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from mailbot_v26.bot_core.pipeline import (
     PIPELINE_CACHE,
@@ -57,8 +57,11 @@ from mailbot_v26.config_yaml import (
     load_config as load_yaml_config,
     validate_config as validate_yaml_config,
 )
-from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthcheck
-from mailbot_v26.imap_client import ResilientIMAP
+from mailbot_v26.health.mail_accounts import (
+    _mask_login,
+    run_startup_mail_account_healthcheck,
+)
+from mailbot_v26.imap_client import MAX_UID_FETCH_ATTEMPTS, ResilientIMAP
 from mailbot_v26.integrity import verify_shipped_files
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline.processor import (
@@ -793,6 +796,140 @@ def _persist_inbound_and_enqueue_parse(
     remember_raw_email(email_id, raw_email)
     store_inbound(email_id, inbound)
     return email_id, True
+
+
+# D-P2-1: at most one aggregated dead-letter alert per account in this window.
+DEAD_LETTER_ALERT_INTERVAL = timedelta(hours=24)
+
+
+def _known_uid_probe(
+    storage: Storage | None, account_email: str
+) -> Callable[[int], bool] | None:
+    """is_known_uid for fetch_new_messages(): True once the UID is stored."""
+    if storage is None:
+        return None
+    normalized_account_email = normalize_login(account_email)
+    return lambda uid: storage.find_email_id(normalized_account_email, uid) is not None
+
+
+def _dead_letter_alert_text(*, locale: str, masked_login: str, count: int) -> str:
+    return _ui_text_for_locale(
+        locale,
+        en=(
+            f"Mailbox {masked_login}: some new mail could not be loaded\n"
+            f"Skipped after {MAX_UID_FETCH_ATTEMPTS} attempts: {count}\n"
+            "Check your mail client. Details: Health page of the web panel."
+        ),
+        ru=(
+            f"Почта {masked_login}: часть новых писем не удалось загрузить\n"
+            f"Пропущено после {MAX_UID_FETCH_ATTEMPTS} попыток: {count}\n"
+            "Проверьте почтовый клиент. Подробности: страница Health в веб-панели."
+        ),
+    )
+
+
+def _maybe_send_dead_letter_alert(
+    *,
+    state: StateManager,
+    account: AccountConfig,
+    login: str,
+    dead_count: int,
+    bot_token: str,
+    now_utc: datetime,
+) -> bool:
+    """One aggregated alert per account per 24 h for dead-lettered mail.
+
+    Count only, no subjects or senders (D-P2-1). The window starts when an
+    alert is delivered, so an undelivered one is retried on the next dead letter.
+    """
+    if not account.telegram_chat_id:
+        digest_logger.warning(
+            "imap_dead_letter_alert_skipped",
+            account_id=account.account_id,
+            reason="no_chat_id",
+            dead_letters=dead_count,
+        )
+        return False
+    last_sent = state.get_dead_letter_alert_at(login)
+    if last_sent is not None and now_utc - last_sent < DEAD_LETTER_ALERT_INTERVAL:
+        digest_logger.info(
+            "imap_dead_letter_alert_suppressed",
+            account_id=account.account_id,
+            dead_letters=dead_count,
+            last_alert_at=last_sent.isoformat(),
+        )
+        return False
+    text = _dead_letter_alert_text(
+        locale=processor_module._resolve_outbound_ui_locale(),
+        masked_login=_mask_login(account.username or account.login),
+        count=dead_count,
+    )
+    payload = _build_system_payload(
+        text=text,
+        bot_token=bot_token,
+        chat_id=account.telegram_chat_id,
+        priority="🔴",
+    )
+    result = send_telegram(payload)
+    delivered = bool(getattr(result, "delivered", False))
+    if delivered:
+        state.set_dead_letter_alert_at(login, now_utc)
+    digest_logger.warning(
+        "imap_dead_letter_alert_sent",
+        account_id=account.account_id,
+        login=login,
+        dead_letters=dead_count,
+        delivered=delivered,
+    )
+    return delivered
+
+
+def _commit_imap_cursor(
+    *,
+    imap: object,
+    persisted_uids: list[int],
+    account: AccountConfig,
+    login: str,
+    state: StateManager,
+    bot_token: str,
+) -> None:
+    """Move the IMAP cursor once the poll's messages are stored (WP2a)."""
+    # getattr: test doubles of ResilientIMAP only implement fetch_new_messages.
+    commit_cursor = getattr(imap, "commit_cursor", None)
+    if not callable(commit_cursor):
+        return
+    commit = commit_cursor(persisted_uids)
+    if commit is None or not commit.dead_uids:
+        return
+    now_utc = datetime.now(timezone.utc)
+    for uid in commit.dead_uids:
+        logger.error(
+            "imap_uid_dead_lettered account=%s uid=%s attempts=%s",
+            login,
+            uid,
+            MAX_UID_FETCH_ATTEMPTS,
+        )
+        _emit_imap_health_event(
+            account_id=login,
+            subtype="dead_letter",
+            detail=f"FETCH dead-lettered after {MAX_UID_FETCH_ATTEMPTS} attempts",
+            ts_utc=now_utc.timestamp(),
+            message_uid=uid,
+            attempt_count=MAX_UID_FETCH_ATTEMPTS,
+            extra_payload={"stage": "FETCH"},
+        )
+    try:
+        _maybe_send_dead_letter_alert(
+            state=state,
+            account=account,
+            login=login,
+            dead_count=len(commit.dead_uids),
+            bot_token=bot_token,
+            now_utc=now_utc,
+        )
+    except Exception:
+        # The poll itself succeeded; a failed alert must not trigger IMAP backoff.
+        logger.exception("imap_dead_letter_alert_failed account=%s", login)
 
 
 def _build_telegram_delivery_key(
@@ -2225,7 +2362,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 first_run_bootstrap_max_messages=config.ingest.first_run_bootstrap_max_messages,
                                 max_email_mb=config.general.max_email_mb,
                             )
-                            new_messages = imap.fetch_new_messages()
+                            new_messages = imap.fetch_new_messages(
+                                is_known_uid=_known_uid_probe(storage, account.login)
+                            )
                             digest_logger.info(
                                 "imap_resync_state",
                                 account_id=account.account_id,
@@ -2289,6 +2428,14 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
                             if not new_messages:
                                 print("   -- no new messages")
+                                _commit_imap_cursor(
+                                    imap=imap,
+                                    persisted_uids=[],
+                                    account=account,
+                                    login=login,
+                                    state=state,
+                                    bot_token=config.keys.telegram_bot_token,
+                                )
                                 continue
 
                             if (
@@ -2319,6 +2466,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
                             print(f"   -- received {len(new_messages)} new messages")
 
+                            persisted_uids: list[int] = []
                             for uid, raw in new_messages:
                                 print(f"      в”њв”Ђ UID {uid}")
                                 try:
@@ -2400,11 +2548,21 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                             )
                                         else:
                                             print("      в”‚  Result: empty")
+                                    persisted_uids.append(uid)
 
                                 except Exception as e:
                                     print(f"      в””в”Ђ [ERROR] {e}")
                                     logger.exception("Processing error for UID %s", uid)
 
+                            # Cursor only past stored UIDs, then onto disk.
+                            _commit_imap_cursor(
+                                imap=imap,
+                                persisted_uids=persisted_uids,
+                                account=account,
+                                login=login,
+                                state=state,
+                                bot_token=config.keys.telegram_bot_token,
+                            )
                             state.save()
 
                         except Exception as e:
