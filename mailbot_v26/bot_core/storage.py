@@ -759,5 +759,38 @@ class Storage:
             (email_id, stage, now, now),
         )
 
+    def advance_stage(
+        self,
+        queue_id: int,
+        email_id: int,
+        next_stage: str,
+        not_before: str | None = None,
+    ) -> None:
+        """Replace the finished queue row with the next stage's row in one
+        transaction (R1): a crash or a failed write between the two can no
+        longer leave the email without a queue row (status NEW, never
+        notified). The next stage starts with a fresh attempt budget.
+        not_before is naive-UTC isoformat, as claim_next compares (F11).
+        """
+        now = self._now()
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE;")
+            cursor.execute("DELETE FROM queue WHERE id = ?;", (queue_id,))
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO queue (
+                    email_id, stage, attempts, not_before, last_error, created_at, updated_at
+                ) VALUES (?, ?, 0, ?, NULL, ?, ?);
+                """,
+                (email_id, next_stage, not_before, now, now),
+            )
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        finally:
+            cursor.close()
+
 
 __all__ = ["Storage", "normalize_message_id"]

@@ -1597,12 +1597,12 @@ def _process_queue(
                         llm_not_before,
                     )
                 stage_parse(ctx)
-                storage.mark_done(queue_id)
-                storage.enqueue_stage(email_id, "LLM", not_before=llm_not_before)
+                storage.advance_stage(
+                    queue_id, email_id, "LLM", not_before=llm_not_before
+                )
             elif stage == "LLM":
                 stage_llm(ctx)
-                storage.mark_done(queue_id)
-                storage.enqueue_stage(email_id, "TG")
+                storage.advance_stage(queue_id, email_id, "TG")
             elif stage == "TG":
                 delivery_guard = _new_email_delivery_guard(
                     storage=storage, config=config, ctx=ctx, email_id=email_id
