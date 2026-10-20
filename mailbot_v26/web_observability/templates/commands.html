@@ -134,7 +134,7 @@
   {% endif %}
     <ul class="commands-list">
       {% for entry in group.entries %}
-      <li class="commands-entry" id="cmd-{{ entry.key }}" data-module="{{ entry.module }}" data-subcommand="{{ entry.subcommand }}">
+      <li class="commands-entry" id="cmd-{{ entry.key }}" data-module="{{ entry.module }}" data-subcommand="{{ entry.subcommand }}" data-script="{{ entry.script }}">
         <div class="commands-entry-head">
           <code class="commands-label">{{ entry.label }}</code>
           <span class="commands-purpose">{{ entry.purpose }}</span>

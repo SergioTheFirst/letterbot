@@ -202,6 +202,22 @@ def test_every_command_line_entry_point_has_a_dashboard_entry(tmp_path: Path) ->
         assert f'data-module="{module}"' in body, module
 
 
+def test_every_bat_launcher_has_a_dashboard_entry(tmp_path: Path) -> None:
+    repo_root = Path(mailbot_v26.__file__).resolve().parents[1]
+    scripts = {path.name for path in repo_root.glob("*.bat")}
+    assert {"letterbot.bat", "run_dist.bat", "backup.bat", "restore.bat"} <= scripts
+
+    listed = {entry.script for entry in commands_registry.ENTRIES if entry.script}
+    missing = scripts - listed
+    assert not missing, f".bat launchers without a dashboard entry: {sorted(missing)}"
+
+    app = _app(tmp_path, _config(tmp_path))
+    with app.test_client() as client:
+        body = client.get("/commands").get_data(as_text=True)
+    for name in scripts:
+        assert f'data-script="{name}"' in body, name
+
+
 def test_registry_entries_name_a_dashboard_place_or_a_reason(tmp_path: Path) -> None:
     app = _app(tmp_path, _config(tmp_path))
     rules = {rule.rule for rule in app.url_map.iter_rules()}

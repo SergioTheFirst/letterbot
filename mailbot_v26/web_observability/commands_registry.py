@@ -52,6 +52,10 @@ class CommandEntry:
     href: str = ""
     place: str = ""
     reason: str = ""
+    # A .bat launcher in the Letterbot folder instead of a Python module; its
+    # name in the packaged app when the build ships it (run_dist.bat -> run.bat).
+    script: str = ""
+    frozen_script: str = ""
 
 
 _SETTINGS_SETUP = "/accounts#settings-setup"
@@ -210,12 +214,38 @@ ENTRIES: tuple[CommandEntry, ...] = (
     CommandEntry("make-ini-compact", "developer", module="mailbot_v26.tools.make_ini_compact", reason="developer"),
     CommandEntry("capture-screenshot", "developer", module="mailbot_v26.tools.capture_web_screenshot", reason="developer"),
     CommandEntry("storage-smoke-test", "developer", module="mailbot_v26.tools.storage_smoke_test", reason="developer"),
+    # .bat launchers in the Letterbot folder
+    CommandEntry("letterbot-bat", "everyday", module="", script="letterbot.bat", reason="start_stop"),
+    CommandEntry(
+        "run-bat",
+        "everyday",
+        module="",
+        script="run_dist.bat",
+        frozen_script="run.bat",
+        reason="start_stop",
+    ),
+    CommandEntry("update-and-run-bat", "everyday", module="", script="update_and_run.bat", reason="start_stop"),
+    CommandEntry(
+        "open-config-folder-bat",
+        "configuration",
+        module="",
+        script="open_config_folder.bat",
+        href="/accounts",
+        place="accounts",
+    ),
+    CommandEntry("backup-bat", "data", module="", script="backup.bat", reason="writes_data"),
+    CommandEntry("restore-bat", "data", module="", script="restore.bat", args='"<backup.zip>"', reason="writes_data"),
+    CommandEntry("verify-dist-bat", "developer", module="", script="verify_dist.bat", reason="developer"),
+    CommandEntry("run-tests-bat", "developer", module="", script="run_tests.bat", reason="developer"),
+    CommandEntry("build-onefolder-bat", "developer", module="", script="build_windows_onefolder.bat", reason="developer"),
 )
 
 
 def command_label(entry: CommandEntry, *, frozen: bool) -> str:
     """The command without this installation's paths."""
-    if entry.module == CLI_MODULE:
+    if entry.script:
+        parts = [entry.frozen_script if frozen and entry.frozen_script else entry.script]
+    elif entry.module == CLI_MODULE:
         parts = [FROZEN_EXE if frozen else f"python -m {CLI_MODULE}"]
         if entry.subcommand:
             parts.append(entry.subcommand)
@@ -255,6 +285,7 @@ def entry_view(
         "key": entry.key,
         "module": entry.module,
         "subcommand": entry.subcommand,
+        "script": entry.script,
         "label": command_label(entry, frozen=frozen),
         "purpose": text(f"purpose.{entry.key}", locale),
         "options": text("entry.options", locale, options=", ".join(entry.options))
@@ -267,11 +298,10 @@ def entry_view(
         return view
     view["command"] = command_line(entry, frozen=frozen, config_dir=config_dir, db_path=db_path)
     view["reason"] = text(f"reason.{entry.reason}", locale)
-    # Letterbot.exe runs only `python -m mailbot_v26`; the other modules ship
-    # with the source folder.
-    view["source_note"] = (
-        text("entry.source_only", locale) if frozen and entry.module != CLI_MODULE else ""
-    )
+    # Letterbot.exe runs only `python -m mailbot_v26`; the other modules and the
+    # .bat launchers (except run.bat) ship with the source folder.
+    shipped = entry.module == CLI_MODULE or bool(entry.frozen_script)
+    view["source_note"] = text("entry.source_only", locale) if frozen and not shipped else ""
     return view
 
 
@@ -423,6 +453,22 @@ _EN: dict[str, str] = {
     "purpose.make-ini-compact": "Write the compact INI template file.",
     "purpose.capture-screenshot": "Capture dashboard screenshots (needs Playwright).",
     "purpose.storage-smoke-test": "Run the storage smoke test on a separate test database.",
+    "purpose.letterbot-bat": (
+        "Start Letterbot from the source folder: installs the Python packages on "
+        "first run, then mail processing and this dashboard."
+    ),
+    "purpose.run-bat": "Start the packaged Letterbot (Letterbot.exe) with its console window.",
+    "purpose.update-and-run-bat": "Update the source folder from Git, then start Letterbot.",
+    "purpose.open-config-folder-bat": (
+        "Open the folder with accounts.ini and settings.ini in Explorer; here you "
+        "edit the same settings in the browser."
+    ),
+    "purpose.backup-bat": "Same as backup: create a data backup archive.",
+    "purpose.restore-bat": "Same as restore: restore data from a backup archive.",
+    "purpose.verify-dist-bat": "Check a built dist\\Letterbot folder before release.",
+    "purpose.run-tests-bat": "Run the automated test suite.",
+    "purpose.build-onefolder-bat": "Build the dist\\Letterbot folder (and optionally the installer).",
+    "place.accounts": "Accounts and settings page",
 }
 
 _RU: dict[str, str] = {
@@ -567,6 +613,22 @@ _RU: dict[str, str] = {
     "purpose.make-ini-compact": "Записать компактный шаблон INI.",
     "purpose.capture-screenshot": "Снять скриншоты панели (нужен Playwright).",
     "purpose.storage-smoke-test": "Быстрая проверка хранилища на отдельной тестовой базе.",
+    "purpose.letterbot-bat": (
+        "Запустить Letterbot из папки с исходниками: при первом запуске ставит "
+        "пакеты Python, затем обработку почты и эту панель."
+    ),
+    "purpose.run-bat": "Запустить собранный Letterbot (Letterbot.exe) с окном консоли.",
+    "purpose.update-and-run-bat": "Обновить папку с исходниками из Git и запустить Letterbot.",
+    "purpose.open-config-folder-bat": (
+        "Открыть в Проводнике папку с accounts.ini и settings.ini; здесь те же "
+        "настройки меняются в браузере."
+    ),
+    "purpose.backup-bat": "То же, что backup: создать архив резервной копии данных.",
+    "purpose.restore-bat": "То же, что restore: восстановить данные из архива.",
+    "purpose.verify-dist-bat": "Проверить собранную папку dist\\Letterbot перед выпуском.",
+    "purpose.run-tests-bat": "Запустить автоматические тесты.",
+    "purpose.build-onefolder-bat": "Собрать папку dist\\Letterbot (и по желанию установщик).",
+    "place.accounts": "Страница «Аккаунты» и настройки",
 }
 
 _CATALOGS: dict[str, dict[str, str]] = {"en": _EN, "ru": _RU}
