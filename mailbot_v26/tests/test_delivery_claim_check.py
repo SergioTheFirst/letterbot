@@ -30,9 +30,12 @@ from mailbot_v26.tests.test_delivery_invariants import (  # noqa: F401 - fixture
     _set_attempts,
     _setup,
     _unknown_contract_events,
-    events,
-    telegram,
 )
+from mailbot_v26.tests import test_delivery_invariants as _invariants
+
+# Shared fixtures, re-exported by assignment so pytest discovers them here.
+events = _invariants.events
+telegram = _invariants.telegram
 
 
 def _restart_without_context(config) -> Storage:

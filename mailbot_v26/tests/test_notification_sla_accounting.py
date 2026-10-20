@@ -32,9 +32,12 @@ from mailbot_v26.tests.test_delivery_invariants import (  # noqa: F401 - fixture
     _patch_premium,
     _seed_email,
     _setup,
-    events,
-    telegram,
 )
+from mailbot_v26.tests import test_delivery_invariants as _invariants
+
+# Shared fixtures, re-exported by assignment so pytest discovers them here.
+events = _invariants.events
+telegram = _invariants.telegram
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
