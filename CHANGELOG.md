@@ -60,6 +60,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - An email whose enrichment produced nothing is still notified (it previously could be dropped silently).
 - Notification SLA alerts are actually delivered (they were silently skipped); IMAP dates are timezone-correct; the snooze reminder no longer says "yesterday" for a snooze made minutes ago around midnight.
 
+- Each Telegram chat now sees only its own mailboxes in /status, /week, /stats and /commitments; snooze reminders go to the chat of the email's mailbox; /digest off applies per chat.
+- Telegram output follows the closed emoji list everywhere (priority buttons are now 🔴🟡🔵); a guard at the send boundary removes anything else.
+- An email can no longer be lost between processing steps (stage changes are atomic); a long IMAP outage right after a restart no longer fails queued emails.
+- The packaged app reports "web UI ready" only once the dashboard is actually listening, and explains a busy port.
+
 ### Performance
 - IMAP headers are fetched in batches with one logout per poll and a per-connection timeout; text clean-up is linear in length (a long Russian email no longer takes ~25 s).
 - Text normalization is memoized (bounded) and the per-email metrics snapshot is reused within a poll cycle, with a new `decision_traces(created_at)` index; duplicate indexes on `emails(priority)` and `events_v1(event_type, ts_utc)` are dropped.
@@ -69,6 +74,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Telegram bot tokens are redacted from logs (including tracebacks), stored delivery errors, failure notices and the diagnostics zip.
 - Web archive and dashboard no longer expose raw email subjects or sender addresses; reflected XSS on the relationships pages fixed.
 - Web UI rejects unknown `Host` headers (DNS rebinding); the session secret is random per process when not configured; the calibration report opens the database read-only.
+- The dashboard asks for a password when opened from another computer (no password needed on the computer running Letterbot); without a configured password, network access is refused; repeated wrong passwords are throttled.
+- Every dashboard page sends a nonce-based Content-Security-Policy and anti-framing headers; the login redirect accepts only same-site paths; the diagnostics zip also masks addresses in the bundled config and health files; logs no longer contain email subjects or senders.
 
 ## [28.0.0-rc] - 2026-03-21
 
