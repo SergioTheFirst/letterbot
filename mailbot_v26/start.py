@@ -2491,7 +2491,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             logger.exception("knowledge_db_schema_refresh_failed")
 
         try:
-            run_self_check()
+            # The worker's own database (read-only checks), not database.sqlite
+            # in the current directory.
+            run_self_check(config.storage.db_path)
         except Exception:
             logger.exception("Self-check execution failure")
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -35,12 +34,15 @@ def run_self_check(
     """
     Выполняет диагностический self-check CRM.
     Никогда не бросает исключения наружу и не меняет поведение бота.
+
+    Read-only: every query opens db_path with mode=ro, so the check never
+    writes and never creates a missing database (it is reported instead).
+    The worker passes its configured storage.db_path.
     """
     resolved_db = Path(db_path) if db_path is not None else DEFAULT_DB_PATH
     resolved_root = project_root or PROJECT_ROOT
 
     _safe_call(_check_schema, resolved_db)
-    _safe_call(_check_priority_reason_persistence, resolved_db)
     _safe_call(_check_priority_reason_leaks, resolved_root)
     _safe_call(_log_crm_metrics, resolved_db)
 
@@ -76,73 +78,6 @@ def _check_schema(db_path: Path) -> None:
         )
     else:
         logger.info("[SELF-CHECK] emails schema OK (%d columns)", len(columns))
-
-
-def _check_priority_reason_persistence(db_path: Path) -> None:
-    if not db_path.exists():
-        logger.error(
-            "[SELF-CHECK] priority_reason check skipped: DB not found at %s", db_path
-        )
-        return
-
-    savepoint = "sc_priority_reason"
-    now = datetime.utcnow().isoformat()
-    sample_reason = "SELF-CHECK: priority_reason echo"
-    sample_subject = "SELF-CHECK priority_reason probe"
-
-    try:
-        with sqlite3.connect(f"file:{db_path}?mode=rw", uri=True) as conn:
-            conn.execute(f"SAVEPOINT {savepoint};")
-            conn.execute(
-                """
-                INSERT INTO emails (
-                    account_email,
-                    from_email,
-                    subject,
-                    received_at,
-                    priority,
-                    priority_reason,
-                    action_line,
-                    body_summary,
-                    raw_body_hash
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (
-                    "self-check@example.com",
-                    "diagnostic@example.com",
-                    sample_subject,
-                    now,
-                    "🟡",
-                    sample_reason,
-                    "Self-check action line",
-                    "Self-check body summary",
-                    "self-check-hash",
-                ),
-            )
-
-            row = conn.execute(
-                """
-                SELECT priority_reason
-                FROM emails
-                WHERE subject = ?
-                ORDER BY id DESC
-                LIMIT 1;
-                """,
-                (sample_subject,),
-            ).fetchone()
-
-            conn.execute(f"ROLLBACK TO {savepoint};")
-            conn.execute(f"RELEASE {savepoint};")
-
-        if row and (row[0] or "").strip() == sample_reason:
-            logger.info("[SELF-CHECK] priority_reason persistence OK")
-        else:
-            logger.error("[SELF-CHECK] priority_reason is not persisted correctly")
-    except sqlite3.OperationalError as exc:
-        logger.error("[SELF-CHECK] priority_reason check failed: %s", exc)
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("[SELF-CHECK] priority_reason check error: %s", exc, exc_info=True)
 
 
 def _check_priority_reason_leaks(project_root: Path) -> None:

@@ -90,3 +90,22 @@ def test_main_exits_2_on_populated_database_without_uid_and_keeps_rows(
     released = acquire_instance_lock(db_path)
     assert released is not None
     released.release()
+
+
+def test_main_runs_self_check_on_the_configured_database(
+    monkeypatch, tmp_path: Path
+) -> None:
+    db_path = _install(monkeypatch, tmp_path)
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        start_module,
+        "run_self_check",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    start_module.main(max_cycles=1)
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    target = kwargs.get("db_path", args[0] if args else None)
+    assert target is not None and Path(target) == db_path
