@@ -308,7 +308,7 @@ def test_reconnect_writes_health_event(monkeypatch, tmp_path: Path) -> None:
             self.last_uidvalidity_changed = False
             self.last_resync_reason = "normal_poll"
 
-        def fetch_new_messages(self):
+        def fetch_new_messages(self, **_kwargs):
             result = responses.pop(0)
             if isinstance(result, Exception):
                 raise result
@@ -388,7 +388,7 @@ def test_uidvalidity_change_triggers_safe_resync_and_health_event(
             self.last_uidvalidity_changed = True
             self.last_resync_reason = "uidvalidity_change"
 
-        def fetch_new_messages(self):
+        def fetch_new_messages(self, **_kwargs):
             return []
 
     monkeypatch.setattr(start_module, "load_config", lambda *_args, **_kwargs: config)

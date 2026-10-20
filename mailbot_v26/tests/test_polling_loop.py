@@ -52,6 +52,10 @@ class DummyStorage:
         self._next_id += 1
         return self._next_id
 
+    def persist_email_and_enqueue(self, **_kwargs):
+        self._next_id += 1
+        return self._next_id, True
+
     def enqueue_stage(self, email_id, stage):
         return None
 
@@ -176,7 +180,7 @@ def _build_imap(responses, call_log=None):
             self.last_uidvalidity_changed = False
             self.last_resync_reason = "normal_poll"
 
-        def fetch_new_messages(self):
+        def fetch_new_messages(self, **_kwargs):
             if call_log is not None:
                 call_log.append(self.login)
             sequence = responses[self.login]
@@ -404,7 +408,7 @@ def test_first_run_notice_sent_once(monkeypatch, tmp_path):
             self.last_uidvalidity_changed = False
             self.last_resync_reason = "first_run"
 
-        def fetch_new_messages(self):
+        def fetch_new_messages(self, **_kwargs):
             if responses:
                 return responses.pop(0)
             return []

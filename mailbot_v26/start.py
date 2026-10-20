@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from mailbot_v26.bot_core.pipeline import (
     PIPELINE_CACHE,
@@ -57,8 +57,11 @@ from mailbot_v26.config_yaml import (
     load_config as load_yaml_config,
     validate_config as validate_yaml_config,
 )
-from mailbot_v26.health.mail_accounts import run_startup_mail_account_healthcheck
-from mailbot_v26.imap_client import ResilientIMAP
+from mailbot_v26.health.mail_accounts import (
+    _mask_login,
+    run_startup_mail_account_healthcheck,
+)
+from mailbot_v26.imap_client import MAX_UID_FETCH_ATTEMPTS, ResilientIMAP
 from mailbot_v26.integrity import verify_shipped_files
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline.processor import (
@@ -762,15 +765,14 @@ def _persist_inbound_and_enqueue_parse(
     attachments_count: int,
     raw_email: bytes,
     inbound: InboundMessage,
+    uidvalidity: int | None = None,
+    dedupe_message_id: bool = False,
 ) -> tuple[int, bool]:
     normalized_account_email = normalize_login(account_email)
-    find_email_id = getattr(storage, "find_email_id", None)
-    existing_email_id = (
-        find_email_id(normalized_account_email, uid)
-        if callable(find_email_id)
-        else None
-    )
-    email_id = storage.upsert_email(
+    # Email row and PARSE queue row in one transaction (F5). uidvalidity lets
+    # a restart refetch the message by UID (WP2b). In a UIDVALIDITY resync a
+    # settled Message-ID is a duplicate and an orphan is re-attached (WP2c).
+    email_id, created = storage.persist_email_and_enqueue(
         account_email=normalized_account_email,
         uid=uid,
         message_id=message_id,
@@ -779,8 +781,10 @@ def _persist_inbound_and_enqueue_parse(
         subject=subject,
         received_at=received_at,
         attachments_count=attachments_count,
+        uidvalidity=uidvalidity,
+        dedupe_message_id=dedupe_message_id,
     )
-    if existing_email_id is not None:
+    if not created:
         logger.info(
             "duplicate_ingest_skipped account_email=%s uid=%s email_id=%s",
             normalized_account_email,
@@ -797,8 +801,195 @@ def _persist_inbound_and_enqueue_parse(
     PIPELINE_CACHE[email_id] = ctx
     remember_raw_email(email_id, raw_email)
     store_inbound(email_id, inbound)
-    storage.enqueue_stage(email_id, "PARSE")
     return email_id, True
+
+
+# D-P2-1: at most one aggregated dead-letter alert per account in this window.
+DEAD_LETTER_ALERT_INTERVAL = timedelta(hours=24)
+# Emails dead-lettered at CONTEXT (WP2b) per normalized login since that
+# account's last poll; the poll folds them into its aggregated alert.
+_CONTEXT_DEAD_LETTERS: dict[str, int] = {}
+
+
+def _known_uid_probe(
+    storage: Storage | None, account_email: str
+) -> Callable[[int], bool] | None:
+    """is_known_uid for fetch_new_messages(): True once the UID is stored."""
+    if storage is None:
+        return None
+    normalized_account_email = normalize_login(account_email)
+    return lambda uid: storage.find_email_id(normalized_account_email, uid) is not None
+
+
+def _known_message_id_probe(
+    storage: Storage | None, account_email: str
+) -> Callable[[str], bool] | None:
+    """is_known_message_id for fetch_new_messages(): True once an email with
+    this Message-ID is settled for the account, under any UID (WP2c)."""
+    if storage is None:
+        return None
+    normalized_account_email = normalize_login(account_email)
+    return lambda message_id: storage.is_known_message_id(
+        normalized_account_email, message_id
+    )
+
+
+def _retire_previous_uid_epoch(
+    *, storage: Storage | None, imap: object, login: str
+) -> int:
+    """After a UIDVALIDITY change, detach stored rows of older epochs from
+    their UIDs before the poll persists anything (WP2c, F6): the new epoch
+    reuses UIDs. Returns the number of rows retired. A storage error
+    propagates, so the poll fails and the cursor stays (retried next poll).
+    """
+    if storage is None or not getattr(imap, "last_uidvalidity_changed", False):
+        return 0
+    # getattr: test doubles of ResilientIMAP lack it (F10).
+    uidvalidity = getattr(imap, "current_uidvalidity", None)
+    if uidvalidity is None:
+        logger.warning(
+            "imap_uid_epoch_retire_skipped account=%s reason=uidvalidity_unknown",
+            login,
+        )
+        return 0
+    retired = storage.retire_uid_epoch(normalize_login(login), int(uidvalidity))
+    logger.warning(
+        "imap_uid_epoch_retired account=%s uidvalidity=%s rows=%s",
+        login,
+        uidvalidity,
+        retired,
+    )
+    return retired
+
+
+def _dead_letter_alert_text(
+    *, locale: str, masked_login: str, count: int, context_count: int = 0
+) -> str:
+    en = [f"Mailbox {masked_login}: some new mail could not be loaded"]
+    ru = [f"Почта {masked_login}: часть новых писем не удалось загрузить"]
+    if count:
+        en.append(f"Skipped after {MAX_UID_FETCH_ATTEMPTS} attempts: {count}")
+        ru.append(f"Пропущено после {MAX_UID_FETCH_ATTEMPTS} попыток: {count}")
+    if context_count:
+        en.append(f"Not found in the mailbox after a restart: {context_count}")
+        ru.append(f"Не найдено в ящике после перезапуска: {context_count}")
+    en.append("Check your mail client. Details: Health page of the web panel.")
+    ru.append("Проверьте почтовый клиент. Подробности: страница Health в веб-панели.")
+    return _ui_text_for_locale(locale, en="\n".join(en), ru="\n".join(ru))
+
+
+def _maybe_send_dead_letter_alert(
+    *,
+    state: StateManager,
+    account: AccountConfig,
+    login: str,
+    dead_count: int,
+    bot_token: str,
+    now_utc: datetime,
+    context_dead_count: int = 0,
+) -> bool:
+    """One aggregated alert per account per 24 h for dead-lettered mail.
+
+    Count only, no subjects or senders (D-P2-1). The window starts when an
+    alert is delivered, so an undelivered one is retried on the next dead letter.
+    context_dead_count: emails lost after a restart (WP2b, stage CONTEXT).
+    """
+    if not account.telegram_chat_id:
+        digest_logger.warning(
+            "imap_dead_letter_alert_skipped",
+            account_id=account.account_id,
+            reason="no_chat_id",
+            dead_letters=dead_count,
+            context_dead_letters=context_dead_count,
+        )
+        return False
+    last_sent = state.get_dead_letter_alert_at(login)
+    if last_sent is not None and now_utc - last_sent < DEAD_LETTER_ALERT_INTERVAL:
+        digest_logger.info(
+            "imap_dead_letter_alert_suppressed",
+            account_id=account.account_id,
+            dead_letters=dead_count,
+            context_dead_letters=context_dead_count,
+            last_alert_at=last_sent.isoformat(),
+        )
+        return False
+    text = _dead_letter_alert_text(
+        locale=processor_module._resolve_outbound_ui_locale(),
+        masked_login=_mask_login(account.username or account.login),
+        count=dead_count,
+        context_count=context_dead_count,
+    )
+    payload = _build_system_payload(
+        text=text,
+        bot_token=bot_token,
+        chat_id=account.telegram_chat_id,
+        priority="🔴",
+    )
+    result = send_telegram(payload)
+    delivered = bool(getattr(result, "delivered", False))
+    if delivered:
+        state.set_dead_letter_alert_at(login, now_utc)
+    digest_logger.warning(
+        "imap_dead_letter_alert_sent",
+        account_id=account.account_id,
+        login=login,
+        dead_letters=dead_count,
+        context_dead_letters=context_dead_count,
+        delivered=delivered,
+    )
+    return delivered
+
+
+def _commit_imap_cursor(
+    *,
+    imap: object,
+    persisted_uids: list[int],
+    account: AccountConfig,
+    login: str,
+    state: StateManager,
+    bot_token: str,
+) -> None:
+    """Move the IMAP cursor once the poll's messages are stored (WP2a)."""
+    # getattr: test doubles of ResilientIMAP only implement fetch_new_messages.
+    commit_cursor = getattr(imap, "commit_cursor", None)
+    if not callable(commit_cursor):
+        return
+    commit = commit_cursor(persisted_uids)
+    dead_uids = tuple(commit.dead_uids) if commit is not None else ()
+    # Context dead letters since this account's last poll join its alert.
+    context_dead = _CONTEXT_DEAD_LETTERS.pop(normalize_login(login), 0)
+    if not dead_uids and not context_dead:
+        return
+    now_utc = datetime.now(timezone.utc)
+    for uid in dead_uids:
+        logger.error(
+            "imap_uid_dead_lettered account=%s uid=%s attempts=%s",
+            login,
+            uid,
+            MAX_UID_FETCH_ATTEMPTS,
+        )
+        _emit_imap_health_event(
+            account_id=login,
+            subtype="dead_letter",
+            detail=f"FETCH dead-lettered after {MAX_UID_FETCH_ATTEMPTS} attempts",
+            ts_utc=now_utc.timestamp(),
+            message_uid=uid,
+            attempt_count=MAX_UID_FETCH_ATTEMPTS,
+            extra_payload={"stage": "FETCH"},
+        )
+    try:
+        _maybe_send_dead_letter_alert(
+            state=state,
+            account=account,
+            login=login,
+            dead_count=len(dead_uids),
+            bot_token=bot_token,
+            now_utc=now_utc,
+            context_dead_count=context_dead,
+        )
+    except Exception:
+        # The poll itself succeeded; a failed alert must not trigger IMAP backoff.
+        logger.exception("imap_dead_letter_alert_failed account=%s", login)
 
 
 def _build_telegram_delivery_key(
@@ -1051,6 +1242,22 @@ def _settle_email_delivery(
     return False
 
 
+# A context refetch retries its IMAP session once: a queue pass must not
+# block on a dead server (the queue item retries with backoff).
+CONTEXT_REFETCH_IMAP_RETRIES = 1
+
+
+class PipelineContextUnavailable(Exception):
+    """The queued email cannot be refetched from IMAP (gone or not the same
+    message): it is dead-lettered, never sent fail-open (no content)."""
+
+    def __init__(self, reason: str, *, account_email: str, uid: int) -> None:
+        super().__init__(f"context_unavailable:{reason}")
+        self.reason = reason
+        self.account_email = account_email
+        self.uid = uid
+
+
 def _rebuild_pipeline_context(
     *,
     storage: Storage,
@@ -1060,10 +1267,98 @@ def _rebuild_pipeline_context(
 ) -> PipelineContext | None:
     """Rebuild a pipeline context lost with the in-memory caches (restart).
 
-    Stub until WP2b refetches the message by UID; None keeps the existing
-    "no pipeline context" retry path.
+    Refetches the message from IMAP (WP2b), parses it and fills the caches;
+    a TG item runs the LLM stage inline first (no premium re-run). None when
+    the email is not stored (the "no pipeline context" retry path). A
+    network error propagates, so the item is retried; a message that is gone
+    or does not match raises PipelineContextUnavailable.
     """
-    return None
+    locator = storage.get_email_locator(email_id)
+    if locator is None:
+        return None
+    account_email = str(locator["account_email"])
+    uid = int(locator["uid"])
+    account = _get_account_by_login(config, account_email)
+    if account is None:
+        raise PipelineContextUnavailable(
+            "account_not_configured", account_email=account_email, uid=uid
+        )
+    imap = ResilientIMAP(
+        account,
+        state=None,
+        max_email_mb=config.general.max_email_mb,
+        retries=CONTEXT_REFETCH_IMAP_RETRIES,
+    )
+    refetch = imap.fetch_message_by_uid(
+        uid,
+        expected_uidvalidity=locator["uidvalidity"],
+        expected_message_id=locator["message_id"],
+    )
+    logger.info(
+        "pipeline_context_refetch email_id=%s stage=%s uid=%s found_uid=%s reason=%s",
+        email_id,
+        stage,
+        uid,
+        refetch.uid,
+        refetch.reason,
+    )
+    if refetch.raw is None:
+        raise PipelineContextUnavailable(
+            refetch.reason, account_email=account_email, uid=uid
+        )
+    inbound = parse_raw_email(refetch.raw, config)
+    ctx = PipelineContext(email_id=email_id, account_email=account_email, uid=uid)
+    remember_raw_email(email_id, refetch.raw)
+    store_inbound(email_id, inbound)
+    try:
+        if stage in ("LLM", "TG"):
+            stage_parse(ctx)
+        if stage == "TG":
+            stage_llm(ctx)
+    except Exception:
+        # A half-built context must not be reused by the retry.
+        _cleanup_pipeline_cache(email_id)
+        raise
+    PIPELINE_CACHE[email_id] = ctx
+    return ctx
+
+
+def _dead_letter_unavailable_context(
+    *,
+    storage: Storage,
+    queue_id: int,
+    email_id: int,
+    stage: str,
+    attempts: int,
+    lost: PipelineContextUnavailable,
+) -> None:
+    """WP2b: a queued email that cannot be refetched after a restart.
+
+    No content means no fail-open send: the email turns ERROR, IMAP_HEALTH
+    shows it (dead_letter, stage CONTEXT) and the account's next poll folds
+    it into the aggregated alert (D-P2-1).
+    """
+    login = normalize_login(lost.account_email)
+    storage.set_email_error(email_id, str(lost))
+    storage.mark_done(queue_id)
+    _cleanup_pipeline_cache(email_id)
+    _CONTEXT_DEAD_LETTERS[login] = _CONTEXT_DEAD_LETTERS.get(login, 0) + 1
+    logger.error(
+        "pipeline_context_dead_lettered email_id=%s stage=%s uid=%s reason=%s",
+        email_id,
+        stage,
+        lost.uid,
+        lost.reason,
+    )
+    _emit_imap_health_event(
+        account_id=login,
+        subtype="dead_letter",
+        detail=f"CONTEXT dead-lettered: {lost.reason}",
+        email_id=email_id,
+        message_uid=lost.uid,
+        attempt_count=attempts,
+        extra_payload={"stage": "CONTEXT", "queue_stage": stage, "reason": lost.reason},
+    )
 
 
 def _finish_reserved_queue_item(
@@ -1227,9 +1522,20 @@ def _process_queue(
         try:
             print(f"[QUEUE] Claimed {stage} for email_id={email_id} attempt={attempts}")
             if ctx is None:
-                ctx = _rebuild_pipeline_context(
-                    storage=storage, config=config, email_id=email_id, stage=stage
-                )
+                try:
+                    ctx = _rebuild_pipeline_context(
+                        storage=storage, config=config, email_id=email_id, stage=stage
+                    )
+                except PipelineContextUnavailable as lost:
+                    _dead_letter_unavailable_context(
+                        storage=storage,
+                        queue_id=queue_id,
+                        email_id=email_id,
+                        stage=stage,
+                        attempts=attempts,
+                        lost=lost,
+                    )
+                    continue
                 if ctx is not None:
                     ctx.attempts = attempts  # type: ignore[attr-defined]
             if ctx is None:
@@ -2231,7 +2537,15 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 first_run_bootstrap_max_messages=config.ingest.first_run_bootstrap_max_messages,
                                 max_email_mb=config.general.max_email_mb,
                             )
-                            new_messages = imap.fetch_new_messages()
+                            new_messages = imap.fetch_new_messages(
+                                is_known_uid=_known_uid_probe(storage, account.login),
+                                is_known_message_id=_known_message_id_probe(
+                                    storage, account.login
+                                ),
+                            )
+                            retired_rows = _retire_previous_uid_epoch(
+                                storage=storage, imap=imap, login=login
+                            )
                             digest_logger.info(
                                 "imap_resync_state",
                                 account_id=account.account_id,
@@ -2281,6 +2595,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                         "bootstrap_enabled": bool(
                                             imap.last_bootstrap_active
                                         ),
+                                        "retired_rows": retired_rows,
                                     },
                                 )
                             digest_logger.info(
@@ -2295,6 +2610,14 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
                             if not new_messages:
                                 print("   -- no new messages")
+                                _commit_imap_cursor(
+                                    imap=imap,
+                                    persisted_uids=[],
+                                    account=account,
+                                    login=login,
+                                    state=state,
+                                    bot_token=config.keys.telegram_bot_token,
+                                )
                                 continue
 
                             if (
@@ -2325,6 +2648,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
                             print(f"   -- received {len(new_messages)} new messages")
 
+                            persisted_uids: list[int] = []
                             for uid, raw in new_messages:
                                 print(f"      в”њв”Ђ UID {uid}")
                                 try:
@@ -2371,6 +2695,19 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                                 attachments_count=attachments_count,
                                                 raw_email=raw,
                                                 inbound=inbound,
+                                                # getattr: fakes lack it (F10)
+                                                uidvalidity=getattr(
+                                                    imap, "current_uidvalidity", None
+                                                ),
+                                                # the whole resync, not only
+                                                # the poll that saw the change
+                                                dedupe_message_id=bool(
+                                                    getattr(
+                                                        imap,
+                                                        "last_message_id_resync",
+                                                        imap.last_uidvalidity_changed,
+                                                    )
+                                                ),
                                             )
                                         )
                                         if enqueued:
@@ -2406,11 +2743,21 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                             )
                                         else:
                                             print("      в”‚  Result: empty")
+                                    persisted_uids.append(uid)
 
                                 except Exception as e:
                                     print(f"      в””в”Ђ [ERROR] {e}")
                                     logger.exception("Processing error for UID %s", uid)
 
+                            # Cursor only past stored UIDs, then onto disk.
+                            _commit_imap_cursor(
+                                imap=imap,
+                                persisted_uids=persisted_uids,
+                                account=account,
+                                login=login,
+                                state=state,
+                                bot_token=config.keys.telegram_bot_token,
+                            )
                             state.save()
 
                         except Exception as e:

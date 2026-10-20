@@ -5,15 +5,28 @@ from email.header import decode_header
 from email.message import Message
 from email.utils import parsedate_to_datetime
 import logging
+import re
 import socket
 import ssl
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from mailbot_v26.account_identity import normalize_login
+# Header values are compared with what storage holds: one normal form.
+from mailbot_v26.bot_core.storage import normalize_message_id as _normalize_message_id
 from mailbot_v26.state_manager import StateManager
 
 try:
@@ -38,9 +51,58 @@ _HEADER_FETCH_FIELDS = [
 ]
 _HEADER_FIELDS_RESPONSE_PREFIX = b"BODY[HEADER.FIELDS"
 
+# Polls in which a UID failed to be fetched or stored before it is
+# dead-lettered and the cursor may pass it (poison message).
+MAX_UID_FETCH_ATTEMPTS = 3
+# Body-fetch failures in a row that end fetching for the poll; the rest is
+# carried, so a flapping server does not burn an attempt on every UID.
+MAX_CONSECUTIVE_BODY_FAILURES = 2
+
 
 class IMAPError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class FetchPlan:
+    """What one fetch_new_messages() call saw; commit_cursor() resolves it."""
+
+    login: str
+    epoch_changed: bool
+    uidvalidity: Optional[int]
+    base_cursor: int
+    uids: Tuple[int, ...]
+    policy_skipped: FrozenSet[int]
+    known: FrozenSet[int]
+    dead: FrozenSet[int]
+    returned: FrozenSet[int]
+    fetch_failed: FrozenSet[int]
+    carried: Tuple[int, ...]
+    # UIDVALIDITY of the Message-ID resync this poll ran in; None: normal poll.
+    resync_epoch: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class CursorCommit:
+    cursor: int
+    dead_uids: Tuple[int, ...]
+    failed_uids: Tuple[int, ...]
+    carried: Tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class MessageRefetch:
+    """Outcome of fetch_message_by_uid(); raw is None when not found."""
+
+    raw: Optional[bytes]
+    uid: Optional[int]
+    # found: "uid" | "message_id"; not found: "gone" | "message_id_mismatch" |
+    # "ambiguous_message_id" | "uidvalidity_changed" | "message_id_unsearchable"
+    reason: str
+
+    @property
+    def found(self) -> bool:
+        return self.raw is not None
 
 
 @dataclass
@@ -122,11 +184,13 @@ def _parse_message_id(fetch_data: Dict[Any, Any]) -> Optional[str]:
         raw = raw.encode("utf-8", "replace")
     if not isinstance(raw, (bytes, bytearray)):
         return None
-    value = email.message_from_bytes(bytes(raw)).get("Message-ID")
-    if value is None:
-        return None
-    text = " ".join(str(value).split())
-    return text or None
+    return _normalize_message_id(email.message_from_bytes(bytes(raw)).get("Message-ID"))
+
+
+# A Message-ID comes from the email itself: SEARCH it only when it is printable
+# ASCII without characters that IMAP quoting or literal syntax could turn
+# into protocol ("()\{} and space).
+_SEARCHABLE_MESSAGE_ID = re.compile(r"[\x21\x23-\x27\x2A-\x5B\x5D-\x7A\x7C\x7E]{1,998}")
 
 
 def _since_criteria(cutoff_utc: datetime) -> list[Any]:
@@ -197,9 +261,12 @@ class ResilientIMAP:
         self._bootstrap_max_messages = max(0, int(first_run_bootstrap_max_messages))
         self._last_fetch_included_prestart = False
         self._last_uidvalidity_changed = False
+        self._last_message_id_resync = False
         self._last_resync_reason = "normal_poll"
         self._last_bootstrap_active = False
         self._last_message_ids: Dict[int, Optional[str]] = {}
+        self._current_uidvalidity: Optional[int] = None
+        self._plan: Optional[FetchPlan] = None
         self.connect_timeout = float(connect_timeout)
         self.io_timeout = float(io_timeout)
         self.retries = int(retries)
@@ -291,6 +358,14 @@ class ResilientIMAP:
         return self._last_uidvalidity_changed
 
     @property
+    def last_message_id_resync(self) -> bool:
+        """True when the last fetch_new_messages() ran in a UIDVALIDITY
+        resync: the poll that saw the change, or a later one before the
+        cursor reached that epoch's highest UID. Its mail is stored with
+        Message-ID dedupe (WP2c)."""
+        return self._last_message_id_resync
+
+    @property
     def last_resync_reason(self) -> str:
         return self._last_resync_reason
 
@@ -303,6 +378,12 @@ class ResilientIMAP:
         """UID -> Message-ID (None when absent) for every UID whose headers the
         last fetch_new_messages() call fetched."""
         return dict(self._last_message_ids)
+
+    @property
+    def current_uidvalidity(self) -> Optional[int]:
+        """UIDVALIDITY the last fetch_new_messages() call saw (None: unknown);
+        the epoch of the UIDs it returned."""
+        return self._current_uidvalidity
 
     def _fetch_uidvalidity(self) -> Optional[int]:
         def _status(client) -> Optional[int]:
@@ -516,22 +597,55 @@ class ResilientIMAP:
                 emitted += 1
                 yield uid, msg
 
-    def fetch_new_messages(self, *, limit: int = 50) -> List[Tuple[int, bytes]]:
+    def fetch_new_messages(
+        self,
+        *,
+        limit: int = 50,
+        is_known_uid: Optional[Callable[[int], bool]] = None,
+        is_known_message_id: Optional[Callable[[str], bool]] = None,
+    ) -> List[Tuple[int, bytes]]:
+        """New messages above the cursor; writes no state.
+
+        The call records a plan; commit_cursor() moves the cursor once the
+        returned messages are stored. is_known_uid(uid) -> True skips a UID
+        that is already stored (not consulted after a UIDVALIDITY change).
+        In a UIDVALIDITY resync (the poll that sees the change, and later
+        polls until the cursor reaches that epoch's highest UID, see
+        last_message_id_resync) is_known_message_id(message_id) -> True
+        skips mail already settled under its old UID; it gets the normalized
+        Message-ID and runs before the newest-N cut, so known mail does not
+        take the place of new mail. Mail without Message-ID counts as new.
+        An exception from is_known_message_id propagates: no plan, no state
+        change, the next poll repeats the resync.
+        """
+        self._plan = None
         # One IMAP session per poll cycle: always LOGOUT, even when the fetch fails.
         try:
-            return self._fetch_new_messages(limit=limit)
+            return self._fetch_new_messages(
+                limit=limit,
+                is_known_uid=is_known_uid,
+                is_known_message_id=is_known_message_id,
+            )
         finally:
             self.close()
 
-    def _fetch_new_messages(self, *, limit: int) -> List[Tuple[int, bytes]]:
+    def _fetch_new_messages(
+        self,
+        *,
+        limit: int,
+        is_known_uid: Optional[Callable[[int], bool]],
+        is_known_message_id: Optional[Callable[[str], bool]],
+    ) -> List[Tuple[int, bytes]]:
         self._last_fetch_included_prestart = False
         self._last_uidvalidity_changed = False
+        self._last_message_id_resync = False
         self._last_resync_reason = "normal_poll"
         self._last_bootstrap_active = False
         self._last_message_ids = {}
         start_time_utc = self._start_time_utc or _utcnow()
         state_login = normalize_login(self.account.user)
-        range_start = 1
+        base_cursor = 0
+        attempts: Dict[int, int] = {}
         previous_uidvalidity: Optional[int] = None
         if self._state is not None and state_login:
             get_uidvalidity = getattr(self._state, "get_uidvalidity", None)
@@ -541,6 +655,7 @@ class ResilientIMAP:
                 except Exception:
                     previous_uidvalidity = None
         current_uidvalidity = self._fetch_uidvalidity()
+        self._current_uidvalidity = current_uidvalidity
         uidvalidity_changed = (
             previous_uidvalidity is not None
             and current_uidvalidity is not None
@@ -548,11 +663,8 @@ class ResilientIMAP:
         )
         if self._state is not None and state_login:
             if uidvalidity_changed:
-                reset_cursor = getattr(self._state, "reset_account_cursor", None)
-                if callable(reset_cursor):
-                    reset_cursor(state_login)
-                else:
-                    self._state.update_last_uid(state_login, 0)
+                # New UID epoch: restart from UID 1; the old cursor and attempt
+                # counts are replaced by commit_cursor().
                 log.warning(
                     "imap_uidvalidity_changed account=%s mailbox=%s previous=%s current=%s",
                     state_login,
@@ -560,14 +672,25 @@ class ResilientIMAP:
                     previous_uidvalidity,
                     current_uidvalidity,
                 )
-            range_start = max(1, self._state.get_last_uid(state_login) + 1)
+            else:
+                base_cursor = max(0, int(self._state.get_last_uid(state_login)))
+                attempts = self._state.get_uid_attempts(state_login)
+        resync_epoch = self._resync_epoch(
+            state_login, uidvalidity_changed, current_uidvalidity
+        )
+        range_start = base_cursor + 1
 
         def _search(client, criteria):
             return client.search(criteria)
 
         base_criteria = ["UID", f"{range_start}:*"]
+        # "UID n:*" also matches the highest UID when n is above it (RFC 3501).
         all_uids = sorted(
-            int(uid) for uid in (self._with_retries(_search, base_criteria) or [])
+            uid
+            for uid in (
+                int(raw) for raw in (self._with_retries(_search, base_criteria) or [])
+            )
+            if uid >= range_start
         )
 
         search_scope, internaldate_cutoff, bootstrap_active = (
@@ -586,8 +709,11 @@ class ResilientIMAP:
             int(uid) for uid in (self._with_retries(_search, scoped_criteria) or [])
         )
         scoped_uids = [uid for uid in scoped_uids if uid >= range_start]
-        highest_seen = max(all_uids) if all_uids else None
+        uids = sorted(set(all_uids) | set(scoped_uids))
+        scoped_set = set(scoped_uids)
+        policy_skipped = {uid for uid in uids if uid not in scoped_set}
         self._last_uidvalidity_changed = uidvalidity_changed
+        self._last_message_id_resync = resync_epoch is not None
         self._last_bootstrap_active = bootstrap_active
         if uidvalidity_changed:
             self._last_resync_reason = "uidvalidity_change"
@@ -596,24 +722,28 @@ class ResilientIMAP:
         else:
             self._last_resync_reason = "normal_poll"
 
-        eligible: list[tuple[int, dict[bytes, Any], Optional[datetime]]] = []
+        # meta None: the server answered the header batch without this UID.
+        eligible: list[tuple[int, Optional[dict[bytes, Any]], Optional[datetime]]] = []
         message_ids: Dict[int, Optional[str]] = {}
         # Batched header FETCH; a chunk that still fails after retries raises
-        # IMAPError before any state write, so the cursor does not move.
+        # IMAPError and leaves no plan, so the cursor does not move.
         for chunk_start in range(0, len(scoped_uids), HEADER_FETCH_CHUNK):
             chunk = scoped_uids[chunk_start : chunk_start + HEADER_FETCH_CHUNK]
             headers_map = self.fetch_headers_and_size(chunk)
             for uid in chunk:
-                meta = headers_map.get(uid, {})
-                message_ids[uid] = _parse_message_id(meta)
-                internal_date = _safe_dt(
-                    meta.get(b"INTERNALDATE") or meta.get("INTERNALDATE")
-                )
+                meta = headers_map.get(uid)
+                internal_date: Optional[datetime] = None
+                if meta is not None:
+                    message_ids[uid] = _parse_message_id(meta)
+                    internal_date = _safe_dt(
+                        meta.get(b"INTERNALDATE") or meta.get("INTERNALDATE")
+                    )
                 if (
                     internaldate_cutoff
                     and internal_date
                     and internal_date < internaldate_cutoff
                 ):
+                    policy_skipped.add(uid)
                     continue
                 eligible.append((uid, meta, internal_date))
         self._last_message_ids = message_ids
@@ -625,42 +755,70 @@ class ResilientIMAP:
             len(eligible),
         )
 
+        known: set[int] = set()
+        if resync_epoch is not None and is_known_message_id is not None:
+            eligible, known = self._drop_settled_message_ids(
+                eligible, message_ids, is_known_message_id, state_login
+            )
+
         fetch_cap = max(0, int(limit))
         if bootstrap_active:
             fetch_cap = min(fetch_cap, self._bootstrap_max_messages)
             if len(eligible) > fetch_cap:
-                eligible = eligible[-fetch_cap:]
+                cut = len(eligible) - fetch_cap
+                policy_skipped.update(uid for uid, _, _ in eligible[:cut])
+                eligible = eligible[cut:]
 
         messages: List[Tuple[int, bytes]] = []
-        max_bytes = int(self.account.max_email_mb) * 1024 * 1024
+        dead: set[int] = set()
+        fetch_failed: set[int] = set()
+        carried: List[int] = []
+        attempted = 0
+        failures_in_a_row = 0
+        # Old-epoch rows reuse UIDs of the new epoch: no known-UID filter then.
+        probe_known = None if uidvalidity_changed else is_known_uid
         for uid, meta, internal_date in eligible:
-            if len(messages) >= fetch_cap:
-                break
+            if attempts.get(uid, 0) >= MAX_UID_FETCH_ATTEMPTS:
+                dead.add(uid)  # dead-lettered by an earlier commit
+                continue
+            if probe_known is not None:
+                try:
+                    is_known = bool(probe_known(uid))
+                except Exception as exc:
+                    log.warning(
+                        "imap_known_uid_probe_failed mailbox=%s uid=%s error=%s: "
+                        "fetching without the known-UID filter",
+                        self.account.mailbox,
+                        uid,
+                        type(exc).__name__,
+                    )
+                    probe_known = None
+                    is_known = False
+                if is_known:
+                    known.add(uid)
+                    continue
+            if (
+                attempted >= fetch_cap
+                or failures_in_a_row >= MAX_CONSECUTIVE_BODY_FAILURES
+            ):
+                carried.append(uid)
+                continue
+            attempted += 1
+            if meta is None:
+                fetch_failed.add(uid)
+                log.warning(
+                    "imap_header_missing mailbox=%s uid=%s: retried next poll",
+                    self.account.mailbox,
+                    uid,
+                )
+                continue
             if internal_date and internal_date < start_time_utc:
                 self._last_fetch_included_prestart = True
-            size = _parse_rfc822_size(meta)
-            if size is not None and size > max_bytes:
-                header_map = (
-                    self._with_retries(
-                        lambda client, uid=uid: client.fetch(
-                            [uid], ["BODY.PEEK[HEADER]"]
-                        )
-                    )
-                    or {}
-                )
-                header_bytes = (header_map.get(uid) or {}).get(b"BODY[HEADER]", b"")
-                header_msg = email.message_from_bytes(header_bytes or b"")
-                synthetic = EmailMessage()
-                synthetic["From"] = header_msg.get("From", "")
-                synthetic["Subject"] = header_msg.get("Subject", "")
-                synthetic.set_content(
-                    "Письмо слишком большое и не было загружено полностью."
-                )
-                messages.append((uid, synthetic.as_bytes()))
-                continue
             try:
-                raw = self._fetch_rfc822_body(uid)
+                raw = self._fetch_within_limit(uid, meta)
             except Exception as exc:
+                failures_in_a_row += 1
+                fetch_failed.add(uid)
                 log.warning(
                     "imap_body_fetch_failed mailbox=%s uid=%s error=%s",
                     self.account.mailbox,
@@ -668,20 +826,308 @@ class ResilientIMAP:
                     type(exc).__name__,
                 )
                 continue
+            failures_in_a_row = 0
             messages.append((uid, raw))
 
-        if self._state is not None and state_login:
-            if highest_seen is not None:
-                self._state.update_last_uid(state_login, highest_seen)
-            update_uidvalidity = getattr(self._state, "update_uidvalidity", None)
-            if callable(update_uidvalidity):
-                update_uidvalidity(
-                    state_login,
-                    current_uidvalidity,
-                    mailbox=self.account.mailbox,
-                )
-            self._state.update_check_time(state_login)
+        self._plan = FetchPlan(
+            login=state_login,
+            epoch_changed=uidvalidity_changed,
+            uidvalidity=current_uidvalidity,
+            base_cursor=base_cursor,
+            uids=tuple(uids),
+            policy_skipped=frozenset(policy_skipped),
+            known=frozenset(known),
+            dead=frozenset(dead),
+            returned=frozenset(uid for uid, _ in messages),
+            fetch_failed=frozenset(fetch_failed),
+            carried=tuple(carried),
+            resync_epoch=resync_epoch,
+        )
         return messages
+
+    def _resync_epoch(
+        self, login: str, uidvalidity_changed: bool, current_uidvalidity: Optional[int]
+    ) -> Optional[int]:
+        """UIDVALIDITY of the Message-ID resync this poll belongs to (WP2c):
+        the new epoch when it changed, else the epoch commit_cursor() kept
+        because the cursor had not reached its highest UID. A marker of
+        another epoch does not count (commit_cursor() drops it); with the
+        epoch unknown (STATUS failed) the marker stays in force."""
+        if uidvalidity_changed:
+            return current_uidvalidity
+        get_resync_epoch = getattr(self._state, "get_resync_epoch", None)
+        if not login or not callable(get_resync_epoch):
+            return None
+        pending = get_resync_epoch(login)
+        if pending is None:
+            return None
+        if current_uidvalidity is not None and pending != current_uidvalidity:
+            return None
+        return int(pending)
+
+    def _drop_settled_message_ids(
+        self,
+        eligible: List[Tuple[int, Optional[Dict[bytes, Any]], Optional[datetime]]],
+        message_ids: Dict[int, Optional[str]],
+        is_known_message_id: Callable[[str], bool],
+        login: str,
+    ) -> Tuple[
+        List[Tuple[int, Optional[Dict[bytes, Any]], Optional[datetime]]], set[int]
+    ]:
+        """UIDVALIDITY resync: split off mail already settled under its old
+        UID (WP2c). Returns (still eligible, known UIDs). A message without
+        Message-ID cannot be matched and stays; a UID whose headers are
+        missing stays too (fetch_failed later). A failing probe is logged
+        and re-raised: the poll fails before it plans anything, so neither
+        the cursor nor the stored UIDVALIDITY moves and the next poll
+        repeats the resync. Failing open would let settled mail take the
+        newest-N slots and carry unchecked UIDs past this poll."""
+        kept: List[Tuple[int, Optional[Dict[bytes, Any]], Optional[datetime]]] = []
+        known: set[int] = set()
+        missing = 0
+        for item in eligible:
+            uid, meta = item[0], item[1]
+            message_id = message_ids.get(uid)
+            if message_id is None:
+                missing += meta is not None
+                kept.append(item)
+                continue
+            try:
+                is_known = bool(is_known_message_id(message_id))
+            except Exception as exc:
+                log.warning(
+                    "imap_known_message_id_probe_failed account=%s mailbox=%s uid=%s "
+                    "error=%s: poll failed, resync retried next poll",
+                    login,
+                    self.account.mailbox,
+                    uid,
+                    type(exc).__name__,
+                )
+                raise
+            if is_known:
+                known.add(uid)
+            else:
+                kept.append(item)
+        if missing:
+            log.warning(
+                "imap_resync_message_id_missing account=%s mailbox=%s count=%d: "
+                "treated as new",
+                login,
+                self.account.mailbox,
+                missing,
+            )
+        log.info(
+            "imap_resync_message_id_filter account=%s mailbox=%s eligible=%d known=%d",
+            login,
+            self.account.mailbox,
+            len(eligible),
+            len(known),
+        )
+        return kept, known
+
+    def _oversize_stand_in(self, uid: int) -> bytes:
+        """A small message with the real From/Subject for mail over max_email_mb."""
+        header_map = (
+            self._with_retries(
+                lambda client: client.fetch([uid], ["BODY.PEEK[HEADER]"])
+            )
+            or {}
+        )
+        header_bytes = (header_map.get(uid) or {}).get(b"BODY[HEADER]", b"")
+        header_msg = email.message_from_bytes(header_bytes or b"")
+        synthetic = EmailMessage()
+        synthetic["From"] = header_msg.get("From", "")
+        synthetic["Subject"] = header_msg.get("Subject", "")
+        synthetic.set_content("Письмо слишком большое и не было загружено полностью.")
+        return synthetic.as_bytes()
+
+    def _fetch_within_limit(self, uid: int, meta: Dict[Any, Any]) -> bytes:
+        """RFC822 of uid, or the stand-in when its size is over max_email_mb."""
+        size = _parse_rfc822_size(meta)
+        if size is not None and size > int(self.account.max_email_mb) * 1024 * 1024:
+            return self._oversize_stand_in(uid)
+        return self._fetch_rfc822_body(uid)
+
+    def fetch_message_by_uid(
+        self,
+        uid: int,
+        expected_uidvalidity: Optional[int] = None,
+        expected_message_id: Optional[str] = None,
+    ) -> MessageRefetch:
+        """Refetch one stored message (rebuild a context lost on restart).
+
+        By UID unless the mailbox UIDVALIDITY is known to differ from
+        expected_uidvalidity; when it differs, or the UID no longer holds the
+        message, by SEARCH HEADER Message-ID with exactly one hit. Content is
+        returned only when its Message-ID equals expected_message_id (when
+        known); after a UIDVALIDITY change a message without Message-ID
+        cannot be identified. Over max_email_mb the poll's stand-in comes
+        back. Read-only, writes no state, always logs out. A network failure
+        after retries raises IMAPError (retry later); a message that is gone
+        or does not match returns raw=None and the reason.
+        """
+        try:
+            return self._fetch_message_by_uid(
+                int(uid), expected_uidvalidity, _normalize_message_id(expected_message_id)
+            )
+        finally:
+            self.close()
+
+    def _fetch_message_by_uid(
+        self,
+        uid: int,
+        expected_uidvalidity: Optional[int],
+        expected_message_id: Optional[str],
+    ) -> MessageRefetch:
+        # Connect first: a network failure must raise, not read as "epoch
+        # unknown" the way _fetch_uidvalidity() reports any failure.
+        self._with_retries(lambda client: client)
+        current_uidvalidity = self._fetch_uidvalidity()
+        epoch_changed = (
+            expected_uidvalidity is not None
+            and current_uidvalidity is not None
+            and int(expected_uidvalidity) != current_uidvalidity
+        )
+        mismatch = False
+        if uid > 0 and not epoch_changed:
+            meta = self.fetch_headers_and_size([uid]).get(uid)
+            if meta is not None:
+                if expected_message_id in (None, _parse_message_id(meta)):
+                    return MessageRefetch(self._fetch_within_limit(uid, meta), uid, "uid")
+                mismatch = True
+        if expected_message_id is None:
+            reason = "uidvalidity_changed" if epoch_changed else "gone"
+            return MessageRefetch(None, None, reason)
+        if not _SEARCHABLE_MESSAGE_ID.fullmatch(expected_message_id):
+            return MessageRefetch(None, None, "message_id_unsearchable")
+        criteria = ["HEADER", "Message-ID", expected_message_id]
+        hits = sorted(
+            {int(hit) for hit in (self._with_retries(lambda c: c.search(criteria)) or [])}
+        )
+        if len(hits) > 1:
+            return MessageRefetch(None, None, "ambiguous_message_id")
+        if hits:
+            # SEARCH HEADER matches substrings: verify the exact value.
+            meta = self.fetch_headers_and_size(hits).get(hits[0])
+            if meta is not None and _parse_message_id(meta) == expected_message_id:
+                raw = self._fetch_within_limit(hits[0], meta)
+                return MessageRefetch(raw, hits[0], "message_id")
+            mismatch = True
+        return MessageRefetch(None, None, "message_id_mismatch" if mismatch else "gone")
+
+    def commit_cursor(self, persisted_uids: Iterable[int]) -> Optional[CursorCommit]:
+        """Move the cursor past what the last fetch_new_messages() resolved.
+
+        Call once per successful fetch, after the returned messages were
+        stored; persisted_uids are the returned UIDs now in storage (new or
+        duplicate). A returned UID that was not stored, or failed to fetch,
+        gets an attempt; at MAX_UID_FETCH_ATTEMPTS it is dead-lettered and
+        resolved. The cursor stops before the first unresolved UID (failed or
+        carried), never moves back within a UIDVALIDITY epoch, and the stored
+        UIDVALIDITY is replaced only by a known value. Returns None when there
+        is no fetch to commit.
+        """
+        plan, self._plan = self._plan, None
+        state = self._state
+        if plan is None or state is None or not plan.login:
+            return None
+        persisted = plan.returned & {int(uid) for uid in persisted_uids}
+        failed = sorted(plan.fetch_failed | (plan.returned - persisted))
+        attempts = {} if plan.epoch_changed else state.get_uid_attempts(plan.login)
+        newly_dead: List[int] = []
+        for uid in failed:
+            attempts[uid] = attempts.get(uid, 0) + 1
+            if attempts[uid] >= MAX_UID_FETCH_ATTEMPTS:
+                newly_dead.append(uid)
+        resolved = (
+            plan.policy_skipped | plan.known | plan.dead | persisted | set(newly_dead)
+        )
+        cursor = plan.base_cursor
+        for uid in plan.uids:
+            if uid not in resolved:
+                break
+            cursor = uid
+        if not plan.epoch_changed:
+            cursor = max(cursor, state.get_last_uid(plan.login))
+
+        state.update_last_uid(plan.login, cursor)
+        if plan.uidvalidity is not None:
+            state.update_uidvalidity(
+                plan.login, plan.uidvalidity, mailbox=self.account.mailbox
+            )
+        state.update_check_time(plan.login)
+        state.set_uid_attempts(
+            plan.login, {uid: n for uid, n in attempts.items() if uid > cursor}
+        )
+        self._commit_resync_epoch(plan, state, cursor)
+        log.info(
+            "imap_fetch_plan account=%s mailbox=%s epoch_changed=%s uidvalidity=%s "
+            "base_cursor=%s cursor=%s uids=%d policy_skipped=%d known=%d "
+            "returned=%d persisted=%d failed=%d dead=%d carried=%d",
+            plan.login,
+            self.account.mailbox,
+            plan.epoch_changed,
+            plan.uidvalidity,
+            plan.base_cursor,
+            cursor,
+            len(plan.uids),
+            len(plan.policy_skipped),
+            len(plan.known),
+            len(plan.returned),
+            len(persisted),
+            len(failed),
+            len(newly_dead),
+            len(plan.carried),
+        )
+        return CursorCommit(
+            cursor=cursor,
+            dead_uids=tuple(newly_dead),
+            failed_uids=tuple(failed),
+            carried=plan.carried,
+        )
+
+    def _commit_resync_epoch(
+        self, plan: FetchPlan, state: StateManager, cursor: int
+    ) -> None:
+        """Keep the Message-ID resync on until the cursor reaches the highest
+        UID it saw. A UID it left unresolved (fetch failed, carried, headers
+        missing) and every UID after it are seen again by a later poll, after
+        the new UIDVALIDITY is stored; that poll must still skip settled
+        Message-IDs and dedupe on store, or notified mail is sent again."""
+        marker = state.get_resync_epoch(plan.login)
+        if plan.resync_epoch is None:
+            if marker is not None:
+                log.warning(
+                    "imap_resync_marker_dropped account=%s mailbox=%s marker=%s "
+                    "uidvalidity=%s",
+                    plan.login,
+                    self.account.mailbox,
+                    marker,
+                    plan.uidvalidity,
+                )
+                state.set_resync_epoch(plan.login, None)
+            return
+        highest_uid = plan.uids[-1] if plan.uids else cursor
+        if cursor < highest_uid:
+            state.set_resync_epoch(plan.login, plan.resync_epoch)
+            log.info(
+                "imap_resync_pending account=%s mailbox=%s uidvalidity=%s cursor=%s "
+                "highest_uid=%s",
+                plan.login,
+                self.account.mailbox,
+                plan.resync_epoch,
+                cursor,
+                highest_uid,
+            )
+            return
+        state.set_resync_epoch(plan.login, None)
+        log.info(
+            "imap_resync_complete account=%s mailbox=%s uidvalidity=%s cursor=%s",
+            plan.login,
+            self.account.mailbox,
+            plan.resync_epoch,
+            cursor,
+        )
 
 
 # ---- удобные helper-ы, если где-то в проекте нужно ----

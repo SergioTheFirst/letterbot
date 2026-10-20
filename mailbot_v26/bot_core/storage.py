@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
+
+
+def normalize_message_id(value: object) -> str | None:
+    """Message-ID as stored and compared: folding whitespace collapsed and
+    stripped, angle brackets and case kept (the local part is case-sensitive
+    and IMAP refetch compares exactly). None when empty."""
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    return text or None
 
 
 class Storage:
@@ -91,6 +104,16 @@ class Storage:
                 self.conn.execute(
                     "ALTER TABLE emails ADD COLUMN telegram_delivered_at TEXT;"
                 )
+            # UIDVALIDITY epoch of uid; NULL for rows stored before WP2b.
+            if "uidvalidity" not in email_columns:
+                self.conn.execute("ALTER TABLE emails ADD COLUMN uidvalidity INTEGER;")
+            # Message-ID is stored normalized since WP2c; older rows hold the
+            # raw (possibly folded) header.
+            self._normalize_stored_message_ids()
+            self.conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_emails_account_message_id
+                ON emails(account_email, message_id);
+                """)
             self.conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_emails_status
                 ON emails(status);
@@ -185,6 +208,7 @@ class Storage:
         subject: str | None,
         received_at: str | None,
         attachments_count: int | None,
+        uidvalidity: int | None = None,
     ) -> int:
         now = self._now()
         attach_count = attachments_count if attachments_count is not None else 0
@@ -193,8 +217,9 @@ class Storage:
                 """
                 INSERT INTO emails (
                     account_email, uid, message_id, from_email, from_name, subject,
-                    received_at, attachments_count, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, ?)
+                    received_at, attachments_count, status, created_at, updated_at,
+                    uidvalidity
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, ?, ?)
                 ON CONFLICT(account_email, uid) DO UPDATE SET
                     message_id=excluded.message_id,
                     from_email=excluded.from_email,
@@ -202,7 +227,8 @@ class Storage:
                     subject=excluded.subject,
                     received_at=excluded.received_at,
                     attachments_count=excluded.attachments_count,
-                    updated_at=excluded.updated_at
+                    updated_at=excluded.updated_at,
+                    uidvalidity=COALESCE(excluded.uidvalidity, emails.uidvalidity)
                 RETURNING id;
                 """,
                 (
@@ -216,6 +242,7 @@ class Storage:
                     attach_count,
                     now,
                     now,
+                    uidvalidity,
                 ),
             )
             row = cursor.fetchone()
@@ -516,5 +543,221 @@ class Storage:
                 (error, self._now(), email_id),
             )
 
+    def persist_email_and_enqueue(
+        self,
+        *,
+        account_email: str,
+        uid: int,
+        message_id: str | None,
+        from_email: str | None,
+        from_name: str | None,
+        subject: str | None,
+        received_at: str | None,
+        attachments_count: int | None,
+        stage: str = "PARSE",
+        uidvalidity: int | None = None,
+        dedupe_message_id: bool = False,
+    ) -> tuple[int, bool]:
+        """Store a new email and its first queue row in one transaction.
 
-__all__ = ["Storage"]
+        Returns (email_id, created). An email already stored for
+        (account_email, uid) is left as is and nothing is enqueued; a crash
+        can no longer leave an email row without its queue row (F5).
+        uidvalidity is the epoch of uid, used to refetch after a restart.
+        message_id is stored normalized (normalize_message_id).
+
+        dedupe_message_id (UIDVALIDITY resync, WP2c): a settled row with the
+        same Message-ID (see _message_id_rows) is returned as a duplicate,
+        which also skips a second copy in the same batch; an orphan row
+        retired from an old epoch (uid <= 0) is re-attached to uid and
+        enqueued again (created=True). Mail without Message-ID is new.
+        """
+        now = self._now()
+        attach_count = attachments_count if attachments_count is not None else 0
+        message_id = normalize_message_id(message_id)
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE;")
+            row = cursor.execute(
+                "SELECT id FROM emails WHERE account_email = ? AND uid = ?;",
+                (account_email, uid),
+            ).fetchone()
+            if row is not None:
+                self.conn.commit()
+                return int(row[0]), False
+            if dedupe_message_id and message_id is not None:
+                matches = self._message_id_rows(cursor, account_email, message_id)
+                settled = next((m for m in matches if m[2]), None)
+                if settled is not None:
+                    self.conn.commit()
+                    logger.info(
+                        "duplicate_message_id_skipped account_email=%s uid=%s email_id=%s",
+                        account_email,
+                        uid,
+                        settled[0],
+                    )
+                    return settled[0], False
+                orphan = next((m for m in matches if m[1] <= 0), None)
+                if orphan is not None:
+                    cursor.execute(
+                        """
+                        UPDATE emails
+                        SET uid = ?, uidvalidity = ?, status = 'NEW', updated_at = ?
+                        WHERE id = ?;
+                        """,
+                        (uid, uidvalidity, now, orphan[0]),
+                    )
+                    self._insert_first_queue_row(cursor, orphan[0], stage, now)
+                    self.conn.commit()
+                    logger.warning(
+                        "orphan_email_reattached account_email=%s uid=%s email_id=%s",
+                        account_email,
+                        uid,
+                        orphan[0],
+                    )
+                    return orphan[0], True
+            cursor.execute(
+                """
+                INSERT INTO emails (
+                    account_email, uid, message_id, from_email, from_name, subject,
+                    received_at, attachments_count, status, created_at, updated_at,
+                    uidvalidity
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, ?, ?);
+                """,
+                (
+                    account_email,
+                    uid,
+                    message_id,
+                    from_email,
+                    from_name,
+                    subject,
+                    received_at,
+                    attach_count,
+                    now,
+                    now,
+                    uidvalidity,
+                ),
+            )
+            email_id = int(cursor.lastrowid)
+            self._insert_first_queue_row(cursor, email_id, stage, now)
+            self.conn.commit()
+            return email_id, True
+        except BaseException:
+            self.conn.rollback()
+            raise
+        finally:
+            cursor.close()
+
+    def get_email_locator(self, email_id: int) -> Dict[str, Any] | None:
+        """Where an email lives in IMAP: account, uid, its epoch, Message-ID.
+
+        None when the email is not stored. uidvalidity is None for rows
+        stored before the column existed; message_id is normalized.
+        """
+        row = self.conn.execute(
+            """
+            SELECT account_email, uid, uidvalidity, message_id
+            FROM emails
+            WHERE id = ?;
+            """,
+            (email_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "account_email": str(row[0]),
+            "uid": int(row[1]),
+            "uidvalidity": int(row[2]) if row[2] is not None else None,
+            "message_id": str(row[3]) if row[3] is not None else None,
+        }
+
+    def _normalize_stored_message_ids(self) -> int:
+        """Normalize Message-IDs stored raw before WP2c (folded headers), so
+        lookups by normalized Message-ID find them. Returns rows changed."""
+        rows = self.conn.execute(
+            "SELECT id, message_id FROM emails WHERE message_id GLOB ?;",
+            ("*[ \t\r\n]*",),
+        ).fetchall()
+        for email_id, message_id in rows:
+            self.conn.execute(
+                "UPDATE emails SET message_id = ? WHERE id = ?;",
+                (normalize_message_id(message_id), email_id),
+            )
+        if rows:
+            logger.info("emails_message_id_normalized rows=%d", len(rows))
+        return len(rows)
+
+    def retire_uid_epoch(self, account_email: str, uidvalidity: int) -> int:
+        """Detach the account's rows of other UIDVALIDITY epochs from their UIDs.
+
+        A new epoch reuses UIDs, so an old row must not match a new message
+        by (account_email, uid) (F6). Its uid becomes -id (unique, never a
+        server UID); the row, its Message-ID and queue rows stay. Rows stored
+        before the uidvalidity column (NULL) are retired too. Irreversible.
+        Returns the number of rows retired.
+        """
+        with self.conn:
+            cursor = self.conn.execute(
+                """
+                UPDATE emails SET uid = -id
+                WHERE account_email = ? AND uid > 0
+                  AND (uidvalidity IS NULL OR uidvalidity <> ?);
+                """,
+                (account_email, int(uidvalidity)),
+            )
+        return int(cursor.rowcount)
+
+    @staticmethod
+    def _message_id_rows(
+        cursor: sqlite3.Cursor, account_email: str, message_id: str
+    ) -> List[tuple[int, int, bool]]:
+        """(id, uid, settled) of the account's rows with this normalized
+        Message-ID, newest first. Settled: delivered or a delivery reserved
+        (sent or maybe sent), DELIVERY_UNKNOWN, DELIVERY_FAILED, or still
+        queued; anything else is an orphan that was never notified."""
+        rows = cursor.execute(
+            """
+            SELECT e.id, e.uid,
+                   (e.telegram_delivered_at IS NOT NULL
+                    OR e.status IN ('DELIVERY_UNKNOWN', 'DELIVERY_FAILED')
+                    OR EXISTS (SELECT 1 FROM queue q WHERE q.email_id = e.id)
+                    OR EXISTS (
+                        SELECT 1 FROM telegram_delivery_log d WHERE d.email_id = e.id
+                    ))
+            FROM emails e
+            WHERE e.account_email = ? AND e.message_id = ?
+            ORDER BY e.id DESC;
+            """,
+            (account_email, message_id),
+        ).fetchall()
+        return [(int(row[0]), int(row[1]), bool(row[2])) for row in rows]
+
+    def is_known_message_id(self, account_email: str, message_id: str | None) -> bool:
+        """True when an email with this Message-ID is settled for the account
+        (see _message_id_rows), whatever its UID or epoch. An orphan, or a
+        missing Message-ID, is not known (WP2c)."""
+        normalized = normalize_message_id(message_id)
+        if normalized is None:
+            return False
+        cursor = self.conn.cursor()
+        try:
+            rows = self._message_id_rows(cursor, account_email, normalized)
+        finally:
+            cursor.close()
+        return any(settled for _id, _uid, settled in rows)
+
+    @staticmethod
+    def _insert_first_queue_row(
+        cursor: sqlite3.Cursor, email_id: int, stage: str, now: str
+    ) -> None:
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO queue (
+                email_id, stage, attempts, not_before, last_error, created_at, updated_at
+            ) VALUES (?, ?, 0, NULL, NULL, ?, ?);
+            """,
+            (email_id, stage, now, now),
+        )
+
+
+__all__ = ["Storage", "normalize_message_id"]
