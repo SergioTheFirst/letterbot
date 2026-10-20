@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -228,7 +229,7 @@ def seed_interaction(
         raw_body="",
         attachment_summaries=[],
     )
-    with sqlite3.connect(storage.knowledge_db.path) as conn:
+    with closing(sqlite3.connect(storage.knowledge_db.path)) as conn, conn:
         conn.execute(
             "INSERT INTO interaction_events (id, entity_id, event_type, event_time, "
             "metadata) VALUES (?, ?, 'email_received', ?, ?)",
@@ -257,3 +258,19 @@ def tick(
         logger=used,
     )
     return used
+
+
+def override_value(storage: digest_scheduler.DigestStorage, key: str) -> str | None:
+    with closing(sqlite3.connect(storage.knowledge_db.path)) as conn:
+        row = conn.execute(
+            "SELECT value FROM runtime_overrides WHERE key = ?", (key,)
+        ).fetchone()
+    return None if row is None else row[0]
+
+
+def daily_sent_key(login: str) -> str:
+    return digest_scheduler._digest_marker_key(digest_scheduler._DAILY_SENT_KEY, login)
+
+
+def weekly_sent_key(login: str) -> str:
+    return digest_scheduler._digest_marker_key(digest_scheduler._WEEKLY_SENT_KEY, login)

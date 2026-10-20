@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import configparser
 import logging
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -39,6 +41,7 @@ from mailbot_v26.config_yaml import (
 from mailbot_v26.llm.runtime_flags import RuntimeFlags, RuntimeFlagStore
 from mailbot_v26.observability.logger import LoggerLike
 from mailbot_v26.observability.event_emitter import EventEmitter
+from mailbot_v26.observability.redact import redact_secrets
 from mailbot_v26.observability.metrics import (
     GateEvaluation,
     MetricsAggregator,
@@ -615,6 +618,134 @@ def _send_payload(
     return telegram_sender(payload)
 
 
+# Sent markers (runtime_overrides, value = day or week key): reserved before
+# the POST, so a digest goes out at most once per window (B17), like per-email
+# Telegram delivery. Keys use the login as configured.
+_DAILY_SENT_KEY = "digest:daily_sent_day"
+_WEEKLY_SENT_KEY = "digest:weekly_sent_week"
+_MARKER_DB_TIMEOUT_S = 5.0
+
+
+def _error_text(exc: BaseException) -> str:
+    return redact_secrets(f"{type(exc).__name__}: {exc}")
+
+
+def _marker_connection(storage: DigestStorage) -> sqlite3.Connection:
+    return sqlite3.connect(storage.knowledge_db.path, timeout=_MARKER_DB_TIMEOUT_S)
+
+
+def _read_sent_marker(storage: DigestStorage, key: str) -> str | None:
+    """The window a digest was last reserved for. Raises sqlite3.Error: an
+    unreadable marker must not read as "not sent" (B17)."""
+    with closing(_marker_connection(storage)) as conn:
+        row = conn.execute(
+            "SELECT value FROM runtime_overrides WHERE key = ?", (key,)
+        ).fetchone()
+    return None if row is None or row[0] is None else str(row[0])
+
+
+def _reserve_sent_marker(storage: DigestStorage, key: str, window: str) -> bool:
+    """Reserve ``window`` before the POST; False when it is already reserved.
+
+    One atomic upsert, so two ticks can never both win a window. Raises
+    sqlite3.Error when the store is unavailable: then nothing is sent.
+    """
+    with closing(_marker_connection(storage)) as conn, conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO runtime_overrides (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            WHERE runtime_overrides.value IS NOT excluded.value
+            """,
+            (key, window, datetime.now(timezone.utc).isoformat()),
+        )
+        return cursor.rowcount == 1
+
+
+def _release_sent_marker(
+    storage: DigestStorage,
+    key: str,
+    window: str,
+    *,
+    logger: LoggerLike,
+    log_fields: dict[str, object],
+) -> None:
+    """Give the window back after a POST that surely did not reach Telegram."""
+    try:
+        with closing(_marker_connection(storage)) as conn, conn:
+            conn.execute(
+                "DELETE FROM runtime_overrides WHERE key = ? AND value = ?",
+                (key, window),
+            )
+    except sqlite3.Error as exc:
+        # The reservation stays: no retry in this window, never a duplicate.
+        logger.error(
+            "digest_reservation_release_failed", **log_fields, error=_error_text(exc)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _SendOutcome:
+    # delivered | taken | unavailable | unknown | failed | retryable
+    status: str
+    error: str | None = None
+
+
+def _send_digest_once(
+    *,
+    storage: DigestStorage,
+    telegram_sender: Callable[[TelegramPayload], DeliveryResult],
+    payload: TelegramPayload,
+    sent_key: str,
+    window: str,
+    logger: LoggerLike,
+    log_fields: dict[str, object],
+) -> _SendOutcome:
+    """Reserve the window, POST once, then settle the reservation (B17).
+
+    At-most-once: a POST that may have reached Telegram (the sender raised,
+    or the request went out and the reply was lost) keeps the window
+    reserved, and so does a definite rejection, which every later tick would
+    only repeat. "Not sent, retry later" (429, 5xx, no connection) gives the
+    window back for the next tick.
+    """
+    try:
+        if not _reserve_sent_marker(storage, sent_key, window):
+            return _SendOutcome("taken")
+    except sqlite3.Error as exc:
+        logger.error("digest_reserve_failed", **log_fields, error=_error_text(exc))
+        return _SendOutcome("unavailable", _error_text(exc))
+    try:
+        result = _send_payload(telegram_sender=telegram_sender, payload=payload)
+    except Exception as exc:
+        error = _error_text(exc)
+        logger.error("digest_failed", **log_fields, delivery="unknown", error=error)
+        return _SendOutcome("unknown", error)
+    if result.delivered:
+        return _SendOutcome("delivered")
+    if result.maybe_delivered:
+        status = "unknown"
+    elif result.retryable:
+        status = "retryable"
+        _release_sent_marker(
+            storage, sent_key, window, logger=logger, log_fields=log_fields
+        )
+    else:
+        status = "failed"
+    error = redact_secrets(result.error or "telegram delivery failed")
+    logger.error(
+        "digest_failed",
+        **log_fields,
+        delivery=status,
+        error=error,
+        retryable=result.retryable,
+    )
+    return _SendOutcome(status, error)
+
+
 def _group_accounts_by_chat_id(accounts) -> dict[str, list[str]]:
     groups: dict[str, list[str]] = {}
     for account in accounts:
@@ -861,7 +992,26 @@ def _run_daily_digest(
         )
         return
 
-    if storage.analytics.has_daily_digest_sent(account_email=account_email, day=now):
+    day_key = _daily_window_key(now)
+    sent_key = _digest_marker_key(_DAILY_SENT_KEY, account_email)
+    try:
+        # The marker covers this build's sends; the events also cover what
+        # the UTC build sent on the switch day.
+        already_sent = _read_sent_marker(storage, sent_key) == day_key
+        if not already_sent:
+            already_sent = storage.analytics.has_daily_digest_sent(
+                account_email=account_email, day=now
+            )
+    except sqlite3.Error as exc:
+        # Fail closed (B17): an unreadable state is never "not sent yet".
+        logger.error(
+            "digest_sent_check_failed",
+            digest_type="daily",
+            account_email=account_email,
+            error=_error_text(exc),
+        )
+        return
+    if already_sent:
         logger.info(
             "digest_tick_checked",
             digest_type="daily",
@@ -872,7 +1022,6 @@ def _run_daily_digest(
         return
 
     marker_store = RuntimeOverrideStore(storage.knowledge_db.path)
-    day_key = _daily_window_key(now)
     no_content_key = _digest_marker_key(_DAILY_NO_CONTENT_KEY, account_email)
     if marker_store.get_value(no_content_key) == day_key:
         logger.info(
@@ -968,58 +1117,58 @@ def _run_daily_digest(
         locale=locale,
     )
 
-    try:
-        result = _send_payload(telegram_sender=telegram_sender, payload=payload)
-    except Exception as exc:
-        logger.error(
-            "digest_failed",
-            digest_type="daily",
-            account_email=account_email,
-            error=str(exc),
-        )
-        return
-
-    if result.delivered:
-        for email in account_emails:
-            storage.knowledge_db.set_last_digest_sent_at(
-                account_email=email,
-                sent_at=now_utc,
-            )
+    outcome = _send_digest_once(
+        storage=storage,
+        telegram_sender=telegram_sender,
+        payload=payload,
+        sent_key=sent_key,
+        window=day_key,
+        logger=logger,
+        log_fields={"digest_type": "daily", "account_email": account_email},
+    )
+    if outcome.status == "taken":
         logger.info(
-            "digest_sent",
+            "digest_tick_checked",
             digest_type="daily",
+            decision="skipped",
+            reason="already_sent",
             account_email=account_email,
         )
-        if storage.contract_event_emitter is not None:
-            try:
-                storage.contract_event_emitter.emit(
-                    EventV1(
-                        event_type=EventType.DAILY_DIGEST_SENT,
-                        ts_utc=now_utc.timestamp(),
-                        account_id=account_email,
-                        entity_id=None,
-                        email_id=0,
-                        payload={
-                            "account_emails": list(account_emails),
-                            "chat_scope": chat_scope,
-                        },
-                    )
-                )
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.error(
-                    "contract_event_emit_failed",
-                    event_type=EventType.DAILY_DIGEST_SENT.value,
-                    error=str(exc),
-                )
+        return
+    if outcome.status != "delivered":
         return
 
-    logger.error(
-        "digest_failed",
+    for email in account_emails:
+        storage.knowledge_db.set_last_digest_sent_at(
+            account_email=email,
+            sent_at=now_utc,
+        )
+    logger.info(
+        "digest_sent",
         digest_type="daily",
         account_email=account_email,
-        error=result.error or "telegram delivery failed",
-        retryable=result.retryable,
     )
+    if storage.contract_event_emitter is not None:
+        try:
+            storage.contract_event_emitter.emit(
+                EventV1(
+                    event_type=EventType.DAILY_DIGEST_SENT,
+                    ts_utc=now_utc.timestamp(),
+                    account_id=account_email,
+                    entity_id=None,
+                    email_id=0,
+                    payload={
+                        "account_emails": list(account_emails),
+                        "chat_scope": chat_scope,
+                    },
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "contract_event_emit_failed",
+                event_type=EventType.DAILY_DIGEST_SENT.value,
+                error=str(exc),
+            )
 
 
 def _run_weekly_digest(
@@ -1070,25 +1219,33 @@ def _run_weekly_digest(
         )
         return
 
-    if storage.analytics.has_weekly_digest_sent(
-        account_email=account_email,
-        week_key=week_key,
-    ):
-        logger.info(
-            "digest_tick_checked",
+    sent_key = _digest_marker_key(_WEEKLY_SENT_KEY, account_email)
+    try:
+        # The marker covers this build's sends; the events also cover what
+        # the UTC build sent.
+        already_sent = _read_sent_marker(storage, sent_key) == week_key
+        if not already_sent:
+            already_sent = storage.analytics.has_weekly_digest_sent(
+                account_email=account_email, week_key=week_key
+            )
+    except sqlite3.Error as exc:
+        # Fail closed (B17): an unreadable state is never "not sent yet".
+        logger.error(
+            "digest_sent_check_failed",
             digest_type="weekly",
-            decision="skipped",
-            reason="already_sent",
             account_email=account_email,
             week_key=week_key,
+            error=_error_text(exc),
         )
-        _emit_weekly_skip_on_change(
+        return
+    if already_sent:
+        _skip_weekly_already_sent(
             storage=storage,
             marker_store=marker_store,
+            logger=logger,
             account_email=account_email,
             week_key=week_key,
-            reason="already_sent",
-            now=now_utc,
+            now_utc=now_utc,
         )
         return
 
@@ -1206,16 +1363,32 @@ def _run_weekly_digest(
         locale=locale,
     )
 
-    try:
-        result = _send_payload(telegram_sender=telegram_sender, payload=payload)
-    except Exception as exc:
-        logger.error(
-            "digest_failed",
-            digest_type="weekly",
+    outcome = _send_digest_once(
+        storage=storage,
+        telegram_sender=telegram_sender,
+        payload=payload,
+        sent_key=sent_key,
+        window=week_key,
+        logger=logger,
+        log_fields={
+            "digest_type": "weekly",
+            "account_email": account_email,
+            "week_key": week_key,
+        },
+    )
+    if outcome.status == "taken":
+        _skip_weekly_already_sent(
+            storage=storage,
+            marker_store=marker_store,
+            logger=logger,
             account_email=account_email,
             week_key=week_key,
-            error=str(exc),
+            now_utc=now_utc,
         )
+        return
+    if outcome.status == "unavailable":
+        return
+    if outcome.status != "delivered":
         if storage.event_emitter:
             storage.event_emitter.emit(
                 type="weekly_digest_failed",
@@ -1224,82 +1397,87 @@ def _run_weekly_digest(
                 payload={
                     "week_key": week_key,
                     "account_email": account_email,
-                    "error": str(exc),
+                    "error": outcome.error,
                 },
             )
         return
 
-    if result.delivered:
-        for email in account_emails:
-            storage.knowledge_db.set_last_weekly_digest_state(
-                account_email=email,
-                week_key=week_key,
-                sent_at=now_utc,
-            )
-        logger.info(
-            "digest_sent",
-            digest_type="weekly",
-            account_email=account_email,
+    for email in account_emails:
+        storage.knowledge_db.set_last_weekly_digest_state(
+            account_email=email,
             week_key=week_key,
+            sent_at=now_utc,
         )
-        if storage.event_emitter:
-            storage.event_emitter.emit(
-                type="weekly_digest_sent",
-                timestamp=now_utc,
-                email_id=0,
-                payload={
-                    "week_key": week_key,
-                    "account_email": account_email,
-                    "total_emails": data.total_emails,
-                    "deferred_emails": data.deferred_emails,
-                },
-            )
-        if storage.contract_event_emitter is not None:
-            try:
-                storage.contract_event_emitter.emit(
-                    EventV1(
-                        event_type=EventType.WEEKLY_DIGEST_SENT,
-                        ts_utc=now_utc.timestamp(),
-                        account_id=account_email,
-                        entity_id=None,
-                        email_id=0,
-                        payload={
-                            "account_emails": list(account_emails),
-                            "chat_scope": chat_scope,
-                            "week_key": week_key,
-                            "account_email": account_email,
-                            "total_emails": data.total_emails,
-                            "deferred_emails": data.deferred_emails,
-                        },
-                    )
-                )
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.error(
-                    "contract_event_emit_failed",
-                    event_type=EventType.WEEKLY_DIGEST_SENT.value,
-                    error=str(exc),
-                )
-        return
-
-    logger.error(
-        "digest_failed",
+    logger.info(
+        "digest_sent",
         digest_type="weekly",
         account_email=account_email,
         week_key=week_key,
-        error=result.error or "telegram delivery failed",
-        retryable=result.retryable,
     )
     if storage.event_emitter:
         storage.event_emitter.emit(
-            type="weekly_digest_failed",
+            type="weekly_digest_sent",
             timestamp=now_utc,
             email_id=0,
             payload={
                 "week_key": week_key,
                 "account_email": account_email,
-                "error": result.error or "telegram delivery failed",
+                "total_emails": data.total_emails,
+                "deferred_emails": data.deferred_emails,
             },
         )
+    if storage.contract_event_emitter is not None:
+        try:
+            storage.contract_event_emitter.emit(
+                EventV1(
+                    event_type=EventType.WEEKLY_DIGEST_SENT,
+                    ts_utc=now_utc.timestamp(),
+                    account_id=account_email,
+                    entity_id=None,
+                    email_id=0,
+                    payload={
+                        "account_emails": list(account_emails),
+                        "chat_scope": chat_scope,
+                        "week_key": week_key,
+                        "account_email": account_email,
+                        "total_emails": data.total_emails,
+                        "deferred_emails": data.deferred_emails,
+                    },
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "contract_event_emit_failed",
+                event_type=EventType.WEEKLY_DIGEST_SENT.value,
+                error=str(exc),
+            )
+
+
+def _skip_weekly_already_sent(
+    *,
+    storage: DigestStorage,
+    marker_store: RuntimeOverrideStore,
+    logger: LoggerLike,
+    account_email: str,
+    week_key: str,
+    now_utc: datetime,
+) -> None:
+    logger.info(
+        "digest_tick_checked",
+        digest_type="weekly",
+        decision="skipped",
+        reason="already_sent",
+        account_email=account_email,
+        week_key=week_key,
+    )
+    _emit_weekly_skip_on_change(
+        storage=storage,
+        marker_store=marker_store,
+        account_email=account_email,
+        week_key=week_key,
+        reason="already_sent",
+        now=now_utc,
+    )
 
 
 __all__ = [

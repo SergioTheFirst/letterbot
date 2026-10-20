@@ -7,6 +7,7 @@ import math
 import re
 import sqlite3
 from collections import Counter, defaultdict
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -5437,11 +5438,25 @@ class KnowledgeAnalytics:
             )
         return output
 
+    # The "digest already sent" checks wait for a busy database as long as
+    # KnowledgeDB writers do, and a failed read raises instead of reading as
+    # "not sent", which would send a duplicate digest (B17).
+    _SENT_CHECK_BUSY_TIMEOUT_MS = 5000
+
+    def _sent_check_rows(
+        self, query: str, params: Sequence[object]
+    ) -> list[dict[str, object]]:
+        with closing(self._connect_readonly()) as conn:
+            conn.execute(f"PRAGMA busy_timeout = {self._SENT_CHECK_BUSY_TIMEOUT_MS}")
+            conn.row_factory = sqlite3.Row
+            return [dict(row) for row in conn.execute(query, tuple(params))]
+
     def has_daily_digest_sent(self, *, account_email: str, day: datetime) -> bool:
         """True when a daily digest went out on ``day``'s calendar day.
 
         The day is taken in ``day``'s own timezone: the scheduler passes local
-        time (B6); a naive value is read as UTC.
+        time (B6); a naive value is read as UTC. Raises sqlite3.Error when the
+        events cannot be read (B17).
         """
         if not account_email:
             return False
@@ -5450,35 +5465,40 @@ class KnowledgeAnalytics:
         )
         start = day_start.timestamp()
         end = (day_start + timedelta(days=1)).timestamp()
-        try:
-            rows = self._execute_select(
-                """
-                SELECT 1
-                FROM events_v1
-                WHERE account_id = ?
-                  AND event_type = 'daily_digest_sent'
-                  AND ts_utc >= ?
-                  AND ts_utc < ?
-                LIMIT 1
-                """,
-                (account_email, start, end),
-            )
-        except sqlite3.OperationalError:
-            return False
+        rows = self._sent_check_rows(
+            """
+            SELECT 1
+            FROM events_v1
+            WHERE account_id = ?
+              AND event_type = 'daily_digest_sent'
+              AND ts_utc >= ?
+              AND ts_utc < ?
+            LIMIT 1
+            """,
+            (account_email, start, end),
+        )
         return bool(rows)
 
     def has_weekly_digest_sent(self, *, account_email: str, week_key: str) -> bool:
+        """True when the weekly digest of ``week_key`` went out.
+
+        Raises sqlite3.Error when the events cannot be read (B17).
+        """
         if not account_email or not week_key:
             return False
-        rows = self._event_rows(
-            account_id=account_email,
-            event_type="weekly_digest_sent",
+        rows = self._sent_check_rows(
+            """
+            SELECT payload, payload_json
+            FROM events_v1
+            WHERE account_id = ?
+              AND event_type = 'weekly_digest_sent'
+            """,
+            (account_email,),
         )
-        for row in rows:
-            payload = self._event_payload(row)
-            if str(payload.get("week_key") or "") == week_key:
-                return True
-        return False
+        return any(
+            str(self._event_payload(row).get("week_key") or "") == week_key
+            for row in rows
+        )
 
     def weekly_compact_summary(
         self,
