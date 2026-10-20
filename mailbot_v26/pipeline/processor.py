@@ -7,6 +7,7 @@ import os
 import hashlib
 import re
 import sqlite3
+import threading
 import time
 from functools import lru_cache
 from dataclasses import dataclass, field
@@ -343,16 +344,103 @@ class _LazyFeatureFlags:
         return getattr(self._resolve(), name)
 
 
+def _build_db_singletons(db_path: Path) -> dict[str, Any]:
+    """The database-backed singletons for ``db_path``, built in import order.
+
+    KnowledgeDB goes first: it creates and migrates the schema the others read.
+    """
+    singletons: dict[str, Any] = {
+        "knowledge_db": KnowledgeDB(db_path),
+        "analytics": KnowledgeAnalytics(db_path),
+        "decision_trace_writer": DecisionTraceWriter(db_path),
+        "trust_snapshot_writer": TrustSnapshotWriter(db_path),
+        "relationship_health_snapshot_writer": RelationshipHealthSnapshotWriter(
+            db_path
+        ),
+        "context_store": ContextStore(db_path),
+        "event_emitter": EventEmitter(db_path),
+        "contract_event_emitter": ContractEventEmitter(db_path),
+        "runtime_override_store": RuntimeOverrideStore(db_path),
+        "metrics_aggregator": MetricsAggregator(db_path),
+        "processing_span_recorder": ProcessingSpanRecorder(db_path),
+        "notification_alert_store": NotificationAlertStore(db_path),
+    }
+    singletons["budget_gate"] = BudgetGate(
+        db_path, BudgetGateConfig(), emitter=singletons["contract_event_emitter"]
+    )
+    return singletons
+
+
+_DB_SINGLETONS: dict[Path, dict[str, Any]] = {}
+_DB_SINGLETONS_LOCK = threading.Lock()
+
+
+def _shared_db_singletons(db_path: Path) -> dict[str, Any]:
+    singletons = _DB_SINGLETONS.get(db_path)
+    if singletons is not None:
+        return singletons
+    with _DB_SINGLETONS_LOCK:
+        singletons = _DB_SINGLETONS.get(db_path)
+        if singletons is None:
+            singletons = _build_db_singletons(db_path)
+            _DB_SINGLETONS[db_path] = singletons
+            logger.info("processor_db_singletons_initialized", db_path=str(db_path))
+        return singletons
+
+
+class _LazyDbResource:
+    """Stands in for a database-backed singleton until its first use (A22).
+
+    Importing this module must not open, create or migrate a database: CLI tools
+    import it, and under Task Scheduler the CWD-relative default would land in
+    System32. Each attribute access goes to the singleton for the current
+    DB_PATH; the first one builds the whole set (KnowledgeDB first, so the schema
+    exists for every reader). Modules that imported a singleton by name thus
+    follow the path configure_processor_db_path() set. Module globals are never
+    rebound here, so tests that replace one keep their fake; attribute writes go
+    to the real object, so monkeypatching its methods keeps working.
+    """
+
+    __slots__ = ("_lazy_label",)
+
+    def __init__(self, label: str) -> None:
+        object.__setattr__(self, "_lazy_label", label)
+
+    def _lazy_resolve(self) -> Any:
+        return _shared_db_singletons(DB_PATH)[self._lazy_label]
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_lazy_"):
+            # Unset slot (e.g. a copy made without __init__): never recurse.
+            raise AttributeError(name)
+        return getattr(self._lazy_resolve(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._lazy_resolve(), name, value)
+
+    def __delattr__(self, name: str) -> None:
+        delattr(self._lazy_resolve(), name)
+
+    def __repr__(self) -> str:
+        return f"<lazy {self._lazy_label} for {DB_PATH}>"
+
+
 # === Инициализация write-only БД ===
+# A22: nothing here touches the database at import time. The database-backed
+# singletons are lazy stand-ins until first use; configure_processor_db_path()
+# (start.main) replaces them, and everything built on them, eagerly.
 DB_PATH = import_time_db_path()
-knowledge_db = KnowledgeDB(DB_PATH)
-analytics = KnowledgeAnalytics(DB_PATH)
-decision_trace_writer = DecisionTraceWriter(DB_PATH)
-trust_snapshot_writer = TrustSnapshotWriter(DB_PATH)
-relationship_health_snapshot_writer = RelationshipHealthSnapshotWriter(DB_PATH)
-context_store = ContextStore(DB_PATH)
-event_emitter = EventEmitter(DB_PATH)
-contract_event_emitter = ContractEventEmitter(DB_PATH)
+_PROCESSOR_DB_CONFIGURED = False
+knowledge_db = _LazyDbResource("knowledge_db")
+analytics = _LazyDbResource("analytics")
+decision_trace_writer = _LazyDbResource("decision_trace_writer")
+trust_snapshot_writer = _LazyDbResource("trust_snapshot_writer")
+relationship_health_snapshot_writer = _LazyDbResource(
+    "relationship_health_snapshot_writer"
+)
+context_store = _LazyDbResource("context_store")
+event_emitter = _LazyDbResource("event_emitter")
+contract_event_emitter = _LazyDbResource("contract_event_emitter")
 decision_trace_emitter = get_default_decision_trace_emitter()
 shadow_priority_engine = ShadowPriorityEngine(analytics)
 priority_engine_v2 = PriorityEngineV2(
@@ -377,11 +465,11 @@ auto_priority_quality_gate = AutoPriorityQualityGate(
     analytics=analytics,
     state_store=auto_priority_gate_state_store,
 )
-runtime_override_store = RuntimeOverrideStore(DB_PATH)
-metrics_aggregator = MetricsAggregator(DB_PATH)
+runtime_override_store = _LazyDbResource("runtime_override_store")
+metrics_aggregator = _LazyDbResource("metrics_aggregator")
 system_gates = SystemGates()
 system_snapshotter = SystemHealthSnapshotter(metrics_aggregator, system_gates)
-processing_span_recorder = ProcessingSpanRecorder(DB_PATH)
+processing_span_recorder = _LazyDbResource("processing_span_recorder")
 feature_flags = _LazyFeatureFlags()
 runtime_flag_store = RuntimeFlagStore()
 trust_score_calculator = TrustScoreCalculator(analytics)
@@ -403,7 +491,7 @@ auto_priority_engine = AutoPriorityEngine(
 )
 auto_action_engine = AutoActionEngine(confidence_threshold=0.75)
 system_orchestrator = SystemOrchestrator()
-notification_alert_store = NotificationAlertStore(DB_PATH)
+notification_alert_store = _LazyDbResource("notification_alert_store")
 MAX_TELEGRAM_WAIT_SECONDS = 180
 _CORRECTION_CACHE_TTL = 60.0
 _CORRECTION_COUNT_CACHE: dict[str, tuple[int, float]] = {}
@@ -411,7 +499,7 @@ _MIN_CORRECTIONS_FOR_PREVIEW = 10
 
 _PREVIEW_CORRECTIONS_TTL_SECONDS = _CORRECTION_CACHE_TTL
 _preview_corrections_cache = _CORRECTION_COUNT_CACHE
-budget_gate = BudgetGate(DB_PATH, BudgetGateConfig(), emitter=contract_event_emitter)
+budget_gate = _LazyDbResource("budget_gate")
 budget_consumer = BudgetConsumer(budget_gate)
 llm_request_queue: LLMRequestQueue | None = None
 llm_worker: Optional[BackgroundLLMWorker] = None
@@ -481,7 +569,8 @@ def _locale_text(locale: str, *, en: str, ru: str) -> str:
 
 
 def configure_processor_db_path(db_path: Path) -> None:
-    global DB_PATH
+    """Point every database-backed singleton at ``db_path`` and open it now."""
+    global DB_PATH, _PROCESSOR_DB_CONFIGURED
     global knowledge_db, analytics, decision_trace_writer, trust_snapshot_writer
     global relationship_health_snapshot_writer, context_store, event_emitter
     global contract_event_emitter, shadow_priority_engine, priority_engine_v2
@@ -494,7 +583,7 @@ def configure_processor_db_path(db_path: Path) -> None:
     global runtime_override_store
 
     resolved_db_path = Path(db_path)
-    if resolved_db_path == DB_PATH:
+    if _PROCESSOR_DB_CONFIGURED and resolved_db_path == DB_PATH:
         return
 
     DB_PATH = resolved_db_path
@@ -546,6 +635,7 @@ def configure_processor_db_path(db_path: Path) -> None:
         DB_PATH, BudgetGateConfig(), emitter=contract_event_emitter
     )
     budget_consumer = BudgetConsumer(budget_gate)
+    _PROCESSOR_DB_CONFIGURED = True
 
 
 @lru_cache(maxsize=1)
