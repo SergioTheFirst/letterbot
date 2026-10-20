@@ -2699,8 +2699,14 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                                 uidvalidity=getattr(
                                                     imap, "current_uidvalidity", None
                                                 ),
+                                                # the whole resync, not only
+                                                # the poll that saw the change
                                                 dedupe_message_id=bool(
-                                                    imap.last_uidvalidity_changed
+                                                    getattr(
+                                                        imap,
+                                                        "last_message_id_resync",
+                                                        imap.last_uidvalidity_changed,
+                                                    )
                                                 ),
                                             )
                                         )

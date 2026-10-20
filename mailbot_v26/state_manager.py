@@ -57,6 +57,9 @@ class BotState:
     # accounts with AccountState(**data) and ignores unknown top-level keys.
     uid_attempts: Dict[str, Dict[int, int]] = field(default_factory=dict)
     dead_letter_alert_at: Dict[str, str] = field(default_factory=dict)
+    # login -> UIDVALIDITY whose Message-ID resync has not yet reached the
+    # epoch's highest UID (WP2c).
+    resync_epoch: Dict[str, int] = field(default_factory=dict)
 
 
 class StateManager:
@@ -113,6 +116,7 @@ class StateManager:
             dead_letter_alert_at=self._load_alert_times(
                 raw.get("dead_letter_alert_at")
             ),
+            resync_epoch=self._load_resync_epochs(raw.get("resync_epoch")),
         )
 
     def _load_uid_attempts(self, raw: Any) -> Dict[str, Dict[int, int]]:
@@ -145,6 +149,18 @@ class StateManager:
             if key and isinstance(value, str) and value:
                 times[key] = max(times.get(key, ""), value)
         return times
+
+    def _load_resync_epochs(self, raw: Any) -> Dict[str, int]:
+        if not isinstance(raw, Mapping):
+            return {}
+        epochs: Dict[str, int] = {}
+        for login, value in raw.items():
+            key = normalize_login(str(login))
+            if key and isinstance(value, int) and not isinstance(value, bool):
+                epochs[key] = value
+            else:
+                log.warning("state_resync_epoch_entry_ignored file=%s", self.state_file)
+        return epochs
 
     def get_last_uid(self, login: str) -> int:
         key = normalize_login(login)
@@ -256,6 +272,24 @@ class StateManager:
             self._state.dead_letter_alert_at[key] = timestamp.isoformat()
             self._mark_dirty()
 
+    def get_resync_epoch(self, login: str) -> Optional[int]:
+        """UIDVALIDITY of a Message-ID resync still in progress, else None."""
+        key = normalize_login(login)
+        with self._lock:
+            return self._state.resync_epoch.get(key)
+
+    def set_resync_epoch(self, login: str, uidvalidity: Optional[int]) -> None:
+        """Record the epoch of a resync in progress; None ends it."""
+        key = normalize_login(login)
+        if not key:
+            return
+        with self._lock:
+            if uidvalidity is None:
+                self._state.resync_epoch.pop(key, None)
+            else:
+                self._state.resync_epoch[key] = int(uidvalidity)
+            self._mark_dirty()
+
     def get_accounts_snapshot(self) -> Dict[str, AccountState]:
         with self._lock:
             return {
@@ -301,6 +335,7 @@ class StateManager:
                     for login, entries in self._state.uid_attempts.items()
                 },
                 "dead_letter_alert_at": dict(self._state.dead_letter_alert_at),
+                "resync_epoch": dict(self._state.resync_epoch),
             }
 
             tmp_file = self.state_file.with_suffix(".tmp")

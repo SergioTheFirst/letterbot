@@ -11,6 +11,7 @@ batch is skipped; mail without a Message-ID is treated as new.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from datetime import timedelta
@@ -29,6 +30,7 @@ from mailbot_v26.tests.test_imap_client import (
     _FakeIMAPClient,
     _body_fetches,
     _install_fake,
+    _is_header_fetch,
 )
 from mailbot_v26.tests.test_imap_refetch import raw_email, server_item
 from mailbot_v26.tests.test_ingest_cursor_commit import (
@@ -215,6 +217,20 @@ def _cap_fetch(monkeypatch, limit: int) -> None:
         return original(self, **{**kwargs, "limit": limit})
 
     monkeypatch.setattr(ResilientIMAP, "fetch_new_messages", _capped)
+
+
+class _HeaderGlitchIMAPClient(_FakeIMAPClient):
+    """Answers header batches without the UIDs in `omit_headers`."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.omit_headers: set[int] = set()
+
+    def fetch(self, uids, fields):  # type: ignore[override]
+        data = super().fetch(uids, fields)
+        if not _is_header_fetch(fields):
+            return data
+        return {uid: item for uid, item in data.items() if uid not in self.omit_headers}
 
 
 def _pending_sends(db_path: Path) -> list[tuple[int, str]]:
@@ -763,3 +779,189 @@ def test_resync_poll_dedupes_copies_and_reattaches_orphans(
     assert _saved_state(tmp_path)["accounts"][LOGIN]["last_uid"] == 4
     # re-attached mail is processed from this poll's content
     assert 4 in {ctx.uid for ctx in start_module.PIPELINE_CACHE.values()}
+
+
+# ---- a resync spans polls until the cursor reaches the epoch's last UID ----
+
+
+def test_resync_epoch_is_a_top_level_state_key_that_survives_a_restart(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.json"
+    state = StateManager(path)
+    state.set_resync_epoch(LOGIN.upper(), NEW_EPOCH)
+    state.save(force=True)
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert raw["resync_epoch"] == {LOGIN: NEW_EPOCH}
+    assert StateManager(path).get_resync_epoch(LOGIN) == NEW_EPOCH
+
+    state.set_resync_epoch(LOGIN, None)
+    state.save(force=True)
+    assert StateManager(path).get_resync_epoch(LOGIN) is None
+
+    raw["resync_epoch"] = {"bad@example.com": "x", LOGIN: OLD_EPOCH}
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    reloaded = StateManager(path)
+    assert reloaded.get_resync_epoch("bad@example.com") is None
+    assert reloaded.get_resync_epoch(LOGIN) == OLD_EPOCH
+
+
+def test_resync_stays_on_until_the_cursor_reaches_the_highest_uid(
+    monkeypatch, tmp_path: Path, caplog
+) -> None:
+    # 3 notified + 3 new since the start, one message per poll: UIDs 5 and 6
+    # are fetched after the new UIDVALIDITY is stored, still as a resync.
+    _fake, state, client = _resync_client(
+        monkeypatch,
+        tmp_path,
+        _mailbox(_old_and_new({4, 5, 6}, count=6), since_start=True),
+        max_messages=0,
+    )
+    probed: list[str] = []
+
+    def _known(message_id: str) -> bool:
+        probed.append(message_id)
+        return message_id.startswith("<old")
+
+    def _poll(limit: int) -> tuple[ResilientIMAP, list[int]]:
+        poll = ResilientIMAP(_account(), state, start_time=START)
+        messages = poll.fetch_new_messages(limit=limit, is_known_message_id=_known)
+        poll.commit_cursor([uid for uid, _ in messages])
+        return poll, [uid for uid, _ in messages]
+
+    first = client.fetch_new_messages(limit=1, is_known_message_id=_known)
+    client.commit_cursor([uid for uid, _ in first])
+    assert [uid for uid, _ in first] == [4]
+    assert client.last_message_id_resync is True
+    assert (state.get_last_uid(LOGIN), state.get_uidvalidity(LOGIN)) == (4, NEW_EPOCH)
+    assert state.get_resync_epoch(LOGIN) == NEW_EPOCH
+
+    probed.clear()
+    second, uids = _poll(limit=1)
+    assert uids == [5]
+    assert second.last_uidvalidity_changed is False
+    assert second.last_message_id_resync is True
+    assert probed == ["<new5@example.com>", "<new6@example.com>"]
+    assert state.get_resync_epoch(LOGIN) == NEW_EPOCH
+
+    with caplog.at_level(logging.INFO, logger=imap_client.__name__):
+        _third, uids = _poll(limit=1)
+    assert uids == [6]
+    assert state.get_resync_epoch(LOGIN) is None
+    assert "imap_resync_complete" in caplog.text
+
+    probed.clear()
+    fourth, uids = _poll(limit=1)
+    assert (uids, probed, fourth.last_message_id_resync) == ([], [], False)
+
+
+def test_resync_marker_of_another_epoch_is_dropped(
+    monkeypatch, tmp_path: Path, caplog
+) -> None:
+    fake = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    fake.uidvalidity = NEW_EPOCH
+    fake.set_messages(_mailbox({1: "<m1@example.com>"}, since_start=True))
+    _install_fake(monkeypatch, fake)
+    state = StateManager(tmp_path / "state.json")
+    state.update_uidvalidity(LOGIN, NEW_EPOCH, mailbox="INBOX")
+    state.set_resync_epoch(LOGIN, OLD_EPOCH)
+    probed: list[str] = []
+
+    client = ResilientIMAP(_account(), state, start_time=START)
+    with caplog.at_level(logging.WARNING, logger=imap_client.__name__):
+        messages = client.fetch_new_messages(
+            is_known_message_id=lambda mid: probed.append(mid) or True
+        )
+        client.commit_cursor([uid for uid, _ in messages])
+
+    assert ([uid for uid, _ in messages], probed) == ([1], [])
+    assert client.last_message_id_resync is False
+    assert state.get_resync_epoch(LOGIN) is None
+    assert "imap_resync_marker_dropped" in caplog.text
+
+
+def test_resync_dedupes_old_mail_whose_headers_were_missing_in_the_change_poll(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # The server answers the change poll's header batch without UIDs 1-2, so
+    # their Message-IDs cannot be checked then and the cursor stays before
+    # them. The next poll, after the new UIDVALIDITY was stored, sees UIDs
+    # 1-4 again; checking Message-IDs only in the change poll stored all
+    # three notified mails (UID 3 was filtered once) as new.
+    old_ids = {uid: f"<old{uid}@example.com>" for uid in range(1, 4)}
+    fake = _HeaderGlitchIMAPClient(host="imap.example.com", port=993, ssl=True)
+    fake.uidvalidity = NEW_EPOCH
+    fake.set_messages(
+        _mailbox({**old_ids, 4: "<new4@example.com>"}, since_start=True)
+    )
+    fake.omit_headers = {1, 2}
+    config, _sent = _seed_resync(
+        monkeypatch,
+        tmp_path,
+        fake,
+        notified=old_ids,
+        ingest=IngestConfig(
+            first_run_bootstrap_hours=24, first_run_bootstrap_max_messages=5
+        ),
+    )
+
+    start_module.main(config_dir=tmp_path, max_cycles=1)
+
+    first = _saved_state(tmp_path)
+    assert first["accounts"][LOGIN]["last_uid"] == 0
+    assert first["resync_epoch"] == {LOGIN: NEW_EPOCH}
+
+    fake.omit_headers = set()
+    fake.fetch_calls.clear()
+    start_module.main(config_dir=tmp_path, max_cycles=1)
+
+    assert _pending_sends(config.storage.db_path) == [(4, "<new4@example.com>")]
+    assert _body_fetches(fake) == []
+    saved = _saved_state(tmp_path)
+    assert saved["accounts"][LOGIN]["last_uid"] == 4
+    assert saved["resync_epoch"] == {}
+
+
+def test_carried_orphan_is_reattached_in_a_later_resync_poll(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # The orphan (stored in epoch 10, never notified) is carried past the
+    # change poll's cap; the next poll still re-attaches its old row.
+    fake = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    fake.uidvalidity = NEW_EPOCH
+    fake.set_messages(
+        _mailbox(
+            {1: "<old1@example.com>", 2: "<new2@example.com>", 3: "<orphan@example.com>"},
+            since_start=True,
+        )
+    )
+    config, _sent = _seed_resync(
+        monkeypatch,
+        tmp_path,
+        fake,
+        notified={1: "<old1@example.com>"},
+        orphans={2: "<orphan@example.com>"},
+        ingest=IngestConfig(
+            first_run_bootstrap_hours=0, first_run_bootstrap_max_messages=0
+        ),
+    )
+    _cap_fetch(monkeypatch, limit=1)
+
+    for _poll in range(2):
+        start_module.main(config_dir=tmp_path, max_cycles=1)
+
+    assert _pending_sends(config.storage.db_path) == [
+        (2, "<new2@example.com>"),
+        (3, "<orphan@example.com>"),
+    ]
+    with sqlite3.connect(config.storage.db_path) as conn:
+        rows = conn.execute(
+            "SELECT message_id, COUNT(*) FROM emails GROUP BY message_id ORDER BY 1"
+        ).fetchall()
+    assert rows == [
+        ("<new2@example.com>", 1),
+        ("<old1@example.com>", 1),
+        ("<orphan@example.com>", 1),
+    ]
+    assert _saved_state(tmp_path)["resync_epoch"] == {}
