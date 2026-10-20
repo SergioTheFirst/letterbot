@@ -89,7 +89,7 @@ from mailbot_v26.system.truth_guard import (
     assert_not_projection_source,
     mark_as_stale,
 )
-from mailbot_v26.ui.i18n import DEFAULT_LOCALE, get_locale
+from mailbot_v26.ui.i18n import DEFAULT_LOCALE, get_locale, t as i18n_t
 from mailbot_v26.version import get_version
 from mailbot_v26.web_observability.doctor_export import build_diagnostics_zip
 from mailbot_v26.tools.networking import get_primary_ipv4
@@ -115,7 +115,12 @@ COMMITMENT_STATUSES = {"open", "closed", "all"}
 EVENTS_GROUP_PAGE_SIZE = 20
 EVENT_FILTERS = {"all", "processing", "delivery", "health", "learning"}
 WEB_EMAIL_REDACTED_PREVIEW = "Summary hidden"
-WEB_EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# Any address-shaped token, not only ASCII dotted ones: IDN local parts and
+# hosts and dotless hosts (root@localhost) are masked too. Bounded by the RFC
+# 5321 local-part/domain limits so a long token cannot make matching quadratic.
+WEB_EMAIL_PATTERN = re.compile(
+    r"[^\s@<>()\[\]{},;:'\"]{1,64}@[^\s@<>()\[\]{},;:'\"]{1,255}"
+)
 LANE_KEYS = ("all", "critical", "commitments", "deferred", "failures", "learning")
 LANE_LABELS = {
     "all": "all",
@@ -252,6 +257,13 @@ _DASHBOARD_CACHE: dict[str, Any] = {
 # The key already carries the DB change token; the entry must outlive one
 # cockpit poll interval or the next poll can never hit it.
 _DASHBOARD_CACHE_TTL = 2 * DASHBOARD_REFRESH_MS / 1000.0
+# strftime('%s', ...) returns TEXT, and TEXT compares greater than any number:
+# window filters must cast it or they count every row ever stored.
+_SQL_EMAIL_EPOCH = (
+    "COALESCE(CAST(strftime('%s', received_at) AS INTEGER), "
+    "CAST(strftime('%s', created_at) AS INTEGER), 0)"
+)
+_SQL_CREATED_EPOCH = "COALESCE(CAST(strftime('%s', created_at) AS INTEGER), 0)"
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -1424,16 +1436,24 @@ def _format_due_signal(*, created_ts: float | None, deadline_iso: str | None) ->
     return f"Age {days}d"
 
 
-def _summarize_mapping(data: Mapping[str, object] | None, *, limit: int = 4) -> str:
+def _summarize_mapping(
+    data: Mapping[str, object] | None, *, limit: int = 4, escape_html: bool = True
+) -> str:
+    """Short "key: value; ..." summary.
+
+    escape_html=True is for HTML built by hand; values handed to a Jinja
+    template must stay plain text, the template escapes them.
+    """
     if not data:
         return "–"
+    escape = html.escape if escape_html else str
     items: list[str] = []
     for key in sorted(data.keys()):
         if len(items) >= max(1, limit):
             break
         value = data.get(key)
-        value_str = html.escape(str(value)) if value is not None else "–"
-        items.append(f"{html.escape(str(key))}: {value_str}")
+        value_str = escape(str(value)) if value is not None else "–"
+        items.append(f"{escape(str(key))}: {value_str}")
     return "; ".join(items) if items else "–"
 
 
@@ -1582,18 +1602,70 @@ def _mask_emails_in_text(value: object) -> str:
     return WEB_EMAIL_PATTERN.sub(lambda match: _mask_email_address(match.group(0)), text)
 
 
+def _hashed_email_key(key: str) -> str:
+    """Stable web id for an analytics key that embeds a sender (address or name)."""
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    return f"email-sha256:{digest}"
+
+
+def _is_sender_keyed_issuer(issuer_key: object) -> bool:
+    """True when issuer_profile keyed the issuer by the raw sender string.
+
+    It does ("email:<sender>") for generic mail domains and for a sender
+    without an address.
+    """
+    return str(issuer_key or "").strip().lower().startswith("email:")
+
+
+def _display_safe_issuer_label(issuer_key: object, issuer_label: object) -> str:
+    """Issuer label for the web that never shows the raw sender.
+
+    A sender-keyed issuer is labelled by the raw sender string itself, whatever
+    its shape (IDN, dotless host, display name only), so that label fails
+    closed: only its masked address token is shown, or a neutral placeholder
+    when there is none. Other labels (domain, tax id, company name) keep their
+    text with any embedded address masked.
+    """
+    if not _is_sender_keyed_issuer(issuer_key):
+        return _mask_emails_in_text(issuer_label)
+    label = str(issuer_label or "").strip()
+    if not label:
+        return ""
+    match = WEB_EMAIL_PATTERN.search(label)
+    return _mask_email_address(match.group(0)) if match else "Sender hidden"
+
+
 def _display_safe_issuer(item: Mapping[str, object]) -> dict[str, object]:
     """Web copy of a top-issuer profile without the raw sender address.
 
-    For generic mail domains issuer_profile keys and labels the issuer by the
-    full address; analytics keeps it for the Telegram digest, the web masks it.
+    For generic mail domains (or a sender without an address) issuer_profile
+    keys and labels the issuer by the raw sender; analytics keeps it for the
+    Telegram digest, the web hashes the key and masks the label.
     """
     safe = dict(item)
-    safe["issuer_label"] = _mask_emails_in_text(item.get("issuer_label"))
     issuer_key = str(item.get("issuer_key") or "")
-    if WEB_EMAIL_PATTERN.search(issuer_key):
-        digest = hashlib.sha256(issuer_key.encode("utf-8")).hexdigest()[:16]
-        safe["issuer_key"] = f"email-sha256:{digest}"
+    safe["issuer_label"] = _display_safe_issuer_label(
+        issuer_key, item.get("issuer_label")
+    )
+    if _is_sender_keyed_issuer(issuer_key) or "@" in issuer_key:
+        safe["issuer_key"] = _hashed_email_key(issuer_key)
+    return safe
+
+
+def _display_safe_attention_entity(item: Mapping[str, object]) -> dict[str, object]:
+    """Web copy of an attention-economics row without the raw sender address.
+
+    Analytics keys attention rows by the lower-cased from_email string (the
+    Telegram digest needs it). That string is the sender whatever its shape
+    (IDN, dotless host, display name only), so every id is hashed, not only
+    the ones an address pattern recognises; the web keeps a stable hashed id
+    and a masked label only.
+    """
+    safe = dict(item)
+    entity_id = str(item.get("entity_id") or "")
+    if entity_id:
+        safe["entity_id"] = _hashed_email_key(entity_id)
+    safe["entity_label"] = _mask_emails_in_text(item.get("entity_label"))
     return safe
 
 
@@ -2265,10 +2337,35 @@ def _dashboard_runtime_view(
             "Process start and uptime are not persisted; showing the latest runtime evidence instead."
         )
 
+    # The IMAP badge repeats the IMAP health component listed on the same
+    # card, so the page never shows two different IMAP verdicts.
+    raw_components = health_map.get("components")
+    imap_component = next(
+        (
+            item
+            for item in (raw_components if isinstance(raw_components, list) else [])
+            if isinstance(item, Mapping)
+            and str(item.get("name") or "").strip().lower() == "imap"
+        ),
+        None,
+    )
+    imap_status_label = (
+        str(imap_component.get("status") or "").strip().upper()
+        if imap_component is not None
+        else ""
+    ) or "UNKNOWN"
+    imap_status_class = (
+        str(imap_component.get("status_class") or "").strip()
+        if imap_component is not None
+        else ""
+    ) or "muted"
+
     return {
         "status": status,
         "status_label": status_label,
         "status_class": _status_class_for_label(status),
+        "imap_status_label": imap_status_label,
+        "imap_status_class": imap_status_class,
         "detail": detail,
         "started_at": None,
         "started_at_display": "UNAVAILABLE",
@@ -2412,7 +2509,12 @@ def _dashboard_processed_rows_view(
             or _parse_datetime_value(email_row.get("created_at"))
             or event_dt
         )
-        issuer_label = _clamp_text(_scrub_pii_line(payload.get("issuer_label") or ""), 64)
+        issuer_label = _clamp_text(
+            _display_safe_issuer_label(
+                payload.get("issuer_key"), payload.get("issuer_label")
+            ),
+            64,
+        )
         sender_display = issuer_label or "Sender hidden"
         priority_bucket = _archive_priority_bucket(
             payload.get("priority") or email_row.get("priority") or ""
@@ -3261,8 +3363,12 @@ def _health_trend_view(timeline: list[dict[str, object]]) -> list[dict[str, obje
             {
                 "ts": _format_ts_utc(item.get("ts_end_utc")),
                 "mode": item.get("system_mode") or "–",
-                "gates": _summarize_mapping(item.get("gates_state"), limit=2),
-                "metrics": _summarize_mapping(item.get("metrics_brief"), limit=2),
+                "gates": _summarize_mapping(
+                    item.get("gates_state"), limit=2, escape_html=False
+                ),
+                "metrics": _summarize_mapping(
+                    item.get("metrics_brief"), limit=2, escape_html=False
+                ),
                 "snapshot": snapshot_id,
                 "snapshot_short": _short_id(snapshot_id, 10),
             }
@@ -4221,6 +4327,24 @@ def create_app(
         # Every response, including guard rejections, static files and 404s.
         app.after_request(_apply_security_headers)
 
+        @app.errorhandler(404)
+        def not_found(_error):
+            # The access guard has already run. The requested address is never
+            # echoed back into the page (no reflected input).
+            if request.path.startswith("/api/"):
+                response = jsonify({"error": "not found"})
+                response.status_code = 404
+                return response
+            return (
+                _render_template(
+                    app,
+                    "not_found.html",
+                    title=app.config["APP_TITLE"],
+                    page_title="Page not found",
+                ),
+                404,
+            )
+
     @app.route("/login", methods=["GET", "POST"])
     def login():
         next_raw = request.form.get("next") if request.method == "POST" else None
@@ -4713,11 +4837,6 @@ def create_app(
 
         base_params = _base_params()
 
-        def _mode_link(target: str) -> str:
-            params = dict(base_params)
-            params["mode"] = target
-            return url_for("archive", **params)
-
         prev_url = None
         if page > 1:
             prev_params = dict(base_params)
@@ -4781,10 +4900,8 @@ def create_app(
             window_options=_build_archive_window_options(window_days or 7),
             pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
             pii_enabled=reveal_pii,
+            # The archive ignores the mode; it only carries it through links.
             cockpit_mode=mode,
-            mode_basic_url=_mode_link("basic"),
-            mode_engineer_url=_mode_link("engineer"),
-            engineer_mode=False,
             error=error_message,
             hide_limit=True,
             share_url=url_for("archive", **base_params),
@@ -5254,13 +5371,38 @@ def create_app(
 
     def _dashboard_payload() -> dict[str, object]:
         now = time.time()
+        try:
+            dashboard_vars = _dashboard_vars()
+            account_scope = _resolve_account_scope(dashboard_vars)
+            window_days = max(1, int(getattr(dashboard_vars, "window_days", 7) or 7))
+            row_limit = max(10, int(getattr(dashboard_vars, "limit", 25) or 25))
+            reveal_pii = bool(getattr(dashboard_vars, "pii", False))
+            if not account_scope:
+                fallback_account = str(request.args.get("account_email") or "").strip()
+                if fallback_account:
+                    account_scope = [fallback_account]
+            if not account_scope:
+                available_accounts = _available_accounts(app.config["DB_PATH"])
+                if available_accounts:
+                    account_scope = [str(available_accounts[0])]
+        except Exception as exc:
+            logger.warning(
+                "dashboard_scope_resolution_failed",
+                extra={"error": type(exc).__name__},
+            )
+            account_scope = []
+            window_days = 7
+            row_limit = 25
+            reveal_pii = False
+        # Keyed by the resolved scope: the session can remember a scope that
+        # the query string does not repeat.
         cache_key = (
             str(app.config["DB_PATH"]),
             _db_change_token(app.config["DB_PATH"]),
-            request.args.get("account_emails") or "",
-            request.args.get("window_days") or "",
-            request.args.get("limit") or "",
-            request.args.get("pii") or "",
+            tuple(account_scope),
+            window_days,
+            row_limit,
+            reveal_pii,
         )
         cached = _DASHBOARD_CACHE.get("payload")
         if (
@@ -5406,23 +5548,6 @@ def create_app(
                 meta["status"] = "unavailable"
             else:
                 meta["status"] = "partial"
-        try:
-            dashboard_vars = _dashboard_vars()
-            account_scope = _resolve_account_scope(dashboard_vars)
-            window_days = max(1, int(getattr(dashboard_vars, "window_days", 7) or 7))
-            row_limit = max(10, int(getattr(dashboard_vars, "limit", 25) or 25))
-            if not account_scope:
-                fallback_account = str(request.args.get("account_email") or "").strip()
-                if fallback_account:
-                    account_scope = [fallback_account]
-            if not account_scope:
-                available_accounts = _available_accounts(app.config["DB_PATH"])
-                if available_accounts:
-                    account_scope = [str(available_accounts[0])]
-        except Exception:
-            account_scope = []
-            window_days = 7
-            row_limit = 25
 
         account_clause = ""
         account_params: list[object] = []
@@ -5456,10 +5581,10 @@ def create_app(
                             "SELECT "
                             "COUNT(*) AS emails_today, "
                             "SUM(CASE WHEN ("
-                            "COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                            f"{_SQL_EMAIL_EPOCH} >= ?"
                             ") THEN 1 ELSE 0 END) AS emails_last_hour "
                             "FROM emails "
-                            "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                            f"WHERE {_SQL_EMAIL_EPOCH} >= ?"
                             f"{account_clause}"
                         ),
                         (hour_ago_ts, day_ago_ts, *account_params),
@@ -5479,7 +5604,7 @@ def create_app(
                                 "FROM emails "
                                 "WHERE llm_provider IS NOT NULL "
                                 "AND TRIM(llm_provider) != '' "
-                                "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                                f"AND {_SQL_EMAIL_EPOCH} >= ?"
                                 f"{account_clause}"
                             ),
                             (day_ago_ts, *account_params),
@@ -5523,7 +5648,7 @@ def create_app(
                                 "SUM(CASE WHEN priority IN ('🟡', 'yellow', 'YELLOW') THEN 1 ELSE 0 END) AS yellow, "
                                 "SUM(CASE WHEN priority IN ('🔵', 'blue', 'BLUE') THEN 1 ELSE 0 END) AS blue "
                                 "FROM emails "
-                                "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                                f"WHERE {_SQL_EMAIL_EPOCH} >= ?"
                                 f"{account_clause}"
                             ),
                             (day_ago_ts, *account_params),
@@ -5546,7 +5671,7 @@ def create_app(
                             "SELECT COUNT(*) AS corrections_week "
                             "FROM priority_feedback "
                             "WHERE kind IN ('correction', 'priority_correction') "
-                            "AND COALESCE(strftime('%s', created_at), 0) >= ?"
+                            f"AND {_SQL_CREATED_EPOCH} >= ?"
                             f"{account_clause}"
                         ),
                         (week_ago_ts, *account_params),
@@ -5874,10 +5999,14 @@ def create_app(
     def _imap_health_payload(account_emails: list[str]) -> dict[str, object]:
         now_ts = datetime.now(timezone.utc).timestamp()
         since_24h = now_ts - 86_400
+        # dead_letter_count is kept as an alias of dead_letter_count_24h. An
+        # all-time count kept IMAP "degraded" forever after one poison UID; the
+        # worker reports dead letters in Telegram (one aggregated alert / 24 h).
         payload: dict[str, object] = {
             "status": "unknown",
             "last_success_ts": None,
             "reconnect_count_24h": None,
+            "dead_letter_count_24h": None,
             "dead_letter_count": None,
         }
         account_clause = ""
@@ -5916,10 +6045,11 @@ def create_app(
                         "SELECT COUNT(*) AS dead_letters "
                         "FROM events_v1 "
                         "WHERE event_type = ? "
+                        "AND ts_utc >= ? "
                         "AND json_extract(payload, '$.subtype') = 'dead_letter'"
                         f"{account_clause}"
                     ),
-                    (EventType.IMAP_HEALTH.value, *account_params),
+                    (EventType.IMAP_HEALTH.value, since_24h, *account_params),
                 ).fetchone()
         except sqlite3.Error:
             payload["status"] = "unavailable"
@@ -5940,6 +6070,7 @@ def create_app(
         )
         payload["last_success_ts"] = last_success_ts or None
         payload["reconnect_count_24h"] = reconnect_count
+        payload["dead_letter_count_24h"] = dead_letter_count
         payload["dead_letter_count"] = dead_letter_count
 
         if last_success_utc <= 0:
@@ -6098,8 +6229,11 @@ def create_app(
             or received_payload.get("from_email")
             or ""
         ).strip()
-        # issuer_profile falls back to the full address for generic mail domains.
-        issuer_display = _mask_emails_in_text(interpretation_payload.get("issuer_label"))
+        # issuer_profile labels a sender-keyed issuer by the raw sender string.
+        issuer_display = _display_safe_issuer_label(
+            interpretation_payload.get("issuer_key"),
+            interpretation_payload.get("issuer_label"),
+        )
         sender_display = (
             issuer_display or _sanitize_sender_label(sender_email) or "Sender hidden"
         )
@@ -6691,16 +6825,22 @@ def create_app(
             "limit": summary.get("limit"),
             "totals": summary.get("totals", {}),
             "lane_breakdown": summary.get("lane_breakdown", []),
-            "top_contact_label": summary.get("top_contact_label", ""),
+            "top_contact_label": _mask_emails_in_text(
+                summary.get("top_contact_label", "")
+            ),
             "generated_at_utc": summary.get("generated_at_utc", ""),
         }
         _ATTENTION_TOTALS_CACHE.set(totals_cache_key, totals_payload)
-        entities = summary.get("entities", [])
-        if isinstance(entities, list):
-            _ATTENTION_TABLE_CACHE.set(table_cache_key, entities)
+        raw_entities = summary.get("entities", [])
+        entities = [
+            _display_safe_attention_entity(item)
+            for item in (raw_entities if isinstance(raw_entities, list) else [])
+            if isinstance(item, Mapping)
+        ]
+        _ATTENTION_TABLE_CACHE.set(table_cache_key, entities)
         return {
             **totals_payload,
-            "entities": entities if isinstance(entities, list) else [],
+            "entities": entities,
             "sort": sort_mode,
             "limit": summary.get("limit", 50),
         }
@@ -7199,6 +7339,13 @@ def create_app(
             }
         )
 
+    def _relationship_user_label() -> str:
+        """Label of the graph node for the user, in the dashboard language."""
+        return i18n_t(
+            "web.relationships.you",
+            locale=str(app.config.get("UI_LOCALE") or DEFAULT_LOCALE),
+        )
+
     @app.route("/api/v1/relationships/graph", methods=["GET"])
     def api_relationships_graph():
         account_email, account_emails, window_days, error = _validate_latency_params(
@@ -7221,6 +7368,7 @@ def create_app(
             account_emails=account_emails,
             window_days=window_days or 30,
             limit=limit or 50,
+            user_label=_relationship_user_label(),
         )
         return jsonify(graph)
 
@@ -8139,6 +8287,7 @@ def create_app(
                 account_emails=account_emails,
                 window_days=window_days or 30,
                 limit=limit or 50,
+                user_label=_relationship_user_label(),
             )
         account_options = _build_select_options(accounts, account_email)
         window_options = _build_window_options(window_days or 30)

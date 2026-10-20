@@ -468,6 +468,47 @@ class KnowledgeAnalytics:
             return cleaned[len("contact:") :]
         return cleaned
 
+    def _relationship_contact_labels(
+        self, entity_ids: Sequence[str]
+    ) -> dict[str, tuple[str, str]]:
+        """Display-safe (label, domain) for relationship contacts.
+
+        Runtime events key contacts by entity UUID. The sender address stored
+        with the entity gives a readable label, masked like every sender in
+        the web (first letter + domain); without one the label is a stable
+        pseudonym. Never the UUID or the sender's display name.
+        """
+        addresses: dict[str, str] = {}
+        lookup = sorted({eid for eid in entity_ids if eid and "@" not in eid})
+        for start in range(0, len(lookup), 500):
+            chunk = lookup[start : start + 500]
+            placeholders = ", ".join(["?"] * len(chunk))
+            try:
+                rows = self._execute_select(
+                    f"SELECT id, metadata FROM entities WHERE id IN ({placeholders})",
+                    chunk,
+                )
+            except sqlite3.OperationalError as exc:
+                logger.warning(
+                    "relationship_contact_labels_unavailable error=%s",
+                    type(exc).__name__,
+                )
+                break
+            for row in rows:
+                metadata = self._parse_json_dict(row.get("metadata"))
+                address = str(metadata.get("from_email") or "").strip()
+                if "@" in address:
+                    addresses[str(row.get("id"))] = address
+        labels: dict[str, tuple[str, str]] = {}
+        for entity_id in entity_ids:
+            address = entity_id if "@" in entity_id else addresses.get(entity_id, "")
+            domain = address.split("@", 1)[1].strip().lower() if address else ""
+            label = self._mask_contact_label(
+                entity_id=entity_id, label=address or entity_id
+            )
+            labels[entity_id] = (label, domain)
+        return labels
+
     @staticmethod
     def _contact_label(
         entity_id: str, payload: Mapping[str, object] | None = None
@@ -3127,6 +3168,7 @@ class KnowledgeAnalytics:
         account_emails: Iterable[str] | None,
         window_days: int,
         limit: int,
+        user_label: str = "You",
     ) -> dict[str, object]:
         account_ids = self._normalize_account_scope(account_email, account_emails)
         since_ts = self._window_start_ts(window_days)
@@ -3135,7 +3177,8 @@ class KnowledgeAnalytics:
         nodes: list[dict[str, object]] = [
             {
                 "id": "user:me",
-                "label": "Вы",
+                # The caller passes the label in its UI language.
+                "label": user_label,
                 "domain": "",
                 "emails_total": 0,
                 "threads_total": 0,
@@ -3179,15 +3222,14 @@ class KnowledgeAnalytics:
             entry = aggregates.setdefault(
                 entity_id,
                 {
-                    "emails_total": 0,
                     "threads": set(),
                     "last_seen": 0.0,
                     "trust_score": None,
                     "risk_flags": set(),
                 },
             )
+            # One email produces several events; count distinct emails.
             if row.get("email_id") is not None:
-                entry["emails_total"] = int(entry["emails_total"]) + 1
                 entry["threads"].add(row.get("email_id"))
             entry["last_seen"] = max(float(entry["last_seen"]), ts_utc)
             max_ts = max(max_ts, ts_utc)
@@ -3214,13 +3256,12 @@ class KnowledgeAnalytics:
                 first = events[0][1]
                 last = events[-1][1]
                 trust_delta = last - first
-            label, domain = self._contact_label(entity_id)
             result_nodes.append(
                 {
                     "id": f"contact:{entity_id}",
-                    "label": label,
-                    "domain": domain,
-                    "emails_total": int(entry["emails_total"]),
+                    "label": "",
+                    "domain": "",
+                    "emails_total": len(entry["threads"]),
                     "threads_total": len(entry["threads"]),
                     **(
                         {"trust_score": entry["trust_score"]}
@@ -3251,6 +3292,17 @@ class KnowledgeAnalytics:
 
         result_nodes.sort(key=_node_sort_key)
         result_nodes = result_nodes[:resolved_limit]
+        # Labels only for the nodes kept: one entities lookup per graph.
+        entity_ids = [self._contact_key(str(node["id"])) for node in result_nodes]
+        contact_labels = self._relationship_contact_labels(entity_ids)
+        result_nodes = [
+            {
+                **node,
+                "label": contact_labels[entity_id][0],
+                "domain": contact_labels[entity_id][1],
+            }
+            for entity_id, node in zip(entity_ids, result_nodes)
+        ]
         edges = [
             {
                 "source": "user:me",
@@ -3306,7 +3358,6 @@ class KnowledgeAnalytics:
         trust_series: list[dict[str, object]] = []
         volume_by_date: dict[str, dict[str, int]] = {}
         risk_flags: set[str] = set()
-        emails_total = 0
         threads: set[object] = set()
         last_seen = 0.0
         trust_score = None
@@ -3329,8 +3380,8 @@ class KnowledgeAnalytics:
                 "priority_correction_recorded",
             }:
                 volume_entry["outbound"] += 1
+            # One email produces several events; count distinct emails.
             if row.get("email_id") is not None:
-                emails_total += 1
                 threads.add(row.get("email_id"))
             last_seen = max(last_seen, ts_utc)
             if event_type == "trust_score_updated":
@@ -3354,12 +3405,12 @@ class KnowledgeAnalytics:
         trust_delta = None
         if len(trust_series) >= 2:
             trust_delta = trust_series[-1]["value"] - trust_series[0]["value"]
-        label, domain = self._contact_label(entity_id)
+        label, domain = self._relationship_contact_labels([entity_id])[entity_id]
         contact = {
             "id": f"contact:{entity_id}",
             "label": label,
             "domain": domain,
-            "emails_total": emails_total,
+            "emails_total": len(threads),
             "threads_total": len(threads),
             **({"trust_score": trust_score} if trust_score is not None else {}),
             **({"trust_delta": trust_delta} if trust_delta is not None else {}),
@@ -4732,7 +4783,10 @@ class KnowledgeAnalytics:
                     "SELECT LOWER(COALESCE(from_email, '')) AS sender_email, COUNT(*) AS emails_count "
                     "FROM emails "
                     "WHERE TRIM(COALESCE(from_email, '')) != '' "
-                    "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                    # strftime returns TEXT, which compares greater than any
+                    # number: cast it or the window keeps every row.
+                    "AND COALESCE(CAST(strftime('%s', received_at) AS INTEGER), "
+                    "CAST(strftime('%s', created_at) AS INTEGER), 0) >= ?"
                     f"{email_clause} "
                     "GROUP BY LOWER(COALESCE(from_email, '')) "
                     "ORDER BY emails_count DESC "

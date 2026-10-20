@@ -105,16 +105,6 @@ input:focus-visible {
   border-radius: 8px;
 }
 
-.var-checkbox {
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
-}
-
-.var-checkbox label {
-  margin: 0;
-}
-
 .var-actions {
   display: flex;
   gap: 8px;
@@ -1886,6 +1876,11 @@ small {
 
 .digest-slice h3 {
   margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.engineer-card h3 {
+  margin: 12px 0 6px;
   font-size: 15px;
 }
 

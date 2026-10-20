@@ -338,6 +338,7 @@ _STRINGS_RU = {
     "inbound.doctor.status_warn": "ПРЕДУПРЕЖДЕНИЕ",
     "inbound.doctor.status_fail": "ОШИБКА",
     "tg.attachments.more": "… и ещё {count}",
+    "web.relationships.you": "Вы",
 }
 
 
@@ -440,6 +441,7 @@ _STRINGS_EN = {
     "inbound.doctor.status_warn": "WARNING",
     "inbound.doctor.status_fail": "ERROR",
     "tg.attachments.more": "… and {count} more",
+    "web.relationships.you": "You",
 }
 
 

@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import re
 from pathlib import Path
@@ -74,7 +75,11 @@ def test_attention_sort_determinism(
         "mailbot_v26.storage.analytics.KnowledgeAnalytics._window_start_ts",
         lambda self, days: 0.0,
     )
-    expected = ["alice@example.com", "bob@example.com", "charlie@example.com"]
+    # The web never returns raw sender addresses; ids are stable hashes.
+    expected = [
+        "email-sha256:" + hashlib.sha256(sender.encode("utf-8")).hexdigest()[:16]
+        for sender in ("alice@example.com", "bob@example.com", "charlie@example.com")
+    ]
     with app.test_client() as client:
         login_with_csrf(client, "pw")
         for sort_mode in ("time", "cost", "count"):
