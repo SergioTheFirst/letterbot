@@ -2014,9 +2014,9 @@ class TelegramInboundProcessor:
                 error=_safe_log_text(exc),
             )
         if new_locale == "en":
-            reply = "✓ Language set to English."
+            reply = "Language set to English."
         else:
-            reply = "✓ Язык изменён на русский."
+            reply = "Язык изменён на русский."
         if not processor_locale_applied:
             reply += "\n" + _ui_text(
                 "Some messages will switch after a restart.",
@@ -2080,7 +2080,7 @@ class TelegramInboundProcessor:
             chat_id,
             "\n".join(
                 [
-                    _ui_text("📌 <b>Commitments:</b>", "📌 <b>Обязательства:</b>"),
+                    _ui_text("<b>Commitments:</b>", "<b>Обязательства:</b>"),
                     *deduped,
                 ]
             ),
@@ -2091,7 +2091,7 @@ class TelegramInboundProcessor:
         no_data = _ui_text("n/a", "н/д")
         if not account_emails:
             base = (
-                f"📊 LetterBot.ru · {_ui_text('week', 'неделя')}\n"
+                f"LetterBot.ru · {_ui_text('week', 'неделя')}\n"
                 f"{_ui_text('Emails', 'Писем')}: 0 · {_ui_text('Important', 'Важных')}: 0 · {_ui_text('Low', 'Низких')}: 0\n"
                 f"{_ui_text('Corrections', 'Исправления')}: 0 · {_ui_text('Accuracy', 'Точность')}: {no_data}\n"
                 f"{_ui_text('Open commitments', 'Открытых обязательств')}: 0"
@@ -2108,7 +2108,7 @@ class TelegramInboundProcessor:
         accuracy_pct = summary.get("accuracy_pct")
         accuracy_text = f"{int(accuracy_pct)}%" if accuracy_pct is not None else no_data
         base = (
-            f"📊 LetterBot.ru · {_ui_text('week', 'неделя')}\n"
+            f"LetterBot.ru · {_ui_text('week', 'неделя')}\n"
             f"{_ui_text('Emails', 'Писем')}: {int(summary.get('emails_total') or 0)} · {_ui_text('Important', 'Важных')}: {int(summary.get('important') or 0)} · {_ui_text('Low', 'Низких')}: {int(summary.get('low') or 0)}\n"
             f"{_ui_text('Corrections', 'Исправления')}: {int(summary.get('corrections') or 0)} · {_ui_text('Accuracy', 'Точность')}: {accuracy_text}\n"
             f"{_ui_text('Open commitments', 'Открытых обязательств')}: {int(summary.get('open_commitments') or 0)}"
@@ -2124,8 +2124,8 @@ class TelegramInboundProcessor:
         no_data = _ui_text("n/a", "н/д")
         if not account_emails:
             header = _ui_text(
-                "📈 Auto-priority quality",
-                "📈 Качество автоприоритета",
+                "Auto-priority quality",
+                "Качество автоприоритета",
             ) if include_header else ""
             trust = _ui_text(
                 "Not enough data yet · stay cautious.",
@@ -2213,7 +2213,7 @@ class TelegramInboundProcessor:
 
         lines: list[str] = []
         if include_header:
-            lines.append(_ui_text("📈 Auto-priority quality", "📈 Качество автоприоритета"))
+            lines.append(_ui_text("Auto-priority quality", "Качество автоприоритета"))
         lines.extend(
             [
                 f"{_ui_text('Corrections', 'Исправления')}: {corrections}",
@@ -2329,7 +2329,7 @@ class TelegramInboundProcessor:
         ]
         insider_since = self.override_store.get_insider_since(chat_id=chat_id)
         if insider_since:
-            status_lines.append(f"🔹 LetterBot.ru Insider since: {insider_since}")
+            status_lines.append(f"LetterBot.ru Insider since: {insider_since}")
         status_lines.append(f"{_ui_text('Version', 'Версия')}: {get_version()}")
         return normalize_mojibake_text("\n".join(status_lines))
 

@@ -194,7 +194,7 @@ def _format_attention_block_localized(
     result: AttentionEconomicsResult, locale: str
 ) -> list[str]:
     lines = [
-        f"<b>{_locale_text(locale, en='⏱ Where attention went', ru='⏱ Куда ушло внимание')}</b>"
+        f"<b>{_locale_text(locale, en='Where attention went', ru='Куда ушло внимание')}</b>"
     ]
     lines.extend(_format_attention_top_sinks_localized(result.top_sinks, locale))
     lines.append(f"<b>{_locale_text(locale, en='Risks', ru='Риски')}</b>")
@@ -1032,7 +1032,7 @@ def _build_shareable_weekly_card(
         invoice_line = f"{invoice_line} ({weekly_data.invoice_total_rub} ₽)"
     return "\n".join(
         [
-            _locale_text(locale, en="📊 My Mail Week", ru="📊 Моя почтовая неделя"),
+            _locale_text(locale, en="My Mail Week", ru="Моя почтовая неделя"),
             _locale_text(
                 locale,
                 en=f"{weekly_data.total_emails} emails processed",
@@ -1067,8 +1067,8 @@ def _build_shareable_card_keyboard(
                 {
                     "text": _locale_text(
                         locale,
-                        en="📤 Share report",
-                        ru="📤 Поделиться отчётом",
+                        en="Share report",
+                        ru="Поделиться отчётом",
                     ),
                     "switch_inline_query_current_chat": share_text,
                 }

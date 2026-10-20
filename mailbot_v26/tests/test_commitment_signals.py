@@ -41,6 +41,6 @@ def test_commitment_reliability_label_boundaries() -> None:
             unknown_count=0,
         )
     )
-    assert high.label == "🟢 Надёжен"
+    assert high.label == "🔵 Надёжен"
     assert mid.label == "🟡 Нестабилен"
     assert low.label == "🔴 Рискованный"

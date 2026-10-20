@@ -2104,7 +2104,7 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
             continue
         payload = TelegramPayload(
             html_text=telegram_safe(
-                f"{'📌 Reminder' if str(ui_locale).startswith('en') else '📌 Напоминание'}\n\n{reminder_text}"
+                f"{'⏰ Reminder' if str(ui_locale).startswith('en') else '⏰ Напоминание'}\n\n{reminder_text}"
             ),
             priority="🔵",
             metadata={

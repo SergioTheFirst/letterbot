@@ -866,7 +866,7 @@ def test_tasks_alias_and_limit(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/tasks"})
 
     output = sent[-1]
-    assert _norm(output).startswith("📌 <b>Обязательства:</b>")
+    assert _norm(output).startswith("<b>Обязательства:</b>")
     assert _norm(output).count("\n• ") == 7
 
 
@@ -1051,7 +1051,7 @@ def test_week_command_returns_compact_summary_with_empty_dataset(
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/week"})
 
-    assert _norm("📊 LetterBot.ru · неделя") in _norm(sent[-1])
+    assert _norm("LetterBot.ru · неделя") in _norm(sent[-1])
     assert _norm("Исправления: 0") in _norm(sent[-1])
     assert _norm("Доля сюрпризов: н/д") in _norm(sent[-1])
     assert _norm("Переходы: нет данных") in _norm(sent[-1])
@@ -1105,7 +1105,7 @@ def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "week"})
 
-    assert _norm("📊 LetterBot.ru · неделя") in _norm(sent[-1])
+    assert _norm("LetterBot.ru · неделя") in _norm(sent[-1])
     assert _norm("Исправления: 1 · Точность: 100%") in _norm(sent[-1])
     assert _norm("Доля сюрпризов: 0%") in _norm(sent[-1])
     assert _norm("Скорость проверки: н/д") in _norm(sent[-1])
@@ -1138,7 +1138,7 @@ def test_stats_command_returns_human_friendly_summary(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
 
-    assert _norm("📈 Качество автоприоритета") in _norm(sent[-1])
+    assert _norm("Качество автоприоритета") in _norm(sent[-1])
     assert _norm("Исправления: 1") in _norm(sent[-1])
     assert _norm("Доля сюрпризов:") in _norm(sent[-1])
     assert _norm("Скорость проверки: н/д") in _norm(sent[-1])
@@ -1174,7 +1174,7 @@ def test_stats_command_handles_analytics_failures_without_crash(
     processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
 
     normalized = _norm(sent[-1])
-    assert "📈 Качество автоприоритета" in normalized
+    assert "Качество автоприоритета" in normalized
     assert "Исправления: 0" in normalized
     assert "Доля сюрпризов: н/д" in normalized
     assert "Переходы: нет данных" in normalized
@@ -1364,7 +1364,7 @@ def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
-    assert _norm("🔹 LetterBot.ru Insider since:") not in _norm(sent[-1])
+    assert _norm("LetterBot.ru Insider since:") not in _norm(sent[-1])
     assert f"Версия: {__version__}" in sent[-1]
 
 
@@ -1384,7 +1384,7 @@ def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
-    assert _norm("🔹 LetterBot.ru Insider since: 2026-02") in _norm(sent[-1])
+    assert _norm("LetterBot.ru Insider since: 2026-02") in _norm(sent[-1])
 
 
 def test_runtime_override_store_insider_roundtrip(tmp_path: Path) -> None:

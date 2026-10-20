@@ -84,9 +84,9 @@ def test_initial_keyboard_priority_buttons() -> None:
     )
 
     assert [button["text"] for button in keyboard["inline_keyboard"][0]] == [
-        "🟦▌Low",
-        "🟨▌Medium",
-        "🟥▌High",
+        "🔵 Low",
+        "🟡 Medium",
+        "🔴 High",
     ]
     assert [button["text"] for button in keyboard["inline_keyboard"][1]] == [
         "Snooze 2h",
@@ -133,9 +133,9 @@ def test_initial_keyboard_shows_human_readable_actions_and_no_trace() -> None:
     assert len(rows) == 2
     labels = [button["text"] for row in rows for button in row]
     assert [button["text"] for button in rows[0]] == [
-        "🟦▌Low",
-        "🟨▌Medium",
-        "🟥▌High",
+        "🔵 Low",
+        "🟡 Medium",
+        "🔴 High",
     ]
     assert [button["text"] for button in rows[1]] == ["Snooze 2h", "Tomorrow"]
     assert "Why this?" not in labels
@@ -199,4 +199,4 @@ def test_default_mode_sends_only_processed_message() -> None:
 
 def test_no_pre_message_in_normal_premium_mode() -> None:
     payload, _, _ = processor.build_telegram_payload(_base_context())
-    assert not payload.html_text.startswith("📩 Письмо получено")
+    assert not payload.html_text.startswith("📧 Письмо получено")

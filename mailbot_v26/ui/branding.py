@@ -3,9 +3,11 @@ from functools import lru_cache
 from mailbot_v26.config_loader import load_branding_config
 
 PRODUCT_LABEL = "LetterBot.ru"
-WATERMARK_LINE = "🔹 Powered by LetterBot.ru"
-WATERMARK_HTML_LINE = "<i>🔹 Powered by LetterBot.ru</i>"
-_LEGACY_WATERMARK_LINE = "🔹 Powered by Letterbot Premium"
+# No icon: the blue diamond is outside CONSTITUTION Appendix A (D2).
+WATERMARK_LINE = "Powered by LetterBot.ru"
+WATERMARK_HTML_LINE = "<i>Powered by LetterBot.ru</i>"
+# Older texts (stored reminders, edits) may still carry these lines.
+_LEGACY_WATERMARK_LINE = "Powered by Letterbot Premium"
 _PLAIN_WATERMARK_LINE = "Powered by LetterBot.ru"
 _PLAIN_WATERMARK_HTML_LINE = "<i>Powered by LetterBot.ru</i>"
 

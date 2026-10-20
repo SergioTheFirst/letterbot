@@ -132,10 +132,10 @@ def test_weekly_support_footer_rate_limited_via_runtime_overrides(tmp_path) -> N
         support_config=cfg,
     )
 
-    assert first.startswith("💛 Поддержать LetterBot.ru")
+    assert first.startswith("Поддержать LetterBot.ru")
     assert first_saved is not None
     assert second == ""
-    assert third.startswith("💛 Поддержать LetterBot.ru")
+    assert third.startswith("Поддержать LetterBot.ru")
 
 
 def test_support_telegram_config_enabled_when_feature_flag_on(monkeypatch) -> None:

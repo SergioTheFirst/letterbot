@@ -947,7 +947,7 @@ def build_telegram_text(
             lines.extend(
                 [
                     "",
-                    _localized_text(locale, en="💡 Relationship:", ru="💡 Контрагент:"),
+                    _localized_text(locale, en="Relationship:", ru="Контрагент:"),
                     f"{emails_count} {_localized_text(locale, en='emails', ru='писем')}",
                     f"{invoice_count} {_localized_text(locale, en='invoices', ru='счета')}",
                     f"{overdue_count} {_localized_text(locale, en='overdue', ru='задержка')}",

@@ -24,7 +24,7 @@ def _clamp_score(value: int) -> int:
 
 def _label_for_score(score: int) -> str:
     if score >= 80:
-        return "🟢 Надёжен"
+        return "🔵 Надёжен"
     if score >= 50:
         return "🟡 Нестабилен"
     return "🔴 Рискованный"

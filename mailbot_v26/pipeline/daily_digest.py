@@ -44,11 +44,10 @@ logger = get_logger("mailbot")
 
 _TRUST_DELTA_THRESHOLD = 0.0
 _RELATIONSHIP_HEALTH_DELTA_THRESHOLD = 5.0
+# CONSTITUTION Appendix A icons only.
 _WARNING_EMOJI = "\u26a0\ufe0f"
-_TARGET_EMOJI = "\U0001f3af"
-_CHART_EMOJI = "\U0001f4c8"
-_LEARNING_EMOJI = "\U0001f393"
-_OBSERVATION_EMOJI = "\U0001f50e"
+_REPLY_EMOJI = "\U0001f4ac"
+_REMINDER_EMOJI = "\u23f0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,7 +185,7 @@ def _format_attention_block_localized(
     result: AttentionEconomicsResult, locale: str
 ) -> list[str]:
     lines = [
-        f"<b>{_locale_text(locale, en='⏱ Where attention went', ru='⏱ Куда ушло внимание')}</b>"
+        f"<b>{_locale_text(locale, en='Where attention went', ru='Куда ушло внимание')}</b>"
     ]
     lines.extend(_format_attention_top_sinks_localized(result.top_sinks, locale))
     lines.append(f"<b>{_locale_text(locale, en='Risks', ru='Риски')}</b>")
@@ -614,7 +613,7 @@ def _build_digest_text(data: DigestData, locale: str = DEFAULT_LOCALE) -> str:
     lines = [t("digest.daily", locale=locale)]
     if data.trust_bootstrap_snapshot and data.trust_bootstrap_snapshot.active:
         lines.append(
-            f"{_LEARNING_EMOJI} <b>{_locale_text(locale, en='Learning mode', ru='Режим обучения')}</b>"
+            f"<b>{_locale_text(locale, en='Learning mode', ru='Режим обучения')}</b>"
         )
         lines.append(
             _locale_text(
@@ -843,7 +842,7 @@ def _build_digest_text(data: DigestData, locale: str = DEFAULT_LOCALE) -> str:
         insights_header = (
             f"{_WARNING_EMOJI} <b>{_locale_text(locale, en='ATTENTION NEEDED', ru='ТРЕБУЕТ ВНИМАНИЯ')}</b>"
             if action_mode
-            else f"{_OBSERVATION_EMOJI} <b>{_locale_text(locale, en='OBSERVATIONS', ru='НАБЛЮДЕНИЯ')}</b>"
+            else f"<b>{_locale_text(locale, en='OBSERVATIONS', ru='НАБЛЮДЕНИЯ')}</b>"
         )
         for item in data.deadlock_insights:
             if insight_count >= data.digest_insights_max_items:
@@ -855,8 +854,8 @@ def _build_digest_text(data: DigestData, locale: str = DEFAULT_LOCALE) -> str:
                 insights_lines.append(
                     _locale_text(
                         locale,
-                        en=f"• Stalled thread: {label} → {_TARGET_EMOJI} Propose a 15-min call",
-                        ru=f"• Застой в переписке: {label} → {_TARGET_EMOJI} Предложить созвон (15 мин)",
+                        en=f"• Stalled thread: {label} → {_REPLY_EMOJI} Propose a 15-min call",
+                        ru=f"• Застой в переписке: {label} → {_REPLY_EMOJI} Предложить созвон (15 мин)",
                     )
                 )
                 if data.digest_action_templates_enabled:
@@ -893,8 +892,8 @@ def _build_digest_text(data: DigestData, locale: str = DEFAULT_LOCALE) -> str:
                 insights_lines.append(
                     _locale_text(
                         locale,
-                        en=f"• No reply: {contact} — {days} → {_TARGET_EMOJI} Send a polite reminder today",
-                        ru=f"• Нет ответа: {contact} — {days} → {_TARGET_EMOJI} Вежливо напомнить сегодня",
+                        en=f"• No reply: {contact} — {days} → {_REMINDER_EMOJI} Send a polite reminder today",
+                        ru=f"• Нет ответа: {contact} — {days} → {_REMINDER_EMOJI} Вежливо напомнить сегодня",
                     )
                 )
                 if data.digest_action_templates_enabled:
@@ -931,8 +930,8 @@ def _build_digest_text(data: DigestData, locale: str = DEFAULT_LOCALE) -> str:
         lines.append(
             _locale_text(
                 locale,
-                en=f"{_CHART_EMOJI} <b>BEHAVIORAL METRICS ({data.behavior_metrics_window_days} days)</b>",
-                ru=f"{_CHART_EMOJI} <b>ПОВЕДЕНЧЕСКИЕ МЕТРИКИ ({data.behavior_metrics_window_days} дней)</b>",
+                en=f"<b>BEHAVIORAL METRICS ({data.behavior_metrics_window_days} days)</b>",
+                ru=f"<b>ПОВЕДЕНЧЕСКИЕ МЕТРИКИ ({data.behavior_metrics_window_days} дней)</b>",
             )
         )
         surprise_rate = metrics.get("surprise_rate")

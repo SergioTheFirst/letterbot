@@ -450,7 +450,7 @@ def _render_support_footer(config: SupportTelegramConfig) -> str:
     resolved_url = config.url.strip()
     if "{url}" in message and resolved_url:
         message = message.replace("{url}", resolved_url)
-    return f"💛 {message}".strip()
+    return message.strip()
 
 
 def _resolve_weekly_support_footer(
