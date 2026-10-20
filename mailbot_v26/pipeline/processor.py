@@ -7367,7 +7367,10 @@ def _record_analytics(
                 chat_id=telegram_chat_id,
                 account_email=account_email,
             )
+        # message_id is the Storage emails.id of this email (start.py passes
+        # ctx.email_id): update that row, never insert a second one (B24).
         email_row_id = knowledge_db.save_email(
+            storage_email_id=message_id,
             account_email=account_email,
             from_email=from_email,
             subject=subject,

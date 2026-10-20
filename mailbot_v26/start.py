@@ -2474,6 +2474,13 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             print(f"[ERROR] Storage initialization error: {exc}")
             time.sleep(10)
             return
+        # On a new database Storage has just recreated the empty emails table
+        # with its own columns: add the KnowledgeDB ones (priority, summaries)
+        # back before the first email is saved (B24).
+        try:
+            processor_module.knowledge_db.ensure_schema()
+        except Exception:
+            logger.exception("knowledge_db_schema_refresh_failed")
 
         try:
             run_self_check()

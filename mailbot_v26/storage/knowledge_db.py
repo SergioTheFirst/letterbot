@@ -42,6 +42,16 @@ class KnowledgeDB:
         self._write_lock = threading.Lock()
         self._init_db()
 
+    def ensure_schema(self) -> None:
+        """Re-apply this schema (idempotent).
+
+        The worker runs it after Storage init: on a new database Storage
+        recreates the empty emails table with its own columns only, which
+        drops priority, action_line, body_summary and the other columns
+        added here (B24).
+        """
+        self._init_db()
+
     def _init_db(self) -> None:
         schema_sql = self._read_sql_script("schema.sql")
         views_sql = self._read_sql_script("views.sql")
@@ -118,6 +128,12 @@ class KnowledgeDB:
         if not text:
             return ""
         return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+
+    @staticmethod
+    def _emails_have_uid(conn: sqlite3.Connection) -> bool:
+        """True for Storage's emails table, whose rows ingest creates."""
+        columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(emails);")}
+        return "uid" in columns
 
     def _ensure_optional_columns(self, conn: sqlite3.Connection) -> None:
         try:
@@ -327,7 +343,10 @@ class KnowledgeDB:
 
                 raw_body_hash = self._hash_text(raw_body)
 
-                if storage_email_id is not None:
+                # A legacy KnowledgeDB file has no uid column: no Storage row
+                # exists there and the id could name another email, so it
+                # INSERTs as before (B24).
+                if storage_email_id is not None and self._emails_have_uid(conn):
                     # UPDATE the existing row that Storage already created —
                     # this keeps the Storage id stable so Telegram button callbacks
                     # (which carry that id) resolve correctly.
@@ -390,6 +409,14 @@ class KnowledgeDB:
                             storage_email_id,
                         ),
                     )
+                    if cur.rowcount < 1:
+                        # Storage's row is gone; an INSERT would fail on
+                        # uid NOT NULL, so nothing is saved for this email.
+                        logger.error(
+                            "knowledge_email_row_missing email_id=%s",
+                            storage_email_id,
+                        )
+                        return None
                     email_id = storage_email_id
                 else:
                     cur.execute(
