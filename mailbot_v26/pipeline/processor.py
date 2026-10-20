@@ -7,15 +7,17 @@ import os
 import hashlib
 import re
 import sqlite3
+import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from functools import lru_cache
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from mailbot_v26.actions.auto_action_engine import AutoActionEngine
 from mailbot_v26.budgets.consumer import BudgetConsumer
@@ -568,6 +570,41 @@ def _locale_text(locale: str, *, en: str, ru: str) -> str:
     return en if str(locale or "").strip().casefold().startswith("en") else ru
 
 
+# Module globals configure_processor_db_path() rebinds (offline_processor_db
+# restores exactly these); keep in sync with its `global` statements.
+_DB_BOUND_GLOBALS = (
+    "DB_PATH",
+    "_PROCESSOR_DB_CONFIGURED",
+    "knowledge_db",
+    "analytics",
+    "decision_trace_writer",
+    "trust_snapshot_writer",
+    "relationship_health_snapshot_writer",
+    "context_store",
+    "event_emitter",
+    "contract_event_emitter",
+    "shadow_priority_engine",
+    "priority_engine_v2",
+    "shadow_action_engine",
+    "auto_priority_gates",
+    "auto_priority_breaker",
+    "auto_priority_gate_state_store",
+    "auto_priority_quality_gate",
+    "runtime_override_store",
+    "metrics_aggregator",
+    "system_snapshotter",
+    "processing_span_recorder",
+    "trust_score_calculator",
+    "relationship_health_calculator",
+    "relationship_anomaly_detector",
+    "temporal_reasoning_engine",
+    "auto_priority_engine",
+    "notification_alert_store",
+    "budget_gate",
+    "budget_consumer",
+)
+
+
 def configure_processor_db_path(db_path: Path) -> None:
     """Point every database-backed singleton at ``db_path`` and open it now."""
     global DB_PATH, _PROCESSOR_DB_CONFIGURED
@@ -636,6 +673,27 @@ def configure_processor_db_path(db_path: Path) -> None:
     )
     budget_consumer = BudgetConsumer(budget_gate)
     _PROCESSOR_DB_CONFIGURED = True
+
+
+@contextmanager
+def offline_processor_db() -> Iterator[Path]:
+    """Point the singletons at a throwaway database, restoring them on exit.
+
+    Offline tools (golden-corpus evaluator, dry run) must never read or write the
+    user's database: its runtime overrides (e.g. ui_locale) would change their
+    output, and a CWD-relative default would create stray database files.
+    """
+    saved = {name: globals()[name] for name in _DB_BOUND_GLOBALS}
+    with tempfile.TemporaryDirectory(prefix="letterbot-offline-") as tmp_dir:
+        offline_path = Path(tmp_dir) / "offline.sqlite"
+        try:
+            configure_processor_db_path(offline_path)
+            logger.info("processor_offline_db_configured", db_path=str(offline_path))
+            yield offline_path
+        finally:
+            globals().update(saved)
+            with _DB_SINGLETONS_LOCK:
+                _DB_SINGLETONS.pop(offline_path, None)
 
 
 @lru_cache(maxsize=1)
