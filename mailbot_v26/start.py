@@ -818,6 +818,34 @@ def _known_uid_probe(
     return lambda uid: storage.find_email_id(normalized_account_email, uid) is not None
 
 
+def _retire_previous_uid_epoch(
+    *, storage: Storage | None, imap: object, login: str
+) -> int:
+    """After a UIDVALIDITY change, detach stored rows of older epochs from
+    their UIDs before the poll persists anything (WP2c, F6): the new epoch
+    reuses UIDs. Returns the number of rows retired. A storage error
+    propagates, so the poll fails and the cursor stays (retried next poll).
+    """
+    if storage is None or not getattr(imap, "last_uidvalidity_changed", False):
+        return 0
+    # getattr: test doubles of ResilientIMAP lack it (F10).
+    uidvalidity = getattr(imap, "current_uidvalidity", None)
+    if uidvalidity is None:
+        logger.warning(
+            "imap_uid_epoch_retire_skipped account=%s reason=uidvalidity_unknown",
+            login,
+        )
+        return 0
+    retired = storage.retire_uid_epoch(normalize_login(login), int(uidvalidity))
+    logger.warning(
+        "imap_uid_epoch_retired account=%s uidvalidity=%s rows=%s",
+        login,
+        uidvalidity,
+        retired,
+    )
+    return retired
+
+
 def _dead_letter_alert_text(
     *, locale: str, masked_login: str, count: int, context_count: int = 0
 ) -> str:
@@ -2496,6 +2524,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             new_messages = imap.fetch_new_messages(
                                 is_known_uid=_known_uid_probe(storage, account.login)
                             )
+                            retired_rows = _retire_previous_uid_epoch(
+                                storage=storage, imap=imap, login=login
+                            )
                             digest_logger.info(
                                 "imap_resync_state",
                                 account_id=account.account_id,
@@ -2545,6 +2576,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                         "bootstrap_enabled": bool(
                                             imap.last_bootstrap_active
                                         ),
+                                        "retired_rows": retired_rows,
                                     },
                                 )
                             digest_logger.info(

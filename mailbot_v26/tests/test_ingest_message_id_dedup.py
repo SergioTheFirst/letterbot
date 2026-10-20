@@ -266,3 +266,53 @@ def test_open_normalizes_raw_message_ids_and_indexes_them(tmp_path: Path) -> Non
         (LOGIN, "<folded@example.com>"),
     ).fetchall()
     assert any("idx_emails_account_message_id" in str(step) for step in plan)
+
+
+# ---- storage: retire the old UID epoch (F6) ----
+
+
+def test_retire_uid_epoch_detaches_rows_of_other_epochs(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    old, _ = _store(storage, 1, "<a@x>", uidvalidity=OLD_EPOCH)
+    legacy, _ = _store(storage, 2, "<b@x>", uidvalidity=None)
+    current, _ = _store(storage, 3, "<c@x>", uidvalidity=NEW_EPOCH)
+    other, _ = _store(storage, 1, "<a@x>", account_email="other@example.com")
+
+    assert storage.retire_uid_epoch(LOGIN, NEW_EPOCH) == 2
+
+    assert _row(storage, old)[0] == -old
+    assert _row(storage, legacy)[0] == -legacy
+    assert _row(storage, current)[0] == 3
+    assert _row(storage, other)[0] == 1
+    # rows, Message-IDs and queue rows stay
+    assert _row(storage, old)[3] == "<a@x>"
+    assert _queued(storage, old) == ["PARSE"]
+    assert storage.retire_uid_epoch(LOGIN, NEW_EPOCH) == 0
+    # the new epoch's UID 1 is a new message, not the old row
+    assert storage.find_email_id(LOGIN, 1) is None
+    new_id, created = _store(storage, 1, "<new@x>", uidvalidity=NEW_EPOCH)
+    assert created
+    assert new_id != old
+
+
+def test_uidvalidity_change_keeps_new_mail_on_a_reused_uid(
+    monkeypatch, tmp_path: Path, caplog
+) -> None:
+    # F6: the old row at UID 1 matched the new epoch's UID 1, so the new
+    # message was skipped as a duplicate and never notified.
+    with caplog.at_level(logging.INFO):
+        config, sent = _run_resync_poll(
+            monkeypatch,
+            tmp_path,
+            notified={1: "<old1@example.com>"},
+            new_epoch={1: "<new1@example.com>"},
+        )
+
+    assert _pending_sends(config.storage.db_path) == [(1, "<new1@example.com>")]
+    assert sent == []
+    assert [event["retired_rows"] for event in _uidvalidity_change_events(
+        config.storage.db_path
+    )] == [1]
+    retired = [r.getMessage() for r in caplog.records if "imap_uid_epoch_retired" in r.getMessage()]
+    assert len(retired) == 1
+    assert "rows=1" in retired[0]

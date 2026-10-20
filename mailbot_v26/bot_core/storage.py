@@ -656,5 +656,25 @@ class Storage:
             logger.info("emails_message_id_normalized rows=%d", len(rows))
         return len(rows)
 
+    def retire_uid_epoch(self, account_email: str, uidvalidity: int) -> int:
+        """Detach the account's rows of other UIDVALIDITY epochs from their UIDs.
+
+        A new epoch reuses UIDs, so an old row must not match a new message
+        by (account_email, uid) (F6). Its uid becomes -id (unique, never a
+        server UID); the row, its Message-ID and queue rows stay. Rows stored
+        before the uidvalidity column (NULL) are retired too. Irreversible.
+        Returns the number of rows retired.
+        """
+        with self.conn:
+            cursor = self.conn.execute(
+                """
+                UPDATE emails SET uid = -id
+                WHERE account_email = ? AND uid > 0
+                  AND (uidvalidity IS NULL OR uidvalidity <> ?);
+                """,
+                (account_email, int(uidvalidity)),
+            )
+        return int(cursor.rowcount)
+
 
 __all__ = ["Storage", "normalize_message_id"]
