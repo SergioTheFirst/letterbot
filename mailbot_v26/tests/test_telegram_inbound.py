@@ -24,6 +24,7 @@ from mailbot_v26.telegram.inbound import (
     _render_tier1_message,
     parse_callback_data,
     parse_command,
+    read_chat_digest_override,
     run_inbound_polling,
     set_inbound_locale,
 )
@@ -172,6 +173,7 @@ def _build_processor(
         allowed_chat_ids=frozenset({"chat"}),
         bot_token="token",
         locale=locale,
+        chat_account_emails={"chat": ("account@example.com",)},
     )
 
 
@@ -256,6 +258,39 @@ def test_lang_command_propagates_to_processor_module(
 
     assert processor_calls == ["en"]
     assert override_calls == [("ui_locale", "en")]
+
+
+def test_lang_command_reports_processor_locale_failure(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="test",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    def _broken_configure(_locale: str) -> None:
+        raise RuntimeError("locale store unavailable")
+
+    monkeypatch.setattr(
+        "mailbot_v26.pipeline.processor.configure_processor_locale",
+        _broken_configure,
+    )
+    caplog.set_level("ERROR")
+
+    processor.handle_update(
+        {"update_id": 1, "message": {"chat": {"id": "chat"}, "text": "/lang en"}}
+    )
+
+    assert processor.override_store.get_value("ui_locale") == "en"
+    assert "telegram_lang_processor_locale_failed" in caplog.text
+    assert "restart" in sent[-1]
 
 
 def test_parse_callback_data_priority() -> None:
@@ -585,9 +620,10 @@ def test_digest_toggle_command_updates_override(tmp_path: Path) -> None:
     processor = _build_processor(tmp_path, sent, gate_result)
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/digest on"})
-    overrides = processor.override_store.get_overrides()
 
-    assert overrides.digest_enabled is True
+    assert read_chat_digest_override(processor.override_store, "chat") is True
+    # B16: /digest is per chat; the legacy global key stays untouched.
+    assert processor.override_store.get_overrides().digest_enabled is None
     assert _norm(sent[-1]) == _norm("Дайджесты включены.")
 
 
@@ -830,7 +866,7 @@ def test_tasks_alias_and_limit(tmp_path: Path) -> None:
     processor.handle_message({"chat": {"id": "chat"}, "text": "/tasks"})
 
     output = sent[-1]
-    assert _norm(output).startswith("📌 <b>Обязательства:</b>")
+    assert _norm(output).startswith("<b>Обязательства:</b>")
     assert _norm(output).count("\n• ") == 7
 
 
@@ -1015,7 +1051,7 @@ def test_week_command_returns_compact_summary_with_empty_dataset(
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/week"})
 
-    assert _norm("📊 LetterBot.ru · неделя") in _norm(sent[-1])
+    assert _norm("LetterBot.ru · неделя") in _norm(sent[-1])
     assert _norm("Исправления: 0") in _norm(sent[-1])
     assert _norm("Доля сюрпризов: н/д") in _norm(sent[-1])
     assert _norm("Переходы: нет данных") in _norm(sent[-1])
@@ -1069,7 +1105,7 @@ def test_week_command_returns_compact_summary_with_data(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "week"})
 
-    assert _norm("📊 LetterBot.ru · неделя") in _norm(sent[-1])
+    assert _norm("LetterBot.ru · неделя") in _norm(sent[-1])
     assert _norm("Исправления: 1 · Точность: 100%") in _norm(sent[-1])
     assert _norm("Доля сюрпризов: 0%") in _norm(sent[-1])
     assert _norm("Скорость проверки: н/д") in _norm(sent[-1])
@@ -1102,7 +1138,7 @@ def test_stats_command_returns_human_friendly_summary(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
 
-    assert _norm("📈 Качество автоприоритета") in _norm(sent[-1])
+    assert _norm("Качество автоприоритета") in _norm(sent[-1])
     assert _norm("Исправления: 1") in _norm(sent[-1])
     assert _norm("Доля сюрпризов:") in _norm(sent[-1])
     assert _norm("Скорость проверки: н/д") in _norm(sent[-1])
@@ -1138,11 +1174,12 @@ def test_stats_command_handles_analytics_failures_without_crash(
     processor.handle_message({"chat": {"id": "chat"}, "text": "/stats"})
 
     normalized = _norm(sent[-1])
-    assert "📈 Качество автоприоритета" in normalized
+    assert "Качество автоприоритета" in normalized
     assert "Исправления: 0" in normalized
     assert "Доля сюрпризов: н/д" in normalized
     assert "Переходы: нет данных" in normalized
-    assert "Пока данных мало · будьте осторожны." in normalized
+    # The chat now has a configured account, so the failing analytics path runs.
+    assert "Автоприоритету можно доверять: осторожно, мало данных" in normalized
 
 
 def test_support_command_disabled_returns_honest_message(tmp_path: Path) -> None:
@@ -1327,7 +1364,7 @@ def test_status_without_insider_badge_by_default(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
-    assert _norm("🔹 LetterBot.ru Insider since:") not in _norm(sent[-1])
+    assert _norm("LetterBot.ru Insider since:") not in _norm(sent[-1])
     assert f"Версия: {__version__}" in sent[-1]
 
 
@@ -1347,7 +1384,7 @@ def test_status_shows_insider_badge_when_set(tmp_path: Path) -> None:
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
 
-    assert _norm("🔹 LetterBot.ru Insider since: 2026-02") in _norm(sent[-1])
+    assert _norm("LetterBot.ru Insider since: 2026-02") in _norm(sent[-1])
 
 
 def test_runtime_override_store_insider_roundtrip(tmp_path: Path) -> None:

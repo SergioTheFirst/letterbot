@@ -125,7 +125,7 @@ def test_tg_payload_with_attachments(monkeypatch) -> None:
     assert payload.priority == "🔴"
     telegram_text = payload.html_text
     assert (
-        telegram_text.startswith("📩 Письмо получено") or "Вложения: 4" in telegram_text
+        telegram_text.startswith("📧 Письмо получено") or "Вложения: 4" in telegram_text
     )
 
 
@@ -289,7 +289,7 @@ def test_attachment_visibility(monkeypatch) -> None:
     )
 
     telegram_text = sent["payload"].html_text
-    assert telegram_text.startswith("📩 Письмо получено") or (
+    assert telegram_text.startswith("📧 Письмо получено") or (
         "📎" in telegram_text and "report.pdf" in telegram_text
     )
     assert "Manual Review" not in telegram_text

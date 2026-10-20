@@ -95,6 +95,7 @@ from mailbot_v26.telegram import (
     run_inbound_polling,
 )
 from mailbot_v26.telegram.decision_trace_ui import build_email_actions_keyboard
+from mailbot_v26.telegram.inbound import build_chat_account_scopes
 from mailbot_v26.storage.self_check import run_self_check
 from mailbot_v26.system.instance_lock import (
     InstanceLock,
@@ -2169,13 +2170,30 @@ def _process_due_snoozes_guarded(*, storage: Storage, config: BotConfig) -> None
         logger.exception("snooze_processing_failed")
 
 
+def _snooze_account(
+    storage: Storage, config: BotConfig, email_id: int
+) -> AccountConfig | None:
+    """The configured account that owns the email, if it has a chat (B16)."""
+    account_email = storage.get_email_account(email_id)
+    for account in config.accounts:
+        if account.telegram_chat_id and logins_match(account.login, account_email):
+            return account
+    return None
+
+
+def _snooze_retry_at(now: datetime, attempts: int) -> tuple[int, str]:
+    next_attempts = attempts + 1
+    backoff_seconds = min(3600, 60 * (2 ** min(next_attempts, 5)))
+    next_dt = now.timestamp() + backoff_seconds
+    return next_attempts, datetime.fromtimestamp(next_dt, tz=timezone.utc).isoformat()
+
+
 def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
     now = datetime.now(timezone.utc)
     due_items = storage.list_due_snoozes(now_iso=now.isoformat(), limit=20)
     if not due_items:
         return
-    account = config.accounts[0] if config.accounts else None
-    if not account:
+    if not config.accounts:
         return
     ui_locale = processor_module._resolve_outbound_ui_locale()
 
@@ -2184,6 +2202,23 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
         email_id = int(item["email_id"])
         deliver_at = str(item["deliver_at_utc"])
         attempts = int(item.get("attempts") or 0)
+        account = _snooze_account(storage, config, email_id)
+        if account is None:
+            # Never fall back to another account's chat: keep it pending.
+            next_attempts, next_iso = _snooze_retry_at(now, attempts)
+            logger.warning(
+                "snooze_account_unresolved snooze_id=%s email_id=%s attempts=%s",
+                snooze_id,
+                email_id,
+                next_attempts,
+            )
+            storage.reschedule_snooze_retry(
+                snooze_id=snooze_id,
+                next_deliver_at_utc=next_iso,
+                attempts=next_attempts,
+                error="snooze account not configured",
+            )
+            continue
         reminder_text = _build_snooze_return_text(
             storage,
             email_id=email_id,
@@ -2208,7 +2243,7 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
             continue
         payload = TelegramPayload(
             html_text=telegram_safe(
-                f"{'📌 Reminder' if str(ui_locale).startswith('en') else '📌 Напоминание'}\n\n{reminder_text}"
+                f"{'⏰ Reminder' if str(ui_locale).startswith('en') else '⏰ Напоминание'}\n\n{reminder_text}"
             ),
             priority="🔵",
             metadata={
@@ -2238,10 +2273,7 @@ def _process_due_snoozes(*, storage: Storage, config: BotConfig) -> None:
             continue
         if dedup_state == "reserved":
             storage.release_telegram_delivery(delivery_key=delivery_key)
-        next_attempts = attempts + 1
-        backoff_seconds = min(3600, 60 * (2 ** min(next_attempts, 5)))
-        next_dt = now.timestamp() + backoff_seconds
-        next_iso = datetime.fromtimestamp(next_dt, tz=timezone.utc).isoformat()
+        next_attempts, next_iso = _snooze_retry_at(now, attempts)
         storage.reschedule_snooze_retry(
             snooze_id=snooze_id,
             next_deliver_at_utc=next_iso,
@@ -2497,6 +2529,10 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                 bot_token=current_config.keys.telegram_bot_token,
                 locale=processor_module._UI_LOCALE,
                 show_decision_trace=load_telegram_ui_config().show_decision_trace,
+                chat_account_emails=build_chat_account_scopes(
+                    current_config.accounts,
+                    admin_chat_id=current_config.general.admin_chat_id,
+                ),
             )
             return client, processor, frozenset(allowed_ids)
 

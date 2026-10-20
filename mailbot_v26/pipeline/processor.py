@@ -2975,9 +2975,9 @@ def _build_progressive_telegram_payload(
     locale = _resolve_outbound_ui_locale()
     return TelegramPayload(
         html_text=_normalize_mojibake_text(
-            "📩 Email received\nProcessing attachments…"
+            "📧 Email received\nProcessing attachments…"
             if str(locale).startswith("en")
-            else "📩 Письмо получено\nОбрабатываю вложения…"
+            else "📧 Письмо получено\nОбрабатываю вложения…"
         ),
         priority=priority,
         metadata=metadata,
@@ -5218,7 +5218,7 @@ def _build_signal_hints(insights: list[Insight]) -> list[str]:
             or "без ответа" in normalized_expl
         ) and "deadlock" not in seen_types:
             if explanation:
-                hints.append(f"🔁 {explanation}")
+                hints.append(f"💬 {explanation}")
                 seen_types.add("deadlock")
                 continue
     return hints
@@ -5453,7 +5453,7 @@ def build_telegram_payload(
         if insights_section:
             telegram_text = f"{telegram_text}{escape_tg_html(insights_section)}"
     if context.preview_hint:
-        telegram_text = f"{telegram_text}\n💡 {escape_tg_html(_sanitize_preview_line(context.preview_hint))}"
+        telegram_text = f"{telegram_text}\n→ {escape_tg_html(_sanitize_preview_line(context.preview_hint))}"
     telegram_text = tg_renderer.finalize_telegram_message(
         text=telegram_text,
         priority=context.priority,

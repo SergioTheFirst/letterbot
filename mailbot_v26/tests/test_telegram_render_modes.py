@@ -122,7 +122,7 @@ def test_attachments_visible_without_llm(monkeypatch) -> None:
     )
 
     telegram_text = sent["payload"].html_text
-    assert telegram_text.startswith("📩 Письмо получено") or (
+    assert telegram_text.startswith("📧 Письмо получено") or (
         "📎" in telegram_text and "one.doc" in telegram_text
     )
 
@@ -160,12 +160,12 @@ def test_safe_fallback_still_shows_attachments(monkeypatch) -> None:
 
     telegram_text = sent["payload"].html_text
     assert (
-        telegram_text.startswith("📩 Email received")
+        telegram_text.startswith("📧 Email received")
         or telegram_text.startswith("🔴 from sender@example.com:")
         or telegram_text.startswith("Email received")
     )
     assert (
-        telegram_text.startswith("📩 Email received")
+        telegram_text.startswith("📧 Email received")
         or "📎" in telegram_text
         or "Attachments:" in telegram_text
     )

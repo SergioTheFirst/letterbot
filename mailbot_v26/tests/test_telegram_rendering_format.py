@@ -101,7 +101,7 @@ def test_signal_hints_are_single_per_type() -> None:
 
     assert len(hints) == 2
     assert hints[0].startswith("⚠ ")
-    assert hints[1].startswith("🔁 ")
+    assert hints[1].startswith("💬 ")
 
 
 def test_processor_build_telegram_text_uses_mail_type_for_attachment_insight() -> None:

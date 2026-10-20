@@ -342,7 +342,7 @@ def test_weekly_digest_attention_block_added_when_flag_on(
 
     assert sent, "digest should be delivered"
     html_text = sent[0]["payload"].html_text
-    assert "⏱ Where attention went" in html_text
+    assert "Where attention went" in html_text
     assert "alice@example.com" in html_text
     assert "bob@example.com" in html_text
 
@@ -413,7 +413,7 @@ def test_weekly_digest_attention_block_skipped_on_small_sample(
 
     assert sent, "digest should still be delivered"
     html_text = sent[0]["payload"].html_text
-    assert "⏱ Where attention went" not in html_text
+    assert "Where attention went" not in html_text
     assert "Quiet week" in html_text
 
     with sqlite3.connect(events_path) as conn:
@@ -513,7 +513,7 @@ def test_shareable_weekly_card_format() -> None:
 
     lines = card.splitlines()
     assert len(lines) <= 6
-    assert lines[0] == "📊 My Mail Week"
+    assert lines[0] == "My Mail Week"
     assert "47 emails processed" in card
     assert "3 invoices detected (387000 ₽)" in card
     assert "2 contracts waiting" in card
@@ -574,13 +574,13 @@ def test_weekly_digest_contains_shareable_card(monkeypatch, tmp_path) -> None:
     payload = sent[0]["payload"]
     assert "Powered by LetterBot.ru" in payload.html_text
     assert "Share this report" in payload.html_text
-    assert "📊 My Mail Week" in payload.html_text
+    assert "My Mail Week" in payload.html_text
     assert payload.metadata["shareable_weekly_qr_url"] == "https://letterbot.ru"
     assert payload.reply_markup == {
         "inline_keyboard": [
             [
                 {
-                    "text": "📤 Share report",
+                    "text": "Share report",
                     "switch_inline_query_current_chat": payload.metadata[
                         "shareable_weekly_card"
                     ],

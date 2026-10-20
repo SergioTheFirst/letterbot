@@ -263,8 +263,8 @@ class AccountRuntimeHealthManager:
         retry_in = self._format_retry(state.next_retry_at_utc, now_utc)
         lines = [
             self._ui_text(
-                en=f"🚨 Mailbox {masked_login} is temporarily unavailable",
-                ru=f"🚨 Почта {masked_login} временно недоступна",
+                en=f"⚠️ Mailbox {masked_login} is temporarily unavailable",
+                ru=f"⚠️ Почта {masked_login} временно недоступна",
             ),
             f"{self._ui_text(en='Reason', ru='Причина')}: {diagnosis}",
             f"{self._ui_text(en='Next attempt', ru='Следующая попытка')}: {retry_in}",

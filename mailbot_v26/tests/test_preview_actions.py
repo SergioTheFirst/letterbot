@@ -118,25 +118,25 @@ def _process(monkeypatch, *, message_id: int = 1) -> str:
 def test_preview_hidden_when_corrections_zero(monkeypatch) -> None:
     payload, calls = _setup(monkeypatch, enabled=True, corrections=0)
     _process(monkeypatch, message_id=10)
-    assert "💡" not in payload["payload"].html_text
+    assert "→ Оплатить счет" not in payload["payload"].html_text
 
 
 def test_preview_hidden_when_corrections_below_threshold(monkeypatch) -> None:
     payload, _ = _setup(monkeypatch, enabled=True, corrections=9)
     _process(monkeypatch, message_id=11)
-    assert "💡" not in payload["payload"].html_text
+    assert "→ Оплатить счет" not in payload["payload"].html_text
 
 
 def test_preview_shown_inline_when_threshold_met(monkeypatch) -> None:
     payload, calls = _setup(monkeypatch, enabled=True, corrections=10)
     _process(monkeypatch, message_id=12)
-    assert "💡 Оплатить счет" in payload["payload"].html_text
+    assert "→ Оплатить счет" in payload["payload"].html_text
 
 
 def test_preview_disabled_flag(monkeypatch) -> None:
     payload, _ = _setup(monkeypatch, enabled=False, corrections=999)
     _process(monkeypatch, message_id=13)
-    assert "💡" not in payload["payload"].html_text
+    assert "→ Оплатить счет" not in payload["payload"].html_text
 
 
 def test_preview_corrections_cache_uses_single_query(monkeypatch) -> None:

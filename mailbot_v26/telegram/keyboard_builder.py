@@ -35,19 +35,19 @@ def _priority_row(
     del locale
     return [
         _safe_button(
-            text="🟦▌Low",
+            text="🔵 Low",
             prefix=PRIORITY_PREFIX,
             action="lo",
             message_key=message_key,
         ),
         _safe_button(
-            text="🟨▌Medium",
+            text="🟡 Medium",
             prefix=PRIORITY_PREFIX,
             action="med",
             message_key=message_key,
         ),
         _safe_button(
-            text="🟥▌High",
+            text="🔴 High",
             prefix=PRIORITY_PREFIX,
             action="hi",
             message_key=message_key,
@@ -76,15 +76,15 @@ def _feedback_rows(
     if doc_kind == "invoice":
         return [[
             _safe_button(
-                text="✓ Paid" if _is_english_locale(locale) else "✓ Оплачено",
+                text="Paid" if _is_english_locale(locale) else "Оплачено",
                 prefix=FEEDBACK_PREFIX,
                 action="paid",
                 message_key=message_key,
             ),
             _safe_button(
-                text="✗ Not an invoice"
+                text="Not an invoice"
                 if _is_english_locale(locale)
-                else "✗ Не счёт",
+                else "Не счёт",
                 prefix=FEEDBACK_PREFIX,
                 action="not_invoice",
                 message_key=message_key,
@@ -99,17 +99,17 @@ def _feedback_rows(
     if doc_kind == "payroll":
         return [[
             _safe_button(
-                text="✓ Acknowledged"
+                text="Acknowledged"
                 if _is_english_locale(locale)
-                else "✓ Принято к сведению",
+                else "Принято к сведению",
                 prefix=FEEDBACK_PREFIX,
                 action="correct",
                 message_key=message_key,
             ),
             _safe_button(
-                text="✗ Wrong classification"
+                text="Wrong classification"
                 if _is_english_locale(locale)
-                else "✗ Неверная классификация",
+                else "Неверная классификация",
                 prefix=FEEDBACK_PREFIX,
                 action="not_payroll",
                 message_key=message_key,
@@ -118,15 +118,15 @@ def _feedback_rows(
     if doc_kind == "contract":
         return [[
             _safe_button(
-                text="✓ Review" if _is_english_locale(locale) else "✓ На review",
+                text="Review" if _is_english_locale(locale) else "На review",
                 prefix=FEEDBACK_PREFIX,
                 action="correct",
                 message_key=message_key,
             ),
             _safe_button(
-                text="✗ Not a contract"
+                text="Not a contract"
                 if _is_english_locale(locale)
-                else "✗ Не контракт",
+                else "Не контракт",
                 prefix=FEEDBACK_PREFIX,
                 action="not_contract",
                 message_key=message_key,
@@ -135,9 +135,9 @@ def _feedback_rows(
     if doc_kind == "reconciliation":
         return [[
             _safe_button(
-                text="✓ Acknowledged"
+                text="Acknowledged"
                 if _is_english_locale(locale)
-                else "✓ Принято к сведению",
+                else "Принято к сведению",
                 prefix=FEEDBACK_PREFIX,
                 action="correct",
                 message_key=message_key,
