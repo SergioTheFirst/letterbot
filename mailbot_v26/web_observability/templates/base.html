@@ -64,12 +64,12 @@
         </nav>
         <form method="get" action="{{ request.path }}" class="dashboard-vars">
           <div class="var-field">
-            <label for="account_emails">Accounts</label>
-            <input id="account_emails" name="account_emails" type="text" value="{{ vars.account_emails|join(',') if vars else '' }}" placeholder="comma-separated">
+            <label for="scope-account-emails">Accounts</label>
+            <input id="scope-account-emails" name="account_emails" type="text" value="{{ vars.account_emails|join(',') if vars else '' }}" placeholder="comma-separated">
           </div>
           <div class="var-field">
-            <label for="window_days">Window</label>
-            <select id="window_days" name="window_days">
+            <label for="scope-window-days">Window</label>
+            <select id="scope-window-days" name="window_days">
               {% set window_val = vars.window_days if vars else 7 %}
               {% for option in [7, 30, 90] %}
               <option value="{{ option }}" {% if option == window_val %}selected{% endif %}>{{ option }}d</option>
@@ -81,9 +81,9 @@
           </div>
           {% if not hide_limit %}
           <div class="var-field">
-            <label for="limit">Limit</label>
+            <label for="scope-limit">Limit</label>
             {% set limit_val = vars.limit if vars else 25 %}
-            <select id="limit" name="limit">
+            <select id="scope-limit" name="limit">
               {% for option in [10, 25, 50] %}
               <option value="{{ option }}" {% if option == limit_val %}selected{% endif %}>{{ option }}</option>
               {% endfor %}
@@ -95,8 +95,8 @@
           {% endif %}
           {% if pii_allowed %}
           <div class="var-field var-checkbox">
-            <label for="pii">PII</label>
-            <input id="pii" name="pii" type="checkbox" value="1" {% if vars and vars.pii %}checked{% endif %}>
+            <label for="scope-pii">PII</label>
+            <input id="scope-pii" name="pii" type="checkbox" value="1" {% if vars and vars.pii %}checked{% endif %}>
           </div>
           {% endif %}
           {% if lane is defined %}

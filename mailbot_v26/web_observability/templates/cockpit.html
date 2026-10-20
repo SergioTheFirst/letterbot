@@ -74,8 +74,8 @@
       </article>
       <article class="metric-card">
         <div class="metric-label">Latency p95</div>
-        <div class="metric-value" id="home-latency-p95">{{ latency.pipeline_p95 or 'NO DATA' }}</div>
-        <div class="metric-subtle">Trace coverage: <span id="home-ai-trace-coverage">{{ ai.trace_coverage or '0/0' }}</span></div>
+        <div class="metric-value" id="metric-latency-p95">{{ latency.pipeline_p95 or 'NO DATA' }}</div>
+        <div class="metric-subtle">Trace coverage: <span id="metric-ai-trace-coverage">{{ ai.trace_coverage or '0/0' }}</span></div>
       </article>
     </section>
 
@@ -421,6 +421,7 @@
         setText('home-latency-detail', displayValue(data.latency && data.latency.detail, 'No latency data yet for this scope.'));
         setText('home-latency-p50', displayValue(data.latency && data.latency.pipeline_p50, '—'));
         setText('home-latency-p95', displayValue(data.latency && data.latency.pipeline_p95, '—'));
+        setText('metric-latency-p95', displayValue(data.latency && data.latency.pipeline_p95, 'NO DATA'));
         setText('home-latency-llm-p90', displayValue(data.latency && data.latency.llm_p90, '—'));
         setText('home-latency-samples', displayValue(data.latency && data.latency.sample_count_display, '0 spans'));
         setText('home-latency-error-rate', displayValue(data.latency && data.latency.error_rate, '—'));
@@ -431,6 +432,7 @@
         setText('home-ai-calls', displayValue(data.ai && data.ai.llm_calls_today, 'unknown'));
         setText('home-ai-fallback', displayValue(data.ai && data.ai.llm_fallback_today, 'unknown'));
         setText('home-ai-trace-coverage', displayValue(data.ai && data.ai.trace_coverage, '0/0'));
+        setText('metric-ai-trace-coverage', displayValue(data.ai && data.ai.trace_coverage, '0/0'));
         renderList('preview-recent-events', data.recent_events, 'No recent events yet.', (item) => `<li>${escapeHtml(String(item.text || item.type || 'event'))}</li>`);
         renderList('home-health-components', data.health && data.health.components, 'No health evidence yet for this scope.', (item) => `<li><span class="badge ${escapeHtml(String(item.status_class || 'muted'))}">${escapeHtml(String(item.name || 'Component'))}: ${escapeHtml(String(item.status || 'UNKNOWN'))}</span>${item.detail ? ` ${escapeHtml(String(item.detail))}` : ''}</li>`);
         const aiItems = [];
