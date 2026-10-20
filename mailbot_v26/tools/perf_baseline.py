@@ -612,6 +612,7 @@ def _top_functions(profiler: cProfile.Profile, limit: int) -> list[dict[str, Any
 def _measure_golden(
     corpus_path: Path | None, runs: int, tracer: SqlTracer
 ) -> dict[str, Any]:
+    from mailbot_v26.pipeline import processor as pipeline_processor
     from mailbot_v26.tools import eval_golden_corpus as golden
 
     tracer.section = "golden_corpus"
@@ -625,17 +626,25 @@ def _measure_golden(
     load_ms = (time.perf_counter() - start) * 1000.0
     samples: list[float] = []
     failed_cases = 0
-    for _ in range(runs):
-        start = time.perf_counter()
-        summary = golden.evaluate_golden_corpus(cases)
-        samples.append((time.perf_counter() - start) * 1000.0)
-        failed_cases = summary.failed_cases
     profiler = cProfile.Profile()
-    profiler.enable()
-    try:
-        golden.evaluate_golden_corpus(cases)
-    finally:
-        profiler.disable()
+    # Like eval_golden_corpus.main: never read or write the configured database
+    # (a cwd-relative database.sqlite when run from the repo root) or its overrides.
+    with pipeline_processor.offline_processor_db():
+        try:
+            for _ in range(runs):
+                start = time.perf_counter()
+                summary = golden.evaluate_golden_corpus(cases)
+                samples.append((time.perf_counter() - start) * 1000.0)
+                failed_cases = summary.failed_cases
+            profiler.enable()
+            try:
+                golden.evaluate_golden_corpus(cases)
+            finally:
+                profiler.disable()
+        finally:
+            # The tracer holds every connection open; Windows cannot delete the
+            # offline database while one is. Earlier sections are done with theirs.
+            tracer.close_connections()
     return {
         "cases": len(cases),
         "failed_cases": failed_cases,

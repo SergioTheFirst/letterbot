@@ -312,3 +312,49 @@ def test_main_writes_privacy_safe_baseline_json(tmp_path: Path) -> None:
     for marker in (MARKER_ACCOUNT, MARKER_SENDER, MARKER_SUBJECT, MARKER_BODY):
         assert marker not in text
     assert list(work_root.iterdir()) == []
+
+
+def test_measure_golden_never_touches_the_configured_processor_db(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # HYG3: the golden-corpus section must run on the processor's throwaway
+    # database; the configured one (cwd-relative database.sqlite when the CLI
+    # runs from the repo root) and its runtime overrides stay out of it.
+    from mailbot_v26.pipeline import processor as pipeline_processor
+
+    configured_path = tmp_path / "configured.sqlite"
+    pipeline_processor.configure_processor_db_path(configured_path)
+    pipeline_processor.runtime_override_store.set_value("ui_locale", "xx-user")
+    real_evaluate = eval_golden_corpus.evaluate_golden_corpus
+    seen: list[tuple[Path, str | None]] = []
+
+    def _spy_evaluate(cases):
+        seen.append(
+            (
+                pipeline_processor.DB_PATH,
+                pipeline_processor.runtime_override_store.get_value("ui_locale"),
+            )
+        )
+        return real_evaluate(cases)
+
+    monkeypatch.setattr(eval_golden_corpus, "evaluate_golden_corpus", _spy_evaluate)
+    corpus_payload = json.loads(
+        Path(eval_golden_corpus.DEFAULT_CORPUS_PATH).read_text(encoding="utf-8")
+    )
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps(corpus_payload[:2]), encoding="utf-8")
+    tracer = perf_baseline.SqlTracer(tmp_path / "copy.sqlite")
+
+    # The tracer keeps every connection open, as during a real baseline run.
+    with tracer:
+        result = perf_baseline._measure_golden(corpus_path, 1, tracer)
+
+    assert result["cases"] == 2
+    assert result["failed_cases"] == 0
+    assert len(seen) == 2  # the timed run and the profile run
+    for db_path, ui_locale in seen:
+        assert db_path != configured_path
+        assert ui_locale is None
+        assert not db_path.parent.exists()  # the offline database is deleted
+    assert pipeline_processor.DB_PATH == configured_path
+    assert pipeline_processor.runtime_override_store.get_value("ui_locale") == "xx-user"
