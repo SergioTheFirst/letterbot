@@ -515,6 +515,15 @@ def _seed_unusual_senders(
     for index, sender in enumerate(senders):
         email_id = UNUSUAL_EMAIL_ID_BASE + index
         ts_utc = now.timestamp() - 120 - index
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO emails (id, account_email, from_email, subject,
+                                    received_at, action_line, body_summary)
+                VALUES (?, ?, ?, 'Invoice', ?, 'Check invoice', 'Short summary')
+                """,
+                (email_id, ACCOUNT, sender, now.isoformat()),
+            )
         _insert_event(
             db_path,
             event_type=EventType.EMAIL_RECEIVED,
@@ -567,3 +576,102 @@ def test_attention_api_hashes_unusual_sender_ids(tmp_path: Path) -> None:
     # Still one distinct id per sender, so it keeps working as a client-side id.
     assert len(set(entity_ids)) == len(entity_ids)
     assert _leaked_unusual_senders(response.get_data(as_text=True)) == []
+
+
+@pytest.mark.parametrize("allow_pii", [False, True], ids=["pii_off", "pii_on"])
+def test_no_scoped_route_shows_unusual_sender_shapes(
+    tmp_path: Path, allow_pii: bool
+) -> None:
+    db_path = _seed_scoped_db(tmp_path)
+    email_ids = _seed_unusual_senders(db_path)
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        allow_pii=allow_pii,
+        api_token=API_TOKEN,
+    )
+    paths = set(_scoped_crawl_paths(app))
+    for email_id in email_ids:
+        paths.update(
+            {
+                f"/email/{email_id}?{SCOPE_QUERY}&mode=engineer",
+                f"/api/archive/{email_id}/detail?{SCOPE_QUERY}",
+                f"/archive?{SCOPE_QUERY}&message_id={email_id}",
+            }
+        )
+
+    leaks: dict[str, list[str]] = {}
+    statuses: dict[str, int] = {}
+    with app.test_client() as client:
+        for path in sorted(paths):
+            target = _with_pii(path) if allow_pii else path
+            response = client.get(target, headers={"X-Api-Token": API_TOKEN})
+            statuses[path] = response.status_code
+            found = _leaked_unusual_senders(response.get_data(as_text=True))
+            if found:
+                leaks[path] = found
+
+    # The routes that show senders must really render (an error hides a leak).
+    for path in (
+        f"/?{SCOPE_QUERY}",
+        f"/api/dashboard?{SCOPE_QUERY}",
+        f"/archive?{SCOPE_QUERY}",
+        f"/api/archive?{SCOPE_QUERY}",
+        f"/api/archive/{email_ids[-1]}/detail?{SCOPE_QUERY}",
+        f"/email/{email_ids[-1]}?{SCOPE_QUERY}&mode=engineer",
+        f"/api/v1/intelligence/attention_economics?{SCOPE_QUERY}",
+    ):
+        assert statuses[path] == 200, path
+    assert leaks == {}
+
+
+def test_sender_keyed_issuers_show_masked_labels(tmp_path: Path) -> None:
+    # issuer_profile keys these two by the raw sender string: a generic mail
+    # domain with an IDN local part, and a sender that has no address at all.
+    db_path = tmp_path / "issuers.sqlite"
+    KnowledgeDB(db_path)
+    email_ids = _seed_unusual_senders(
+        db_path, senders=("иван@mail.ru", "Ivan Petrov Secret")
+    )
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    scope = {"account_emails": ACCOUNT}
+    with app.test_client() as client:
+        dashboard = client.get("/api/dashboard", query_string=scope).get_json()
+        archive = client.get("/api/archive", query_string=scope).get_json()
+        details = [
+            client.get(
+                f"/api/archive/{email_id}/detail", query_string=scope
+            ).get_json()
+            for email_id in email_ids
+        ]
+
+    expected = ["Sender hidden", "и…@mail.ru"]
+    issuers = dashboard["top_issuers"]
+    assert sorted(item["issuer_label"] for item in issuers) == expected
+    for item in issuers:
+        assert str(item["issuer_key"]).startswith("email-sha256:")
+    processed = dashboard["processed_table"]["rows"]
+    assert sorted(row["sender_display"] for row in processed) == expected
+    assert sorted(item["sender_display"] for item in archive["items"]) == expected
+    assert sorted(item["issuer_display"] for item in archive["items"]) == expected
+    assert [detail["issuer_display"] for detail in details] == [
+        "и…@mail.ru",
+        "Sender hidden",
+    ]
+
+
+def test_web_address_masking_covers_unusual_shapes() -> None:
+    from mailbot_v26.web_observability import app as web_app
+
+    for address in (sender for sender in UNUSUAL_SENDERS if "@" in sender):
+        local, _, domain = address.partition("@")
+        line = f"Reply to {address} today"
+        assert web_app._mask_emails_in_text(line) == (
+            f"Reply to {local[0]}…@{domain} today"
+        )
+        assert web_app._scrub_pii_line(line) == "Reply to [redacted] today"
+    # Labels without an address, or with only a handle, stay as they are.
+    for label in ("ООО Ромашка", "vendor.example", "Support (@support)"):
+        assert web_app._mask_emails_in_text(label) == label
+        assert web_app._scrub_pii_line(label) == label

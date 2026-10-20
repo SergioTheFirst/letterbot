@@ -115,7 +115,12 @@ COMMITMENT_STATUSES = {"open", "closed", "all"}
 EVENTS_GROUP_PAGE_SIZE = 20
 EVENT_FILTERS = {"all", "processing", "delivery", "health", "learning"}
 WEB_EMAIL_REDACTED_PREVIEW = "Summary hidden"
-WEB_EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# Any address-shaped token, not only ASCII dotted ones: IDN local parts and
+# hosts and dotless hosts (root@localhost) are masked too. Bounded by the RFC
+# 5321 local-part/domain limits so a long token cannot make matching quadratic.
+WEB_EMAIL_PATTERN = re.compile(
+    r"[^\s@<>()\[\]{},;:'\"]{1,64}@[^\s@<>()\[\]{},;:'\"]{1,255}"
+)
 LANE_KEYS = ("all", "critical", "commitments", "deferred", "failures", "learning")
 LANE_LABELS = {
     "all": "all",
@@ -1603,16 +1608,45 @@ def _hashed_email_key(key: str) -> str:
     return f"email-sha256:{digest}"
 
 
+def _is_sender_keyed_issuer(issuer_key: object) -> bool:
+    """True when issuer_profile keyed the issuer by the raw sender string.
+
+    It does ("email:<sender>") for generic mail domains and for a sender
+    without an address.
+    """
+    return str(issuer_key or "").strip().lower().startswith("email:")
+
+
+def _display_safe_issuer_label(issuer_key: object, issuer_label: object) -> str:
+    """Issuer label for the web that never shows the raw sender.
+
+    A sender-keyed issuer is labelled by the raw sender string itself, whatever
+    its shape (IDN, dotless host, display name only), so that label is masked
+    by construction: the masked address, or a neutral placeholder when there
+    is no address. Other labels (domain, tax id, company name) keep their text
+    with any embedded address masked.
+    """
+    if not _is_sender_keyed_issuer(issuer_key):
+        return _mask_emails_in_text(issuer_label)
+    label = str(issuer_label or "").strip()
+    if not label:
+        return ""
+    return _mask_email_address(label) or "Sender hidden"
+
+
 def _display_safe_issuer(item: Mapping[str, object]) -> dict[str, object]:
     """Web copy of a top-issuer profile without the raw sender address.
 
-    For generic mail domains issuer_profile keys and labels the issuer by the
-    full address; analytics keeps it for the Telegram digest, the web masks it.
+    For generic mail domains (or a sender without an address) issuer_profile
+    keys and labels the issuer by the raw sender; analytics keeps it for the
+    Telegram digest, the web hashes the key and masks the label.
     """
     safe = dict(item)
-    safe["issuer_label"] = _mask_emails_in_text(item.get("issuer_label"))
     issuer_key = str(item.get("issuer_key") or "")
-    if WEB_EMAIL_PATTERN.search(issuer_key):
+    safe["issuer_label"] = _display_safe_issuer_label(
+        issuer_key, item.get("issuer_label")
+    )
+    if _is_sender_keyed_issuer(issuer_key) or "@" in issuer_key:
         safe["issuer_key"] = _hashed_email_key(issuer_key)
     return safe
 
@@ -2474,7 +2508,12 @@ def _dashboard_processed_rows_view(
             or _parse_datetime_value(email_row.get("created_at"))
             or event_dt
         )
-        issuer_label = _clamp_text(_scrub_pii_line(payload.get("issuer_label") or ""), 64)
+        issuer_label = _clamp_text(
+            _display_safe_issuer_label(
+                payload.get("issuer_key"), payload.get("issuer_label")
+            ),
+            64,
+        )
         sender_display = issuer_label or "Sender hidden"
         priority_bucket = _archive_priority_bucket(
             payload.get("priority") or email_row.get("priority") or ""
@@ -6171,8 +6210,11 @@ def create_app(
             or received_payload.get("from_email")
             or ""
         ).strip()
-        # issuer_profile falls back to the full address for generic mail domains.
-        issuer_display = _mask_emails_in_text(interpretation_payload.get("issuer_label"))
+        # issuer_profile labels a sender-keyed issuer by the raw sender string.
+        issuer_display = _display_safe_issuer_label(
+            interpretation_payload.get("issuer_key"),
+            interpretation_payload.get("issuer_label"),
+        )
         sender_display = (
             issuer_display or _sanitize_sender_label(sender_email) or "Sender hidden"
         )
