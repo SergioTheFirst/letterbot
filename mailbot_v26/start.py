@@ -187,7 +187,8 @@ def _run_startup_preflight(config_dir: Path) -> tuple[bool, list[str], list[str]
         critical.append(f"Missing accounts.ini in {config_dir}")
         return False, critical, warnings
 
-    parser = configparser.ConfigParser()
+    # Values as written (no %-interpolation), like config_loader reads them.
+    parser = configparser.ConfigParser(interpolation=None)
     # utf-8-sig: Notepad's "UTF-8 with BOM" must parse like plain UTF-8.
     parser.read(accounts_path, encoding="utf-8-sig")
     imap_sections = [

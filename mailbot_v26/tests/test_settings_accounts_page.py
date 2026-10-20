@@ -307,7 +307,7 @@ def test_reading_the_status_changes_no_file(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("accounts", "expected"),
     [
-        (_accounts_ini(password="pa%ss" + PASSWORD_MARKER), "write %% instead"),
+        (_accounts_ini(password="pa%%ss" + PASSWORD_MARKER), "Letterbot reads % as written"),
         (_accounts_ini(password="пароль").encode("cp1251"), "Save accounts.ini as UTF-8"),
         ("password = x\n[work_mail]\n", "line 1"),
     ],

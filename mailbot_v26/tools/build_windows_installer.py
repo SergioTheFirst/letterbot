@@ -9,6 +9,7 @@ import subprocess
 import zipfile
 from pathlib import Path, PurePosixPath
 
+from mailbot_v26.config.ini_editor import is_secret_copy_name
 from mailbot_v26.tools.verify_dist import verify_dist_contract
 
 DEFAULT_DIST_DIR = Path("dist") / "Letterbot"
@@ -167,6 +168,7 @@ def payload_members(dist_dir: Path) -> tuple[list[str], list[str]]:
         if (
             name in _NEVER_SHIP_NAMES
             or name.endswith(_NEVER_SHIP_SUFFIXES)
+            or is_secret_copy_name(name)
             or (rel_path.parts and rel_path.parts[0] == "data")
         ):
             raise InstallerBuildError(f"runtime file must not be shipped: {rel}")

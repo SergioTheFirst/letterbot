@@ -3667,8 +3667,13 @@ def _validate_csrf_token() -> bool:
     expected = session.get("csrf_token")
     if not isinstance(expected, str) or not expected:
         return False
+    provided = request.form.get("csrf_token", "")
+    if not provided:
+        # Page scripts posting JSON (the Settings editor) send it as a header.
+        headers = getattr(request, "headers", None)
+        provided = headers.get("X-CSRF-Token", "") if headers is not None else ""
     # Bytes compare: hmac.compare_digest raises TypeError on non-ASCII str.
-    return _secret_matches(request.form.get("csrf_token", ""), expected)
+    return _secret_matches(provided, expected)
 
 
 def _text_response(body: str, status_code: int) -> Response:
@@ -3747,6 +3752,7 @@ def _local_smoke_bypass_allowed(app: Flask, remote_addr: str | None) -> bool:
 
 
 REMOTE_SESSION_MAX_AGE_SECONDS = 12 * 3600
+_SESSION_TAG_FALLBACK_KEY = secrets.token_bytes(32)
 # Fetched by page scripts or non-browser clients: answer 401, never a redirect.
 _REMOTE_AUTH_NO_REDIRECT_PREFIXES = ("/api/", "/partial/")
 _REMOTE_ACCESS_DISABLED_TEXT = (
@@ -3834,22 +3840,54 @@ def _remote_auth_configured(app: Flask) -> bool:
     return bool(_remote_password(app) or _remote_api_token(app))
 
 
+def _credential_tag(app: Flask) -> str:
+    """HMAC of the current network credentials under the app's secret key.
+
+    A login session keeps the tag of the credentials it signed in with: once
+    the dashboard password or API token changes (Settings page, or a restart
+    with another value), every older session stops working. Keyed, so the
+    cookie holds nothing that tests password guesses without the key.
+    """
+    key = app.secret_key
+    key_bytes = key if isinstance(key, bytes) else str(key or "").encode("utf-8")
+    if not key_bytes:
+        # create_app always sets a key; never put an unkeyed password hash in a cookie.
+        key_bytes = _SESSION_TAG_FALLBACK_KEY
+    message = "\x00".join(
+        ("letterbot-session-v1", _remote_password(app), _remote_api_token(app))
+    )
+    return hmac.new(key_bytes, message.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _stamp_session_credentials(app: Flask) -> None:
+    """Bind the caller's session to the credentials as they are now."""
+    session["credential_tag"] = _credential_tag(app)
+
+
+def _session_authenticated(app: Flask) -> bool:
+    """True for a fresh login session made with the current credentials."""
+    authenticated_at = session.get("authenticated_at")
+    if session.get("authenticated") is not True or not isinstance(
+        authenticated_at, (int, float)
+    ):
+        return False
+    max_age = float(
+        app.config.get(
+            "WEB_UI_REMOTE_SESSION_MAX_AGE_SECONDS", REMOTE_SESSION_MAX_AGE_SECONDS
+        )
+    )
+    if time.time() - float(authenticated_at) > max_age:
+        return False
+    return _secret_matches(session.get("credential_tag"), _credential_tag(app))
+
+
 def _ensure_authenticated(app: Flask) -> bool:
     """True when the request carries a fresh login session or the API token.
 
     Only non-loopback requests are asked for this; loopback stays login-free.
     """
-    authenticated_at = session.get("authenticated_at")
-    if session.get("authenticated") is True and isinstance(
-        authenticated_at, (int, float)
-    ):
-        max_age = float(
-            app.config.get(
-                "WEB_UI_REMOTE_SESSION_MAX_AGE_SECONDS", REMOTE_SESSION_MAX_AGE_SECONDS
-            )
-        )
-        if time.time() - float(authenticated_at) <= max_age:
-            return True
+    if _session_authenticated(app):
+        return True
     # Werkzeug EnvironHeaders is not a collections.abc.Mapping; the Flask stub
     # request has no headers at all.
     headers = getattr(request, "headers", None)
@@ -3938,6 +3976,7 @@ def _handle_remote_login(app: Flask, remote_addr: str | None, target: str) -> Re
         session.clear()
         session["authenticated"] = True
         session["authenticated_at"] = time.time()
+        _stamp_session_credentials(app)
         logger.info("WEB_UI_LOGIN_OK remote=%s", client)
         return redirect(target)
     failures, lockout_seconds = throttle.record_failure(client)
@@ -8509,6 +8548,17 @@ def main() -> None:
 
 
 WEB_THREAD_READY_TIMEOUT_SECONDS = 15.0
+# settings.ini [web] host outside loopback (the Settings page's "local
+# network" switch) admits only private and link-local addresses; every such
+# client still has to sign in with the dashboard password.
+LAN_PRIVATE_CIDRS = (
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+    "fc00::/7",
+    "fe80::/10",
+)
 
 
 def _web_start_failure_message(exc: BaseException, host: str, port: int) -> str:
@@ -8557,12 +8607,20 @@ def start_web_in_thread(
                 logger.warning(
                     "WEB_UI_LOCAL_SMOKE_BYPASS_ACTIVE allow_local_smoke_bypass=true"
                 )
+            lan = not _is_loopback_bind(host)
+            if lan:
+                logger.info(
+                    "WEB_UI_LAN_ENABLED bind=%s port=%s allow_cidrs=private",
+                    host,
+                    port,
+                )
 
             app = create_app(
                 db_path=db_path,
                 password=resolved_password,
                 secret_key=secret_key,
                 attention_cost_per_hour=attention_cost,
+                allow_cidrs=list(LAN_PRIVATE_CIDRS) if lan else None,
                 config_dir=config_dir,
                 config_path=None,
                 log_path=runtime_log_path(),
@@ -8572,6 +8630,9 @@ def start_web_in_thread(
                 allow_local_smoke_bypass=local_smoke_bypass,
                 support_settings=None,
             )
+            # This launcher binds to settings.ini [web] host, so the Settings
+            # page may switch network access (it applies after a restart).
+            app.config["SETTINGS_LAN_TOGGLE"] = True
             # make_server binds in its constructor, so "ready" means listening.
             server = make_server(host, int(port), app, threaded=True)
         except (SystemExit, Exception) as exc:

@@ -12,6 +12,16 @@ class IniEncodingError(ValueError):
     """A user INI file is not UTF-8 text (for example saved as ANSI/cp1251)."""
 
 
+def new_user_ini_parser() -> configparser.ConfigParser:
+    """Parser for the user INI files (accounts.ini, settings.ini, keys.ini).
+
+    No %-interpolation: a value is what the user typed, so a password such as
+    "50%off" works and the Settings page writes "%" unescaped. No shipped
+    example relies on %(name)s substitution.
+    """
+    return configparser.ConfigParser(interpolation=None)
+
+
 def read_user_ini_with_defaults(
     ini_path: Path,
     *,
@@ -20,7 +30,7 @@ def read_user_ini_with_defaults(
     template_path: Path | None = None,
 ) -> configparser.ConfigParser:
     """Read user-provided INI; empty parser on read/parse issues, IniEncodingError if not UTF-8."""
-    parser = configparser.ConfigParser()
+    parser = new_user_ini_parser()
     active_logger = logger or _LOGGER
     resolved_template = template_path or (ini_path.parent / f"{ini_path.name}.example")
 
@@ -66,7 +76,7 @@ def read_user_ini_with_defaults(
             template_path=resolved_template,
         )
         active_logger.debug("INI read failure details for %s", ini_path, exc_info=exc)
-        return configparser.ConfigParser()
+        return new_user_ini_parser()
 
 
 def _read_ini_with_legacy_support(
@@ -121,4 +131,4 @@ def _warn_once(
     )
 
 
-__all__ = ["IniEncodingError", "read_user_ini_with_defaults"]
+__all__ = ["IniEncodingError", "new_user_ini_parser", "read_user_ini_with_defaults"]

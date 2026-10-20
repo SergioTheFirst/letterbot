@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 import imaplib
 import logging
 import socket
+import ssl
 from typing import Callable, Iterable, List, Optional
 
 from mailbot_v26 import deps
@@ -156,6 +157,69 @@ def check_mail_accounts(
                         "IMAP logout failed for %s", account.account_id
                     )
     return results
+
+
+IMAP_TEST_CODES = ("OK", "AUTH", "DNS", "REFUSED", "TLS", "TIMEOUT", "OTHER")
+
+
+def classify_imap_failure(exc: BaseException, stage: str) -> str:
+    """Result code for a failed login probe; ``stage`` is connect/login/select."""
+    if isinstance(exc, socket.gaierror):
+        return "DNS"
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return "TIMEOUT"
+    if isinstance(exc, ssl.SSLError):
+        return "TLS"
+    if isinstance(exc, ConnectionRefusedError):
+        return "REFUSED"
+    if isinstance(exc, imaplib.IMAP4.error):
+        # imapclient's LoginError is an IMAP4.error raised by login().
+        return "AUTH" if stage == "login" else "OTHER"
+    if isinstance(exc, OSError) and stage == "connect":
+        return "REFUSED"
+    return "OTHER"
+
+
+def probe_imap_login(
+    *,
+    host: str,
+    port: int,
+    use_ssl: bool,
+    login: str,
+    password: str,
+    timeout_sec: float = 10.0,
+) -> str:
+    """Settings "Test connection": connect, log in, SELECT INBOX read-only, log out.
+
+    Changes nothing in the mailbox (no flags, no fetch). Returns one of
+    IMAP_TEST_CODES; neither the server's text nor the exception message is
+    returned or logged (both can quote the login).
+    """
+    log = logging.getLogger(__name__)
+    stage = "connect"
+    client: Optional[object] = None
+    try:
+        client = _imap_client_cls()(host, port=port, ssl=use_ssl, timeout=timeout_sec)
+        stage = "login"
+        client.login(login, password)
+        stage = "select"
+        client.select_folder("INBOX", readonly=True)
+        code = "OK"
+    except Exception as exc:
+        code = classify_imap_failure(exc, stage)
+        log.info(
+            "settings_imap_test_failed code=%s stage=%s error_class=%s",
+            code,
+            stage,
+            type(exc).__name__,
+        )
+    finally:
+        if client is not None:
+            try:
+                client.logout()
+            except Exception as exc:
+                log.debug("settings_imap_test_logout_failed error_class=%s", type(exc).__name__)
+    return code
 
 
 def _format_exception(exc: Exception) -> str:

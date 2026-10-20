@@ -641,27 +641,32 @@ def test_placeholder_password_is_setup_incomplete(tmp_path: Path) -> None:
     assert "gmail" in _card_ids(status)
 
 
-def test_percent_in_password_gives_a_hint_without_the_value(tmp_path: Path) -> None:
-    status = _status(tmp_path, _account(password="pa%ss" + PASSWORD_MARKER) + _telegram())
+def test_percent_in_password_is_read_as_written(tmp_path: Path) -> None:
+    # Letterbot reads the user INI files without %-interpolation (S2).
+    status = _status(
+        tmp_path,
+        _account(password="pa%ss" + PASSWORD_MARKER) + _telegram(),
+        events=[("worker@gmail.com", NOW - timedelta(minutes=1))],
+    )
 
     row = _row(status)
-    assert row["state"] == "setup_incomplete"
+    assert row["state"] == "ok"
     assert row["password_set"] is True
-    assert ("percent_sign", "work_mail", "password") in _blocking_codes(status)
-    assert "percent" in _card_ids(status)
+    assert row["issues"] == []
+    assert status["blocking"] == []
+    assert "percent" not in _card_ids(status)
     _assert_no_secrets(status)
 
 
-def test_percent_in_bot_token_is_reported_on_the_telegram_section(
-    tmp_path: Path,
-) -> None:
+def test_percent_in_bot_token_is_read_as_written(tmp_path: Path) -> None:
     status = _status(tmp_path, _account() + _telegram(token="12%34" + TOKEN_MARKER))
 
-    assert ("percent_sign", "telegram", "bot_token") in _blocking_codes(status)
+    assert status["telegram"]["token_set"] is True
+    assert not any(item["code"].startswith("percent") for item in status["blocking"])
     _assert_no_secrets(status)
 
 
-def test_percent_in_a_key_letterbot_does_not_read_only_warns(tmp_path: Path) -> None:
+def test_percent_in_a_key_letterbot_does_not_read_is_fine(tmp_path: Path) -> None:
     status = _status(
         tmp_path,
         _account() + "notes = 100% mine\n" + _telegram(),
@@ -669,16 +674,27 @@ def test_percent_in_a_key_letterbot_does_not_read_only_warns(tmp_path: Path) -> 
     )
 
     row = _row(status)
+    assert (row["state"], row["severity"], row["issues"]) == ("ok", "success", [])
+
+
+def test_doubled_percent_warns_that_it_is_now_read_as_written(tmp_path: Path) -> None:
+    status = _status(
+        tmp_path,
+        _account(password="pa%%ss") + _telegram(),
+        events=[("worker@gmail.com", NOW - timedelta(minutes=1))],
+    )
+
+    row = _row(status)
     assert row["state"] == "ok"
     assert row["severity"] == "warn"
-    # Only keys Letterbot reads are named: another "key" can be part of a
-    # value (see the next test).
     assert [(i["code"], i["field"], i["blocking"]) for i in row["issues"]] == [
-        ("percent_sign", "", False)
+        ("percent_doubled", "password", False)
     ]
     assert row["issues"][0]["text"] == (
-        "[work_mail] a value contains %: write %% instead of each %"
+        "[work_mail] password contains %%: Letterbot reads % as written, so %% "
+        "means two % signs"
     )
+    assert status["blocking"] == []
     assert status["startup_blocked"] is False
     assert "percent" in _card_ids(status)
 
@@ -686,49 +702,40 @@ def test_percent_in_a_key_letterbot_does_not_read_only_warns(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     "line",
     [
-        # The password on its own line: "abc=def%" reads as key "abc".
-        f"password =\n{SECRET_HEAD}={SECRET_TAIL}%",
+        # The password on its own line: "abc=def%%" reads as key "abc".
+        f"password =\n{SECRET_HEAD}={SECRET_TAIL}%%",
         # A line without "=" splits at ":".
-        f"password {SECRET_HEAD}:{SECRET_TAIL}%",
-        f"password{SECRET_HEAD}:{SECRET_TAIL}%",
+        f"password {SECRET_HEAD}:{SECRET_TAIL}%%",
+        f"password{SECRET_HEAD}:{SECRET_TAIL}%%",
     ],
     ids=["value_on_its_own_line", "missing_equals", "missing_equals_and_space"],
 )
-def test_percent_in_a_value_read_as_a_key_names_no_key(
+def test_doubled_percent_in_a_value_read_as_a_key_names_no_key(
     tmp_path: Path, line: str
 ) -> None:
     text = (
-        f"[work_mail]\nlogin = worker@gmail.com\n{line}\nnotes = 100% mine\n"
+        f"[work_mail]\nlogin = worker@gmail.com\n{line}\nnotes = 100%% mine\n"
         f"host = imap.gmail.com\ntelegram_chat_id = {CHAT_ID}\n" + _telegram()
     )
     status = _status(tmp_path, text)
 
     row = _row(status)
-    percent = [issue for issue in row["issues"] if issue["code"] == "percent_sign"]
+    percent = [issue for issue in row["issues"] if issue["code"] == "percent_doubled"]
     # One hint for both unknown keys, naming neither.
     assert [(issue["field"], issue["blocking"]) for issue in percent] == [("", False)]
+    assert percent[0]["text"].startswith("[work_mail] a value contains %%")
     assert ("missing_field", "work_mail", "password") in _blocking_codes(status)
     _assert_no_secret_halves(status)
 
 
-def test_percent_in_default_chat_marks_it_invalid_and_blocks(tmp_path: Path) -> None:
+def test_percent_in_default_chat_is_an_invalid_chat(tmp_path: Path) -> None:
     status = _status(tmp_path, _account(chat=None) + _telegram(chat="-100%1"))
 
+    # "-100%1" is read as written: not a chat id Telegram accepts.
     assert status["telegram"]["default_chat"]["status"] == "invalid"
     assert _row(status)["chat"]["status"] == "invalid"
-    assert ("percent_sign", "telegram", "chat_id") in _blocking_codes(status)
+    assert not any(code.startswith("percent") for code, _, _ in _blocking_codes(status))
     assert ("chat_missing", "work_mail", "telegram_chat_id") not in _blocking_codes(status)
-
-
-def test_escaped_percent_is_readable(tmp_path: Path) -> None:
-    status = _status(
-        tmp_path,
-        _account(password="pa%%ss") + _telegram(),
-        events=[("worker@gmail.com", NOW - timedelta(minutes=1))],
-    )
-
-    assert _row(status)["state"] == "ok"
-    assert status["blocking"] == []
 
 
 def test_cp1251_file_gives_an_encoding_card(tmp_path: Path) -> None:

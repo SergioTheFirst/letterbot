@@ -4,6 +4,8 @@ import argparse
 import zipfile
 from pathlib import Path
 
+from mailbot_v26.config.ini_editor import is_secret_copy_name
+
 EXCLUDED_TOP_LEVEL_DIRS = {
     ".git",
     ".pytest_cache",
@@ -78,6 +80,9 @@ def _is_excluded(path: Path, root: Path, output_zip: Path) -> bool:
     if path.name.startswith(".env.") or any(
         marker in path.name for marker in EXCLUDED_NAME_MARKERS
     ):
+        return True
+    if is_secret_copy_name(path.name):
+        # Backup or temp copy of a config file: same passwords and tokens.
         return True
     if rel_posix.startswith("runtime/tmp_") and path.suffix.lower() == ".ps1":
         return True

@@ -19,8 +19,8 @@ _EN: dict[str, str] = {
     # Page shell
     "accounts.title": "Mail accounts",
     "accounts.read_only": (
-        "Status only: this page reads accounts.ini and changes nothing. To change "
-        "a mailbox, edit accounts.ini and restart Letterbot."
+        "Mailbox status and settings. Changes are saved to accounts.ini with a "
+        "backup; restart Letterbot to apply them."
     ),
     "accounts.file_label": "Settings file",
     "accounts.updated": "Updated at {time}",
@@ -153,9 +153,13 @@ _EN: dict[str, str] = {
         "[{section}] is still the template: rename it (for example to "
         "[work_mail]) and fill in your values"
     ),
-    "issue.percent_sign": "[{section}] {field} contains %: write %% instead of each %",
-    "issue.percent_sign_unnamed": (
-        "[{section}] a value contains %: write %% instead of each %"
+    "issue.percent_doubled": (
+        "[{section}] {field} contains %%: Letterbot reads % as written, so %% "
+        "means two % signs"
+    ),
+    "issue.percent_doubled_unnamed": (
+        "[{section}] a value contains %%: Letterbot reads % as written, so %% "
+        "means two % signs"
     ),
     "issue.chat_missing": (
         "[{section}] has no Telegram chat: set telegram_chat_id here or chat_id "
@@ -174,6 +178,37 @@ _EN: dict[str, str] = {
     "issue.bad_host": (
         "[{section}] host doesn't look like a server name (for example "
         "imap.gmail.com)"
+    ),
+    # Settings editor (S2) checks of typed values
+    "issue.bad_type": "[{section}] {field} has a value of the wrong kind",
+    "issue.bad_characters": (
+        "[{section}] {field}: line breaks and control characters are not allowed"
+    ),
+    "issue.too_long": "[{section}] {field} is too long",
+    "issue.edge_spaces": "[{section}] {field} must not start or end with a space",
+    "issue.required": "[{section}] {field} is required",
+    "issue.bad_id": (
+        "Mailbox name: lowercase Latin letters, digits and _ only, for example "
+        "work_mail"
+    ),
+    "issue.unknown_account": "[{section}] is no longer in accounts.ini: reload the page",
+    "issue.account_exists": "[{section}] already exists: choose another name",
+    "issue.unknown_field": "[{section}] the form sent a field Letterbot doesn't know",
+    "issue.bad_request": "The request was not understood: reload the page",
+    "issue.outlook_unsupported": (
+        "[{section}] Outlook.com / Microsoft 365 don't accept passwords for IMAP: "
+        "forward the mail to a supported mailbox"
+    ),
+    "issue.plain_imap": "[{section}] without SSL the password travels unencrypted",
+    "issue.token_format": (
+        "[{section}] {field} doesn't look like a bot token from @BotFather"
+    ),
+    "issue.layout": (
+        "accounts.ini could not be changed safely: edit it in a text editor"
+    ),
+    "issue.password_required": (
+        "[{section}] enter the password again: a saved password is used only "
+        "with the server it was saved for"
     ),
     # Fix cards
     "card.copy": "Copy",
@@ -215,13 +250,14 @@ _EN: dict[str, str] = {
         "Each [section] may appear only once, and each key only once inside a "
         "section."
     ),
-    "card.percent.title": "A value contains the % sign",
+    "card.percent.title": "A value contains %%",
     "card.percent.intro": (
-        "Letterbot reads accounts.ini with %-substitution, so a lone % in a value "
-        "is an error."
+        "Letterbot reads accounts.ini as written, % included. Older versions "
+        "needed %% for each %."
     ),
     "card.percent.step1": (
-        "Write %% for every % in the value: for example 50%off becomes 50%%off."
+        "If you wrote %% to get one %, write a single % again: 50%%off becomes "
+        "50%off."
     ),
     "card.gmail.title": "Gmail",
     "card.gmail.step1": "Turn on 2-Step Verification for your Google account.",
@@ -269,14 +305,193 @@ _EN: dict[str, str] = {
     "card.generic.step5": (
         "Telegram chat id: a number like 272250747, or -100… for groups."
     ),
+    # Telegram test message (plain text, sent only on "Send test message")
+    "telegram.test_message": (
+        "Letterbot test message: notifications will arrive in this chat."
+    ),
+    # Settings editor (S2): page labels and settings.js messages
+    "editor.title": "Change settings",
+    "editor.add": "Add mailbox",
+    "editor.telegram": "Telegram",
+    "editor.history": "History",
+    "editor.loading": "Loading settings…",
+    "editor.load_failed": (
+        "Settings can't be loaded right now. Details are in the Letterbot log."
+    ),
+    "editor.file_problem": (
+        "accounts.ini can't be read (see above). Fix it in a text editor or "
+        "restore a backup from History."
+    ),
+    "editor.list_empty": "No mailboxes yet: add the first one.",
+    "editor.edit": "Edit",
+    "editor.remove": "Remove",
+    "editor.template_row": "template from the first start",
+    "editor.invalid_row": (
+        "a section with a name Letterbot can't use: rename it in accounts.ini"
+    ),
+    "editor.form_add": "New mailbox",
+    "editor.form_edit": "Mailbox [{id}]",
+    "editor.provider": "Mail service",
+    "editor.provider.gmail": "Gmail",
+    "editor.provider.yandex": "Yandex",
+    "editor.provider.mailru": "Mail.ru",
+    "editor.provider.outlook": "Outlook.com / Microsoft 365",
+    "editor.provider.other": "Other server",
+    "editor.outlook": (
+        "Outlook.com and Microsoft 365 no longer accept passwords for IMAP. "
+        "Forward new mail to a Gmail, Yandex or Mail.ru mailbox and add that one."
+    ),
+    "editor.name": "Name in Letterbot",
+    "editor.name_hint": "Lowercase Latin letters, digits and _, for example work_mail",
+    "editor.login": "Login (e-mail address)",
+    "editor.login_hidden": (
+        "The saved login is not shown: type it again to change it."
+    ),
+    "editor.password": "Password",
+    "editor.password_hint": "For Gmail, Yandex and Mail.ru use an app password.",
+    "editor.password_saved": "Password saved",
+    "editor.replace": "Replace",
+    "editor.host": "IMAP server",
+    "editor.port": "Port",
+    "editor.ssl": "Use SSL (port 993)",
+    "editor.chat": "Telegram chat",
+    "editor.chat_default": "Default chat",
+    "editor.chat_custom": "Own chat id",
+    "editor.chat_hint": "A number like 272250747, or -100… for groups",
+    "editor.test": "Test connection",
+    "editor.testing": "Checking…",
+    "editor.save": "Save",
+    "editor.saving": "Saving…",
+    "editor.cancel": "Cancel",
+    "editor.reload": "Reload",
+    "editor.saved": (
+        "Saved {time}. Backup: {name}. Restart Letterbot to apply the changes."
+    ),
+    "editor.saved_first": "Saved {time}. Restart Letterbot to apply the changes.",
+    "editor.conflict": "accounts.ini changed on disk. Reload.",
+    "editor.no_changes": "Nothing to save: no field changed.",
+    "editor.rejected": "Not saved: fix the marked fields.",
+    "editor.save_wait": "Not saved: wait a few seconds before saving a password or token again.",
+    "editor.failed": (
+        "Not saved: the file could not be written. Details are in the Letterbot "
+        "log."
+    ),
+    "editor.unreadable": (
+        "accounts.ini can't be read: restore a backup or fix the file first."
+    ),
+    "editor.remove_confirm": (
+        "Remove [{id}]? Letterbot stops checking this mailbox; processed history "
+        "stays."
+    ),
+    "editor.history_title": "Backups of accounts.ini",
+    "editor.history_empty": "No backups yet: one is made before every save.",
+    "editor.restore": "Restore",
+    "editor.restore_confirm": (
+        "Restore {name}? The current accounts.ini is backed up first."
+    ),
+    "editor.restored": "Restored {name} at {time}. Restart Letterbot to apply.",
+    "editor.issues_title": "Check these:",
+    "editor.request_failed": "The request failed. Reload the page.",
+    "editor.test_warning": "The check failed, but you can still save.",
+    "editor.result.OK": "Connected, inbox found",
+    "editor.result.AUTH": (
+        "Login rejected. Gmail needs an app password, not your usual one."
+    ),
+    "editor.result.DNS": "Server not found: check the server name for typos.",
+    "editor.result.REFUSED": (
+        "Can't reach the server: check the server, the port and the network."
+    ),
+    "editor.result.TLS": (
+        "Secure connection failed: port 993 needs SSL, port 143 usually not."
+    ),
+    "editor.result.TIMEOUT": "The server did not answer within 10 seconds.",
+    "editor.result.OTHER": (
+        "The check failed. For privacy the server's answer is not shown."
+    ),
+    "editor.result.RATE_LIMIT": "Wait a few seconds before the next check.",
+    "editor.result.BUSY": "Another check is still running. Try again in a moment.",
+    "editor.result.PORT_NOT_ALLOWED": (
+        "Only ports 143 and 993 can be tested before the mailbox is saved."
+    ),
+    "editor.result.HOST_NOT_ALLOWED": "This server address can't be tested.",
+    "editor.result.PASSWORD_REQUIRED": (
+        "Enter the password: the saved one is used only for the saved server."
+    ),
+    "editor.result.LOGIN_REQUIRED": "Enter the login.",
+    "editor.result.INVALID": "Check the server, port and login fields.",
+    "editor.tg_title": "Telegram bot",
+    "editor.tg_token": "Bot token",
+    "editor.tg_token_saved": "Token saved",
+    "editor.tg_token_hint": "From @BotFather: digits, a colon, then letters",
+    "editor.tg_chat": "Default chat id",
+    "editor.tg_check": "Check bot",
+    "editor.tg_send": "Send test message",
+    "editor.tg.OK_getme": "Bot @{name} answers.",
+    "editor.tg.OK_getme_anonymous": "The bot answers.",
+    "editor.tg.OK_send": "Test message sent: check Telegram.",
+    "editor.tg.AUTH": "Telegram rejected the bot token.",
+    "editor.tg.CHAT": (
+        "Telegram can't deliver to this chat: send /start to the bot first or "
+        "check the chat id."
+    ),
+    "editor.tg.NETWORK": "Can't reach Telegram: check the internet connection.",
+    "editor.tg.TLS": "The secure connection to Telegram failed.",
+    "editor.tg.TIMEOUT": "Telegram did not answer within 10 seconds.",
+    "editor.tg.OTHER": "Telegram did not accept the request.",
+    "editor.tg.TOKEN_MISSING": "Enter the bot token first.",
+    "editor.tg.TOKEN_FORMAT": "This doesn't look like a bot token.",
+    "editor.tg.CHAT_MISSING": "Enter a chat id or save a default chat first.",
+    "editor.tg.CHAT_FORMAT": (
+        "This doesn't look like a chat id: a number like 272250747, or -100… for "
+        "groups."
+    ),
+    "editor.web_title": "Dashboard password and network access",
+    "editor.web_password_set": "Dashboard password: set",
+    "editor.web_password_missing": (
+        "Dashboard password: not set (the dashboard opens only on this computer)"
+    ),
+    "editor.web_new_password": "New dashboard password",
+    "editor.web_current_password": "Current dashboard password",
+    "editor.web_password_hint": "At least 10 characters.",
+    "editor.web_save_password": "Save password",
+    "editor.web_password_saved": "Password saved {time}.",
+    "editor.web.LENGTH": "Use at least 10 characters.",
+    "editor.web.WEAK": "This password is too easy to guess.",
+    "editor.web.INVALID": (
+        "Line breaks and spaces at the start or end are not allowed."
+    ),
+    "editor.web.CURRENT_PASSWORD_WRONG": "The current password is wrong.",
+    "editor.web.ENV_OVERRIDE": (
+        "The WEB_PASSWORD environment variable sets the password; change it there."
+    ),
+    "editor.web.LEGACY_CONFIG": (
+        "This installation still uses config.ini: run migrate-config first."
+    ),
+    "editor.web.RATE_LIMIT": "Too many attempts. Try again later.",
+    "editor.web.LOOPBACK_ONLY": (
+        "Network access can be changed only on the Letterbot computer."
+    ),
+    "editor.web.LAUNCHER_UNSUPPORTED": (
+        "This launcher takes its network settings from config.yaml (web_ui)."
+    ),
+    "editor.web.PASSWORD_REQUIRED": "Set a dashboard password first.",
+    "editor.web_lan_on": "Network access: on (local network, password login)",
+    "editor.web_lan_off": "Network access: off (this computer only)",
+    "editor.web_enable_lan": "Allow from the local network",
+    "editor.web_disable_lan": "This computer only",
+    "editor.web_restart": "Restart Letterbot to apply.",
+    "editor.web_lan_hint": (
+        "Other devices sign in with the dashboard password. The connection is not "
+        "encrypted: use it only on a trusted network."
+    ),
 }
 
 _RU: dict[str, str] = {
     # Page shell
     "accounts.title": "Почтовые ящики",
     "accounts.read_only": (
-        "Только просмотр: страница читает accounts.ini и ничего не меняет. Чтобы "
-        "изменить ящик, отредактируйте accounts.ini и перезапустите Letterbot."
+        "Состояние и настройки ящиков. Изменения сохраняются в accounts.ini с "
+        "резервной копией; чтобы они вступили в силу, перезапустите Letterbot."
     ),
     "accounts.file_label": "Файл настроек",
     "accounts.updated": "Обновлено в {time}",
@@ -412,11 +627,13 @@ _RU: dict[str, str] = {
         "[{section}] — всё ещё шаблон: переименуйте раздел (например, в "
         "[work_mail]) и впишите свои значения"
     ),
-    "issue.percent_sign": (
-        "[{section}] {field} содержит %: пишите %% вместо каждого %"
+    "issue.percent_doubled": (
+        "[{section}] {field} содержит %%: Letterbot читает % как написано, "
+        "поэтому %% — это два знака %"
     ),
-    "issue.percent_sign_unnamed": (
-        "[{section}] в одном из значений есть %: пишите %% вместо каждого %"
+    "issue.percent_doubled_unnamed": (
+        "[{section}] в одном из значений есть %%: Letterbot читает % как "
+        "написано, поэтому %% — это два знака %"
     ),
     "issue.chat_missing": (
         "[{section}]: не задан чат Telegram — укажите telegram_chat_id здесь или "
@@ -434,6 +651,37 @@ _RU: dict[str, str] = {
     "issue.ssl_mismatch": "[{section}] для порта 993 нужно use_ssl = true",
     "issue.bad_host": (
         "[{section}] host не похож на имя сервера (например, imap.gmail.com)"
+    ),
+    # Settings editor (S2) checks of typed values
+    "issue.bad_type": "[{section}] {field}: значение не того вида",
+    "issue.bad_characters": (
+        "[{section}] {field}: переносы строк и управляющие символы не допускаются"
+    ),
+    "issue.too_long": "[{section}] {field}: слишком длинное значение",
+    "issue.edge_spaces": (
+        "[{section}] {field} не должен начинаться или заканчиваться пробелом"
+    ),
+    "issue.required": "[{section}] {field}: обязательное поле",
+    "issue.bad_id": (
+        "Имя ящика: только строчные латинские буквы, цифры и _, например work_mail"
+    ),
+    "issue.unknown_account": "[{section}] больше нет в accounts.ini: обновите страницу",
+    "issue.account_exists": "[{section}] уже есть: выберите другое имя",
+    "issue.unknown_field": "[{section}] форма прислала неизвестное поле",
+    "issue.bad_request": "Запрос не распознан: обновите страницу",
+    "issue.outlook_unsupported": (
+        "[{section}] Outlook.com / Microsoft 365 не принимают пароли для IMAP: "
+        "настройте пересылку в поддерживаемый ящик"
+    ),
+    "issue.plain_imap": "[{section}] без SSL пароль передаётся без шифрования",
+    "issue.token_format": "[{section}] {field} не похож на токен бота от @BotFather",
+    "issue.layout": (
+        "accounts.ini не удалось безопасно изменить: отредактируйте его в "
+        "текстовом редакторе"
+    ),
+    "issue.password_required": (
+        "[{section}] введите пароль ещё раз: сохранённый пароль используется "
+        "только с тем сервером, для которого он сохранён"
     ),
     # Fix cards
     "card.copy": "Копировать",
@@ -479,14 +727,14 @@ _RU: dict[str, str] = {
         "Каждый [раздел] может встречаться только один раз, а каждый ключ — один "
         "раз внутри раздела."
     ),
-    "card.percent.title": "Значение содержит знак %",
+    "card.percent.title": "Значение содержит %%",
     "card.percent.intro": (
-        "Letterbot читает accounts.ini с подстановкой через %, поэтому одиночный % "
-        "в значении — ошибка."
+        "Letterbot читает accounts.ini как написано, вместе со знаком %. Старым "
+        "версиям нужно было %% вместо каждого %."
     ),
     "card.percent.step1": (
-        "Пишите %% вместо каждого % в значении: например, 50%off записывается как "
-        "50%%off."
+        "Если вы писали %% ради одного %, верните один %: 50%%off записывается "
+        "как 50%off."
     ),
     "card.gmail.title": "Gmail",
     "card.gmail.step1": "Включите двухэтапную аутентификацию в аккаунте Google.",
@@ -530,6 +778,194 @@ _RU: dict[str, str] = {
     ),
     "card.generic.step4": "Сохраните accounts.ini в UTF-8.",
     "card.generic.step5": "ID чата Telegram: число вида 272250747 или -100… для групп.",
+    # Telegram test message (plain text, sent only on "Send test message")
+    "telegram.test_message": (
+        "Тестовое сообщение Letterbot: уведомления будут приходить в этот чат."
+    ),
+    # Settings editor (S2): page labels and settings.js messages
+    "editor.title": "Изменить настройки",
+    "editor.add": "Добавить ящик",
+    "editor.telegram": "Telegram",
+    "editor.history": "История",
+    "editor.loading": "Загружаем настройки…",
+    "editor.load_failed": (
+        "Сейчас не удаётся загрузить настройки. Подробности — в журнале Letterbot."
+    ),
+    "editor.file_problem": (
+        "accounts.ini не читается (см. выше). Исправьте его в текстовом редакторе "
+        "или восстановите копию из «Истории»."
+    ),
+    "editor.list_empty": "Ящиков пока нет: добавьте первый.",
+    "editor.edit": "Изменить",
+    "editor.remove": "Удалить",
+    "editor.template_row": "шаблон первого запуска",
+    "editor.invalid_row": (
+        "раздел с именем, которое Letterbot не принимает: переименуйте его в "
+        "accounts.ini"
+    ),
+    "editor.form_add": "Новый ящик",
+    "editor.form_edit": "Ящик [{id}]",
+    "editor.provider": "Почтовый сервис",
+    "editor.provider.gmail": "Gmail",
+    "editor.provider.yandex": "Яндекс",
+    "editor.provider.mailru": "Mail.ru",
+    "editor.provider.outlook": "Outlook.com / Microsoft 365",
+    "editor.provider.other": "Другой сервер",
+    "editor.outlook": (
+        "Outlook.com и Microsoft 365 больше не принимают пароли для IMAP. "
+        "Настройте пересылку новых писем в ящик Gmail, Яндекс или Mail.ru и "
+        "добавьте его."
+    ),
+    "editor.name": "Имя в Letterbot",
+    "editor.name_hint": "Строчные латинские буквы, цифры и _, например work_mail",
+    "editor.login": "Логин (адрес почты)",
+    "editor.login_hidden": (
+        "Сохранённый логин не показан: введите его заново, чтобы изменить."
+    ),
+    "editor.password": "Пароль",
+    "editor.password_hint": "Для Gmail, Яндекса и Mail.ru нужен пароль приложения.",
+    "editor.password_saved": "Пароль сохранён",
+    "editor.replace": "Заменить",
+    "editor.host": "IMAP-сервер",
+    "editor.port": "Порт",
+    "editor.ssl": "Использовать SSL (порт 993)",
+    "editor.chat": "Чат Telegram",
+    "editor.chat_default": "Чат по умолчанию",
+    "editor.chat_custom": "Свой ID чата",
+    "editor.chat_hint": "Число вида 272250747 или -100… для групп",
+    "editor.test": "Проверить подключение",
+    "editor.testing": "Проверяем…",
+    "editor.save": "Сохранить",
+    "editor.saving": "Сохраняем…",
+    "editor.cancel": "Отмена",
+    "editor.reload": "Обновить",
+    "editor.saved": (
+        "Сохранено в {time}. Резервная копия: {name}. Перезапустите Letterbot, "
+        "чтобы применить изменения."
+    ),
+    "editor.saved_first": (
+        "Сохранено в {time}. Перезапустите Letterbot, чтобы применить изменения."
+    ),
+    "editor.conflict": "accounts.ini изменён на диске. Обновите страницу.",
+    "editor.no_changes": "Нечего сохранять: поля не изменились.",
+    "editor.rejected": "Не сохранено: исправьте отмеченные поля.",
+    "editor.save_wait": "Не сохранено: подождите несколько секунд, прежде чем снова сохранять пароль или токен.",
+    "editor.failed": (
+        "Не сохранено: файл не удалось записать. Подробности — в журнале Letterbot."
+    ),
+    "editor.unreadable": (
+        "accounts.ini не читается: сначала восстановите копию или исправьте файл."
+    ),
+    "editor.remove_confirm": (
+        "Удалить [{id}]? Letterbot перестанет проверять этот ящик; обработанная "
+        "история останется."
+    ),
+    "editor.history_title": "Резервные копии accounts.ini",
+    "editor.history_empty": (
+        "Резервных копий пока нет: копия делается перед каждым сохранением."
+    ),
+    "editor.restore": "Восстановить",
+    "editor.restore_confirm": (
+        "Восстановить {name}? Текущий accounts.ini сначала сохранится в резервную "
+        "копию."
+    ),
+    "editor.restored": (
+        "Восстановлено {name} в {time}. Перезапустите Letterbot, чтобы применить."
+    ),
+    "editor.issues_title": "Проверьте:",
+    "editor.request_failed": "Запрос не прошёл. Обновите страницу.",
+    "editor.test_warning": "Проверка не прошла, но сохранить всё равно можно.",
+    "editor.result.OK": "Подключено, ящик найден",
+    "editor.result.AUTH": (
+        "Вход отклонён. Для Gmail нужен пароль приложения, а не обычный."
+    ),
+    "editor.result.DNS": "Сервер не найден: проверьте имя сервера на опечатки.",
+    "editor.result.REFUSED": (
+        "Не удаётся связаться с сервером: проверьте сервер, порт и сеть."
+    ),
+    "editor.result.TLS": (
+        "Не удалось защищённое соединение: для порта 993 нужен SSL, для 143 "
+        "обычно нет."
+    ),
+    "editor.result.TIMEOUT": "Сервер не ответил за 10 секунд.",
+    "editor.result.OTHER": (
+        "Проверка не удалась. Ответ сервера не показывается ради приватности."
+    ),
+    "editor.result.RATE_LIMIT": "Подождите несколько секунд перед следующей проверкой.",
+    "editor.result.BUSY": "Ещё идёт другая проверка. Повторите чуть позже.",
+    "editor.result.PORT_NOT_ALLOWED": (
+        "До сохранения ящика можно проверить только порты 143 и 993."
+    ),
+    "editor.result.HOST_NOT_ALLOWED": "Этот адрес сервера проверить нельзя.",
+    "editor.result.PASSWORD_REQUIRED": (
+        "Введите пароль: сохранённый используется только для сохранённого сервера."
+    ),
+    "editor.result.LOGIN_REQUIRED": "Введите логин.",
+    "editor.result.INVALID": "Проверьте поля сервера, порта и логина.",
+    "editor.tg_title": "Бот Telegram",
+    "editor.tg_token": "Токен бота",
+    "editor.tg_token_saved": "Токен сохранён",
+    "editor.tg_token_hint": "От @BotFather: цифры, двоеточие и буквы",
+    "editor.tg_chat": "ID чата по умолчанию",
+    "editor.tg_check": "Проверить бота",
+    "editor.tg_send": "Отправить тестовое сообщение",
+    "editor.tg.OK_getme": "Бот @{name} отвечает.",
+    "editor.tg.OK_getme_anonymous": "Бот отвечает.",
+    "editor.tg.OK_send": "Тестовое сообщение отправлено: проверьте Telegram.",
+    "editor.tg.AUTH": "Telegram отклонил токен бота.",
+    "editor.tg.CHAT": (
+        "Telegram не может доставить в этот чат: сначала отправьте боту /start "
+        "или проверьте ID чата."
+    ),
+    "editor.tg.NETWORK": "Нет связи с Telegram: проверьте подключение к интернету.",
+    "editor.tg.TLS": "Не удалось защищённое соединение с Telegram.",
+    "editor.tg.TIMEOUT": "Telegram не ответил за 10 секунд.",
+    "editor.tg.OTHER": "Telegram не принял запрос.",
+    "editor.tg.TOKEN_MISSING": "Сначала введите токен бота.",
+    "editor.tg.TOKEN_FORMAT": "Это не похоже на токен бота.",
+    "editor.tg.CHAT_MISSING": "Введите ID чата или сначала сохраните чат по умолчанию.",
+    "editor.tg.CHAT_FORMAT": (
+        "Это не похоже на ID чата: нужно число вида 272250747 или -100… для групп."
+    ),
+    "editor.web_title": "Пароль панели и доступ по сети",
+    "editor.web_password_set": "Пароль панели: задан",
+    "editor.web_password_missing": (
+        "Пароль панели: не задан (панель открывается только на этом компьютере)"
+    ),
+    "editor.web_new_password": "Новый пароль панели",
+    "editor.web_current_password": "Текущий пароль панели",
+    "editor.web_password_hint": "Не короче 10 символов.",
+    "editor.web_save_password": "Сохранить пароль",
+    "editor.web_password_saved": "Пароль сохранён в {time}.",
+    "editor.web.LENGTH": "Используйте не меньше 10 символов.",
+    "editor.web.WEAK": "Этот пароль слишком легко угадать.",
+    "editor.web.INVALID": (
+        "Переносы строк и пробелы в начале или конце не допускаются."
+    ),
+    "editor.web.CURRENT_PASSWORD_WRONG": "Текущий пароль неверный.",
+    "editor.web.ENV_OVERRIDE": (
+        "Пароль задаёт переменная окружения WEB_PASSWORD: меняйте его там."
+    ),
+    "editor.web.LEGACY_CONFIG": (
+        "Эта установка ещё использует config.ini: сначала выполните migrate-config."
+    ),
+    "editor.web.RATE_LIMIT": "Слишком много попыток. Повторите позже.",
+    "editor.web.LOOPBACK_ONLY": (
+        "Доступ по сети меняется только на компьютере, где работает Letterbot."
+    ),
+    "editor.web.LAUNCHER_UNSUPPORTED": (
+        "Этот способ запуска берёт настройки сети из config.yaml (web_ui)."
+    ),
+    "editor.web.PASSWORD_REQUIRED": "Сначала задайте пароль панели.",
+    "editor.web_lan_on": "Доступ по сети: включён (локальная сеть, вход по паролю)",
+    "editor.web_lan_off": "Доступ по сети: выключен (только этот компьютер)",
+    "editor.web_enable_lan": "Разрешить из локальной сети",
+    "editor.web_disable_lan": "Только этот компьютер",
+    "editor.web_restart": "Перезапустите Letterbot, чтобы применить.",
+    "editor.web_lan_hint": (
+        "Другие устройства входят по паролю панели. Соединение не шифруется: "
+        "используйте только в доверенной сети."
+    ),
 }
 
 _CATALOGS: dict[str, dict[str, str]] = {"en": _EN, "ru": _RU}
@@ -552,6 +988,12 @@ def text(key: str, locale: str, **params: object) -> str:
         logger.warning("settings_text_missing key=%s locale=%s", key, locale)
         return key
     return template.format(**params) if params else template
+
+
+def editor_texts(locale: str) -> dict[str, str]:
+    """The "editor." strings settings.js needs, unformatted ({id}, {time} ...)."""
+    catalog = _CATALOGS[resolve_locale(locale)]
+    return {key: value for key, value in catalog.items() if key.startswith("editor.")}
 
 
 def plural_text(key: str, count: int, locale: str) -> str:

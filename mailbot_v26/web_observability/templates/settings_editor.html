@@ -1,0 +1,137 @@
+{# Settings editor (S2). static/settings.js fills it from GET /api/settings/accounts
+   and posts JSON with the X-CSRF-Token header; no inline script or handler (CSP).
+   Secret fields are write-only: they start empty and are never filled back. #}
+<meta name="csrf-token" content="{{ csrf_token }}">
+<div id="settings-editor-data" hidden data-json="{{ editor_data|tojson|forceescape }}"></div>
+
+<section class="card settings-section settings-editor" data-settings-editor aria-labelledby="settings-editor-title" data-testid="settings-editor">
+  <h2 id="settings-editor-title">{{ st('editor.title') }}</h2>
+  <p class="hint" data-editor-loading>{{ st('editor.loading') }}</p>
+  <div class="settings-toolbar" data-editor-toolbar hidden>
+    <button type="button" data-action="add">{{ st('editor.add') }}</button>
+    <button type="button" class="ghost" data-action="telegram">{{ st('editor.telegram') }}</button>
+    <button type="button" class="ghost" data-action="history">{{ st('editor.history') }}</button>
+  </div>
+  <ul class="settings-editor-list" data-account-list></ul>
+  <p class="settings-message" role="status" aria-live="polite" data-editor-message></p>
+
+  <form class="settings-form" data-account-form hidden novalidate autocomplete="off">
+    <h3 data-form-title></h3>
+    <div class="settings-field">
+      <label for="sf-provider">{{ st('editor.provider') }}</label>
+      <select id="sf-provider" name="provider">
+        {% for key in ['gmail', 'yandex', 'mailru', 'outlook', 'other'] %}
+        <option value="{{ key }}">{{ st('editor.provider.' ~ key) }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <p class="alert settings-outlook" data-outlook-note hidden>{{ st('editor.outlook') }}</p>
+    <div class="settings-field" data-name-field>
+      <label for="sf-id">{{ st('editor.name') }}</label>
+      <input id="sf-id" name="id" type="text" maxlength="64" spellcheck="false" autocapitalize="none" aria-describedby="sf-id-hint">
+      <p class="hint" id="sf-id-hint">{{ st('editor.name_hint') }}</p>
+    </div>
+    <div class="settings-field">
+      <label for="sf-login">{{ st('editor.login') }}</label>
+      <input id="sf-login" name="login" type="text" maxlength="254" spellcheck="false" autocapitalize="none" autocomplete="off">
+      <p class="hint" data-login-hidden hidden>{{ st('editor.login_hidden') }}</p>
+    </div>
+    <div class="settings-field">
+      <label for="sf-password">{{ st('editor.password') }}</label>
+      <div class="settings-secret" data-secret="password">
+        <span class="status-pill success" data-secret-saved hidden>{{ st('editor.password_saved') }}</span>
+        <button type="button" class="ghost" data-secret-replace hidden>{{ st('editor.replace') }}</button>
+        <input id="sf-password" name="password" type="password" maxlength="512" autocomplete="new-password" aria-describedby="sf-password-hint">
+      </div>
+      <p class="hint" id="sf-password-hint">{{ st('editor.password_hint') }}</p>
+    </div>
+    <div class="settings-field-row">
+      <div class="settings-field">
+        <label for="sf-host">{{ st('editor.host') }}</label>
+        <input id="sf-host" name="host" type="text" maxlength="253" spellcheck="false" autocapitalize="none">
+      </div>
+      <div class="settings-field settings-port">
+        <label for="sf-port">{{ st('editor.port') }}</label>
+        <input id="sf-port" name="port" type="number" min="1" max="65535" inputmode="numeric">
+      </div>
+    </div>
+    <label class="settings-check"><input type="checkbox" name="use_ssl"> {{ st('editor.ssl') }}</label>
+    <fieldset class="settings-field settings-chat">
+      <legend>{{ st('editor.chat') }}</legend>
+      <label class="settings-check"><input type="radio" name="chat_mode" value="default"> {{ st('editor.chat_default') }}</label>
+      <label class="settings-check"><input type="radio" name="chat_mode" value="custom"> {{ st('editor.chat_custom') }}</label>
+      <input name="telegram_chat_id" type="text" maxlength="64" inputmode="numeric" spellcheck="false" aria-label="{{ st('editor.chat_custom') }}" aria-describedby="sf-chat-hint">
+      <p class="hint" id="sf-chat-hint">{{ st('editor.chat_hint') }}</p>
+    </fieldset>
+    <ul class="settings-issues-list" data-form-issues></ul>
+    <p class="settings-message" role="status" aria-live="polite" data-form-message></p>
+    <div class="settings-actions">
+      <button type="button" class="ghost" data-action="test-imap">{{ st('editor.test') }}</button>
+      <button type="submit" data-action="save-account">{{ st('editor.save') }}</button>
+      <button type="button" class="ghost" data-action="cancel">{{ st('editor.cancel') }}</button>
+    </div>
+  </form>
+
+  <form class="settings-form" data-telegram-form hidden novalidate autocomplete="off">
+    <h3>{{ st('editor.tg_title') }}</h3>
+    <div class="settings-field">
+      <label for="st-token">{{ st('editor.tg_token') }}</label>
+      <div class="settings-secret" data-secret="bot_token">
+        <span class="status-pill success" data-secret-saved hidden>{{ st('editor.tg_token_saved') }}</span>
+        <button type="button" class="ghost" data-secret-replace hidden>{{ st('editor.replace') }}</button>
+        <input id="st-token" name="bot_token" type="password" maxlength="200" autocomplete="new-password" spellcheck="false" aria-describedby="st-token-hint">
+      </div>
+      <p class="hint" id="st-token-hint">{{ st('editor.tg_token_hint') }}</p>
+    </div>
+    <div class="settings-field">
+      <label for="st-chat">{{ st('editor.tg_chat') }}</label>
+      <input id="st-chat" name="chat_id" type="text" maxlength="64" inputmode="numeric" spellcheck="false" aria-describedby="st-chat-hint">
+      <p class="hint" id="st-chat-hint">{{ st('editor.chat_hint') }}</p>
+    </div>
+    <ul class="settings-issues-list" data-form-issues></ul>
+    <p class="settings-message" role="status" aria-live="polite" data-form-message></p>
+    <div class="settings-actions">
+      <button type="button" class="ghost" data-action="tg-getme">{{ st('editor.tg_check') }}</button>
+      <button type="button" class="ghost" data-action="tg-send">{{ st('editor.tg_send') }}</button>
+      <button type="submit">{{ st('editor.save') }}</button>
+      <button type="button" class="ghost" data-action="cancel">{{ st('editor.cancel') }}</button>
+    </div>
+  </form>
+
+  <div class="settings-history" data-history hidden>
+    <h3>{{ st('editor.history_title') }}</h3>
+    <ul class="settings-editor-list" data-backup-list></ul>
+    <p class="hint" data-history-empty hidden>{{ st('editor.history_empty') }}</p>
+    <div class="settings-actions">
+      <button type="button" class="ghost" data-action="cancel">{{ st('editor.cancel') }}</button>
+    </div>
+  </div>
+</section>
+
+<section class="card settings-section settings-web" data-web-card hidden aria-labelledby="settings-web-title" data-testid="settings-web">
+  <h2 id="settings-web-title">{{ st('editor.web_title') }}</h2>
+  <p data-web-password-state></p>
+  <form class="settings-form" data-web-password-form novalidate autocomplete="off">
+    <div class="settings-field" data-current-password-field hidden>
+      <label for="sw-current">{{ st('editor.web_current_password') }}</label>
+      <input id="sw-current" name="current_password" type="password" maxlength="256" autocomplete="current-password">
+    </div>
+    <div class="settings-field">
+      <label for="sw-new">{{ st('editor.web_new_password') }}</label>
+      <input id="sw-new" name="new_password" type="password" minlength="10" maxlength="256" autocomplete="new-password" aria-describedby="sw-new-hint">
+      <p class="hint" id="sw-new-hint">{{ st('editor.web_password_hint') }}</p>
+    </div>
+    <div class="settings-actions">
+      <button type="submit">{{ st('editor.web_save_password') }}</button>
+    </div>
+    <p class="settings-message" role="status" aria-live="polite" data-form-message></p>
+  </form>
+  <div class="settings-lan">
+    <p data-lan-state></p>
+    <p class="hint">{{ st('editor.web_lan_hint') }}</p>
+    <div class="settings-actions">
+      <button type="button" class="ghost" data-action="lan-toggle" hidden></button>
+    </div>
+    <p class="settings-message" role="status" aria-live="polite" data-lan-message></p>
+  </div>
+</section>

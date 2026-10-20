@@ -5,6 +5,13 @@
   gap: 16px;
 }
 
+/* settings.js shows and hides parts with the hidden attribute; rules below
+   (and .status-pill in style.css) set display, which would override the
+   browser's own [hidden] rule and show a "saved" pill with no secret saved. */
+.settings-page [hidden] {
+  display: none !important;
+}
+
 .settings-intro {
   margin: 0;
 }
@@ -122,4 +129,177 @@
   margin: 0;
   color: var(--success);
   font-size: 13px;
+}
+
+/* Settings editor (S2) */
+.settings-toolbar,
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.settings-actions {
+  margin: 12px 0 0;
+}
+
+.settings-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-editor-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.settings-editor-row .hint {
+  flex: 1 1 12ch;
+  overflow-wrap: anywhere;
+}
+
+.settings-form,
+.settings-history {
+  margin-top: 12px;
+  padding: 14px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.settings-web .settings-form {
+  margin-top: 0;
+}
+
+.settings-form h3,
+.settings-history h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 12px;
+  max-width: 44ch;
+}
+
+.settings-field label,
+.settings-field legend {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.settings-field .hint {
+  margin: 0;
+}
+
+.settings-field input,
+.settings-field select {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface, #fff);
+  color: inherit;
+}
+
+.settings-field input:focus-visible,
+.settings-field select:focus-visible,
+.settings-check input:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 1px;
+}
+
+.settings-field input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.settings-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+
+.settings-field-row .settings-field {
+  flex: 1 1 22ch;
+}
+
+.settings-field-row .settings-port {
+  flex: 0 0 10ch;
+}
+
+.settings-chat {
+  border: 0;
+  padding: 0;
+}
+
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-weight: 400;
+}
+
+.settings-secret {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-secret input {
+  flex: 1 1 24ch;
+}
+
+.settings-issues-list {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.settings-issue-error {
+  color: var(--danger);
+}
+
+.settings-issue-warning {
+  color: var(--muted);
+}
+
+.settings-message {
+  margin: 8px 0 0;
+  min-height: 1em;
+  font-size: 14px;
+}
+
+.settings-message[data-kind="ok"] {
+  color: var(--success);
+}
+
+.settings-message[data-kind="warn"],
+.settings-message[data-kind="error"] {
+  color: var(--danger);
+}
+
+.settings-outlook {
+  max-width: 60ch;
+}
+
+.settings-lan {
+  margin-top: 16px;
+}
+
+.settings-lan p {
+  margin: 0 0 8px;
 }
