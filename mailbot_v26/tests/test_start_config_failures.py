@@ -101,8 +101,11 @@ def test_load_config_with_explicit_config_dir_ignores_cwd_yaml(
 def test_start_fails_fast_on_invalid_telegram_contract(
     tmp_path, monkeypatch, capsys
 ) -> None:
+    # Explicit db_path: the default resolves to the live database of the checkout.
+    db_path = (tmp_path / "mailbot.sqlite").as_posix()
     (tmp_path / "settings.ini").write_text(
-        "[general]\ncheck_interval=120\n", encoding="utf-8"
+        f"[general]\ncheck_interval=120\n[storage]\ndb_path={db_path}\n",
+        encoding="utf-8",
     )
     (tmp_path / "accounts.ini").write_text(
         "[acc]\nlogin=u@example.com\npassword=p\nhost=imap.example.com\n\n"

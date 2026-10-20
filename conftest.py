@@ -6,9 +6,11 @@
 2. Tests must not reach the network: connections to non-loopback addresses
    raise, so an unmocked Telegram/IMAP/LLM call fails loudly instead of
    silently depending on connectivity.
-3. Tests must never open the live database (repo-root database.sqlite): the
-   pipeline's import-time singletons get a throwaway database via
-   LETTERBOT_DEFAULT_DB_PATH, and any sqlite3.connect to the live file raises.
+3. Tests must never open a real database: the configured live DB
+   (data/mailbot.sqlite by default) and the legacy repo-root database.sqlite
+   both live inside the checkout, so any sqlite3.connect to a file inside the
+   repository tree raises (tests use tmp_path). The pipeline's import-time
+   singletons get a throwaway database via LETTERBOT_DEFAULT_DB_PATH.
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ from urllib.parse import unquote, urlsplit
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent
-LIVE_DB = (REPO_ROOT / "database.sqlite").resolve()
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -48,7 +49,7 @@ if not os.environ.get("LETTERBOT_DEFAULT_DB_PATH"):
 
 def _sqlite_target(database: object) -> Path | None:
     text = os.fspath(database) if isinstance(database, (str, os.PathLike)) else None
-    if not text or text == ":memory:":
+    if not text or ":memory:" in text or "mode=memory" in text:
         return None
     if text.startswith("file:"):
         path = unquote(urlsplit(text).path)
@@ -66,9 +67,15 @@ def _sqlite_target(database: object) -> Path | None:
 _original_sqlite_connect = sqlite3.connect
 
 
+def _inside_repo(target: Path | None) -> bool:
+    return target is not None and (target == REPO_ROOT or REPO_ROOT in target.parents)
+
+
 def _guarded_sqlite_connect(database, *args, **kwargs):
-    if _sqlite_target(database) == LIVE_DB:
-        raise RuntimeError(f"tests must not open the live database: {database!r}")
+    if _inside_repo(_sqlite_target(database)):
+        raise RuntimeError(
+            f"tests must not open a database inside the checkout: {database!r}"
+        )
     return _original_sqlite_connect(database, *args, **kwargs)
 
 

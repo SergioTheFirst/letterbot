@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from mailbot_v26 import doctor
+from mailbot_v26.config_loader import StorageConfig
 from mailbot_v26.worker.telegram_sender import DeliveryResult
 
 
@@ -13,6 +14,17 @@ def _reset_doctor_locale() -> None:
     doctor._set_doctor_locale("en")
     yield
     doctor._set_doctor_locale("en")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_storage(monkeypatch, tmp_path) -> None:
+    # A relative or missing db_path resolves against the app root, which is
+    # the live database of this checkout; the doctor must probe a temp file.
+    monkeypatch.setattr(
+        doctor,
+        "load_storage_config",
+        lambda _base_dir: StorageConfig(db_path=tmp_path / "doctor.sqlite"),
+    )
 
 
 def test_doctor_mode_missing_yaml_and_ini_warns_and_does_not_crash(
