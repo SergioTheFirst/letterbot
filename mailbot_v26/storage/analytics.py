@@ -7,6 +7,7 @@ import math
 import re
 import sqlite3
 from collections import Counter, defaultdict
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -4196,20 +4197,65 @@ class KnowledgeAnalytics:
         *,
         days: int = 7,
         limit: int = 5,
+        account_emails: Iterable[str] | None = None,
     ) -> list[dict[str, object]]:
-        rows = self._execute_select(
-            """
-            SELECT entity_id, COUNT(*) AS total
-            FROM interaction_events
-            WHERE event_type = 'email_received'
-              AND event_time >= datetime('now', ?)
-            GROUP BY entity_id
+        """Entities with the most received emails over the last ``days``.
+
+        ``account_emails`` counts only emails of those accounts (B8): an
+        interaction links to its email through ``metadata.email_id``. None
+        keeps the count over every account.
+        """
+        if account_emails is None:
+            return self._execute_select(
+                """
+                SELECT entity_id, COUNT(*) AS total
+                FROM interaction_events
+                WHERE event_type = 'email_received'
+                  AND event_time >= datetime('now', ?)
+                GROUP BY entity_id
+                ORDER BY total DESC
+                LIMIT ?
+                """,
+                (f"-{days} days", limit),
+            )
+        scope_clause, scope_params = self._digest_scope_clause(
+            account_emails, column="e.account_email"
+        )
+        if scope_clause is None:
+            return []
+        return self._execute_select(
+            f"""
+            SELECT ie.entity_id, COUNT(*) AS total
+            FROM interaction_events ie
+            JOIN emails e ON e.id = (
+                CASE WHEN json_valid(ie.metadata)
+                THEN json_extract(ie.metadata, '$.email_id') END
+            )
+            WHERE ie.event_type = 'email_received'
+              AND ie.event_time >= datetime('now', ?){scope_clause}
+            GROUP BY ie.entity_id
             ORDER BY total DESC
             LIMIT ?
             """,
-            (f"-{days} days", limit),
+            (f"-{days} days", *scope_params, limit),
         )
-        return rows
+
+    def _digest_scope_clause(
+        self, account_emails: Iterable[str] | None, *, column: str = "account_id"
+    ) -> tuple[str | None, list[object]]:
+        """SQL filter for the optional account scope of a digest query (B8).
+
+        None: no filter (every account). Otherwise ``" AND <column> IN (...)"``
+        with its parameters, or ``(None, [])`` when the scope holds no
+        account, so the caller returns no rows.
+        """
+        if account_emails is None:
+            return "", []
+        account_ids = self._normalize_account_scope("", account_emails)
+        if not account_ids:
+            return None, []
+        placeholders = ", ".join(["?"] * len(account_ids))
+        return f" AND {column} IN ({placeholders})", list(account_ids)
 
     def entity_label(self, *, entity_id: str) -> str | None:
         if not entity_id:
@@ -5392,40 +5438,67 @@ class KnowledgeAnalytics:
             )
         return output
 
+    # The "digest already sent" checks wait for a busy database as long as
+    # KnowledgeDB writers do, and a failed read raises instead of reading as
+    # "not sent", which would send a duplicate digest (B17).
+    _SENT_CHECK_BUSY_TIMEOUT_MS = 5000
+
+    def _sent_check_rows(
+        self, query: str, params: Sequence[object]
+    ) -> list[dict[str, object]]:
+        with closing(self._connect_readonly()) as conn:
+            conn.execute(f"PRAGMA busy_timeout = {self._SENT_CHECK_BUSY_TIMEOUT_MS}")
+            conn.row_factory = sqlite3.Row
+            return [dict(row) for row in conn.execute(query, tuple(params))]
+
     def has_daily_digest_sent(self, *, account_email: str, day: datetime) -> bool:
+        """True when a daily digest went out on ``day``'s calendar day.
+
+        The day is taken in ``day``'s own timezone: the scheduler passes local
+        time (B6); a naive value is read as UTC. Raises sqlite3.Error when the
+        events cannot be read (B17).
+        """
         if not account_email:
             return False
-        start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp()
-        end = start + 24 * 60 * 60
-        try:
-            rows = self._execute_select(
-                """
-                SELECT 1
-                FROM events_v1
-                WHERE account_id = ?
-                  AND event_type = 'daily_digest_sent'
-                  AND ts_utc >= ?
-                  AND ts_utc < ?
-                LIMIT 1
-                """,
-                (account_email, start, end),
-            )
-        except sqlite3.OperationalError:
-            return False
+        day_start = datetime(
+            day.year, day.month, day.day, tzinfo=day.tzinfo or timezone.utc
+        )
+        start = day_start.timestamp()
+        end = (day_start + timedelta(days=1)).timestamp()
+        rows = self._sent_check_rows(
+            """
+            SELECT 1
+            FROM events_v1
+            WHERE account_id = ?
+              AND event_type = 'daily_digest_sent'
+              AND ts_utc >= ?
+              AND ts_utc < ?
+            LIMIT 1
+            """,
+            (account_email, start, end),
+        )
         return bool(rows)
 
     def has_weekly_digest_sent(self, *, account_email: str, week_key: str) -> bool:
+        """True when the weekly digest of ``week_key`` went out.
+
+        Raises sqlite3.Error when the events cannot be read (B17).
+        """
         if not account_email or not week_key:
             return False
-        rows = self._event_rows(
-            account_id=account_email,
-            event_type="weekly_digest_sent",
+        rows = self._sent_check_rows(
+            """
+            SELECT payload, payload_json
+            FROM events_v1
+            WHERE account_id = ?
+              AND event_type = 'weekly_digest_sent'
+            """,
+            (account_email,),
         )
-        for row in rows:
-            payload = self._event_payload(row)
-            if str(payload.get("week_key") or "") == week_key:
-                return True
-        return False
+        return any(
+            str(self._event_payload(row).get("week_key") or "") == week_key
+            for row in rows
+        )
 
     def weekly_compact_summary(
         self,
@@ -6501,12 +6574,19 @@ class KnowledgeAnalytics:
         return {"total": total, "drops": drops, "pct": int(pct)}
 
     def weekly_trust_score_deltas(
-        self, *, days: int = 7
+        self, *, days: int = 7, account_emails: Iterable[str] | None = None
     ) -> dict[str, list[dict[str, object]]]:
+        """Top trust gains/losses over ``days``; ``account_emails`` limits the
+        events to those accounts (B8), None keeps every account."""
+        scope_clause, scope_params = self._digest_scope_clause(
+            account_emails, column="ev.account_id"
+        )
+        if scope_clause is None:
+            return {"up": [], "down": []}
         since_ts = self._window_start_ts(days)
         try:
             rows = self._execute_select(
-                """
+                f"""
                 SELECT
                     ev.entity_id,
                     ev.ts_utc,
@@ -6516,12 +6596,15 @@ class KnowledgeAnalytics:
                 FROM events_v1 ev
                 LEFT JOIN entities e ON e.id = ev.entity_id
                 WHERE ev.event_type = 'trust_score_updated'
-                  AND ev.ts_utc >= ?
+                  AND ev.ts_utc >= ?{scope_clause}
                 ORDER BY ev.entity_id ASC, ev.ts_utc ASC
                 """,
-                (since_ts,),
+                (since_ts, *scope_params),
             )
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as exc:
+            logger.warning(
+                "digest_query_failed query=weekly_trust_score_deltas error=%s", exc
+            )
             return {"up": [], "down": []}
 
         per_entity: dict[str, dict[str, list[tuple[float, float, str]]]] = {}
@@ -6602,19 +6685,29 @@ class KnowledgeAnalytics:
             combined[entity_id] = entry
         return combined
 
-    def latest_trust_score_delta(self, *, limit: int = 50) -> dict[str, object] | None:
+    def latest_trust_score_delta(
+        self, *, limit: int = 50, account_emails: Iterable[str] | None = None
+    ) -> dict[str, object] | None:
+        """Most recent trust change; ``account_emails`` limits the events to
+        those accounts (B8), None keeps every account (web cockpit)."""
+        scope_clause, scope_params = self._digest_scope_clause(account_emails)
+        if scope_clause is None:
+            return None
         try:
             rows = self._execute_select(
-                """
+                f"""
                 SELECT entity_id, ts_utc, payload, payload_json
                 FROM events_v1
-                WHERE event_type = 'trust_score_updated'
+                WHERE event_type = 'trust_score_updated'{scope_clause}
                 ORDER BY ts_utc DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (*scope_params, limit),
             )
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as exc:
+            logger.warning(
+                "digest_query_failed query=latest_trust_score_delta error=%s", exc
+            )
             return None
         versioned: dict[str, dict[str, list[tuple[float, float]]]] = {}
         for row in rows:
@@ -6656,20 +6749,29 @@ class KnowledgeAnalytics:
         }
 
     def latest_relationship_health_delta(
-        self, *, limit: int = 50
+        self, *, limit: int = 50, account_emails: Iterable[str] | None = None
     ) -> dict[str, object] | None:
+        """Most recent relationship-health change; ``account_emails`` limits
+        the events to those accounts (B8), None keeps every account."""
+        scope_clause, scope_params = self._digest_scope_clause(account_emails)
+        if scope_clause is None:
+            return None
         try:
             rows = self._execute_select(
-                """
+                f"""
                 SELECT entity_id, ts_utc, payload, payload_json
                 FROM events_v1
-                WHERE event_type = 'relationship_health_updated'
+                WHERE event_type = 'relationship_health_updated'{scope_clause}
                 ORDER BY ts_utc DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (*scope_params, limit),
             )
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as exc:
+            logger.warning(
+                "digest_query_failed query=latest_relationship_health_delta error=%s",
+                exc,
+            )
             return None
         latest_by_entity: dict[str, dict[str, object]] = {}
         for row in rows:

@@ -135,8 +135,9 @@ def test_collect_weekly_data_accepts_account_emails() -> None:
             return []
 
         def weekly_trust_score_deltas(
-            self, *, days: int = 7
+            self, *, days: int = 7, account_emails: list[str] | None = None
         ) -> dict[str, list[dict[str, object]]]:
+            self.seen["trust"] = account_emails
             return {}
 
         def weekly_accuracy_report(
@@ -222,5 +223,6 @@ def test_collect_weekly_data_accepts_account_emails() -> None:
     assert analytics.seen["attention"] == account_emails
     assert analytics.seen["commitments"] == account_emails
     assert analytics.seen["overdue"] == account_emails
+    assert analytics.seen["trust"] == account_emails
     assert analytics.seen["event_rows"] == account_emails
     assert analytics.seen["silence"] == account_emails

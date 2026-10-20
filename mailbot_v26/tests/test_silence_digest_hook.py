@@ -45,19 +45,15 @@ minute = 0
     )
 
 
-def _write_accounts(path: Path) -> None:
-    (path / "accounts.ini").write_text(
-        """[primary]
-login = account@example.com
-password = pass
-telegram_chat_id = chat
-
-[secondary]
-login = alt@example.com
-password = pass
-telegram_chat_id = chat
-""",
-        encoding="utf-8",
+def _alt_account_in_same_chat() -> AccountConfig:
+    return AccountConfig(
+        account_id="alt",
+        login="alt@example.com",
+        password="pass",
+        host="",
+        port=993,
+        use_ssl=True,
+        telegram_chat_id="chat",
     )
 
 
@@ -104,8 +100,10 @@ def _build_storage(tmp_path: Path) -> digest_scheduler.DigestStorage:
 def test_silence_scan_runs_when_flag_enabled(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.ini"
     _write_config(config_path, silence_mode="shadow")
-    _write_accounts(tmp_path)
     monkeypatch.setattr(digest_scheduler, "_CONFIG_PATH", config_path)
+    # The scan gets the accounts the live config routes to the chat (B8).
+    config = _build_config(tmp_path)
+    config.accounts.append(_alt_account_in_same_chat())
 
     calls: list[dict[str, object]] = []
 
@@ -117,7 +115,7 @@ def test_silence_scan_runs_when_flag_enabled(monkeypatch, tmp_path) -> None:
 
     digest_scheduler.run_digest_tick(
         now=datetime(2025, 1, 6, 9, 1, tzinfo=timezone.utc),
-        config=_build_config(tmp_path),
+        config=config,
         storage=_build_storage(tmp_path),
         telegram_sender=lambda payload: None,
         logger=DummyLogger(),

@@ -303,7 +303,12 @@ def _load_account_scopes(base_dir: str) -> dict[str, AccountScope]:
     for account in accounts:
         if not account.telegram_chat_id:
             continue
-        chat_groups.setdefault(account.telegram_chat_id, []).append(account.login)
+        # Ingest stores rows under normalize_login(login); older rows may hold
+        # the login as configured, so the scope lists both forms (B8).
+        group = chat_groups.setdefault(account.telegram_chat_id, [])
+        for login in (account.login, normalize_login(account.login)):
+            if login and login not in group:
+                group.append(login)
     for account in accounts:
         if not account.telegram_chat_id:
             continue

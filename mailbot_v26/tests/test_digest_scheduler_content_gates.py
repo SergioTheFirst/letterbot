@@ -210,13 +210,9 @@ def test_weekly_not_due_skip_event_only_on_state_change(monkeypatch, tmp_path) -
     config, storage = _setup(monkeypatch, tmp_path, daily=False, weekly=True)
     sender = _Sender()
 
-    for day, hour, minute in ((30, 10, 0), (30, 10, 2), (31, 11, 0)):
-        _tick(
-            config,
-            storage,
-            sender,
-            datetime(2025, 12, day, hour, minute, tzinfo=timezone.utc),
-        )
+    # Before the Monday 09:00 slot (later that week is catch-up time, B6).
+    for hour, minute in ((7, 0), (7, 2), (8, 0)):
+        _tick(config, storage, sender, _MONDAY_DUE.replace(hour=hour, minute=minute))
 
     assert sender.payloads == []
     assert _weekly_skip_reasons(storage) == ["not_due"]

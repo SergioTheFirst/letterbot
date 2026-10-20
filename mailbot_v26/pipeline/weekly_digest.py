@@ -470,11 +470,16 @@ def _collect_anomaly_alerts(
     now: datetime,
     contract_event_emitter: ContractEventEmitter | None = None,
     account_email: str | None = None,
+    account_emails: Sequence[str] | None = None,
     locale: str = DEFAULT_LOCALE,
 ) -> list[str]:
     alerts: list[str] = []
+    # Only entities that wrote to this chat's accounts (B8), never all accounts.
+    scope = list(account_emails or ([account_email] if account_email else []))
     try:
-        entities = analytics.recent_entity_activity(days=30, limit=8)
+        entities = analytics.recent_entity_activity(
+            days=30, limit=8, account_emails=scope
+        )
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("anomaly_digest_activity_failed", error=str(exc))
         return alerts
@@ -638,7 +643,11 @@ def _collect_weekly_data(
         days=7,
         limit=5,
     )
-    trust_deltas = analytics.weekly_trust_score_deltas(days=7)
+    # Trust and anomaly queries see only this chat's accounts (B8).
+    scope_account_emails = list(account_emails or [account_email])
+    trust_deltas = analytics.weekly_trust_score_deltas(
+        days=7, account_emails=scope_account_emails
+    )
 
     attention_economics: AttentionEconomicsResult | None = None
     if include_attention_economics:
@@ -651,15 +660,6 @@ def _collect_weekly_data(
             event_emitter=event_emitter,
             now=now or datetime.now(timezone.utc),
         )
-        compute_attention_economics(
-            analytics=analytics,
-            account_email=account_email,
-            account_emails=account_emails,
-            window_days=30,
-            include_anomalies=include_anomalies,
-            event_emitter=event_emitter,
-            now=now or datetime.now(timezone.utc),
-        )
 
     anomaly_alerts: list[str] = []
     if include_anomalies:
@@ -668,6 +668,7 @@ def _collect_weekly_data(
             now=now or datetime.now(timezone.utc),
             contract_event_emitter=contract_event_emitter,
             account_email=account_email,
+            account_emails=scope_account_emails,
             locale=locale,
         )
 
