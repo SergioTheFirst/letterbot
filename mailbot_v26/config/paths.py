@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
 import sys
 
 
@@ -33,6 +34,16 @@ def runtime_log_path() -> Path:
     return Path(__file__).resolve().parents[1] / "mailbot.log"
 
 
+def import_time_db_path() -> Path:
+    """Database the pipeline's module-level singletons use until start.main configures the real one.
+
+    LETTERBOT_DEFAULT_DB_PATH overrides it; the test suite points it at a temp file
+    so importing the pipeline never opens a real database.
+    """
+    override = os.environ.get("LETTERBOT_DEFAULT_DB_PATH", "").strip()
+    return Path(override) if override else Path("database.sqlite")
+
+
 def resolve_config_paths(config_dir: Path | None = None) -> ConfigPaths:
     selected_dir = config_dir if config_dir is not None else default_config_dir()
 
@@ -62,6 +73,7 @@ __all__ = [
     "ConfigPaths",
     "app_root",
     "default_config_dir",
+    "import_time_db_path",
     "resolve_config_paths",
     "runtime_log_path",
 ]

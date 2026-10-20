@@ -35,6 +35,7 @@ from mailbot_v26.behavior.attention_engine import (
 from mailbot_v26.behavior.deadlock_detector import maybe_emit_deadlock
 from mailbot_v26.behavior.threading import compute_thread_key
 from mailbot_v26.config.deadlock_policy import load_deadlock_policy_config
+from mailbot_v26.config.paths import import_time_db_path
 from mailbot_v26.config.delivery_policy import (
     DeliveryPolicyConfig,
     load_delivery_policy_config,
@@ -343,7 +344,7 @@ class _LazyFeatureFlags:
 
 
 # === Инициализация write-only БД ===
-DB_PATH = Path("database.sqlite")
+DB_PATH = import_time_db_path()
 knowledge_db = KnowledgeDB(DB_PATH)
 analytics = KnowledgeAnalytics(DB_PATH)
 decision_trace_writer = DecisionTraceWriter(DB_PATH)

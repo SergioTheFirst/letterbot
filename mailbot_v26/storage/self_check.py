@@ -6,11 +6,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
+from mailbot_v26.config.paths import import_time_db_path
 from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = Path("database.sqlite")
+DEFAULT_DB_PATH = import_time_db_path()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 EMAILS_REQUIRED_COLUMNS: set[str] = {
