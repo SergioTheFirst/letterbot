@@ -319,6 +319,41 @@ def test_open_normalizes_raw_message_ids_and_indexes_them(tmp_path: Path) -> Non
     assert any("idx_emails_account_message_id" in str(step) for step in plan)
 
 
+def test_message_id_normalization_scans_once_per_database(
+    tmp_path: Path, monkeypatch
+) -> None:
+    scans: list[Path] = []
+    real_normalize = Storage._normalize_stored_message_ids
+
+    def counting_normalize(self: Storage) -> int:
+        scans.append(self.db_path)
+        return real_normalize(self)
+
+    monkeypatch.setattr(Storage, "_normalize_stored_message_ids", counting_normalize)
+    db_path = tmp_path / "db.sqlite"
+    first = Storage(db_path)
+    first.persist_email_and_enqueue(
+        account_email=LOGIN,
+        uid=1,
+        message_id=" <a@example.com>\r\n",
+        from_email=None,
+        from_name=None,
+        subject=None,
+        received_at=None,
+        attachments_count=0,
+    )
+    first.close()
+    assert scans == [db_path]
+
+    # R4: every later open skips the unindexed GLOB scan over all emails.
+    for _ in range(2):
+        Storage(db_path).close()
+    assert scans == [db_path]
+    # Another database runs its own migration.
+    Storage(tmp_path / "other.sqlite").close()
+    assert scans == [db_path, tmp_path / "other.sqlite"]
+
+
 # ---- storage: retire the old UID epoch (F6) ----
 
 

@@ -60,6 +60,9 @@ class BotState:
     # login -> UIDVALIDITY whose Message-ID resync has not yet reached the
     # epoch's highest UID (WP2c).
     resync_epoch: Dict[str, int] = field(default_factory=dict)
+    # login -> emails dead-lettered at CONTEXT (lost after a restart) that
+    # the account's next poll folds into its aggregated alert (R3).
+    context_dead_letters: Dict[str, int] = field(default_factory=dict)
 
 
 class StateManager:
@@ -117,6 +120,9 @@ class StateManager:
                 raw.get("dead_letter_alert_at")
             ),
             resync_epoch=self._load_resync_epochs(raw.get("resync_epoch")),
+            context_dead_letters=self._load_context_dead_letters(
+                raw.get("context_dead_letters")
+            ),
         )
 
     def _load_uid_attempts(self, raw: Any) -> Dict[str, Dict[int, int]]:
@@ -161,6 +167,20 @@ class StateManager:
             else:
                 log.warning("state_resync_epoch_entry_ignored file=%s", self.state_file)
         return epochs
+
+    def _load_context_dead_letters(self, raw: Any) -> Dict[str, int]:
+        if not isinstance(raw, Mapping):
+            return {}
+        counts: Dict[str, int] = {}
+        for login, value in raw.items():
+            key = normalize_login(str(login))
+            if key and isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                counts[key] = counts.get(key, 0) + value
+            else:
+                log.warning(
+                    "state_context_dead_letter_entry_ignored file=%s", self.state_file
+                )
+        return counts
 
     def get_last_uid(self, login: str) -> int:
         key = normalize_login(login)
@@ -290,6 +310,26 @@ class StateManager:
                 self._state.resync_epoch[key] = int(uidvalidity)
             self._mark_dirty()
 
+    def add_context_dead_letter(self, login: str) -> None:
+        """Count one email dead-lettered at CONTEXT for the account's next
+        poll alert (R3)."""
+        key = normalize_login(login)
+        if not key:
+            return
+        with self._lock:
+            counts = self._state.context_dead_letters
+            counts[key] = counts.get(key, 0) + 1
+            self._mark_dirty()
+
+    def pop_context_dead_letters(self, login: str) -> int:
+        """Take the account's CONTEXT dead-letter count; 0 when none."""
+        key = normalize_login(login)
+        with self._lock:
+            count = self._state.context_dead_letters.pop(key, 0)
+            if count:
+                self._mark_dirty()
+        return count
+
     def get_accounts_snapshot(self) -> Dict[str, AccountState]:
         with self._lock:
             return {
@@ -336,6 +376,7 @@ class StateManager:
                 },
                 "dead_letter_alert_at": dict(self._state.dead_letter_alert_at),
                 "resync_epoch": dict(self._state.resync_epoch),
+                "context_dead_letters": dict(self._state.context_dead_letters),
             }
 
             tmp_file = self.state_file.with_suffix(".tmp")

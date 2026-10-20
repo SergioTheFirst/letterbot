@@ -61,7 +61,7 @@ from mailbot_v26.health.mail_accounts import (
     _mask_login,
     run_startup_mail_account_healthcheck,
 )
-from mailbot_v26.imap_client import MAX_UID_FETCH_ATTEMPTS, ResilientIMAP
+from mailbot_v26.imap_client import MAX_UID_FETCH_ATTEMPTS, IMAPError, ResilientIMAP
 from mailbot_v26.integrity import verify_shipped_files
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline.processor import (
@@ -807,8 +807,26 @@ def _persist_inbound_and_enqueue_parse(
 # D-P2-1: at most one aggregated dead-letter alert per account in this window.
 DEAD_LETTER_ALERT_INTERVAL = timedelta(hours=24)
 # Emails dead-lettered at CONTEXT (WP2b) per normalized login since that
-# account's last poll; the poll folds them into its aggregated alert.
+# account's last poll; the poll folds them into its aggregated alert. The
+# worker loop keeps the counts in state.json (R3); this in-memory map only
+# serves callers of _process_queue without a StateManager.
 _CONTEXT_DEAD_LETTERS: dict[str, int] = {}
+
+
+def _record_context_dead_letter(state: StateManager | None, login: str) -> None:
+    """Count a CONTEXT dead letter for the account's next poll alert.
+
+    Saved to state.json at once (R3), so a restart before that poll keeps it.
+    """
+    if state is None:
+        _CONTEXT_DEAD_LETTERS[login] = _CONTEXT_DEAD_LETTERS.get(login, 0) + 1
+        return
+    state.add_context_dead_letter(login)
+    try:
+        state.save()
+    except Exception:
+        # Still counted in memory; the cycle-end save writes it again.
+        logger.exception("context_dead_letter_state_save_failed account=%s", login)
 
 
 def _known_uid_probe(
@@ -957,7 +975,9 @@ def _commit_imap_cursor(
     commit = commit_cursor(persisted_uids)
     dead_uids = tuple(commit.dead_uids) if commit is not None else ()
     # Context dead letters since this account's last poll join its alert.
-    context_dead = _CONTEXT_DEAD_LETTERS.pop(normalize_login(login), 0)
+    login_key = normalize_login(login)
+    context_dead = _CONTEXT_DEAD_LETTERS.pop(login_key, 0)
+    context_dead += state.pop_context_dead_letters(login_key)
     if not dead_uids and not context_dead:
         return
     now_utc = datetime.now(timezone.utc)
@@ -1245,6 +1265,21 @@ def _settle_email_delivery(
 # A context refetch retries its IMAP session once: a queue pass must not
 # block on a dead server (the queue item retries with backoff).
 CONTEXT_REFETCH_IMAP_RETRIES = 1
+# R2: IMAP unreachable during a context refetch is an outage, not a broken
+# email. The item retries after 1, 2, 5, 10, then every 30 min without using
+# its attempts: (waited under N seconds, retry in M seconds), else the cap.
+CONTEXT_IMAP_RETRY_DELAYS: tuple[tuple[int, int], ...] = (
+    (60, 60),
+    (180, 120),
+    (480, 300),
+    (1080, 600),
+)
+CONTEXT_IMAP_RETRY_MAX_DELAY_SECONDS = 1800
+# Then it is dead-lettered (stage CONTEXT), as a message that is gone.
+CONTEXT_IMAP_MAX_WAIT = timedelta(hours=24)
+# An item queued before this worker started waits from the start: after a
+# long shutdown the queue still holds old items.
+_WORKER_STARTED_AT = datetime.now(timezone.utc)
 
 
 class PipelineContextUnavailable(Exception):
@@ -1254,6 +1289,17 @@ class PipelineContextUnavailable(Exception):
     def __init__(self, reason: str, *, account_email: str, uid: int) -> None:
         super().__init__(f"context_unavailable:{reason}")
         self.reason = reason
+        self.account_email = account_email
+        self.uid = uid
+
+
+class PipelineContextImapUnavailable(Exception):
+    """IMAP could not be reached to refetch a queued email (R2): the item is
+    retried later without using its attempts."""
+
+    def __init__(self, cause: BaseException, *, account_email: str, uid: int) -> None:
+        super().__init__(f"context_imap_unavailable: {cause}")
+        self.error_class = cause.__class__.__name__
         self.account_email = account_email
         self.uid = uid
 
@@ -1269,9 +1315,9 @@ def _rebuild_pipeline_context(
 
     Refetches the message from IMAP (WP2b), parses it and fills the caches;
     a TG item runs the LLM stage inline first (no premium re-run). None when
-    the email is not stored (the "no pipeline context" retry path). A
-    network error propagates, so the item is retried; a message that is gone
-    or does not match raises PipelineContextUnavailable.
+    the email is not stored (the "no pipeline context" retry path). IMAP
+    unreachable raises PipelineContextImapUnavailable (retried, R2); a
+    message that is gone or does not match raises PipelineContextUnavailable.
     """
     locator = storage.get_email_locator(email_id)
     if locator is None:
@@ -1289,11 +1335,16 @@ def _rebuild_pipeline_context(
         max_email_mb=config.general.max_email_mb,
         retries=CONTEXT_REFETCH_IMAP_RETRIES,
     )
-    refetch = imap.fetch_message_by_uid(
-        uid,
-        expected_uidvalidity=locator["uidvalidity"],
-        expected_message_id=locator["message_id"],
-    )
+    try:
+        refetch = imap.fetch_message_by_uid(
+            uid,
+            expected_uidvalidity=locator["uidvalidity"],
+            expected_message_id=locator["message_id"],
+        )
+    except (IMAPError, OSError) as exc:
+        raise PipelineContextImapUnavailable(
+            exc, account_email=account_email, uid=uid
+        ) from exc
     logger.info(
         "pipeline_context_refetch email_id=%s stage=%s uid=%s found_uid=%s reason=%s",
         email_id,
@@ -1306,11 +1357,11 @@ def _rebuild_pipeline_context(
         raise PipelineContextUnavailable(
             refetch.reason, account_email=account_email, uid=uid
         )
-    inbound = parse_raw_email(refetch.raw, config)
     ctx = PipelineContext(email_id=email_id, account_email=account_email, uid=uid)
-    remember_raw_email(email_id, refetch.raw)
-    store_inbound(email_id, inbound)
     try:
+        inbound = parse_raw_email(refetch.raw, config)
+        remember_raw_email(email_id, refetch.raw)
+        store_inbound(email_id, inbound)
         if stage in ("LLM", "TG"):
             stage_parse(ctx)
         if stage == "TG":
@@ -1331,18 +1382,19 @@ def _dead_letter_unavailable_context(
     stage: str,
     attempts: int,
     lost: PipelineContextUnavailable,
+    state: StateManager | None = None,
 ) -> None:
     """WP2b: a queued email that cannot be refetched after a restart.
 
     No content means no fail-open send: the email turns ERROR, IMAP_HEALTH
     shows it (dead_letter, stage CONTEXT) and the account's next poll folds
-    it into the aggregated alert (D-P2-1).
+    it into the aggregated alert (D-P2-1). The alert count and the event come
+    first, then the ERROR status and the queue removal in one transaction: a
+    crash before that write, or a failed write, leaves the item queued, so a
+    later pass dead-letters it again (shown twice rather than never).
     """
     login = normalize_login(lost.account_email)
-    storage.set_email_error(email_id, str(lost))
-    storage.mark_done(queue_id)
-    _cleanup_pipeline_cache(email_id)
-    _CONTEXT_DEAD_LETTERS[login] = _CONTEXT_DEAD_LETTERS.get(login, 0) + 1
+    _record_context_dead_letter(state, login)
     logger.error(
         "pipeline_context_dead_lettered email_id=%s stage=%s uid=%s reason=%s",
         email_id,
@@ -1358,6 +1410,78 @@ def _dead_letter_unavailable_context(
         message_uid=lost.uid,
         attempt_count=attempts,
         extra_payload={"stage": "CONTEXT", "queue_stage": stage, "reason": lost.reason},
+    )
+    storage.dead_letter_queue_item(queue_id, email_id, str(lost))
+    _cleanup_pipeline_cache(email_id)
+
+
+def _context_refetch_delay_seconds(waited_seconds: float) -> int:
+    for waited_under, delay in CONTEXT_IMAP_RETRY_DELAYS:
+        if waited_seconds < waited_under:
+            return delay
+    return CONTEXT_IMAP_RETRY_MAX_DELAY_SECONDS
+
+
+def _context_wait_started_at(storage: Storage, queue_id: int) -> datetime:
+    """When the item started waiting in this run: its queue time, or the
+    worker start for an item queued before it (R2)."""
+    created_at = storage.get_queue_created_at(queue_id)
+    queued: datetime | None = None
+    if created_at:
+        try:
+            queued = datetime.fromisoformat(created_at)
+        except ValueError:
+            logger.warning("queue_created_at_unreadable queue_id=%s", queue_id)
+    if queued is not None and queued.tzinfo is None:
+        queued = queued.replace(tzinfo=timezone.utc)  # stored naive UTC
+    if queued is None or queued < _WORKER_STARTED_AT:
+        return _WORKER_STARTED_AT
+    return queued
+
+
+def _defer_context_refetch(
+    *,
+    storage: Storage,
+    queue_id: int,
+    email_id: int,
+    stage: str,
+    attempts: int,
+    unavailable: PipelineContextImapUnavailable,
+    state: StateManager | None,
+) -> None:
+    """R2: IMAP is unreachable while a lost context is rebuilt.
+
+    The item retries with a growing delay and gets back the attempt
+    claim_next counted, so an outage after a restart cannot exhaust its
+    budget. After CONTEXT_IMAP_MAX_WAIT it is dead-lettered visibly
+    (stage CONTEXT, reason imap_unavailable).
+    """
+    waited = datetime.now(timezone.utc) - _context_wait_started_at(storage, queue_id)
+    if waited >= CONTEXT_IMAP_MAX_WAIT:
+        _dead_letter_unavailable_context(
+            storage=storage,
+            queue_id=queue_id,
+            email_id=email_id,
+            stage=stage,
+            attempts=attempts,
+            lost=PipelineContextUnavailable(
+                "imap_unavailable",
+                account_email=unavailable.account_email,
+                uid=unavailable.uid,
+            ),
+            state=state,
+        )
+        return
+    delay = _context_refetch_delay_seconds(waited.total_seconds())
+    storage.defer_queue_item(queue_id, str(unavailable), delay)
+    logger.warning(
+        "pipeline_context_refetch_deferred email_id=%s stage=%s uid=%s waited_seconds=%d delay_seconds=%d error_class=%s",
+        email_id,
+        stage,
+        unavailable.uid,
+        waited.total_seconds(),
+        delay,
+        unavailable.error_class,
     )
 
 
@@ -1476,7 +1600,10 @@ def _process_queue(
     config: BotConfig,
     processor: MessageProcessor,
     flags: FeatureFlags,
+    state: StateManager | None = None,
 ) -> None:
+    """Run every due queue item. state keeps context dead-letter counts
+    across restarts (R3); without it they are kept in memory."""
     _process_due_snoozes_guarded(storage=storage, config=config)
     max_tg_attempts = MAX_TELEGRAM_STAGE_ATTEMPTS
     max_pipeline_attempts = MAX_PIPELINE_STAGE_ATTEMPTS
@@ -1526,6 +1653,17 @@ def _process_queue(
                     ctx = _rebuild_pipeline_context(
                         storage=storage, config=config, email_id=email_id, stage=stage
                     )
+                except PipelineContextImapUnavailable as unavailable:
+                    _defer_context_refetch(
+                        storage=storage,
+                        queue_id=queue_id,
+                        email_id=email_id,
+                        stage=stage,
+                        attempts=attempts,
+                        unavailable=unavailable,
+                        state=state,
+                    )
+                    continue
                 except PipelineContextUnavailable as lost:
                     _dead_letter_unavailable_context(
                         storage=storage,
@@ -1534,6 +1672,7 @@ def _process_queue(
                         stage=stage,
                         attempts=attempts,
                         lost=lost,
+                        state=state,
                     )
                     continue
                 if ctx is not None:
@@ -1597,12 +1736,12 @@ def _process_queue(
                         llm_not_before,
                     )
                 stage_parse(ctx)
-                storage.mark_done(queue_id)
-                storage.enqueue_stage(email_id, "LLM", not_before=llm_not_before)
+                storage.advance_stage(
+                    queue_id, email_id, "LLM", not_before=llm_not_before
+                )
             elif stage == "LLM":
                 stage_llm(ctx)
-                storage.mark_done(queue_id)
-                storage.enqueue_stage(email_id, "TG")
+                storage.advance_stage(queue_id, email_id, "TG")
             elif stage == "TG":
                 delivery_guard = _new_email_delivery_guard(
                     storage=storage, config=config, ctx=ctx, email_id=email_id
@@ -2847,7 +2986,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
                     if storage:
                         try:
-                            _process_queue(storage, config, processor, flags)
+                            _process_queue(
+                                storage, config, processor, flags, state=state
+                            )
                         except Exception:
                             # Queued rows stay in the queue and are retried by
                             # its own attempt/backoff logic; no blanket fail-open.

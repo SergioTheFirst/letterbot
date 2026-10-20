@@ -4,9 +4,12 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
+
+# One-time data migrations, recorded in storage_migrations (R4).
+MESSAGE_ID_NORMALIZATION_MIGRATION = "emails_message_id_normalized_v1"
 
 
 def normalize_message_id(value: object) -> str | None:
@@ -108,8 +111,11 @@ class Storage:
             if "uidvalidity" not in email_columns:
                 self.conn.execute("ALTER TABLE emails ADD COLUMN uidvalidity INTEGER;")
             # Message-ID is stored normalized since WP2c; older rows hold the
-            # raw (possibly folded) header.
-            self._normalize_stored_message_ids()
+            # raw (possibly folded) header. The scan cannot use an index, so
+            # it runs once per database (R4).
+            self._run_once(
+                MESSAGE_ID_NORMALIZATION_MIGRATION, self._normalize_stored_message_ids
+            )
             self.conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_emails_account_message_id
                 ON emails(account_email, message_id);
@@ -758,6 +764,112 @@ class Storage:
             """,
             (email_id, stage, now, now),
         )
+
+    def advance_stage(
+        self,
+        queue_id: int,
+        email_id: int,
+        next_stage: str,
+        not_before: str | None = None,
+    ) -> None:
+        """Replace the finished queue row with the next stage's row in one
+        transaction (R1): a crash or a failed write between the two can no
+        longer leave the email without a queue row (status NEW, never
+        notified). The next stage starts with a fresh attempt budget.
+        not_before is naive-UTC isoformat, as claim_next compares (F11).
+        """
+        now = self._now()
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE;")
+            cursor.execute("DELETE FROM queue WHERE id = ?;", (queue_id,))
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO queue (
+                    email_id, stage, attempts, not_before, last_error, created_at, updated_at
+                ) VALUES (?, ?, 0, ?, NULL, ?, ?);
+                """,
+                (email_id, next_stage, not_before, now, now),
+            )
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        finally:
+            cursor.close()
+
+    def _run_once(self, name: str, migration: Callable[[], object]) -> bool:
+        """Run a one-time data migration unless storage_migrations records it
+        (R4). Called inside the schema transaction, so the migration and its
+        marker commit together. True when it ran now."""
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS storage_migrations (
+                name TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );
+            """)
+        done = self.conn.execute(
+            "SELECT 1 FROM storage_migrations WHERE name = ?;", (name,)
+        ).fetchone()
+        if done is not None:
+            return False
+        migration()
+        self.conn.execute(
+            "INSERT INTO storage_migrations (name, applied_at) VALUES (?, ?);",
+            (name, self._now()),
+        )
+        logger.info("storage_migration_applied name=%s", name)
+        return True
+
+    def get_queue_created_at(self, queue_id: int) -> str | None:
+        """When the queue row was created (naive-UTC isoformat); None when
+        the row is gone."""
+        row = self.conn.execute(
+            "SELECT created_at FROM queue WHERE id = ?;", (queue_id,)
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+
+    def defer_queue_item(self, queue_id: int, error: str, delay_seconds: int) -> None:
+        """Retry the item after delay_seconds without using an attempt: the
+        one claim_next counted is given back (a transient outage, R2)."""
+        now = datetime.utcnow()
+        not_before = now + timedelta(seconds=delay_seconds)
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE queue
+                SET attempts = MAX(attempts - 1, 0),
+                    last_error = ?,
+                    not_before = ?,
+                    updated_at = ?
+                WHERE id = ?;
+                """,
+                (error, not_before.isoformat(), now.isoformat(), queue_id),
+            )
+
+    def dead_letter_queue_item(self, queue_id: int, email_id: int, error: str) -> None:
+        """Mark the email ERROR and remove its queue row in one transaction:
+        a crash or a failed write cannot leave it ERROR but still queued (a
+        later delivery would keep ERROR) or dead-lettered halfway."""
+        now = self._now()
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE;")
+            cursor.execute(
+                """
+                UPDATE emails
+                SET status = 'ERROR', error_last = ?, updated_at = ?
+                WHERE id = ?;
+                """,
+                (error, now, email_id),
+            )
+            cursor.execute("DELETE FROM queue WHERE id = ?;", (queue_id,))
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        finally:
+            cursor.close()
 
 
 __all__ = ["Storage", "normalize_message_id"]

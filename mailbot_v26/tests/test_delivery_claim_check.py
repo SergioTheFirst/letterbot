@@ -4,7 +4,8 @@ Before any context work, an item for an email whose delivery is already
 reserved finishes: confirmed -> done without sending; unconfirmed (crash
 between the reservation and the POST) -> DELIVERY_UNKNOWN. Neither is
 dead-lettered nor gets a "delivery failed" notice. A missing context goes
-through ``_rebuild_pipeline_context`` (a stub until WP2b fills it).
+through ``_rebuild_pipeline_context``, which refetches the message from IMAP
+(WP2b, covered in test_restart_context_rebuild.py).
 """
 
 from __future__ import annotations
@@ -224,9 +225,11 @@ def test_missing_context_goes_through_the_rebuild_hook(
     assert _queue_rows(storage) == []
 
 
-def test_rebuild_pipeline_context_stub_is_keyword_only_and_returns_none(
+def test_rebuild_pipeline_context_is_keyword_only_and_none_for_unknown_email(
     tmp_path,
 ) -> None:
+    # An email that is not stored has nothing to refetch: None keeps the
+    # "no pipeline context" retry path.
     storage = Storage(tmp_path / "db.sqlite")
     assert (
         start_module._rebuild_pipeline_context(
