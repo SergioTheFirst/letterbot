@@ -135,3 +135,14 @@
     <p class="settings-message" role="status" aria-live="polite" data-lan-message></p>
   </div>
 </section>
+
+<section class="card settings-section settings-setup" id="settings-setup" data-setup-card aria-labelledby="settings-setup-title" data-testid="settings-setup">
+  <h2 id="settings-setup-title">{{ st('editor.setup_title') }}</h2>
+  <p data-setup-state>{{ st('editor.loading') }}</p>
+  <p class="hint">{{ st('editor.setup_hint') }}</p>
+  <div class="settings-actions">
+    <button type="button" data-action="init-config" hidden>{{ st('editor.setup_init') }}</button>
+    <button type="button" data-action="migrate-config" hidden>{{ st('editor.setup_migrate') }}</button>
+  </div>
+  <p class="settings-message" role="status" aria-live="polite" data-setup-message></p>
+</section>

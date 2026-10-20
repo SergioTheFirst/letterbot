@@ -27,6 +27,11 @@ exception: it may write accounts.ini and settings.ini, never the database.
   atomically after a timestamped backup (config/ini_editor), guarded by a
   lock and an etag (409 when the file changed meanwhile), and logged as
   settings_saved naming the changed fields only.
+- The configuration-files buttons (P3c) are init-config, creating only the
+  missing accounts.ini / settings.ini from the CLI templates, and
+  migrate-config, converting a legacy config.ini / config.yaml while
+  accounts.ini does not exist; the legacy files are only read. Answers and
+  log lines name files only.
 - "Test" calls only verify a login (IMAP: connect, login, SELECT INBOX
   read-only, logout; Telegram: getMe or one plain-text message on request).
   They run off the request thread with a hard deadline, one per client per
@@ -72,7 +77,11 @@ from mailbot_v26.config_loader import (
 )
 from mailbot_v26.config_yaml import _is_default_weak_web_password
 from mailbot_v26.health import mail_accounts
-from mailbot_v26.tools.config_bootstrap import ACCOUNTS_TEMPLATE, SETTINGS_TEMPLATE
+from mailbot_v26.tools.config_bootstrap import (
+    ACCOUNTS_TEMPLATE,
+    SETTINGS_TEMPLATE,
+    migrate_two_file_config,
+)
 from mailbot_v26.web_observability import app as web_app
 from mailbot_v26.web_observability.accounts_status import (
     EXAMPLE_SECTION,
@@ -124,6 +133,10 @@ LOOPBACK_BIND = "127.0.0.1"
 TELEGRAM_API = "https://api.telegram.org"
 EDITABLE_FIELDS = ("login", "host", "port", "use_ssl", "telegram_chat_id")
 SECRET_KEYS = frozenset({"password", "bot_token"})
+# init-config creates these from the CLI templates; migrate-config converts
+# the legacy files (only read, never changed) into them.
+CONFIG_TEMPLATES = {"accounts.ini": ACCOUNTS_TEMPLATE, "settings.ini": SETTINGS_TEMPLATE}
+LEGACY_CONFIG_FILES = ("config.ini", "config.yaml")
 PROVIDER_PRESETS: dict[str, dict[str, object]] = {
     "gmail": {"host": "imap.gmail.com", "port": 993, "use_ssl": True},
     "yandex": {"host": "imap.yandex.ru", "port": 993, "use_ssl": True},
@@ -401,6 +414,20 @@ def _web_state(app: Any, config_dir: Path) -> dict[str, object]:
     }
 
 
+def _setup_state(config_dir: Path) -> dict[str, object]:
+    """What init-config would create, and whether migrate-config applies
+    (a legacy config.ini / config.yaml and no accounts.ini yet)."""
+    legacy = [name for name in LEGACY_CONFIG_FILES if (config_dir / name).exists()]
+    can_migrate = bool(legacy) and not (config_dir / "accounts.ini").exists()
+    missing: list[str] = []
+    if not can_migrate:
+        if not (config_dir / "accounts.ini").exists():
+            missing.append("accounts.ini")
+        if _settings_path(config_dir)[1] == "missing":
+            missing.append("settings.ini")
+    return {"missing": missing, "legacy": legacy, "can_migrate": can_migrate}
+
+
 def _editor_state(app: Any, config_dir: Path, locale: str) -> dict[str, object]:
     accounts_path = config_dir / "accounts.ini"
     raw, etag = read_versioned(accounts_path)
@@ -413,6 +440,7 @@ def _editor_state(app: Any, config_dir: Path, locale: str) -> dict[str, object]:
         "backups": list_backups(accounts_path),
         "web": _web_state(app, config_dir),
         "presets": PROVIDER_PRESETS,
+        "setup": _setup_state(config_dir),
     }
     if raw is None:
         state["file"] = "missing"
@@ -1058,6 +1086,67 @@ def _write_settings_value(app: Any, config_dir: Path, section: str, key: str, va
     return backup, None
 
 
+def _init_config(app: Any, config_dir: Path) -> Any:
+    """init-config: only the missing accounts.ini / settings.ini, from the CLI
+    templates. An existing file is never touched; no .example copy is made."""
+    created: list[tuple[str, str | None]] = []
+    with app.config["SETTINGS_WRITE_LOCK"]:
+        setup = _setup_state(config_dir)
+        if setup["can_migrate"]:
+            return _error(409, "LEGACY_CONFIG")
+        for name in setup["missing"]:
+            path = config_dir / name
+            if path.exists():
+                continue
+            backup = write_with_backup(path, CONFIG_TEMPLATES[name].encode("utf-8"), now=_now(app))
+            created.append((name, backup))
+    for name, backup in created:
+        _log_saved(name, ["created"], backup)
+    return _json({"ok": True, "created": [name for name, _ in created]})
+
+
+def _migrate_config(app: Any, config_dir: Path) -> Any:
+    """migrate-config: the CLI conversion (config_bootstrap) writing only
+    accounts.ini / settings.ini, each atomically with a backup. The legacy
+    files are only read: never changed, renamed, deleted or copied to .bak."""
+    written: list[tuple[str, str | None]] = []
+
+    def write(path: Path, content: str) -> None:
+        written.append((path.name, write_with_backup(path, content.encode("utf-8"), now=_now(app))))
+
+    with app.config["SETTINGS_WRITE_LOCK"]:
+        if (config_dir / "accounts.ini").exists():
+            return _error(409, "ACCOUNTS_EXIST")
+        if not _setup_state(config_dir)["legacy"]:
+            return _error(409, "NO_LEGACY")
+        try:
+            migrate_two_file_config(config_dir, legacy_backups=False, write=write)
+        except (UnicodeDecodeError, configparser.Error) as exc:
+            logger.warning(
+                "settings_migrate_unreadable error_class=%s at=%s", type(exc).__name__, _where(exc)
+            )
+            return _error(409, "FILE_UNREADABLE")
+        finally:
+            for name, backup in written:
+                _log_saved(name, ["migrated"], backup)
+    return _json({"ok": True, "created": [name for name, _ in written]})
+
+
+def _setup_write(app: Any, action: Callable[[Any, Path], Any]) -> Any:
+    """The configuration-files buttons: the full write guard, then ``action``."""
+    denial = _write_denial(app)
+    if denial is not None:
+        return denial
+    folder = _config_dir(app)
+    if folder is None:
+        return _error(503, "NO_CONFIG_DIR")
+    try:
+        return action(app, folder)
+    except OSError as exc:
+        logger.error("settings_save_failed error_class=%s at=%s", type(exc).__name__, _where(exc))
+        return _error(500, "WRITE_FAILED")
+
+
 def register_settings_routes(app: Any, *, config_dir: Path | None) -> None:
     """Add the Settings routes and the Home-card Jinja global to ``app``."""
     app.config["SETTINGS_CONFIG_DIR"] = (
@@ -1372,6 +1461,14 @@ def register_settings_routes(app: Any, *, config_dir: Path | None) -> None:
         return _json(
             {"ok": True, "lan": lan, "restart_required": lan != running_lan, **_saved_message_fields(app, backup)}
         )
+
+    @app.route("/api/settings/init-config", methods=["POST"])
+    def api_settings_init_config():
+        return _setup_write(app, _init_config)
+
+    @app.route("/api/settings/migrate-config", methods=["POST"])
+    def api_settings_migrate_config():
+        return _setup_write(app, _migrate_config)
 
     jinja_env = getattr(app, "jinja_env", None)
     if jinja_env is not None:
