@@ -5298,13 +5298,38 @@ def create_app(
 
     def _dashboard_payload() -> dict[str, object]:
         now = time.time()
+        try:
+            dashboard_vars = _dashboard_vars()
+            account_scope = _resolve_account_scope(dashboard_vars)
+            window_days = max(1, int(getattr(dashboard_vars, "window_days", 7) or 7))
+            row_limit = max(10, int(getattr(dashboard_vars, "limit", 25) or 25))
+            reveal_pii = bool(getattr(dashboard_vars, "pii", False))
+            if not account_scope:
+                fallback_account = str(request.args.get("account_email") or "").strip()
+                if fallback_account:
+                    account_scope = [fallback_account]
+            if not account_scope:
+                available_accounts = _available_accounts(app.config["DB_PATH"])
+                if available_accounts:
+                    account_scope = [str(available_accounts[0])]
+        except Exception as exc:
+            logger.warning(
+                "dashboard_scope_resolution_failed",
+                extra={"error": type(exc).__name__},
+            )
+            account_scope = []
+            window_days = 7
+            row_limit = 25
+            reveal_pii = False
+        # Keyed by the resolved scope: the session can remember a scope that
+        # the query string does not repeat.
         cache_key = (
             str(app.config["DB_PATH"]),
             _db_change_token(app.config["DB_PATH"]),
-            request.args.get("account_emails") or "",
-            request.args.get("window_days") or "",
-            request.args.get("limit") or "",
-            request.args.get("pii") or "",
+            tuple(account_scope),
+            window_days,
+            row_limit,
+            reveal_pii,
         )
         cached = _DASHBOARD_CACHE.get("payload")
         if (
@@ -5450,23 +5475,6 @@ def create_app(
                 meta["status"] = "unavailable"
             else:
                 meta["status"] = "partial"
-        try:
-            dashboard_vars = _dashboard_vars()
-            account_scope = _resolve_account_scope(dashboard_vars)
-            window_days = max(1, int(getattr(dashboard_vars, "window_days", 7) or 7))
-            row_limit = max(10, int(getattr(dashboard_vars, "limit", 25) or 25))
-            if not account_scope:
-                fallback_account = str(request.args.get("account_email") or "").strip()
-                if fallback_account:
-                    account_scope = [fallback_account]
-            if not account_scope:
-                available_accounts = _available_accounts(app.config["DB_PATH"])
-                if available_accounts:
-                    account_scope = [str(available_accounts[0])]
-        except Exception:
-            account_scope = []
-            window_days = 7
-            row_limit = 25
 
         account_clause = ""
         account_params: list[object] = []
