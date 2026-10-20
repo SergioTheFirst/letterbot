@@ -1582,6 +1582,12 @@ def _mask_emails_in_text(value: object) -> str:
     return WEB_EMAIL_PATTERN.sub(lambda match: _mask_email_address(match.group(0)), text)
 
 
+def _hashed_email_key(key: str) -> str:
+    """Stable web id for an analytics key that embeds an e-mail address."""
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    return f"email-sha256:{digest}"
+
+
 def _display_safe_issuer(item: Mapping[str, object]) -> dict[str, object]:
     """Web copy of a top-issuer profile without the raw sender address.
 
@@ -1592,8 +1598,21 @@ def _display_safe_issuer(item: Mapping[str, object]) -> dict[str, object]:
     safe["issuer_label"] = _mask_emails_in_text(item.get("issuer_label"))
     issuer_key = str(item.get("issuer_key") or "")
     if WEB_EMAIL_PATTERN.search(issuer_key):
-        digest = hashlib.sha256(issuer_key.encode("utf-8")).hexdigest()[:16]
-        safe["issuer_key"] = f"email-sha256:{digest}"
+        safe["issuer_key"] = _hashed_email_key(issuer_key)
+    return safe
+
+
+def _display_safe_attention_entity(item: Mapping[str, object]) -> dict[str, object]:
+    """Web copy of an attention-economics row without the raw sender address.
+
+    Analytics keys attention rows by the sender address (the Telegram digest
+    needs it); the web keeps a stable hashed id and a masked label only.
+    """
+    safe = dict(item)
+    entity_id = str(item.get("entity_id") or "")
+    if WEB_EMAIL_PATTERN.search(entity_id):
+        safe["entity_id"] = _hashed_email_key(entity_id)
+    safe["entity_label"] = _mask_emails_in_text(item.get("entity_label"))
     return safe
 
 
@@ -6691,16 +6710,22 @@ def create_app(
             "limit": summary.get("limit"),
             "totals": summary.get("totals", {}),
             "lane_breakdown": summary.get("lane_breakdown", []),
-            "top_contact_label": summary.get("top_contact_label", ""),
+            "top_contact_label": _mask_emails_in_text(
+                summary.get("top_contact_label", "")
+            ),
             "generated_at_utc": summary.get("generated_at_utc", ""),
         }
         _ATTENTION_TOTALS_CACHE.set(totals_cache_key, totals_payload)
-        entities = summary.get("entities", [])
-        if isinstance(entities, list):
-            _ATTENTION_TABLE_CACHE.set(table_cache_key, entities)
+        raw_entities = summary.get("entities", [])
+        entities = [
+            _display_safe_attention_entity(item)
+            for item in (raw_entities if isinstance(raw_entities, list) else [])
+            if isinstance(item, Mapping)
+        ]
+        _ATTENTION_TABLE_CACHE.set(table_cache_key, entities)
         return {
             **totals_payload,
-            "entities": entities if isinstance(entities, list) else [],
+            "entities": entities,
             "sort": sort_mode,
             "limit": summary.get("limit", 50),
         }

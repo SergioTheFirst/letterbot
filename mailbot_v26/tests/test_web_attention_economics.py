@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -8,6 +9,11 @@ from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.web_observability.app import create_app
 from mailbot_v26.tests._web_helpers import login_with_csrf
+
+
+def _web_entity_id(sender_email: str) -> str:
+    digest = hashlib.sha256(sender_email.encode("utf-8")).hexdigest()[:16]
+    return f"email-sha256:{digest}"
 
 
 def _emit_event(
@@ -182,9 +188,11 @@ def test_attention_scope_isolation(
         secondary_entities = {
             item["entity_id"] for item in secondary_response.get_json()["entities"]
         }
-        assert "intruder@example.com" not in primary_entities
+        # The web never returns raw sender addresses; ids are stable hashes.
+        intruder_id = _web_entity_id("intruder@example.com")
+        assert intruder_id not in primary_entities
         assert primary_entities
-        assert secondary_entities == {"intruder@example.com"}
+        assert secondary_entities == {intruder_id}
 
 
 def test_attention_pii_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -258,3 +258,210 @@ def test_archive_row_has_no_raw_subject_or_sender_fields(tmp_path: Path) -> None
     # Masked, still useful: first letter and domain.
     assert items[EMAIL_ID]["sender_display"] == "s…@example.com"
     assert items[ISSUER_EMAIL_ID]["sender_display"] == "s…@gmail.com"
+
+
+# --- Scoped crawl: parameterized routes with the seeded account (P3b D1/C1) ---
+# The parameterless crawl above never selects an account on routes that need
+# one, so it misses everything that only renders for a scope. This crawl adds
+# the account parameters to every route, plus a resolved sender entity (the
+# runtime keys contacts by entity UUID) and per-entity events.
+
+SECRET_SENDER_NAME = "Secret Sender Name 7Q"
+CONTACT_ENTITY_ID = "3f2c1a9e-5b7d-4c11-9a0e-7d2b8c4e6f10"
+SCOPED_MARKERS = (*MARKERS, SECRET_SENDER_NAME)
+SCOPE_QUERY = f"account_emails={ACCOUNT}&account_email={ACCOUNT}"
+
+# Same contract as KNOWN_VIOLATORS: path -> reason, only for leaks that live
+# in modules the web lane does not own.
+SCOPED_KNOWN_VIOLATORS: dict[str, str] = {}
+
+
+def _seed_scoped_db(tmp_path: Path) -> Path:
+    # Local import keeps this file's existing header untouched (append-only).
+    from mailbot_v26.observability.processing_span import ProcessingSpanRecorder
+
+    db_path = _seed_db(tmp_path)
+    ProcessingSpanRecorder(db_path)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO entities (id, type, name, normalized_name, first_seen,
+                                  last_seen, metadata)
+            VALUES (?, 'person', ?, ?, ?, ?, ?)
+            """,
+            (
+                CONTACT_ENTITY_ID,
+                SECRET_SENDER_NAME,
+                SECRET_SENDER_NAME.lower(),
+                now.isoformat(),
+                now.isoformat(),
+                json.dumps(
+                    {"from_email": SECRET_SENDER, "from_name": SECRET_SENDER_NAME}
+                ),
+            ),
+        )
+        entity_events = (
+            (
+                "email_received",
+                {
+                    "from_email": SECRET_SENDER,
+                    "from_name": SECRET_SENDER_NAME,
+                    "subject": SECRET_SUBJECT,
+                },
+            ),
+            ("telegram_delivered", {"delivery_mode": "IMMEDIATE"}),
+            ("trust_score_updated", {"trust_score": 0.8}),
+        )
+        for index, (event_type, payload) in enumerate(entity_events):
+            payload_json = json.dumps(payload, ensure_ascii=False)
+            conn.execute(
+                """
+                INSERT INTO events_v1 (
+                    event_type, ts_utc, ts, account_id, entity_id, email_id,
+                    payload, payload_json, schema_version, fingerprint
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (
+                    event_type,
+                    now.timestamp() + index,
+                    now.isoformat(),
+                    ACCOUNT,
+                    CONTACT_ENTITY_ID,
+                    EMAIL_ID,
+                    payload_json,
+                    payload_json,
+                    f"scoped-crawl:{event_type}",
+                ),
+            )
+        conn.execute(
+            """
+            INSERT INTO processing_spans (
+                span_id, ts_start_utc, ts_end_utc, total_duration_ms, account_id,
+                email_id, stage_durations_json, llm_provider, llm_model,
+                llm_latency_ms, outcome, error_code, health_snapshot_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "span-scoped-crawl",
+                now.timestamp() - 2,
+                now.timestamp(),
+                2000,
+                ACCOUNT,
+                EMAIL_ID,
+                json.dumps({"parse": 100, "llm": 1500}),
+                "gigachat",
+                "giga-pro",
+                1500,
+                "error",
+                "LLM_TIMEOUT",
+                "",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO commitments (email_row_id, source, commitment_text,
+                                     deadline_iso, status, confidence, created_at)
+            VALUES (?, 'heuristic', 'Pay the invoice', '2026-11-01', 'pending', 0.9, ?)
+            """,
+            (EMAIL_ID, now.strftime("%Y-%m-%d %H:%M:%S")),
+        )
+    return db_path
+
+
+def _scoped_crawl_paths(app) -> list[str]:
+    paths: set[str] = set()
+    for rule in app.url_map.iter_rules():
+        if "GET" not in (rule.methods or set()):
+            continue
+        if rule.arguments or rule.endpoint in {"static", "login"}:
+            continue
+        paths.add(f"{rule.rule}?{SCOPE_QUERY}")
+    contact = f"contact_id=contact:{CONTACT_ENTITY_ID}"
+    paths.update(
+        {
+            f"/?{SCOPE_QUERY}&mode=engineer",
+            f"/health?{SCOPE_QUERY}&mode=engineer",
+            f"/relationships/contact?{SCOPE_QUERY}&{contact}",
+            f"/api/v1/relationships/contact?{SCOPE_QUERY}&{contact}",
+        }
+    )
+    for email_id in (EMAIL_ID, ISSUER_EMAIL_ID):
+        paths.update(
+            {
+                f"/email/{email_id}?{SCOPE_QUERY}&mode=engineer",
+                f"/api/archive/{email_id}/detail?{SCOPE_QUERY}",
+                f"/archive?{SCOPE_QUERY}&message_id={email_id}",
+            }
+        )
+    return sorted(paths)
+
+
+@pytest.mark.parametrize("allow_pii", [False, True], ids=["pii_off", "pii_on"])
+def test_no_scoped_route_shows_raw_subject_or_sender(
+    tmp_path: Path, allow_pii: bool
+) -> None:
+    db_path = _seed_scoped_db(tmp_path)
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        allow_pii=allow_pii,
+        api_token=API_TOKEN,
+    )
+    paths = _scoped_crawl_paths(app)
+    assert f"/api/v1/intelligence/attention_economics?{SCOPE_QUERY}" in paths
+
+    leaks: dict[str, list[str]] = {}
+    statuses: dict[str, int] = {}
+    with app.test_client() as client:
+        for path in paths:
+            target = _with_pii(path) if allow_pii else path
+            response = client.get(target, headers={"X-Api-Token": API_TOKEN})
+            statuses[path] = response.status_code
+            body = response.get_data(as_text=True)
+            found = [marker for marker in SCOPED_MARKERS if marker in body]
+            if found:
+                leaks[path] = found
+
+    # The scoped routes must really render (a 400/500 would hide a leak).
+    assert statuses[f"/api/v1/intelligence/attention_economics?{SCOPE_QUERY}"] == 200
+    assert statuses[f"/api/v1/relationships/graph?{SCOPE_QUERY}"] == 200
+    contact_api = (
+        f"/api/v1/relationships/contact?{SCOPE_QUERY}"
+        f"&contact_id=contact:{CONTACT_ENTITY_ID}"
+    )
+    assert statuses[contact_api] == 200
+    unexpected = {
+        path: found for path, found in leaks.items() if path not in SCOPED_KNOWN_VIOLATORS
+    }
+    assert unexpected == {}
+    stale = sorted(path for path in SCOPED_KNOWN_VIOLATORS if path not in leaks)
+    assert stale == [], f"SCOPED_KNOWN_VIOLATORS entries no longer leak: {stale}"
+
+
+def test_attention_api_hashes_sender_entity_ids(tmp_path: Path) -> None:
+    db_path = _seed_db(tmp_path)
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    query = {"account_emails": ACCOUNT}
+    with app.test_client() as client:
+        first = client.get(
+            "/api/v1/intelligence/attention_economics", query_string=query
+        ).get_json()
+        second = client.get(
+            "/api/v1/intelligence/attention_economics", query_string=query
+        ).get_json()
+
+    entity_ids = [str(item["entity_id"]) for item in first["entities"]]
+    assert len(entity_ids) == 2
+    for entity_id in entity_ids:
+        assert entity_id.startswith("email-sha256:")
+        assert "@" not in entity_id
+    # Stable across requests, so the key still works as a client-side id.
+    assert entity_ids == [str(item["entity_id"]) for item in second["entities"]]
+    assert {item["entity_label"] for item in first["entities"]} == {
+        "s…@example.com",
+        "s…@gmail.com",
+    }
+    for marker in MARKERS:
+        assert marker not in json.dumps(first, ensure_ascii=False)
