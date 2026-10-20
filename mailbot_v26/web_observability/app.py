@@ -25,7 +25,7 @@ from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional
 from urllib.parse import urlsplit
 
 try:
@@ -3616,8 +3616,199 @@ def _local_smoke_bypass_allowed(app: Flask, remote_addr: str | None) -> bool:
     return False
 
 
-def _ensure_authenticated() -> bool:
-    return bool(session.get("authenticated"))
+REMOTE_SESSION_MAX_AGE_SECONDS = 12 * 3600
+# Fetched by page scripts or non-browser clients: answer 401, never a redirect.
+_REMOTE_AUTH_NO_REDIRECT_PREFIXES = ("/api/", "/partial/")
+_REMOTE_ACCESS_DISABLED_TEXT = (
+    "Remote access to the LetterBot.ru web UI is disabled because no web "
+    "password or API token is configured. On the Letterbot computer set "
+    "password under [web_ui] in settings.ini (or the WEB_PASSWORD environment "
+    "variable), or web_ui.api_token in config.yaml, then restart Letterbot. "
+    "Local access on this computer (http://127.0.0.1) keeps working without a "
+    "password."
+)
+
+
+class _LoginThrottle:
+    """In-memory per-client backoff for failed remote logins.
+
+    The first FREE_ATTEMPTS failures cost nothing; every further failure
+    doubles the lockout from BASE_DELAY_SECONDS up to MAX_DELAY_SECONDS. State
+    lives for the process lifetime and is bounded to MAX_TRACKED_CLIENTS.
+    """
+
+    FREE_ATTEMPTS = 3
+    BASE_DELAY_SECONDS = 2.0
+    MAX_DELAY_SECONDS = 300.0
+    MAX_TRACKED_CLIENTS = 1024
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._lock = threading.Lock()
+        # client -> (consecutive failures, locked until per clock)
+        self._state: dict[str, tuple[int, float]] = {}
+
+    def retry_after(self, client: str) -> int:
+        """Seconds the client must still wait before the next attempt."""
+        with self._lock:
+            entry = self._state.get(client)
+        if entry is None:
+            return 0
+        remaining = entry[1] - self._clock()
+        return int(math.ceil(remaining)) if remaining > 0 else 0
+
+    def record_failure(self, client: str) -> tuple[int, int]:
+        """Count one failure; return (failures, lockout seconds)."""
+        with self._lock:
+            failures = self._state.get(client, (0, 0.0))[0] + 1
+            over = failures - self.FREE_ATTEMPTS
+            delay = 0.0
+            if over > 0:
+                delay = min(
+                    self.MAX_DELAY_SECONDS,
+                    self.BASE_DELAY_SECONDS * (2 ** min(over - 1, 16)),
+                )
+            if client not in self._state and len(self._state) >= self.MAX_TRACKED_CLIENTS:
+                stalest = min(self._state, key=lambda key: self._state[key][1])
+                del self._state[stalest]
+            self._state[client] = (failures, self._clock() + delay)
+        return failures, int(math.ceil(delay))
+
+    def reset(self, client: str) -> None:
+        with self._lock:
+            self._state.pop(client, None)
+
+
+def _secret_matches(provided: object, expected: str) -> bool:
+    """Constant-time compare; non-str or empty values never match."""
+    if not expected or not isinstance(provided, str) or not provided:
+        return False
+    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+
+
+def _remote_auth_configured(app: Flask) -> bool:
+    return bool(app.config.get("WEB_PASSWORD") or app.config.get("COCKPIT_API_TOKEN"))
+
+
+def _ensure_authenticated(app: Flask) -> bool:
+    """True when the request carries a fresh login session or the API token.
+
+    Only non-loopback requests are asked for this; loopback stays login-free.
+    """
+    authenticated_at = session.get("authenticated_at")
+    if session.get("authenticated") is True and isinstance(
+        authenticated_at, (int, float)
+    ):
+        max_age = float(
+            app.config.get(
+                "WEB_UI_REMOTE_SESSION_MAX_AGE_SECONDS", REMOTE_SESSION_MAX_AGE_SECONDS
+            )
+        )
+        if time.time() - float(authenticated_at) <= max_age:
+            return True
+    # Werkzeug EnvironHeaders is not a collections.abc.Mapping; the Flask stub
+    # request has no headers at all.
+    headers = getattr(request, "headers", None)
+    header_token = headers.get("X-Api-Token") if headers is not None else None
+    return _secret_matches(header_token, str(app.config.get("COCKPIT_API_TOKEN") or ""))
+
+
+def _render_login_page(
+    app: Flask, *, next_target: str, error_message: str = ""
+) -> str:
+    return _render_template(
+        app,
+        "login.html",
+        title="Sign in",
+        auth_configured=_remote_auth_configured(app),
+        disabled_text=_REMOTE_ACCESS_DISABLED_TEXT,
+        error_message=error_message,
+        next_target=next_target,
+        csrf_token=_get_or_create_csrf_token(),
+    )
+
+
+def _remote_access_disabled_response(app: Flask, remote_addr: str | None) -> Response:
+    # Logged loudly once per process; afterwards per request at DEBUG only.
+    level = logging.DEBUG
+    if not app.config.get("WEB_UI_REMOTE_AUTH_REFUSAL_LOGGED"):
+        app.config["WEB_UI_REMOTE_AUTH_REFUSAL_LOGGED"] = True
+        level = logging.WARNING
+    logger.log(
+        level,
+        "WEB_UI_REMOTE_AUTH_NOT_CONFIGURED refused remote=%s path=%s: "
+        "set web_ui password or api_token to allow LAN access",
+        remote_addr,
+        request.path,
+    )
+    return _text_response(_render_login_page(app, next_target="/"), 403)
+
+
+def _remote_auth_denial(app: Flask, remote_addr: str | None) -> Response | None:
+    """Gate one non-loopback request; None lets it through."""
+    if not _remote_auth_configured(app):
+        return _remote_access_disabled_response(app, remote_addr)
+    if request.endpoint == "login" or _ensure_authenticated(app):
+        return None
+    path = str(request.path or "/")
+    if request.method == "GET" and not path.startswith(
+        _REMOTE_AUTH_NO_REDIRECT_PREFIXES
+    ):
+        raw_query = getattr(request, "query_string", b"") or b""
+        query = raw_query.decode("utf-8", "replace") if raw_query else ""
+        return redirect(url_for("login", next=f"{path}?{query}" if query else path))
+    return _text_response(
+        "Unauthorized: sign in at /login or send the X-Api-Token header", 401
+    )
+
+
+def _handle_remote_login(app: Flask, remote_addr: str | None, target: str) -> Response:
+    throttle: _LoginThrottle = app.config["WEB_UI_LOGIN_THROTTLE"]
+    client = remote_addr or "unknown"
+    retry_after = throttle.retry_after(client)
+    if retry_after > 0:
+        logger.warning(
+            "WEB_UI_LOGIN_THROTTLED remote=%s retry_after_s=%d", client, retry_after
+        )
+        response = _text_response(
+            _render_login_page(
+                app,
+                next_target=target,
+                error_message=(
+                    f"Too many failed attempts. Try again in {retry_after} seconds."
+                ),
+            ),
+            429,
+        )
+        if not USING_FLASK_STUB:
+            response.headers["Retry-After"] = str(retry_after)
+        return response
+    if not _validate_csrf_token():
+        logger.warning("WEB_UI_LOGIN_CSRF_REJECTED remote=%s", client)
+        return _text_response("Forbidden: invalid CSRF token", 403)
+    provided = request.form.get("password", "")
+    if _secret_matches(provided, str(app.config.get("WEB_PASSWORD") or "")) or (
+        _secret_matches(provided, str(app.config.get("COCKPIT_API_TOKEN") or ""))
+    ):
+        throttle.reset(client)
+        session.clear()
+        session["authenticated"] = True
+        session["authenticated_at"] = time.time()
+        logger.info("WEB_UI_LOGIN_OK remote=%s", client)
+        return redirect(target)
+    failures, lockout_seconds = throttle.record_failure(client)
+    logger.warning(
+        "WEB_UI_LOGIN_FAILED remote=%s failures=%d lockout_s=%d",
+        client,
+        failures,
+        lockout_seconds,
+    )
+    return _text_response(
+        _render_login_page(
+            app, next_target=target, error_message="Wrong password or token."
+        ),
+        401,
+    )
 
 
 def _is_loopback(remote_addr: str | None) -> bool:
@@ -3630,11 +3821,7 @@ def _is_loopback(remote_addr: str | None) -> bool:
 
 
 def _cockpit_token_ok(token: str | None, expected: str) -> bool:
-    if not expected:
-        return False
-    if not token:
-        return False
-    return hmac.compare_digest(token, expected)
+    return _secret_matches(token, expected)
 
 
 def _parse_cidrs(values: Iterable[str]) -> list[ipaddress._BaseNetwork]:
@@ -3904,6 +4091,14 @@ def create_app(
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     allowed_networks = _parse_cidrs(allow_cidrs or [])
     app.config["WEB_UI_ALLOWED_CIDRS"] = allowed_networks
+    app.config["WEB_UI_LOGIN_THROTTLE"] = _LoginThrottle()
+    app.config["WEB_UI_REMOTE_SESSION_MAX_AGE_SECONDS"] = REMOTE_SESSION_MAX_AGE_SECONDS
+    if allowed_networks and not _remote_auth_configured(app):
+        logger.warning(
+            "WEB_UI_REMOTE_AUTH_NOT_CONFIGURED allow_cidrs=%d: LAN requests get 403 "
+            "until web_ui password or api_token is set",
+            len(allowed_networks),
+        )
     app.config["WEB_UI_STARTED_AT"] = time.monotonic()
     app.config["DOCTOR_EXPORT_LAST_TS"] = {}
     app.config["DOCTOR_EXPORT_COOLDOWN_SECONDS"] = 60
@@ -3957,7 +4152,6 @@ def create_app(
             return None
         if not _ip_allowed(remote_addr, app.config.get("WEB_UI_ALLOWED_CIDRS", [])):
             return Response("Forbidden", status=403)
-        open_paths = {"login", "static"}
         cockpit_endpoints = {
             "api_cockpit_calibration",
             "api_cockpit_decision_trace_health",
@@ -3971,7 +4165,15 @@ def create_app(
             if not _cockpit_token_ok(token, app.config["COCKPIT_API_TOKEN"]):
                 return Response("Forbidden", status=403)
             return None
-        if request.endpoint in open_paths or request.path.startswith("/static"):
+        if request.endpoint == "static" or request.path.startswith("/static"):
+            return None
+        # Loopback stays login-free; every other client must authenticate.
+        if not _is_loopback(remote_addr):
+            denial = _remote_auth_denial(app, remote_addr)
+            if denial is not None:
+                return denial
+        if request.endpoint == "login":
+            # The login form checks its own CSRF token.
             return None
         if request.method == "POST" and not _validate_csrf_token():
             return _text_response("Forbidden: invalid CSRF token", 403)
@@ -3979,7 +4181,18 @@ def create_app(
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
-        return redirect(_resolve_login_next_target(request.args.get("next")))
+        next_raw = request.form.get("next") if request.method == "POST" else None
+        target = _resolve_login_next_target(next_raw or request.args.get("next"))
+        remote_addr = _request_remote_addr()
+        if (
+            _is_loopback(remote_addr)
+            or _local_smoke_bypass_allowed(app, remote_addr)
+            or _ensure_authenticated(app)
+        ):
+            return redirect(target)
+        if request.method == "POST":
+            return _handle_remote_login(app, remote_addr, target)
+        return _render_login_page(app, next_target=target)
 
     @app.route("/doctor", methods=["GET"])
     def doctor() -> str:
