@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from mailbot_v26.account_identity import normalize_login
+from mailbot_v26.config.ini_utils import new_user_ini_parser
 from mailbot_v26.config_loader import ACCOUNT_ID_PATTERN, parse_telegram_chat_id
 from mailbot_v26.events.contract import EventType
 from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
@@ -81,8 +82,8 @@ _LAST_SUCCESS_SQL = (
     "ORDER BY ts_utc DESC LIMIT 1"
 )
 
-# Values the worker reads at startup with %-interpolation: a lone % in one of
-# them stops Letterbot (InterpolationSyntaxError). A % elsewhere only warns.
+# Keys the worker reads from a mailbox / system section. Values are read as
+# written (config/ini_utils.new_user_ini_parser: no %-interpolation).
 _MAILBOX_READ_KEYS = frozenset(
     {
         "login",
@@ -334,19 +335,21 @@ def _settings_present(config_dir: Path) -> bool:
 
 
 def _percent_issues(
-    parser: configparser.ConfigParser, section: str, read_keys: frozenset[str]
+    parser: configparser.ConfigParser, section: str
 ) -> list[ConfigIssue]:
+    """A warning per value with "%%": older versions needed it for one "%".
+
+    Letterbot now reads every value as written, so a doubled "%" left over
+    from that rule means two "%" signs (a wrong password). Never blocking.
+    """
     issues: list[ConfigIssue] = []
     for option in parser.options(section):
-        if _value(parser, section, option)[1]:
+        if "%%" not in str(parser.get(section, option, raw=True, fallback="")):
             continue
         # An unknown key is not named (it may be part of a value): one
         # unnamed hint covers all of them.
         issue = ConfigIssue(
-            "percent_sign",
-            section,
-            option if option in _SHOWN_KEYS else "",
-            blocking=option in read_keys,
+            "percent_doubled", section, option if option in _SHOWN_KEYS else ""
         )
         if issue not in issues:
             issues.append(issue)
@@ -355,9 +358,7 @@ def _percent_issues(
 
 def _is_setup_issue(issue: ConfigIssue) -> bool:
     """True when the worker skips this mailbox or refuses to start over it."""
-    return issue.code in _SETUP_CODES or (
-        issue.code == "percent_sign" and issue.blocking
-    )
+    return issue.code in _SETUP_CODES
 
 
 def _port(
@@ -484,7 +485,7 @@ def _inspect_mailbox(
         value, readable = _value(parser, section, field)
         if readable and _looks_like_placeholder(value):
             issues.append(ConfigIssue("missing_field", section, field, blocking=True))
-    issues.extend(_percent_issues(parser, section, _MAILBOX_READ_KEYS))
+    issues.extend(_percent_issues(parser, section))
     valid_name = bool(ACCOUNT_ID_PATTERN.fullmatch(section))
     if not valid_name:
         issues.append(ConfigIssue("bad_section_name", section))
@@ -527,8 +528,7 @@ def _inspect(
     for section in parser.sections():
         # Same test as the startup preflight: lowercased, not stripped.
         if section.lower() in SYSTEM_SECTIONS:
-            read_keys = _SYSTEM_READ_KEYS.get(section, frozenset())
-            system_issues.extend(_percent_issues(parser, section, read_keys))
+            system_issues.extend(_percent_issues(parser, section))
 
     token_raw = ""
     default_raw, default_readable = "", True
@@ -582,6 +582,34 @@ def _inspect(
     )
 
 
+def parse_accounts_text(content: str, *, source: str = "accounts.ini") -> configparser.ConfigParser:
+    """Parse accounts.ini text the way the worker does; raises configparser.Error."""
+    parser = new_user_ini_parser()
+    parser.read_string(content, source=source)
+    return parser
+
+
+def inspect_accounts(
+    parser: configparser.ConfigParser, *, settings_present: bool = True
+) -> AccountsFile:
+    """Structured issues of parsed accounts.ini text (no file access, no values).
+
+    The same rules as the status page, the startup preflight,
+    load_accounts_config and validate_telegram_contract: the Settings editor
+    validates a candidate file with it before saving.
+    """
+    file_issues = [] if settings_present else [ConfigIssue("settings_missing", blocking=True)]
+    return _inspect(parser, Path("accounts.ini"), file_issues)
+
+
+def all_issues(accounts_file: AccountsFile) -> tuple[ConfigIssue, ...]:
+    """File, system-section and mailbox issues of one inspection, in that order."""
+    mailbox_issues = tuple(
+        issue for entry in accounts_file.mailboxes for issue in entry.issues
+    )
+    return (*accounts_file.issues, *mailbox_issues)
+
+
 def read_accounts_file(config_dir: Path | None) -> AccountsFile:
     """Parse accounts.ini like the worker does, without echoing any value."""
     if config_dir is None:
@@ -621,9 +649,8 @@ def read_accounts_file(config_dir: Path | None) -> AccountsFile:
             path=path,
             issues=(ConfigIssue("encoding", blocking=True), *file_issues),
         )
-    parser = configparser.ConfigParser()
     try:
-        parser.read_string(content, source=path.name)
+        parser = parse_accounts_text(content, source=path.name)
     except configparser.Error as exc:
         line = _error_line(exc)
         _log_degraded(
@@ -803,8 +830,8 @@ def _section_label(section: str) -> str:
 
 def _issue_text(issue: ConfigIssue, locale: str) -> str:
     key = f"issue.{issue.code}"
-    if issue.code == "percent_sign" and not issue.field:
-        key = "issue.percent_sign_unnamed"
+    if issue.code == "percent_doubled" and not issue.field:
+        key = "issue.percent_doubled_unnamed"
     return text(
         key,
         locale,
@@ -1004,7 +1031,7 @@ def _cards(
             # Often a typo in a known provider's host: show that provider's server.
             problem_providers.add(_login_provider(entry.login))
     card_ids: list[str] = []
-    if "percent_sign" in codes:
+    if "percent_doubled" in codes:
         card_ids.append("percent")
     card_ids.extend(p for p in _PROVIDER_CARD_ORDER if p in problem_providers)
     if "other" in problem_providers or codes & _GENERIC_CARD_CODES:

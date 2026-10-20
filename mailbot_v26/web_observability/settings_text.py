@@ -153,9 +153,13 @@ _EN: dict[str, str] = {
         "[{section}] is still the template: rename it (for example to "
         "[work_mail]) and fill in your values"
     ),
-    "issue.percent_sign": "[{section}] {field} contains %: write %% instead of each %",
-    "issue.percent_sign_unnamed": (
-        "[{section}] a value contains %: write %% instead of each %"
+    "issue.percent_doubled": (
+        "[{section}] {field} contains %%: Letterbot reads % as written, so %% "
+        "means two % signs"
+    ),
+    "issue.percent_doubled_unnamed": (
+        "[{section}] a value contains %%: Letterbot reads % as written, so %% "
+        "means two % signs"
     ),
     "issue.chat_missing": (
         "[{section}] has no Telegram chat: set telegram_chat_id here or chat_id "
@@ -215,13 +219,14 @@ _EN: dict[str, str] = {
         "Each [section] may appear only once, and each key only once inside a "
         "section."
     ),
-    "card.percent.title": "A value contains the % sign",
+    "card.percent.title": "A value contains %%",
     "card.percent.intro": (
-        "Letterbot reads accounts.ini with %-substitution, so a lone % in a value "
-        "is an error."
+        "Letterbot reads accounts.ini as written, % included. Older versions "
+        "needed %% for each %."
     ),
     "card.percent.step1": (
-        "Write %% for every % in the value: for example 50%off becomes 50%%off."
+        "If you wrote %% to get one %, write a single % again: 50%%off becomes "
+        "50%off."
     ),
     "card.gmail.title": "Gmail",
     "card.gmail.step1": "Turn on 2-Step Verification for your Google account.",
@@ -412,11 +417,13 @@ _RU: dict[str, str] = {
         "[{section}] — всё ещё шаблон: переименуйте раздел (например, в "
         "[work_mail]) и впишите свои значения"
     ),
-    "issue.percent_sign": (
-        "[{section}] {field} содержит %: пишите %% вместо каждого %"
+    "issue.percent_doubled": (
+        "[{section}] {field} содержит %%: Letterbot читает % как написано, "
+        "поэтому %% — это два знака %"
     ),
-    "issue.percent_sign_unnamed": (
-        "[{section}] в одном из значений есть %: пишите %% вместо каждого %"
+    "issue.percent_doubled_unnamed": (
+        "[{section}] в одном из значений есть %%: Letterbot читает % как "
+        "написано, поэтому %% — это два знака %"
     ),
     "issue.chat_missing": (
         "[{section}]: не задан чат Telegram — укажите telegram_chat_id здесь или "
@@ -479,14 +486,14 @@ _RU: dict[str, str] = {
         "Каждый [раздел] может встречаться только один раз, а каждый ключ — один "
         "раз внутри раздела."
     ),
-    "card.percent.title": "Значение содержит знак %",
+    "card.percent.title": "Значение содержит %%",
     "card.percent.intro": (
-        "Letterbot читает accounts.ini с подстановкой через %, поэтому одиночный % "
-        "в значении — ошибка."
+        "Letterbot читает accounts.ini как написано, вместе со знаком %. Старым "
+        "версиям нужно было %% вместо каждого %."
     ),
     "card.percent.step1": (
-        "Пишите %% вместо каждого % в значении: например, 50%off записывается как "
-        "50%%off."
+        "Если вы писали %% ради одного %, верните один %: 50%%off записывается "
+        "как 50%off."
     ),
     "card.gmail.title": "Gmail",
     "card.gmail.step1": "Включите двухэтапную аутентификацию в аккаунте Google.",
