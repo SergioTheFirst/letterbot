@@ -606,6 +606,19 @@ def test_mailbox_health_alert_is_clean(tmp_path, locale: str) -> None:
     _assert_clean(text)
 
 
+def test_launch_report_is_clean() -> None:
+    from types import SimpleNamespace
+
+    from mailbot_v26.system.startup_health import LaunchReportBuilder
+
+    report = LaunchReportBuilder().build(
+        results=[], mode=SimpleNamespace(value="FULL")
+    )
+
+    assert "Powered by LetterBot.ru" in report
+    _assert_clean(report)
+
+
 @pytest.mark.parametrize("locale", LOCALES)
 def test_dead_letter_alert_is_clean(locale: str) -> None:
     from mailbot_v26 import start as start_module
