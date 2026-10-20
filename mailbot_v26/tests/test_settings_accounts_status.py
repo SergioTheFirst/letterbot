@@ -31,6 +31,10 @@ PASSWORD_MARKER = "PW-MARKER-5Q"
 TOKEN_MARKER = "123456789:TOKEN-MARKER-ABCDEFGHIJKLMNOP"
 ERROR_MARKER = "LAST-ERROR-MARKER-8R"
 CHAT_ID = "272250747"
+# Two halves of a password that a malformed line splits (configparser
+# lowercases key names, so these are looked for in any case).
+SECRET_HEAD = "Sup3rHeadQ7"
+SECRET_TAIL = "Sup3rTailZ9"
 
 
 def _account(
@@ -166,6 +170,12 @@ def _assert_no_secrets(status: dict) -> None:
     dumped = json.dumps(status, ensure_ascii=False)
     for marker in (PASSWORD_MARKER, TOKEN_MARKER, ERROR_MARKER, "TOKEN-MARKER"):
         assert marker not in dumped, marker
+
+
+def _assert_no_secret_halves(status: dict) -> None:
+    dumped = json.dumps(status, ensure_ascii=False).lower()
+    for part in (SECRET_HEAD, SECRET_TAIL):
+        assert part.lower() not in dumped, part
 
 
 def test_ok_gmail_mailbox_with_recent_success(tmp_path: Path) -> None:
@@ -661,11 +671,44 @@ def test_percent_in_a_key_letterbot_does_not_read_only_warns(tmp_path: Path) -> 
     row = _row(status)
     assert row["state"] == "ok"
     assert row["severity"] == "warn"
+    # Only keys Letterbot reads are named: another "key" can be part of a
+    # value (see the next test).
     assert [(i["code"], i["field"], i["blocking"]) for i in row["issues"]] == [
-        ("percent_sign", "notes", False)
+        ("percent_sign", "", False)
     ]
+    assert row["issues"][0]["text"] == (
+        "[work_mail] a value contains %: write %% instead of each %"
+    )
     assert status["startup_blocked"] is False
     assert "percent" in _card_ids(status)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # The password on its own line: "abc=def%" reads as key "abc".
+        f"password =\n{SECRET_HEAD}={SECRET_TAIL}%",
+        # A line without "=" splits at ":".
+        f"password {SECRET_HEAD}:{SECRET_TAIL}%",
+        f"password{SECRET_HEAD}:{SECRET_TAIL}%",
+    ],
+    ids=["value_on_its_own_line", "missing_equals", "missing_equals_and_space"],
+)
+def test_percent_in_a_value_read_as_a_key_names_no_key(
+    tmp_path: Path, line: str
+) -> None:
+    text = (
+        f"[work_mail]\nlogin = worker@gmail.com\n{line}\nnotes = 100% mine\n"
+        f"host = imap.gmail.com\ntelegram_chat_id = {CHAT_ID}\n" + _telegram()
+    )
+    status = _status(tmp_path, text)
+
+    row = _row(status)
+    percent = [issue for issue in row["issues"] if issue["code"] == "percent_sign"]
+    # One hint for both unknown keys, naming neither.
+    assert [(issue["field"], issue["blocking"]) for issue in percent] == [("", False)]
+    assert ("missing_field", "work_mail", "password") in _blocking_codes(status)
+    _assert_no_secret_halves(status)
 
 
 def test_percent_in_default_chat_marks_it_invalid_and_blocks(tmp_path: Path) -> None:
@@ -767,6 +810,90 @@ def test_section_named_after_an_address_is_masked(tmp_path: Path) -> None:
     assert row["issues"][0]["section"] == "o…@gmail.com"
     assert row["issues"][0]["text"].startswith("[o…@gmail.com] is not a valid name")
     assert "owner.full@gmail.com" not in json.dumps(status, ensure_ascii=False)
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        # configparser takes a header up to the line's last "]".
+        f"[work_mail] password = {SECRET_HEAD}]{SECRET_TAIL}",
+        # Line breaks lost: the next lines joined onto the header.
+        f"[work_mail] login = worker@gmail.com password = {SECRET_HEAD}{SECRET_TAIL}"
+        " host = imap.gmail.com [telegram]",
+    ],
+    ids=["header_runs_into_a_value", "lines_joined"],
+)
+def test_header_with_more_text_is_shown_only_up_to_it(
+    tmp_path: Path, header: str
+) -> None:
+    text = f"{header}\nlogin = worker@gmail.com\npassword = x\nhost = imap.gmail.com\n"
+    status = _status(tmp_path, text + _telegram())
+
+    row = _row(status, "work_mail…")
+    assert "bad_section_name" in [issue["code"] for issue in row["issues"]]
+    assert {issue["section"] for issue in row["issues"]} == {"work_mail…"}
+    assert all(issue["text"].startswith("[work_mail…] ") for issue in row["issues"])
+    _assert_no_secret_halves(status)
+
+
+@pytest.mark.parametrize(
+    "login_line",
+    [
+        # An indented line continues the value above it.
+        f"login = worker@gmail.com\n    password = {PASSWORD_MARKER}",
+        # configparser has no inline comments: the rest of the line is the value.
+        f"login = worker@gmail.com ; password = {PASSWORD_MARKER}",
+    ],
+    ids=["continued", "inline"],
+)
+def test_login_with_more_text_shows_only_its_first_letter(
+    tmp_path: Path, login_line: str
+) -> None:
+    text = (
+        f"[work_mail]\n{login_line}\npassword = x\nhost = imap.gmail.com\n"
+        f"telegram_chat_id = {CHAT_ID}\n" + _telegram()
+    )
+    status = _status(tmp_path, text)
+
+    row = _row(status)
+    assert row["login"] == "w…"
+    assert row["provider"] == "gmail"
+    _assert_no_secrets(status)
+
+
+@pytest.mark.parametrize(
+    "host_line",
+    [
+        f"host = imap.gmail.com\n    password = {PASSWORD_MARKER}",
+        f"host = imap.gmail.com ; password = {PASSWORD_MARKER}",
+    ],
+    ids=["continued", "inline"],
+)
+def test_host_with_more_text_is_not_shown(tmp_path: Path, host_line: str) -> None:
+    text = (
+        f"[work_mail]\nlogin = worker@gmail.com\npassword = x\n{host_line}\n"
+        f"telegram_chat_id = {CHAT_ID}\n" + _telegram()
+    )
+    status = _status(tmp_path, text)
+
+    row = _row(status)
+    assert row["host"] == ""
+    assert row["server"] == "—"
+    assert [issue["code"] for issue in row["issues"]] == ["bad_host"]
+    _assert_no_secrets(status)
+
+
+def test_host_longer_than_a_server_name_is_not_shown(tmp_path: Path) -> None:
+    host = ".".join(["a" * 60] * 5)
+    text = (
+        f"[work_mail]\nlogin = worker@gmail.com\npassword = x\nhost = {host}\n"
+        f"telegram_chat_id = {CHAT_ID}\n" + _telegram()
+    )
+    status = _status(tmp_path, text)
+
+    row = _row(status)
+    assert row["host"] == ""
+    assert [issue["code"] for issue in row["issues"]] == ["bad_host"]
 
 
 def test_host_typo_shows_the_login_provider_card(tmp_path: Path) -> None:
@@ -894,6 +1021,13 @@ def test_russian_labels(tmp_path: Path) -> None:
         ("HQ\\MedvedevSS", "H…"),
         ("", ""),
         ("@nodomain", ""),
+        ("me@почта.рф", "m…@почта.рф"),
+        # The domain is shown only when the whole value is one address.
+        ("worker@gmail.com\npassword = Secret1", "w…"),
+        ("worker@gmail.com ; password = Secret1", "w…"),
+        ("HQ\\owner\npassword = P@ss.word", "H…"),
+        ("me;password=P@ss.word", "m…"),
+        ("worker@gmail.com:993", "w…"),
     ],
 )
 def test_mask_login(login: str, expected: str) -> None:

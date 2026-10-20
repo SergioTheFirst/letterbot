@@ -23,6 +23,7 @@ from mailbot_v26.events.contract import EventType, EventV1, fingerprint
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.tests._web_helpers import extract_csrf_token
 from mailbot_v26.web_observability import settings_api, settings_text
+from mailbot_v26.web_observability.accounts_status import collect_accounts_status
 from mailbot_v26.web_observability.app import create_app
 
 PASSWORD_MARKER = "PW-PAGE-MARKER-3J"
@@ -33,6 +34,61 @@ SECOND_LOGIN = "second.owner@yandex.ru"
 MARKERS = (PASSWORD_MARKER, TOKEN_MARKER, "TOKEN-PAGE-MARKER", ERROR_MARKER, FULL_LOGIN, SECOND_LOGIN)
 WEB_PASSWORD = "lan password 42"
 LAN = {"REMOTE_ADDR": "192.168.1.5"}
+# Halves of a password that a malformed line moves into a shown value, key
+# or header (configparser lowercases keys: looked for in any case).
+SECRET_HEAD = "Sup3rHeadQ7"
+SECRET_TAIL = "Sup3rTailZ9"
+SECRET = SECRET_HEAD + SECRET_TAIL
+MALFORMED_ACCOUNTS = {
+    # An indented line continues the value above it.
+    "indented_after_login": (
+        f"[work_mail]\nlogin = {FULL_LOGIN}\n    password = {SECRET}\n"
+        "host = imap.gmail.com\n"
+    ),
+    "indented_after_host": (
+        f"[work_mail]\nlogin = {FULL_LOGIN}\nhost = imap.gmail.com\n"
+        f"    password = {SECRET}\n"
+    ),
+    "indented_after_windows_login": (
+        "[work_mail]\nlogin = HQ\\owner\n"
+        f"    password = P@{SECRET_HEAD}.{SECRET_TAIL}\nhost = imap.gmail.com\n"
+    ),
+    # configparser has no inline comments: the rest of the line is the value.
+    "inline_after_login": (
+        f"[work_mail]\nlogin = {FULL_LOGIN} ; password = {SECRET}\n"
+        "password = x\nhost = imap.gmail.com\n"
+    ),
+    "inline_without_spaces": (
+        f"[work_mail]\nlogin = owner;password=P@{SECRET_HEAD}.{SECRET_TAIL}\n"
+        "password = x\nhost = imap.gmail.com\n"
+    ),
+    "inline_after_host": (
+        f"[work_mail]\nlogin = {FULL_LOGIN}\npassword = x\n"
+        f"host = imap.gmail.com ; password = {SECRET}\n"
+    ),
+    # A line without "=" splits at ":", and its % is reported on that "key".
+    "missing_equals": (
+        f"[work_mail]\nlogin = {FULL_LOGIN}\n"
+        f"password {SECRET_HEAD}:{SECRET_TAIL}%\nhost = imap.gmail.com\n"
+    ),
+    "missing_equals_and_space": (
+        f"[work_mail]\nlogin = {FULL_LOGIN}\n"
+        f"password{SECRET_HEAD}:{SECRET_TAIL}%\nhost = imap.gmail.com\n"
+    ),
+    "value_on_its_own_line": (
+        f"[work_mail]\nlogin = {FULL_LOGIN}\npassword =\n"
+        f"{SECRET_HEAD}={SECRET_TAIL}%\nhost = imap.gmail.com\n"
+    ),
+    # configparser takes a header up to the line's last "]".
+    "header_runs_into_a_value": (
+        f"[work_mail] password = {SECRET_HEAD}]{SECRET_TAIL}\n"
+        f"login = {FULL_LOGIN}\npassword = x\nhost = imap.gmail.com\n"
+    ),
+    "lines_joined": (
+        f"[work_mail] login = {FULL_LOGIN} password = {SECRET} "
+        "host = imap.gmail.com [telegram]\n"
+    ),
+}
 
 
 @pytest.fixture(autouse=True)
@@ -271,6 +327,42 @@ def test_broken_accounts_file_gives_a_hint_not_a_500(
     assert expected in body
     _assert_no_markers(body)
     _assert_no_markers(api.get_data(as_text=True))
+
+
+@pytest.mark.parametrize("case", sorted(MALFORMED_ACCOUNTS))
+def test_malformed_accounts_file_never_echoes_a_secret(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, case: str
+) -> None:
+    accounts = (
+        MALFORMED_ACCOUNTS[case]
+        + f"[telegram]\nbot_token = {TOKEN_MARKER}\nchat_id = -1001234567890\n"
+    )
+    paths = _setup(tmp_path, accounts=accounts)
+    caplog.set_level(logging.DEBUG)
+    status = collect_accounts_status(
+        config_dir=paths["config_dir"],
+        db_path=paths["db"],
+        runtime_health_path=paths["runtime"],
+    )
+    app = _app(paths)
+    with app.test_client() as client:
+        page = client.get("/accounts")
+        api = client.get("/api/accounts/status")
+
+    assert status["file"]["state"] == "ok"
+    assert page.status_code == 200
+    assert api.status_code == 200
+    shown = {
+        "builder": json.dumps(status, ensure_ascii=False),
+        "page": page.get_data(as_text=True),
+        "api": api.get_data(as_text=True),
+    }
+    for surface, body in shown.items():
+        _assert_no_markers(body)
+        assert SECRET_HEAD.lower() not in body.lower(), surface
+        assert SECRET_TAIL.lower() not in body.lower(), surface
+    assert SECRET_HEAD.lower() not in caplog.text.lower()
+    assert SECRET_TAIL.lower() not in caplog.text.lower()
 
 
 def test_missing_accounts_file_shows_the_first_run_checklist(tmp_path: Path) -> None:

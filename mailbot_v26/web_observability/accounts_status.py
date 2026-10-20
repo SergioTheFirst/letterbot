@@ -12,7 +12,13 @@ Privacy: secrets leave this module only as set/unset booleans; the free-text
 IMAP error in runtime_health.json (last_error, last_alert_fingerprint) is
 never read into the result; configparser exception text is never logged or
 shown because it can quote a line of the file (a password); logins and
-e-mail-like section names are masked (a…@gmail.com).
+e-mail-like section names are masked (a…@gmail.com). A malformed line can
+carry a secret into a shown value (an indented line continues the value
+above, configparser has no inline comments, a header runs to its line's last
+"]", a value on its own line reads as a key), so file text is shown only in
+its expected shape: a login's domain for a single address, a host that is a
+server name, key names Letterbot reads, a section name up to its first "]",
+"=", ":", ";" or "#".
 """
 
 from __future__ import annotations
@@ -93,6 +99,19 @@ _SYSTEM_READ_KEYS = {
     "telegram": frozenset({"bot_token", "chat_id"}),
     "cloudflare": frozenset({"account_id", "api_token"}),
 }
+# Key names the page may show: those Letterbot reads from accounts.ini
+# (config_loader, the startup preflight, llm/router.py). Any other "key" can be
+# part of a value: "password =" with "ab=c%d" on the next line reads as "ab".
+_SHOWN_KEYS = _MAILBOX_READ_KEYS.union(
+    *_SYSTEM_READ_KEYS.values(),
+    {
+        "api_key",
+        "llm_priority_primary",
+        "llm_priority_secondary",
+        "priority_llm_primary",
+        "priority_llm_secondary",
+    },
+)
 
 # The worker refuses to start with these, or skips the mailbox.
 _SETUP_CODES = frozenset(
@@ -175,7 +194,13 @@ _PROVIDER_LOGIN_DOMAINS = {
 # Telegram chat ids: a (negative for groups) number or a public @username.
 _CHAT_ID_RE = re.compile(r"^(?:-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{3,31})$")
 _HOST_RE = re.compile(r"^[\w-]+(?:\.[\w-]+)+\.?$")
+_HOST_MAX_LENGTH = 253
+# A login shown with its domain: one plain address and nothing else (no
+# space, ";", "=", "\" ... that could join it to more text).
+_ADDRESS_RE = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
 _EMAIL_LIKE_RE = re.compile(r"[^\s@\[\]]+@[^\s@\[\]]+")
+# From the first of these on, a section name may hold the rest of its line.
+_SECTION_CUT_RE = re.compile(r"[\]=:;#]")
 _SECTION_DISPLAY_LIMIT = 64
 
 _LOGGED_KEYS: set[tuple[str, ...]] = set()
@@ -230,14 +255,18 @@ def default_runtime_health_path() -> Path:
 
 
 def mask_login(login: str) -> str:
-    """'a…@gmail.com' for addresses, 'H…' for other logins, '' if unusable."""
+    """'a…@gmail.com' for addresses, 'H…' for other logins, '' if unusable.
+
+    The domain is shown only when the whole value is one address: text after
+    it (an indented next line, "; password = …") may be a secret.
+    """
     value = str(login or "").strip()
     if not value:
         return ""
-    if "@" in value:
-        local, _, domain = value.partition("@")
-        if not local or not domain:
-            return ""
+    local, at, domain = value.partition("@")
+    if at and (not local or not domain):
+        return ""
+    if at and _ADDRESS_RE.fullmatch(value):
         return f"{local[0]}…@{domain}"
     return f"{value[0]}…"
 
@@ -307,11 +336,21 @@ def _settings_present(config_dir: Path) -> bool:
 def _percent_issues(
     parser: configparser.ConfigParser, section: str, read_keys: frozenset[str]
 ) -> list[ConfigIssue]:
-    return [
-        ConfigIssue("percent_sign", section, option, blocking=option in read_keys)
-        for option in parser.options(section)
-        if not _value(parser, section, option)[1]
-    ]
+    issues: list[ConfigIssue] = []
+    for option in parser.options(section):
+        if _value(parser, section, option)[1]:
+            continue
+        # An unknown key is not named (it may be part of a value): one
+        # unnamed hint covers all of them.
+        issue = ConfigIssue(
+            "percent_sign",
+            section,
+            option if option in _SHOWN_KEYS else "",
+            blocking=option in read_keys,
+        )
+        if issue not in issues:
+            issues.append(issue)
+    return issues
 
 
 def _is_setup_issue(issue: ConfigIssue) -> bool:
@@ -355,6 +394,8 @@ def _use_ssl(
 
 
 def _host_looks_valid(host: str) -> bool:
+    if len(host) > _HOST_MAX_LENGTH:
+        return False
     if host.lower() == "localhost":
         return True
     try:
@@ -362,6 +403,15 @@ def _host_looks_valid(host: str) -> bool:
         return True
     except ValueError:
         return bool(_HOST_RE.fullmatch(host))
+
+
+def _shown_host(host: str) -> str:
+    """The host if it is a server name, an IP address or CHANGE_ME, else ''.
+
+    Other text may run on into another setting (an indented next line, inline
+    text); the bad_host issue says why nothing is shown.
+    """
+    return host if host == PLACEHOLDER or _host_looks_valid(host) else ""
 
 
 def _chat_id_status(raw: str) -> tuple[str, str]:
@@ -738,16 +788,25 @@ def _mask_emails(value: str) -> str:
 
 
 def _section_label(section: str) -> str:
-    """Section name for display: e-mail-like parts masked, long names cut."""
-    label = _mask_emails(section)
-    if len(label) <= _SECTION_DISPLAY_LIMIT:
+    """Section name for display: e-mail-like parts masked, long names cut.
+
+    configparser reads a header up to its line's last "]", so the name is
+    shown only up to its first "]", "=", ":", ";" or "#" (the rest may be
+    another setting written on the same line).
+    """
+    head = _SECTION_CUT_RE.split(section, maxsplit=1)[0]
+    label = _mask_emails(head)
+    if head == section and len(label) <= _SECTION_DISPLAY_LIMIT:
         return label
     return label[: _SECTION_DISPLAY_LIMIT - 1] + "…"
 
 
 def _issue_text(issue: ConfigIssue, locale: str) -> str:
+    key = f"issue.{issue.code}"
+    if issue.code == "percent_sign" and not issue.field:
+        key = "issue.percent_sign_unnamed"
     return text(
-        f"issue.{issue.code}",
+        key,
         locale,
         section=_section_label(issue.section),
         field=issue.field,
@@ -757,7 +816,7 @@ def _issue_text(issue: ConfigIssue, locale: str) -> str:
 def _issue_payload(issue: ConfigIssue, locale: str) -> dict[str, object]:
     return {
         "code": issue.code,
-        "section": _mask_emails(issue.section),
+        "section": _section_label(issue.section),
         "field": issue.field,
         "blocking": issue.blocking,
         "text": _issue_text(issue, locale),
@@ -821,9 +880,10 @@ def _state_sentence(state: str, provider: str, age: str, locale: str) -> str:
 
 
 def _server_text(entry: MailboxEntry, locale: str) -> str:
-    if not entry.host:
+    host = _shown_host(entry.host)
+    if not host:
         return "—"
-    server = entry.host if entry.port is None else f"{entry.host}:{entry.port}"
+    server = host if entry.port is None else f"{host}:{entry.port}"
     if entry.use_ssl is None:
         return server
     ssl_label = text("server.ssl" if entry.use_ssl else "server.no_ssl", locale)
@@ -883,11 +943,11 @@ def _mailbox_row(
         else None
     )
     return {
-        "id": _mask_emails(entry.section),
+        "id": _section_label(entry.section),
         "login": mask_login(entry.login),
         "provider": provider,
         "provider_label": text(f"provider.{provider}", locale),
-        "host": entry.host,
+        "host": _shown_host(entry.host),
         "port": entry.port,
         "use_ssl": entry.use_ssl,
         "server": _server_text(entry, locale),

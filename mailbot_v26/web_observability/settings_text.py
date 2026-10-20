@@ -154,6 +154,9 @@ _EN: dict[str, str] = {
         "[work_mail]) and fill in your values"
     ),
     "issue.percent_sign": "[{section}] {field} contains %: write %% instead of each %",
+    "issue.percent_sign_unnamed": (
+        "[{section}] a value contains %: write %% instead of each %"
+    ),
     "issue.chat_missing": (
         "[{section}] has no Telegram chat: set telegram_chat_id here or chat_id "
         "under [telegram]"
@@ -411,6 +414,9 @@ _RU: dict[str, str] = {
     ),
     "issue.percent_sign": (
         "[{section}] {field} содержит %: пишите %% вместо каждого %"
+    ),
+    "issue.percent_sign_unnamed": (
+        "[{section}] в одном из значений есть %: пишите %% вместо каждого %"
     ),
     "issue.chat_missing": (
         "[{section}]: не задан чат Telegram — укажите telegram_chat_id здесь или "
