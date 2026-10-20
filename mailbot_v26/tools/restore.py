@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import configparser
+import csv
 import os
 import sqlite3
 import subprocess
@@ -9,13 +10,21 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
-from mailbot_v26.tools.backup import MASKED_VALUE, create_backup
+from mailbot_v26.tools.backup import (
+    DB_MEMBER,
+    MASKED_VALUE,
+    create_backup,
+    resolve_app_db_path,
+)
 from mailbot_v26.config.paths import app_root
 from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 from mailbot_v26.system.instance_lock import InstanceLockError, is_instance_running
 
 _IS_WINDOWS = os.name == "nt"
-_DB_MEMBER = "data/mailbot.sqlite"
+_DB_MEMBER = DB_MEMBER
+# Frozen builds before B25 stored the database under this name; such a
+# backup still restores it (when it has no data/mailbot.sqlite).
+_LEGACY_FROZEN_DB_MEMBER = "_internal/data/mailbot.sqlite"
 _CONFIG_PREFIX = "mailbot_v26/config/"
 _SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
 _MAX_MEMBER_BYTES = 16 * 1024 * 1024
@@ -109,11 +118,25 @@ def ensure_letterbot_stopped(db_path: Path | None = None) -> None:
             "Could not verify that Letterbot is stopped "
             f"(tasklist exit code {completed.returncode}); restore not started."
         )
-    # CSV rows carry the quoted image name; the "no tasks" notice is localized.
-    if '"letterbot.exe"' in completed.stdout.decode("ascii", "replace").lower():
+    if _other_letterbot_pids(completed.stdout.decode("ascii", "replace")):
         raise RestoreRefusedError(
             "Letterbot is running. Close Letterbot (worker and web UI) and run restore again."
         )
+
+
+def _other_letterbot_pids(tasklist_csv: str) -> list[str]:
+    """PIDs of Letterbot.exe processes other than this one (Letterbot.exe restore)."""
+    # CSV rows carry the quoted image name and PID; the "no tasks" notice is
+    # localized and has no such row.
+    own_pid = str(os.getpid())
+    pids: list[str] = []
+    for row in csv.reader(tasklist_csv.splitlines()):
+        if len(row) < 2 or row[0].strip().lower() != "letterbot.exe":
+            continue
+        pid = row[1].strip()
+        if pid != own_pid:
+            pids.append(pid)
+    return pids
 
 
 def _config_skip_reason(data: bytes) -> str | None:
@@ -182,11 +205,15 @@ def _remove_sqlite_sidecars(db_path: Path) -> None:
 
 
 def _restore_member(
-    archive: zipfile.ZipFile, info: zipfile.ZipInfo, destination: Path
+    archive: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    destination: Path,
+    *,
+    is_db: bool = False,
 ) -> str | None:
     """Write one allowed member; return a skip reason instead of writing when unsafe."""
     member = info.filename
-    limit = _MAX_DB_MEMBER_BYTES if member == _DB_MEMBER else _MAX_MEMBER_BYTES
+    limit = _MAX_DB_MEMBER_BYTES if is_db else _MAX_MEMBER_BYTES
     if info.file_size > limit:
         return f"{info.file_size} bytes exceeds the {limit} byte limit"
     if member.startswith(_CONFIG_PREFIX):
@@ -197,7 +224,7 @@ def _restore_member(
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp_path = _extract_to_temp(archive, info, destination)
     try:
-        if member == _DB_MEMBER:
+        if is_db:
             refusal = _db_member_refusal(temp_path)
             if refusal is not None:
                 raise RestoreRefusedError(refusal)
@@ -217,16 +244,25 @@ def restore_from_backup(
     skipped: list[str] = []
     warnings: list[str] = []
 
-    ensure_letterbot_stopped(db_path=root / _DB_MEMBER)
+    # The database the worker uses, wherever it lives (B25): its lock is the
+    # one to check and the data/mailbot.sqlite member is written there.
+    db_path = resolve_app_db_path(root)
+    ensure_letterbot_stopped(db_path=db_path)
     with zipfile.ZipFile(archive_path, "r") as archive:
+        names = set(archive.namelist())
+        db_member = _DB_MEMBER
+        if _DB_MEMBER not in names and _LEGACY_FROZEN_DB_MEMBER in names:
+            db_member = _LEGACY_FROZEN_DB_MEMBER
         # The database first: when it is refused no other file has changed.
-        members = sorted(archive.infolist(), key=lambda info: info.filename != _DB_MEMBER)
+        members = sorted(archive.infolist(), key=lambda info: info.filename != db_member)
         for info in members:
             member = info.filename
-            if not _is_safe_member(member) or not _is_allowed_path(member):
+            is_db = member == db_member
+            if not _is_safe_member(member) or not (is_db or _is_allowed_path(member)):
                 skipped.append(member)
                 continue
-            reason = _restore_member(archive, info, root / member)
+            destination = db_path if is_db else root / member
+            reason = _restore_member(archive, info, destination, is_db=is_db)
             if reason is not None:
                 skipped.append(member)
                 warnings.append(f"{member}: {reason}")
@@ -245,7 +281,7 @@ def run_restore(archive_path: str) -> None:
     if not path.exists():
         raise SystemExit(f"Backup archive not found: {path}")
     try:
-        ensure_letterbot_stopped(db_path=_repo_root() / _DB_MEMBER)
+        ensure_letterbot_stopped(db_path=resolve_app_db_path(_repo_root()))
     except RestoreRefusedError as exc:
         raise SystemExit(f"[ERROR] {exc}") from exc
 

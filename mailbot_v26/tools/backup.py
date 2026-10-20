@@ -12,11 +12,13 @@ from typing import Iterable
 
 from mailbot_v26.config_loader import ConfigError, load_storage_config
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
-from mailbot_v26.config.paths import app_root
+from mailbot_v26.config.paths import app_root, resolve_db_path
 
 DEFAULT_RETENTION = 14
 # Placeholder written instead of secrets; restore refuses config members containing it.
 MASKED_VALUE = "***"
+# Archive name of the database wherever it lives (restore maps it back).
+DB_MEMBER = "data/mailbot.sqlite"
 
 
 @dataclass(frozen=True)
@@ -30,17 +32,17 @@ def _repo_root() -> Path:
     return app_root()
 
 
-def _resolve_db_path(base_dir: Path) -> Path:
+def resolve_app_db_path(base_dir: Path) -> Path:
+    """The database the worker of this app folder uses (backup, restore, export).
+
+    Same resolver as the worker (config.paths.resolve_db_path): a relative
+    db_path is relative to base_dir, an absolute one is used as given.
+    """
     config_dir = base_dir / "mailbot_v26" / "config"
     try:
-        resolved = load_storage_config(config_dir).db_path
-        try:
-            resolved.relative_to(base_dir)
-        except ValueError:
-            return base_dir / "data" / "mailbot.sqlite"
-        return resolved
+        return load_storage_config(config_dir, root=base_dir).db_path
     except ConfigError:
-        return base_dir / "data" / "mailbot.sqlite"
+        return resolve_db_path(None, root=base_dir)
 
 
 def _state_paths(base_dir: Path) -> list[Path]:
@@ -85,11 +87,11 @@ def _snapshot_db(source: Path, target: Path) -> None:
 def _collect_backup_files(base_dir: Path, temp_dir: Path) -> list[tuple[Path, str]]:
     entries: list[tuple[Path, str]] = []
 
-    db_path = _resolve_db_path(base_dir)
+    db_path = resolve_app_db_path(base_dir)
     if db_path.exists():
         snapshot = temp_dir / "db_snapshot.sqlite"
         _snapshot_db(db_path, snapshot)
-        entries.append((snapshot, db_path.relative_to(base_dir).as_posix()))
+        entries.append((snapshot, DB_MEMBER))
 
     for path in _state_paths(base_dir):
         if path.exists():
@@ -148,4 +150,10 @@ def run_backup() -> None:
         print("[WARN] No files were added to the backup archive.")
 
 
-__all__ = ["BackupResult", "create_backup", "run_backup"]
+__all__ = [
+    "DB_MEMBER",
+    "BackupResult",
+    "create_backup",
+    "resolve_app_db_path",
+    "run_backup",
+]
