@@ -314,6 +314,51 @@ def test_status_mode_shows_counts_only(
         assert _count(conn, "SELECT COUNT(*) FROM decision_traces") == 2
 
 
+def test_status_reads_through_a_read_only_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "cleanup.sqlite"
+    _prepare_db(db_path)
+    dry_run = cleanup.run_cleanup(db_path=db_path, run=False, status_only=False)
+    expected = cleanup.format_cleanup_report(dry_run).replace("Mode: dry-run", "Mode: status")
+    before = (db_path.read_bytes(), db_path.stat().st_mtime_ns)
+    opened: list[tuple[str, bool]] = []
+    real_connect = sqlite3.connect
+
+    def spy(database, *args, **kwargs):
+        opened.append((str(database), bool(kwargs.get("uri", False))))
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(cleanup.sqlite3, "connect", spy)
+
+    exit_code = cleanup.main(["--status", "--db", str(db_path)])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == expected + "\n"
+    assert opened and all(uri and database.endswith("?mode=ro") for database, uri in opened)
+    assert (db_path.read_bytes(), db_path.stat().st_mtime_ns) == before
+    # A read-only reader of a WAL database may create SQLite's -shm index and
+    # an empty -wal; nothing is written to the database or the WAL.
+    names = {path.name for path in tmp_path.iterdir()}
+    assert names <= {"cleanup.sqlite", "cleanup.sqlite-wal", "cleanup.sqlite-shm"}
+    wal = tmp_path / "cleanup.sqlite-wal"
+    assert not wal.exists() or wal.stat().st_size == 0
+
+
+def test_status_names_tables_that_do_not_exist_yet(tmp_path: Path) -> None:
+    db_path = tmp_path / "fresh.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(_schema_sql())
+
+    result = cleanup.cleanup_status(db_path)
+
+    assert result.mode == "status"
+    assert set(result.missing_tables) == {"trust_snapshots", "relationship_health_snapshots"}
+    for entry in result.plan:
+        if entry.target.table in result.missing_tables:
+            assert entry.eligible_rows == 0
+
+
 def test_cleanup_without_where_clause_is_impossible(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

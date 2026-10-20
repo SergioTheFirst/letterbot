@@ -10,6 +10,7 @@ from typing import Iterable
 from mailbot_v26.config.paths import app_root
 from mailbot_v26.config_loader import ConfigError, load_storage_config
 from mailbot_v26.events.contract import EventType
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 
 DEFAULT_BATCH_SIZE = 500
 DEFAULT_VACUUM_THRESHOLD_ROWS = 50_000
@@ -83,6 +84,8 @@ class CleanupResult:
     freelist_after: int
     vacuum_performed: bool
     vacuum_reason: str
+    # --status only: target tables the database has not created yet (0 rows).
+    missing_tables: tuple[str, ...] = ()
 
 
 def _repo_root() -> Path:
@@ -215,6 +218,61 @@ def build_cleanup_plan(db_path: Path) -> tuple[CleanupPlanEntry, ...]:
         )
 
 
+def _missing_result(db_path: Path, mode: str) -> CleanupResult:
+    return CleanupResult(
+        db_path=db_path,
+        mode=mode,
+        plan=(),
+        deleted_rows=0,
+        freelist_before=0,
+        freelist_after=0,
+        vacuum_performed=False,
+        vacuum_reason="database_missing",
+    )
+
+
+def cleanup_status(db_path: Path) -> CleanupResult:
+    """``--status`` (and the dashboard): counts on a read-only connection.
+
+    ``mode=ro`` plus ``query_only`` never creates the database, a table or a
+    journal and never checkpoints the WAL. A target table the database has not
+    created yet counts 0 rows and is named in ``missing_tables``.
+    """
+    db_path = Path(db_path)
+    if not db_path.exists():
+        return _missing_result(db_path, "status")
+    conn = sqlite3.connect(sqlite_readonly_uri(db_path), uri=True)
+    try:
+        conn.execute("PRAGMA query_only = ON")
+        freelist = _freelist_count(conn)
+        tables = {
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        targets = resolve_cleanup_targets()
+        plan = tuple(
+            CleanupPlanEntry(
+                target=target,
+                eligible_rows=_count_target(conn, target) if target.table in tables else 0,
+            )
+            for target in targets
+        )
+    finally:
+        conn.close()
+    missing = tuple(sorted({target.table for target in targets} - tables))
+    return CleanupResult(
+        db_path=db_path,
+        mode="status",
+        plan=plan,
+        deleted_rows=0,
+        freelist_before=freelist,
+        freelist_after=freelist,
+        vacuum_performed=False,
+        vacuum_reason="not_requested",
+        missing_tables=missing,
+    )
+
+
 def _delete_batch(
     conn: sqlite3.Connection, target: CleanupTarget, *, batch_size: int
 ) -> int:
@@ -249,16 +307,12 @@ def run_cleanup(
     if vacuum_threshold_rows < 0:
         raise ValueError("vacuum_threshold_rows must be >= 0")
 
+    if status_only and not run:
+        return cleanup_status(db_path)
+
     if not db_path.exists():
-        return CleanupResult(
-            db_path=db_path,
-            mode="status" if status_only else ("run" if run else "dry-run"),
-            plan=(),
-            deleted_rows=0,
-            freelist_before=0,
-            freelist_after=0,
-            vacuum_performed=False,
-            vacuum_reason="database_missing",
+        return _missing_result(
+            db_path, "status" if status_only else ("run" if run else "dry-run")
         )
 
     mode = "status" if status_only else ("run" if run else "dry-run")
