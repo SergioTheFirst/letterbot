@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import configparser
 from pathlib import Path
 
 from mailbot_v26.config_loader import ACCOUNT_ID_PATTERN, CONFIG_DIR
-from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
+from mailbot_v26.config.ini_utils import new_user_ini_parser, read_user_ini_with_defaults
 from mailbot_v26.config.paths import resolve_config_paths
 from mailbot_v26.config_yaml import (
     SUPPORTED_SCHEMA_VERSION,
@@ -340,9 +339,10 @@ def migrate_two_file_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]
 
     if legacy_keys.exists():
         # utf-8-sig: Notepad's "UTF-8 with BOM" must parse like plain UTF-8.
-        parser = configparser.ConfigParser()
+        # Values as written (no %-interpolation), like every user INI reader.
+        parser = new_user_ini_parser()
         parser.read(accounts_path, encoding="utf-8-sig")
-        legacy = configparser.ConfigParser()
+        legacy = new_user_ini_parser()
         legacy.read(legacy_keys, encoding="utf-8-sig")
         for section in ("telegram", "cloudflare"):
             if section in legacy and section not in parser:
