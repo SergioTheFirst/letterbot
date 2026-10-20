@@ -316,3 +316,201 @@ def test_uidvalidity_change_keeps_new_mail_on_a_reused_uid(
     retired = [r.getMessage() for r in caplog.records if "imap_uid_epoch_retired" in r.getMessage()]
     assert len(retired) == 1
     assert "rows=1" in retired[0]
+
+
+# ---- settled Message-IDs: skipped in the resync poll ----
+
+
+@pytest.mark.parametrize(
+    "settle", ["delivered", "delivery_unknown", "delivery_failed", "queued", "reserved"]
+)
+def test_settled_message_id_is_known(tmp_path: Path, settle: str) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    email_id, _ = _store(storage, 1, "<m@x>")
+    if settle != "queued":
+        _drop_queue(storage, email_id)
+    if settle == "delivered":
+        storage.mark_telegram_delivered(email_id)
+    elif settle == "delivery_unknown":
+        storage.set_email_delivery_unknown(email_id, "delivery_unknown")
+    elif settle == "delivery_failed":
+        storage.set_email_delivery_failed(email_id, "chat not found")
+    elif settle == "reserved":
+        # sent or maybe sent (at-most-once): never again
+        storage.reserve_telegram_delivery(
+            delivery_key=f"email:{email_id}",
+            email_id=email_id,
+            account_id=LOGIN,
+            chat_id="chat",
+        )
+    storage.retire_uid_epoch(LOGIN, NEW_EPOCH)
+
+    assert storage.is_known_message_id(LOGIN, " <m@x>\r\n")
+    assert not storage.is_known_message_id("other@example.com", "<m@x>")
+
+
+@pytest.mark.parametrize("status", ["NEW", "ERROR"])
+def test_undelivered_orphan_message_id_is_not_known(tmp_path: Path, status: str) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    email_id, _ = _store(storage, 1, "<m@x>")
+    _drop_queue(storage, email_id)
+    if status == "ERROR":
+        storage.set_email_error(email_id, "context_unavailable:gone")
+
+    assert not storage.is_known_message_id(LOGIN, "<m@x>")
+    assert not storage.is_known_message_id(LOGIN, None)
+    assert not storage.is_known_message_id(LOGIN, "<unknown@x>")
+
+
+def test_header_probe_matches_the_message_id_stored_from_the_body(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Exchange folds Message-ID onto its own line. The poll reads it from the
+    # header batch; the worker stores what the full message says. Both forms
+    # must meet, or the resync filter never recognises the mail.
+    raw = (
+        b"Subject: Folded\r\nFrom: a@example.com\r\n"
+        b"Message-ID:\r\n <folded.1@example.com>\r\n\r\nBody\r\n"
+    )
+    fake = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    fake.set_messages(
+        {
+            1: {
+                b"RFC822": raw,
+                b"RFC822.SIZE": len(raw),
+                b"INTERNALDATE": START + timedelta(minutes=1),
+                _HEADER_FIELDS_KEY: b"Message-ID:\r\n <folded.1@example.com>\r\n\r\n",
+            }
+        }
+    )
+    _install_fake(monkeypatch, fake)
+    storage = Storage(tmp_path / "db.sqlite")
+    client = ResilientIMAP(_account(), StateManager(tmp_path / "state.json"), START)
+
+    [(uid, body)] = client.fetch_new_messages()
+    stored_from_body = start_module.message_from_bytes(body).get("Message-ID")
+    email_id, _ = _store(storage, uid, stored_from_body)
+
+    assert stored_from_body != client.last_message_ids[uid]
+    assert storage.is_known_message_id(LOGIN, client.last_message_ids[uid])
+    assert _row(storage, email_id)[3] == client.last_message_ids[uid]
+
+
+def test_resync_skips_settled_message_ids_before_the_newest_n_cut(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # 10 notified + 2 new, newest 5 allowed: the new mail is not among the
+    # newest 5, so filtering after the cut would lose it and resend old mail.
+    fake, state, client = _resync_client(
+        monkeypatch, tmp_path, _mailbox(_old_and_new({3, 7}))
+    )
+    probed: list[str] = []
+
+    def _known(message_id: str) -> bool:
+        probed.append(message_id)
+        return message_id.startswith("<old")
+
+    messages = client.fetch_new_messages(is_known_message_id=_known)
+    commit = client.commit_cursor([uid for uid, _ in messages])
+
+    assert [uid for uid, _ in messages] == [3, 7]
+    assert _body_fetches(fake) == [[3], [7]]
+    assert sorted(probed) == sorted(_old_and_new({3, 7}).values())
+    assert commit.cursor == 12
+    assert state.get_uidvalidity(LOGIN) == NEW_EPOCH
+
+
+def test_message_id_probe_is_not_consulted_without_uidvalidity_change(
+    monkeypatch, tmp_path: Path
+) -> None:
+    fake = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    fake.uidvalidity = OLD_EPOCH
+    fake.set_messages(
+        {
+            uid: server_item(
+                raw_email(f"<m{uid}@x>"), internaldate=START + timedelta(minutes=uid)
+            )
+            for uid in (1, 2)
+        }
+    )
+    _install_fake(monkeypatch, fake)
+    state = StateManager(tmp_path / "state.json")
+    state.update_uidvalidity(LOGIN, OLD_EPOCH, mailbox="INBOX")
+    probed: list[str] = []
+
+    client = ResilientIMAP(_account(), state, start_time=START)
+    messages = client.fetch_new_messages(
+        is_known_message_id=lambda mid: probed.append(mid) or True
+    )
+
+    assert [uid for uid, _ in messages] == [1, 2]
+    assert probed == []
+
+
+def test_resync_mail_without_message_id_is_fetched_as_new_and_logged(
+    monkeypatch, tmp_path: Path, caplog
+) -> None:
+    _fake, _state, client = _resync_client(
+        monkeypatch, tmp_path, _mailbox({1: "<old1@example.com>", 2: None})
+    )
+
+    with caplog.at_level(logging.WARNING, logger=imap_client.__name__):
+        messages = client.fetch_new_messages(is_known_message_id=lambda _mid: True)
+
+    assert [uid for uid, _ in messages] == [2]
+    missing = [r.getMessage() for r in caplog.records if "message_id_missing" in r.getMessage()]
+    assert len(missing) == 1
+    assert "count=1" in missing[0]
+
+
+def test_message_id_probe_failure_fetches_without_the_filter(
+    monkeypatch, tmp_path: Path, caplog
+) -> None:
+    # The worker dedupes again when it stores, so failing open cannot resend.
+    _fake, _state, client = _resync_client(
+        monkeypatch, tmp_path, _mailbox(_old_and_new({3}, count=4))
+    )
+
+    def _broken(_message_id: str) -> bool:
+        raise sqlite3.OperationalError("database is locked")
+
+    with caplog.at_level(logging.WARNING, logger=imap_client.__name__):
+        messages = client.fetch_new_messages(is_known_message_id=_broken)
+
+    assert [uid for uid, _ in messages] == [1, 2, 3, 4]
+    assert "imap_known_message_id_probe_failed" in caplog.text
+
+
+def test_uidvalidity_change_sends_only_new_mail(monkeypatch, tmp_path: Path) -> None:
+    # Epoch 10 notified 10 mails at UIDs 1-10. The mailbox is rebuilt as
+    # epoch 20: the same 10 mails plus 2 new ones at UIDs 3 and 7 - UIDs the
+    # old rows held. Newest 5 allowed.
+    old_ids = [f"<old{n}@example.com>" for n in range(1, 11)]
+    remaining = iter(old_ids)
+    new_epoch = {
+        uid: f"<new{uid}@example.com>" if uid in (3, 7) else next(remaining)
+        for uid in range(1, 13)
+    }
+
+    config, sent = _run_resync_poll(
+        monkeypatch,
+        tmp_path,
+        notified=dict(enumerate(old_ids, start=1)),
+        new_epoch=new_epoch,
+    )
+
+    assert _pending_sends(config.storage.db_path) == [
+        (3, "<new3@example.com>"),
+        (7, "<new7@example.com>"),
+    ]
+    assert sent == []
+    with sqlite3.connect(config.storage.db_path) as conn:
+        total, retired = conn.execute(
+            "SELECT COUNT(*), SUM(uid < 0) FROM emails"
+        ).fetchone()
+    assert (total, retired) == (12, 10)
+    saved = _saved_state(tmp_path)["accounts"][LOGIN]
+    assert (saved["last_uid"], saved["uidvalidity"]) == (12, NEW_EPOCH)
+    assert [event["retired_rows"] for event in _uidvalidity_change_events(
+        config.storage.db_path
+    )] == [10]

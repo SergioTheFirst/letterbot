@@ -591,22 +591,35 @@ class ResilientIMAP:
         *,
         limit: int = 50,
         is_known_uid: Optional[Callable[[int], bool]] = None,
+        is_known_message_id: Optional[Callable[[str], bool]] = None,
     ) -> List[Tuple[int, bytes]]:
         """New messages above the cursor; writes no state.
 
         The call records a plan; commit_cursor() moves the cursor once the
         returned messages are stored. is_known_uid(uid) -> True skips a UID
         that is already stored (not consulted after a UIDVALIDITY change).
+        After a UIDVALIDITY change is_known_message_id(message_id) -> True
+        skips mail already settled under its old UID; it gets the normalized
+        Message-ID and runs before the newest-N cut, so known mail does not
+        take the place of new mail. Mail without Message-ID counts as new.
         """
         self._plan = None
         # One IMAP session per poll cycle: always LOGOUT, even when the fetch fails.
         try:
-            return self._fetch_new_messages(limit=limit, is_known_uid=is_known_uid)
+            return self._fetch_new_messages(
+                limit=limit,
+                is_known_uid=is_known_uid,
+                is_known_message_id=is_known_message_id,
+            )
         finally:
             self.close()
 
     def _fetch_new_messages(
-        self, *, limit: int, is_known_uid: Optional[Callable[[int], bool]]
+        self,
+        *,
+        limit: int,
+        is_known_uid: Optional[Callable[[int], bool]],
+        is_known_message_id: Optional[Callable[[str], bool]],
     ) -> List[Tuple[int, bytes]]:
         self._last_fetch_included_prestart = False
         self._last_uidvalidity_changed = False
@@ -722,6 +735,12 @@ class ResilientIMAP:
             len(eligible),
         )
 
+        known: set[int] = set()
+        if uidvalidity_changed and is_known_message_id is not None:
+            eligible, known = self._drop_settled_message_ids(
+                eligible, message_ids, is_known_message_id, state_login
+            )
+
         fetch_cap = max(0, int(limit))
         if bootstrap_active:
             fetch_cap = min(fetch_cap, self._bootstrap_max_messages)
@@ -731,7 +750,6 @@ class ResilientIMAP:
                 eligible = eligible[cut:]
 
         messages: List[Tuple[int, bytes]] = []
-        known: set[int] = set()
         dead: set[int] = set()
         fetch_failed: set[int] = set()
         carried: List[int] = []
@@ -805,6 +823,65 @@ class ResilientIMAP:
             carried=tuple(carried),
         )
         return messages
+
+    def _drop_settled_message_ids(
+        self,
+        eligible: List[Tuple[int, Optional[Dict[bytes, Any]], Optional[datetime]]],
+        message_ids: Dict[int, Optional[str]],
+        is_known_message_id: Callable[[str], bool],
+        login: str,
+    ) -> Tuple[
+        List[Tuple[int, Optional[Dict[bytes, Any]], Optional[datetime]]], set[int]
+    ]:
+        """UIDVALIDITY resync: split off mail already settled under its old
+        UID (WP2c). Returns (still eligible, known UIDs). A message without
+        Message-ID cannot be matched and stays; a UID whose headers are
+        missing stays too (fetch_failed later). A failing probe is logged
+        and the rest is kept: the worker dedupes again when it stores."""
+        kept: List[Tuple[int, Optional[Dict[bytes, Any]], Optional[datetime]]] = []
+        known: set[int] = set()
+        missing = 0
+        probe: Optional[Callable[[str], bool]] = is_known_message_id
+        for item in eligible:
+            uid, meta = item[0], item[1]
+            message_id = message_ids.get(uid)
+            if message_id is None:
+                missing += meta is not None
+                kept.append(item)
+                continue
+            is_known = False
+            if probe is not None:
+                try:
+                    is_known = bool(probe(message_id))
+                except Exception as exc:
+                    log.warning(
+                        "imap_known_message_id_probe_failed mailbox=%s uid=%s error=%s: "
+                        "resync without the Message-ID filter",
+                        self.account.mailbox,
+                        uid,
+                        type(exc).__name__,
+                    )
+                    probe = None
+            if is_known:
+                known.add(uid)
+            else:
+                kept.append(item)
+        if missing:
+            log.warning(
+                "imap_resync_message_id_missing account=%s mailbox=%s count=%d: "
+                "treated as new",
+                login,
+                self.account.mailbox,
+                missing,
+            )
+        log.info(
+            "imap_resync_message_id_filter account=%s mailbox=%s eligible=%d known=%d",
+            login,
+            self.account.mailbox,
+            len(eligible),
+            len(known),
+        )
+        return kept, known
 
     def _oversize_stand_in(self, uid: int) -> bytes:
         """A small message with the real From/Subject for mail over max_email_mb."""

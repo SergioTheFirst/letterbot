@@ -676,5 +676,44 @@ class Storage:
             )
         return int(cursor.rowcount)
 
+    @staticmethod
+    def _message_id_rows(
+        cursor: sqlite3.Cursor, account_email: str, message_id: str
+    ) -> List[tuple[int, int, bool]]:
+        """(id, uid, settled) of the account's rows with this normalized
+        Message-ID, newest first. Settled: delivered or a delivery reserved
+        (sent or maybe sent), DELIVERY_UNKNOWN, DELIVERY_FAILED, or still
+        queued; anything else is an orphan that was never notified."""
+        rows = cursor.execute(
+            """
+            SELECT e.id, e.uid,
+                   (e.telegram_delivered_at IS NOT NULL
+                    OR e.status IN ('DELIVERY_UNKNOWN', 'DELIVERY_FAILED')
+                    OR EXISTS (SELECT 1 FROM queue q WHERE q.email_id = e.id)
+                    OR EXISTS (
+                        SELECT 1 FROM telegram_delivery_log d WHERE d.email_id = e.id
+                    ))
+            FROM emails e
+            WHERE e.account_email = ? AND e.message_id = ?
+            ORDER BY e.id DESC;
+            """,
+            (account_email, message_id),
+        ).fetchall()
+        return [(int(row[0]), int(row[1]), bool(row[2])) for row in rows]
+
+    def is_known_message_id(self, account_email: str, message_id: str | None) -> bool:
+        """True when an email with this Message-ID is settled for the account
+        (see _message_id_rows), whatever its UID or epoch. An orphan, or a
+        missing Message-ID, is not known (WP2c)."""
+        normalized = normalize_message_id(message_id)
+        if normalized is None:
+            return False
+        cursor = self.conn.cursor()
+        try:
+            rows = self._message_id_rows(cursor, account_email, normalized)
+        finally:
+            cursor.close()
+        return any(settled for _id, _uid, settled in rows)
+
 
 __all__ = ["Storage", "normalize_message_id"]

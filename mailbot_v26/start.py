@@ -818,6 +818,19 @@ def _known_uid_probe(
     return lambda uid: storage.find_email_id(normalized_account_email, uid) is not None
 
 
+def _known_message_id_probe(
+    storage: Storage | None, account_email: str
+) -> Callable[[str], bool] | None:
+    """is_known_message_id for fetch_new_messages(): True once an email with
+    this Message-ID is settled for the account, under any UID (WP2c)."""
+    if storage is None:
+        return None
+    normalized_account_email = normalize_login(account_email)
+    return lambda message_id: storage.is_known_message_id(
+        normalized_account_email, message_id
+    )
+
+
 def _retire_previous_uid_epoch(
     *, storage: Storage | None, imap: object, login: str
 ) -> int:
@@ -2522,7 +2535,10 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                 max_email_mb=config.general.max_email_mb,
                             )
                             new_messages = imap.fetch_new_messages(
-                                is_known_uid=_known_uid_probe(storage, account.login)
+                                is_known_uid=_known_uid_probe(storage, account.login),
+                                is_known_message_id=_known_message_id_probe(
+                                    storage, account.login
+                                ),
                             )
                             retired_rows = _retire_previous_uid_epoch(
                                 storage=storage, imap=imap, login=login
