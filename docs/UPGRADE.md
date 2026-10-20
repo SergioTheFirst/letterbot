@@ -17,15 +17,20 @@ Alternative: unpack `Letterbot.zip` into a new folder and copy the two config fi
 The installer updates files in place and never deletes anything, so files that a
 newer release no longer ships stay in the folder. For a clean reinstall, back up
 `mailbot_v26\config\` and the `data\` folder, delete `%LOCALAPPDATA%\Letterbot`,
-run the installer, and copy the backup back.
+run the installer, and copy the backup back. Older builds kept the database in
+`_internal\data\` instead, and Letterbot keeps using it there: back up that
+folder too (or run `backup.bat` / `Letterbot.exe backup` first).
 
 ## Backup and restore notes
 - `backup.bat` (`python -m mailbot_v26 backup`) writes `backups\backup_<time>.zip`
   with a consistent database snapshot. Passwords, tokens and keys in the `.ini`
-  files are replaced by `***`, so a backup never holds your secrets.
+  files are replaced by `***`. The archive does hold your mail database and its
+  subject-hash key (`data\mailbot.sqlite.subject.key`), so keep backups on this
+  computer.
 - `restore.bat <zip>` refuses to run while `Letterbot.exe` is running; close
   Letterbot first, including any `python -m mailbot_v26` window. It takes a
-  safety backup, replaces the database and removes its stale `-wal`/`-shm` files.
+  safety backup, replaces the database (where `[storage] db_path` points) and
+  removes its stale `-wal`/`-shm` files; the subject-hash key goes next to it.
 - Restore never writes a config file that contains `***`: your current
   `accounts.ini` / `keys.ini` stay as they are. On a new PC, create them from the
   `.example` templates and re-enter the secrets.
