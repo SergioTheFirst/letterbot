@@ -105,12 +105,16 @@ def _email_count(storage: Storage) -> int:
     return int(storage.conn.execute("SELECT COUNT(*) FROM emails").fetchone()[0])
 
 
-def _mailbox(message_ids: dict[int, str | None]) -> dict[int, dict[bytes, object]]:
-    """Server items inside the resync window, oldest UID first."""
+def _mailbox(
+    message_ids: dict[int, str | None], *, since_start: bool = False
+) -> dict[int, dict[bytes, object]]:
+    """Server items inside the resync window, oldest UID first. since_start:
+    received after the process started, so polls after the resync see them."""
+    first = START if since_start else START - timedelta(hours=1)
     return {
         uid: server_item(
             raw_email(message_id, subject=f"Mail {uid}"),
-            internaldate=START - timedelta(hours=1) + timedelta(minutes=uid),
+            internaldate=first + timedelta(minutes=uid),
         )
         for uid, message_id in message_ids.items()
     }
@@ -161,10 +165,33 @@ def _run_resync_poll(
     fake = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
     fake.uidvalidity = NEW_EPOCH
     fake.set_messages(_mailbox(new_epoch))
-    config, sent = _install_main(monkeypatch, tmp_path, fake)
-    config.ingest = IngestConfig(
-        first_run_bootstrap_hours=24, first_run_bootstrap_max_messages=max_messages
+    config, sent = _seed_resync(
+        monkeypatch,
+        tmp_path,
+        fake,
+        notified=notified,
+        orphans=orphans,
+        ingest=IngestConfig(
+            first_run_bootstrap_hours=24, first_run_bootstrap_max_messages=max_messages
+        ),
     )
+    start_module.main(config_dir=tmp_path, max_cycles=1)
+    return config, sent
+
+
+def _seed_resync(
+    monkeypatch,
+    tmp_path: Path,
+    fake: _FakeIMAPClient,
+    *,
+    notified: dict[int, str],
+    ingest: IngestConfig,
+    orphans: dict[int, str] | None = None,
+):
+    """Install the worker on `fake` with mail of OLD_EPOCH already stored
+    (see _run_resync_poll) and the cursor at the last notified UID."""
+    config, sent = _install_main(monkeypatch, tmp_path, fake)
+    config.ingest = ingest
     storage = Storage(config.storage.db_path)
     for uid, message_id in notified.items():
         email_id, _ = _store(storage, uid, message_id, uidvalidity=OLD_EPOCH)
@@ -177,9 +204,17 @@ def _run_resync_poll(
     seeded.update_last_uid(LOGIN, max(notified))
     seeded.update_uidvalidity(LOGIN, OLD_EPOCH, mailbox="INBOX")
     seeded.save(force=True)
-
-    start_module.main(config_dir=tmp_path, max_cycles=1)
     return config, sent
+
+
+def _cap_fetch(monkeypatch, limit: int) -> None:
+    """The worker fetches at most `limit` messages per poll."""
+    original = ResilientIMAP.fetch_new_messages
+
+    def _capped(self, **kwargs):
+        return original(self, **{**kwargs, "limit": limit})
+
+    monkeypatch.setattr(ResilientIMAP, "fetch_new_messages", _capped)
 
 
 def _pending_sends(db_path: Path) -> list[tuple[int, str]]:
@@ -463,22 +498,99 @@ def test_resync_mail_without_message_id_is_fetched_as_new_and_logged(
     assert "count=1" in missing[0]
 
 
-def test_message_id_probe_failure_fetches_without_the_filter(
+def test_message_id_probe_failure_fails_the_poll_and_keeps_the_epoch(
     monkeypatch, tmp_path: Path, caplog
 ) -> None:
-    # The worker dedupes again when it stores, so failing open cannot resend.
-    _fake, _state, client = _resync_client(
-        monkeypatch, tmp_path, _mailbox(_old_and_new({3}, count=4))
+    # Failing open let settled mail take the newest-5 slots, so the new mail
+    # at UIDs 3 and 7 fell outside them and was skipped for good.
+    fake, state, client = _resync_client(
+        monkeypatch, tmp_path, _mailbox(_old_and_new({3, 7}))
     )
 
     def _broken(_message_id: str) -> bool:
         raise sqlite3.OperationalError("database is locked")
 
     with caplog.at_level(logging.WARNING, logger=imap_client.__name__):
-        messages = client.fetch_new_messages(is_known_message_id=_broken)
+        with pytest.raises(sqlite3.OperationalError):
+            client.fetch_new_messages(is_known_message_id=_broken)
 
-    assert [uid for uid, _ in messages] == [1, 2, 3, 4]
     assert "imap_known_message_id_probe_failed" in caplog.text
+    assert _body_fetches(fake) == []
+    assert client.commit_cursor([]) is None
+    assert (state.get_last_uid(LOGIN), state.get_uidvalidity(LOGIN)) == (10, OLD_EPOCH)
+
+    retry = ResilientIMAP(
+        _account(),
+        state,
+        start_time=START,
+        first_run_bootstrap_hours=24,
+        first_run_bootstrap_max_messages=5,
+    )
+    messages = retry.fetch_new_messages(
+        is_known_message_id=lambda message_id: message_id.startswith("<old")
+    )
+
+    assert retry.last_uidvalidity_changed is True
+    assert [uid for uid, _ in messages] == [3, 7]
+
+
+def test_failed_resync_probe_never_lets_carried_old_mail_be_resent(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Epoch 10 notified 4 mails since the start. The mailbox is rebuilt as
+    # epoch 20: the same mails at UIDs 1-4, new mail at 5 and 6. One message
+    # per poll, no bootstrap window, so the resync spans polls. Failing open,
+    # the first poll fetched old UID 1, stored the new UIDVALIDITY and carried
+    # 2-6 into polls that no longer checked Message-IDs: old mail sent again.
+    old_ids = {uid: f"<old{uid}@example.com>" for uid in range(1, 5)}
+    fake = _FakeIMAPClient(host="imap.example.com", port=993, ssl=True)
+    fake.uidvalidity = NEW_EPOCH
+    fake.set_messages(
+        _mailbox(
+            {**old_ids, 5: "<new5@example.com>", 6: "<new6@example.com>"},
+            since_start=True,
+        )
+    )
+    config, _sent = _seed_resync(
+        monkeypatch,
+        tmp_path,
+        fake,
+        notified=old_ids,
+        ingest=IngestConfig(
+            first_run_bootstrap_hours=0, first_run_bootstrap_max_messages=0
+        ),
+    )
+    _cap_fetch(monkeypatch, limit=1)
+    working_probe = Storage.is_known_message_id
+
+    def _locked(_self, _account_email, _message_id):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(Storage, "is_known_message_id", _locked)
+    start_module.main(config_dir=tmp_path, max_cycles=1)
+
+    db_path = config.storage.db_path
+    assert _pending_sends(db_path) == []
+    saved = _saved_state(tmp_path)["accounts"][LOGIN]
+    assert (saved["last_uid"], saved["uidvalidity"]) == (4, OLD_EPOCH)
+
+    monkeypatch.setattr(Storage, "is_known_message_id", working_probe)
+    for _poll in range(3):
+        # the failed poll set a backoff; the next ones are due at once
+        (tmp_path / "runtime_health.json").unlink(missing_ok=True)
+        start_module.main(config_dir=tmp_path, max_cycles=1)
+
+    assert _pending_sends(db_path) == [
+        (5, "<new5@example.com>"),
+        (6, "<new6@example.com>"),
+    ]
+    with sqlite3.connect(db_path) as conn:
+        total, retired = conn.execute(
+            "SELECT COUNT(*), SUM(uid < 0) FROM emails"
+        ).fetchone()
+    assert (total, retired) == (6, 4)
+    saved = _saved_state(tmp_path)["accounts"][LOGIN]
+    assert (saved["last_uid"], saved["uidvalidity"]) == (6, NEW_EPOCH)
 
 
 def test_uidvalidity_change_sends_only_new_mail(monkeypatch, tmp_path: Path) -> None:

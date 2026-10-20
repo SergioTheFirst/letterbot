@@ -602,6 +602,8 @@ class ResilientIMAP:
         skips mail already settled under its old UID; it gets the normalized
         Message-ID and runs before the newest-N cut, so known mail does not
         take the place of new mail. Mail without Message-ID counts as new.
+        An exception from is_known_message_id propagates: no plan, no state
+        change, the next poll repeats the resync.
         """
         self._plan = None
         # One IMAP session per poll cycle: always LOGOUT, even when the fetch fails.
@@ -837,11 +839,13 @@ class ResilientIMAP:
         UID (WP2c). Returns (still eligible, known UIDs). A message without
         Message-ID cannot be matched and stays; a UID whose headers are
         missing stays too (fetch_failed later). A failing probe is logged
-        and the rest is kept: the worker dedupes again when it stores."""
+        and re-raised: the poll fails before it plans anything, so neither
+        the cursor nor the stored UIDVALIDITY moves and the next poll
+        repeats the resync. Failing open would let settled mail take the
+        newest-N slots and carry unchecked UIDs past this poll."""
         kept: List[Tuple[int, Optional[Dict[bytes, Any]], Optional[datetime]]] = []
         known: set[int] = set()
         missing = 0
-        probe: Optional[Callable[[str], bool]] = is_known_message_id
         for item in eligible:
             uid, meta = item[0], item[1]
             message_id = message_ids.get(uid)
@@ -849,19 +853,18 @@ class ResilientIMAP:
                 missing += meta is not None
                 kept.append(item)
                 continue
-            is_known = False
-            if probe is not None:
-                try:
-                    is_known = bool(probe(message_id))
-                except Exception as exc:
-                    log.warning(
-                        "imap_known_message_id_probe_failed mailbox=%s uid=%s error=%s: "
-                        "resync without the Message-ID filter",
-                        self.account.mailbox,
-                        uid,
-                        type(exc).__name__,
-                    )
-                    probe = None
+            try:
+                is_known = bool(is_known_message_id(message_id))
+            except Exception as exc:
+                log.warning(
+                    "imap_known_message_id_probe_failed account=%s mailbox=%s uid=%s "
+                    "error=%s: poll failed, resync retried next poll",
+                    login,
+                    self.account.mailbox,
+                    uid,
+                    type(exc).__name__,
+                )
+                raise
             if is_known:
                 known.add(uid)
             else:
