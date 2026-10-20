@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from mailbot_v26.behavior.silence_detector import run_silence_scan
-from mailbot_v26.config_loader import resolve_account_scope
 from mailbot_v26.config.paths import default_config_dir, resolve_config_paths
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.regret_minimization import (
@@ -834,8 +833,8 @@ def _run_daily_digest(
 ) -> None:
     # `now` is local time (due hour, day window); data and stored times use UTC.
     now_utc = now.astimezone(timezone.utc)
-    resolved_scope = resolve_account_scope(account_email, base_dir=_CONFIG_PATH.parent)
-    scope_account_emails = resolved_scope.account_emails if resolved_scope else None
+    # Data of the accounts routed to this chat only (B8), from the live config.
+    scope_account_emails = list(account_emails)
     if not _is_daily_due(now, config):
         logger.info(
             "digest_tick_checked",
@@ -887,6 +886,7 @@ def _run_daily_digest(
     data = daily_digest._collect_digest_data(
         analytics=storage.analytics,
         account_email=account_email,
+        account_emails=scope_account_emails,
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
         include_quality_metrics=include_quality_metrics,
@@ -1100,6 +1100,8 @@ def _run_weekly_digest(
     data = weekly_digest._collect_weekly_data(
         analytics=storage.analytics,
         account_email=account_email,
+        # Data of the accounts routed to this chat only (B8).
+        account_emails=list(account_emails),
         week_key=week_key,
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,

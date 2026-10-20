@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -183,6 +185,60 @@ def seed_deferred(
             ),
         )
     return email_id
+
+
+def emit_score_pair(
+    storage: digest_scheduler.DigestStorage,
+    *,
+    account_id: str,
+    entity_id: str,
+    event_type: EventType,
+    field: str,
+    before: float,
+    after: float,
+) -> None:
+    """Two recent score events for one entity (a non-zero delta)."""
+    now = datetime.now(timezone.utc)
+    for offset_hours, value in ((6, before), (1, after)):
+        emit(
+            storage,
+            EventV1(
+                event_type=event_type,
+                ts_utc=(now - timedelta(hours=offset_hours)).timestamp(),
+                account_id=account_id,
+                entity_id=entity_id,
+                email_id=None,
+                payload={field: value, "model_version": "v2"},
+            ),
+        )
+
+
+def seed_interaction(
+    storage: digest_scheduler.DigestStorage, *, account_id: str, entity_id: str
+) -> None:
+    """An email of account_id from entity_id, as the context layer records it."""
+    email_id = storage.knowledge_db.save_email(
+        account_email=account_id,
+        from_email=f"{entity_id}@example.com",
+        subject="Subject",
+        received_at=datetime.now(timezone.utc).isoformat(),
+        priority="🔵",
+        action_line="Check",
+        body_summary="",
+        raw_body="",
+        attachment_summaries=[],
+    )
+    with sqlite3.connect(storage.knowledge_db.path) as conn:
+        conn.execute(
+            "INSERT INTO interaction_events (id, entity_id, event_type, event_time, "
+            "metadata) VALUES (?, ?, 'email_received', ?, ?)",
+            (
+                f"{entity_id}-{email_id}",
+                entity_id,
+                datetime.now(timezone.utc).isoformat(),
+                json.dumps({"email_id": email_id}),
+            ),
+        )
 
 
 def tick(

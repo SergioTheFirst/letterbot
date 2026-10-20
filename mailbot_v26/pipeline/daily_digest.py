@@ -230,11 +230,16 @@ def _collect_anomaly_alerts(
     now: datetime,
     contract_event_emitter: ContractEventEmitter | None = None,
     account_email: str | None = None,
+    account_emails: Sequence[str] | None = None,
     locale: str = DEFAULT_LOCALE,
 ) -> list[str]:
     alerts: list[str] = []
+    # Only entities that wrote to this chat's accounts (B8), never all accounts.
+    scope = list(account_emails or ([account_email] if account_email else []))
     try:
-        entities = analytics.recent_entity_activity(days=30, limit=5)
+        entities = analytics.recent_entity_activity(
+            days=30, limit=5, account_emails=scope
+        )
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("anomaly_digest_activity_failed", error=str(exc))
         return alerts
@@ -293,6 +298,7 @@ def _collect_digest_data(
     *,
     analytics: KnowledgeAnalytics,
     account_email: str,
+    account_emails: Sequence[str] | None = None,
     include_anomalies: bool = False,
     include_attention_economics: bool = False,
     include_quality_metrics: bool = False,
@@ -315,10 +321,13 @@ def _collect_digest_data(
     now: datetime | None = None,
     contract_event_emitter: ContractEventEmitter | None = None,
 ) -> DigestData:
-    resolved_scope = resolve_account_scope(account_email)
-    scope_account_emails = (
-        list(resolved_scope.account_emails) if resolved_scope else None
-    )
+    # The scheduler passes the accounts routed to the chat (B8).
+    scope_account_emails = list(account_emails) if account_emails else None
+    if not scope_account_emails:
+        resolved_scope = resolve_account_scope(account_email)
+        scope_account_emails = (
+            list(resolved_scope.account_emails) if resolved_scope else None
+        )
     if not scope_account_emails and account_email:
         scope_account_emails = [account_email]
     deferred = analytics.deferred_digest_counts(
@@ -334,8 +343,12 @@ def _collect_digest_data(
         account_email=account_email,
         account_emails=scope_account_emails,
     )
-    trust_delta = analytics.latest_trust_score_delta()
-    health_delta = analytics.latest_relationship_health_delta()
+    trust_delta = analytics.latest_trust_score_delta(
+        account_emails=scope_account_emails or []
+    )
+    health_delta = analytics.latest_relationship_health_delta(
+        account_emails=scope_account_emails or []
+    )
     uncertainty_queue_items: list[dict[str, object]] = []
     commitment_chain_items: list[dict[str, object]] = []
 
@@ -362,6 +375,7 @@ def _collect_digest_data(
             now=now or datetime.now(timezone.utc),
             contract_event_emitter=contract_event_emitter,
             account_email=account_email,
+            account_emails=scope_account_emails,
             locale=locale,
         )
 
