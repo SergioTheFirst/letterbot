@@ -14,11 +14,17 @@ import re
 BOT_TOKEN_PLACEHOLDER = "bot<redacted>"
 BARE_TOKEN_PLACEHOLDER = "<redacted-token>"
 
+# The ":" between bot id and secret, raw or percent-encoded once (%3A: a URL
+# quoted into a query string or an error page) or twice (%253A).
+_TOKEN_SEPARATOR = r"(?::|%3[Aa]|%253[Aa])"
 # ``bot<digits>:<secret>`` as it appears in Bot API URL paths.
-_BOT_URL_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
-# A bare ``<bot id>:<secret>`` token outside a URL.
+_BOT_URL_TOKEN_RE = re.compile(r"bot\d+" + _TOKEN_SEPARATOR + r"[A-Za-z0-9_-]+")
+# A bare ``<bot id>:<secret>`` token outside a URL. Its only left bound is
+# that the id does not continue a longer number: a letter may come right
+# before it (the hex digit of a %2F escape, a repr() escape such as \n, a
+# "Bot" prefix).
 _BARE_TOKEN_RE = re.compile(
-    r"(?<![A-Za-z0-9_])\d{6,}:[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_-])"
+    r"(?<!\d)\d{6,}" + _TOKEN_SEPARATOR + r"[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_-])"
 )
 
 

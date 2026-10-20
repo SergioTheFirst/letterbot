@@ -12,6 +12,7 @@ from __future__ import annotations
 import errno
 import logging
 import os
+import time
 from pathlib import Path
 
 _IS_WINDOWS = os.name == "nt"
@@ -22,17 +23,24 @@ else:
 
 logger = logging.getLogger("mailbot")
 
-# errno values that mean "another process holds the lock".
-_HELD_ERRNOS = frozenset(
+# POSIX: a symlink planted at the lock path is refused, never followed (with
+# O_CREAT the lock would create and land on whatever file it points to).
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+# A probe (is_instance_running) or a worker that is just exiting holds the
+# lock only for a moment: try this often before reporting "held".
+_LOCK_ATTEMPTS = 3
+_LOCK_RETRY_DELAY_SECONDS = 0.25
+
+# errno values that mean "another process holds the lock". msvcrt reports a
+# locked byte as EACCES (or EDEADLOCK); flock reports EWOULDBLOCK/EAGAIN, and
+# an EACCES or EPERM there is a permission problem, never a held lock.
+_WINDOWS_HELD_ERRNOS = frozenset(
     code
-    for code in (
-        errno.EACCES,
-        getattr(errno, "EDEADLOCK", None),
-        errno.EAGAIN,
-        errno.EWOULDBLOCK,
-    )
+    for code in (errno.EACCES, getattr(errno, "EDEADLOCK", None))
     if code is not None
 )
+_POSIX_HELD_ERRNOS = frozenset((errno.EAGAIN, errno.EWOULDBLOCK))
 
 
 class InstanceLockError(RuntimeError):
@@ -44,6 +52,20 @@ def instance_lock_path(db_path: Path | str) -> Path:
     return db.with_name(f"{db.name}.lock")
 
 
+def _open_error(path: Path, exc: OSError) -> InstanceLockError:
+    if isinstance(exc, PermissionError):
+        return InstanceLockError(
+            f"no permission to open the lock file {path} ({exc.strerror}); check "
+            "the folder permissions and that no other program keeps the file open"
+        )
+    if _O_NOFOLLOW and exc.errno in (errno.ELOOP, errno.EMLINK):
+        # ELOOP (Linux, macOS) / EMLINK (FreeBSD): O_NOFOLLOW met a symlink.
+        return InstanceLockError(
+            f"the lock file {path} is a symbolic link; refusing to follow it"
+        )
+    return InstanceLockError(f"cannot open {path}: {exc}")
+
+
 def _try_lock(fd: int, path: Path) -> bool:
     """True when this descriptor now holds the lock, False when it is held."""
     try:
@@ -53,10 +75,31 @@ def _try_lock(fd: int, path: Path) -> bool:
         else:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as exc:
-        if exc.errno in _HELD_ERRNOS:
+        held_errnos = _WINDOWS_HELD_ERRNOS if _IS_WINDOWS else _POSIX_HELD_ERRNOS
+        if exc.errno in held_errnos:
             return False
+        if exc.errno in (errno.EACCES, errno.EPERM):
+            raise InstanceLockError(
+                f"no permission to lock {path} ({exc.strerror})"
+            ) from exc
         raise InstanceLockError(f"cannot lock {path}: {exc}") from exc
     return True
+
+
+def _try_lock_with_retry(fd: int, path: Path) -> bool:
+    """_try_lock, retried briefly before the lock counts as held."""
+    for attempt in range(1, _LOCK_ATTEMPTS + 1):
+        if _try_lock(fd, path):
+            return True
+        if attempt < _LOCK_ATTEMPTS:
+            logger.info(
+                "single_instance_lock_busy lock=%s attempt=%d/%d: retrying",
+                path,
+                attempt,
+                _LOCK_ATTEMPTS,
+            )
+            time.sleep(_LOCK_RETRY_DELAY_SECONDS)
+    return False
 
 
 def _unlock(fd: int) -> None:
@@ -90,11 +133,11 @@ def acquire_instance_lock(db_path: Path | str) -> InstanceLock | None:
     path = instance_lock_path(db_path)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | _O_NOFOLLOW, 0o644)
     except OSError as exc:
-        raise InstanceLockError(f"cannot open {path}: {exc}") from exc
+        raise _open_error(path, exc) from exc
     try:
-        acquired = _try_lock(fd, path)
+        acquired = _try_lock_with_retry(fd, path)
     except BaseException:
         os.close(fd)
         raise
@@ -107,16 +150,17 @@ def acquire_instance_lock(db_path: Path | str) -> InstanceLock | None:
 def is_instance_running(db_path: Path | str) -> bool:
     """True while a worker holds the lock for this database."""
     path = instance_lock_path(db_path)
-    if not path.exists():
+    # lexists: a symlink (even a dangling one) is opened and refused below.
+    if not os.path.lexists(path):
         return False  # a running worker creates the file and never deletes it
     try:
-        fd = os.open(path, os.O_RDWR)
+        fd = os.open(path, os.O_RDWR | _O_NOFOLLOW)
     except FileNotFoundError:
         return False
     except OSError as exc:
-        raise InstanceLockError(f"cannot open {path}: {exc}") from exc
+        raise _open_error(path, exc) from exc
     try:
-        if not _try_lock(fd, path):
+        if not _try_lock_with_retry(fd, path):
             return True
         try:
             _unlock(fd)

@@ -36,6 +36,20 @@ _SEND_NOT_SENT_RETRYABLE = "not_sent_retryable"
 _SEND_NOT_SENT_FINAL = "not_sent_final"
 _SEND_MAYBE_DELIVERED = "maybe_delivered"
 
+# DeliveryResult.error is stored (emails, queue, events, delivery log), and a
+# proxy error page or exception text can be kilobytes long.
+MAX_STORED_ERROR_CHARS = 300
+
+
+def _stored_error(text: object) -> str:
+    """Error text as it may be stored: secrets redacted first (a cut must not
+    leave part of a token behind), then capped at MAX_STORED_ERROR_CHARS with
+    an ellipsis marking the cut."""
+    value = redact_secrets(text)
+    if len(value) <= MAX_STORED_ERROR_CHARS:
+        return value
+    return value[: MAX_STORED_ERROR_CHARS - 1] + "…"
+
 
 @dataclass(frozen=True, slots=True)
 class DeliveryResult:
@@ -186,7 +200,7 @@ def _send_exception_result(exc: BaseException, *, mode: str) -> DeliveryResult:
         result = DeliveryResult(
             delivered=False,
             retryable=kind == _SEND_NOT_SENT_RETRYABLE,
-            error=error_text,
+            error=_stored_error(error_text),
             mode=mode,
             retry_count=1,
             message_id=None,
@@ -442,19 +456,20 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             )
             retryable = _is_retryable_status(salvage_resp.status_code)
             retry_after = _parse_retry_after(salvage_resp)
+            salvage_error = _stored_error(salvage_resp.text)
             log.info(
                 "tg_delivery_final",
                 extra={
                     "delivered": False,
                     "retryable": retryable,
-                    "error": salvage_resp.text,
+                    "error": salvage_error,
                     "retry_after": retry_after,
                 },
             )
             return DeliveryResult(
                 delivered=False,
                 retryable=retryable,
-                error=salvage_resp.text,
+                error=salvage_error,
                 mode="plain_salvage",
                 retry_count=1,
                 message_id=None,
@@ -463,19 +478,20 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             )
         retryable = _is_retryable_status(resp.status_code)
         retry_after = _parse_retry_after(resp)
+        http_error = _stored_error(resp.text)
         log.info(
             "tg_delivery_final",
             extra={
                 "delivered": False,
                 "retryable": retryable,
-                "error": resp.text,
+                "error": http_error,
                 "retry_after": retry_after,
             },
         )
         return DeliveryResult(
             delivered=False,
             retryable=retryable,
-            error=resp.text,
+            error=http_error,
             mode="html",
             retry_count=0,
             message_id=None,
