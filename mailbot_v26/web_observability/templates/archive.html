@@ -1,10 +1,4 @@
 {% extends "base.html" %}
-{% block page_actions %}
-  <div class="mode-toggle">
-    <a class="mode-pill {% if cockpit_mode == 'basic' %}active{% endif %}" href="{{ mode_basic_url }}">Basic</a>
-    <a class="mode-pill {% if cockpit_mode == 'engineer' %}active{% endif %}" href="{{ mode_engineer_url }}">Engineer</a>
-  </div>
-{% endblock %}
 {% block content %}
   <div class="card filters surface-panel archive-filters">
     <div class="section-title compact">

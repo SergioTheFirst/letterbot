@@ -4764,11 +4764,6 @@ def create_app(
 
         base_params = _base_params()
 
-        def _mode_link(target: str) -> str:
-            params = dict(base_params)
-            params["mode"] = target
-            return url_for("archive", **params)
-
         prev_url = None
         if page > 1:
             prev_params = dict(base_params)
@@ -4832,10 +4827,8 @@ def create_app(
             window_options=_build_archive_window_options(window_days or 7),
             pii_allowed=bool(app.config.get("WEB_OBSERVABILITY_ALLOW_PII")),
             pii_enabled=reveal_pii,
+            # The archive ignores the mode; it only carries it through links.
             cockpit_mode=mode,
-            mode_basic_url=_mode_link("basic"),
-            mode_engineer_url=_mode_link("engineer"),
-            engineer_mode=False,
             error=error_message,
             hide_limit=True,
             share_url=url_for("archive", **base_params),

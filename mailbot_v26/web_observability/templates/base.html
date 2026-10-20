@@ -113,10 +113,11 @@
     {% endif %}
 
     <main class="page">
-      {% if page_title or page_actions %}
+      {% set page_actions_html = self.page_actions()|trim %}
+      {% if page_title or page_actions_html %}
       <div class="page-header">
         {% if page_title %}<h1>{{ page_title }}</h1>{% endif %}
-        {% if page_actions %}<div class="page-actions">{% block page_actions %}{{ page_actions }}{% endblock %}</div>{% endif %}
+        {% if page_actions_html %}<div class="page-actions">{% block page_actions %}{% endblock %}</div>{% endif %}
       </div>
       {% endif %}
 
