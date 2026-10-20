@@ -1053,7 +1053,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     cases = list(load_golden_corpus(args.path))
-    summary = evaluate_golden_corpus(cases)
+    # A22: never read or write the user's database; its overrides would skew the gate.
+    with pipeline_processor.offline_processor_db():
+        summary = evaluate_golden_corpus(cases)
     if args.report:
         print(render_report(summary, generated_at=_report_timestamp(Path(args.path))))
     else:

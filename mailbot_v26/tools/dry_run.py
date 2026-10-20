@@ -279,7 +279,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Print machine-readable JSON with canonical pipeline stages.",
     )
     args = parser.parse_args(argv)
-    result = run_dry_run_fixture(args.fixture)
+    # A22: never read or write the user's database during an offline dry run.
+    with pipeline_processor.offline_processor_db():
+        result = run_dry_run_fixture(args.fixture)
     if args.json:
         _write_stdout(
             json.dumps(
