@@ -231,17 +231,20 @@
     return input && !input.hidden ? input.value : "";
   }
 
+  function revealSecret(box) {
+    show(box.querySelector("[data-secret-saved]"), false);
+    show(box.querySelector("[data-secret-replace]"), false);
+    var input = box.querySelector("input");
+    show(input, true);
+    return input;
+  }
+
   root.addEventListener("click", function (event) {
     var replace = event.target.closest ? event.target.closest("[data-secret-replace]") : null;
     if (!replace) {
       return;
     }
-    var box = replace.closest("[data-secret]");
-    show(box.querySelector("[data-secret-saved]"), false);
-    show(replace, false);
-    var input = box.querySelector("input");
-    show(input, true);
-    input.focus();
+    revealSecret(replace.closest("[data-secret]")).focus();
   });
 
   /* ---------- issues */
@@ -379,6 +382,29 @@
     syncChat();
   }
 
+  /* The saved password is used only with the server it was saved for: once
+     host, port or SSL differ, the server asks for it again, so open the field. */
+  function serverMoved() {
+    var account = editing && editing.op === "update" ? findAccount(editing.id) : null;
+    if (!account || !account.password_set) {
+      return false;
+    }
+    var fields = accountForm.elements;
+    return (
+      fields.host.value.trim().toLowerCase() !== String(account.host || "").toLowerCase() ||
+      fields.port.value.trim() !== String(account.port) ||
+      fields.use_ssl.checked !== (account.use_ssl !== false)
+    );
+  }
+
+  function syncServerPassword() {
+    var box = accountForm.querySelector('[data-secret="password"]');
+    if (serverMoved() && box.querySelector("input").hidden) {
+      revealSecret(box);
+      touched.password = true;
+    }
+  }
+
   function openAccount(account) {
     hidePanels();
     editing = account ? { op: "update", id: account.id } : { op: "add", id: "" };
@@ -463,6 +489,9 @@
       applyPreset(event.target.value);
     } else if (name === "chat_mode") {
       syncChat();
+    }
+    if (name === "provider" || name === "host" || name === "port" || name === "use_ssl") {
+      syncServerPassword();
     }
   });
 

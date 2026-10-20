@@ -668,6 +668,91 @@ def test_stored_password_is_used_only_for_the_saved_server(tmp_path: Path, fake_
     assert [call for call in fake_imap.calls if call[0] == "connect"] == [("connect", "imap.gmail.com", 993, True)]
 
 
+SERVER_CHANGES = [
+    {"host": "imap.other.example"},
+    {"host": "imap.gmail.com", "port": 143, "use_ssl": False},
+    {"use_ssl": False},
+    {"port": "1993"},
+]
+
+
+@pytest.mark.parametrize("fields", SERVER_CHANGES, ids=["host", "plain_143", "ssl_off", "port"])
+def test_server_change_needs_the_password_again(tmp_path: Path, fake_imap, fields: dict) -> None:
+    # The stored password goes only to the server it was saved for: moving the
+    # mailbox to another host, port or plain IMAP needs the password typed again.
+    config_dir = _config(tmp_path)
+    before = (config_dir / "accounts.ini").read_bytes()
+    app = _app(tmp_path, config_dir)
+    change = {"op": "update", "id": "work_mail", "fields": {"login": "worker@gmail.com", **fields}}
+    with app.test_client() as client:
+        token = _csrf(client)
+        checked = _post(client, "/api/settings/accounts/validate", {"changes": [change]}, token=token)
+        saved = _post(client, "/api/settings/accounts", {"etag": _state(client)["etag"], "changes": [change]}, token=token)
+        probe = _test_imap(client, token, id="work_mail", **{"login": "", **fields})
+
+    for response in (checked, saved):
+        issues = {(i["code"], i["field"], i["severity"]) for i in response.get_json()["issues"]}
+        assert ("password_required", "password", "error") in issues
+    assert checked.get_json()["ok"] is False
+    assert saved.status_code == 422
+    assert (config_dir / "accounts.ini").read_bytes() == before
+    assert list_backups(config_dir / "accounts.ini") == []
+    assert [(a.host, a.port, a.use_ssl) for a in load_accounts_config(config_dir)] == [("imap.gmail.com", 993, True)]
+    assert probe.status_code == 422 and probe.get_json()["code"] in ("PASSWORD_REQUIRED", "PORT_NOT_ALLOWED")
+    assert fake_imap.calls == []
+
+
+def test_server_change_with_a_new_password_is_saved(tmp_path: Path) -> None:
+    config_dir = _config(tmp_path)
+    app = _app(tmp_path, config_dir)
+    with app.test_client() as client:
+        token = _csrf(client)
+        response = _post(
+            client,
+            "/api/settings/accounts",
+            {
+                "etag": _state(client)["etag"],
+                "changes": [
+                    {
+                        "op": "update",
+                        "id": "work_mail",
+                        "fields": {"host": "imap.yandex.ru", "port": 993, "use_ssl": True},
+                        "password": NEW_PASSWORD,
+                    }
+                ],
+            },
+            token=token,
+        )
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert [(a.host, a.password) for a in load_accounts_config(config_dir)] == [("imap.yandex.ru", NEW_PASSWORD)]
+
+
+@pytest.mark.parametrize(
+    ("accounts", "fields"),
+    [
+        (ACCOUNTS, {"login": "new@gmail.com", "host": "IMAP.Gmail.com ", "port": "993", "use_ssl": "true"}),
+        (ACCOUNTS.replace(f"password = {PASSWORD}", "password = CHANGE_ME"), {"host": "imap.yandex.ru"}),
+    ],
+    ids=["same_server_spelled_differently", "no_stored_password"],
+)
+def test_no_password_needed_when_no_stored_password_moves(tmp_path: Path, accounts: str, fields: dict) -> None:
+    config_dir = _config(tmp_path, accounts)
+    app = _app(tmp_path, config_dir)
+    with app.test_client() as client:
+        token = _csrf(client)
+        response = _post(
+            client,
+            "/api/settings/accounts",
+            {"etag": _state(client)["etag"], "changes": [{"op": "update", "id": "work_mail", "fields": fields}]},
+            token=token,
+        )
+
+    codes = {issue["code"] for issue in response.get_json().get("issues", [])}
+    assert "password_required" not in codes
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+
 @pytest.mark.parametrize(
     ("host", "port", "code"),
     [

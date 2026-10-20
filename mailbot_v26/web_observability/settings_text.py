@@ -206,6 +206,10 @@ _EN: dict[str, str] = {
     "issue.layout": (
         "accounts.ini could not be changed safely: edit it in a text editor"
     ),
+    "issue.password_required": (
+        "[{section}] enter the password again: a saved password is used only "
+        "with the server it was saved for"
+    ),
     # Fix cards
     "card.copy": "Copy",
     "card.copied": "Copied",
@@ -673,6 +677,10 @@ _RU: dict[str, str] = {
     "issue.layout": (
         "accounts.ini не удалось безопасно изменить: отредактируйте его в "
         "текстовом редакторе"
+    ),
+    "issue.password_required": (
+        "[{section}] введите пароль ещё раз: сохранённый пароль используется "
+        "только с тем сервером, для которого он сохранён"
     ),
     # Fix cards
     "card.copy": "Копировать",

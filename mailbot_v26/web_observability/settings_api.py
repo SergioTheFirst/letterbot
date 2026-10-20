@@ -568,6 +568,24 @@ def _account_fields(
     return pairs
 
 
+def _moves_stored_password(
+    parser: configparser.ConfigParser, section: str, pairs: list[tuple[str, str | None]]
+) -> bool:
+    """True when an update points a stored password at another server: the
+    host, port or SSL setting differs from what the worker uses now."""
+    stored = parser.get(section, "password", fallback="").strip()
+    if not stored or stored.upper() == PLACEHOLDER:
+        return False
+    port, _ = _port(parser, section)
+    use_ssl, _ = _use_ssl(parser, section)
+    saved: dict[str, str | None] = {
+        "host": parser.get(section, "host", fallback="").strip().lower(),
+        "port": None if port is None else str(port),
+        "use_ssl": None if use_ssl is None else ("true" if use_ssl else "false"),
+    }
+    return any(key in saved and (value or "").lower() != saved[key] for key, value in pairs)
+
+
 def _account_edits(
     parser: configparser.ConfigParser | None, changes: object, issues: _Issues
 ) -> list[Edit]:
@@ -607,6 +625,15 @@ def _account_edits(
             issues.add("unknown_account", account_id)
             continue
         pairs = _account_fields(op, account_id, change, issues)
+        if (
+            op == "update"
+            and parser is not None
+            and change.get("password") in (None, "")
+            and _moves_stored_password(parser, account_id, pairs)
+        ):
+            # A stored password goes only to the server it was saved for (the
+            # same rule as the Test button): a new server needs it typed again.
+            issues.add("password_required", account_id, "password")
         if op == "add":
             adding = True
             edits.append(
