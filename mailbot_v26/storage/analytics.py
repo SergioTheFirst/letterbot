@@ -4686,7 +4686,10 @@ class KnowledgeAnalytics:
                     "SELECT LOWER(COALESCE(from_email, '')) AS sender_email, COUNT(*) AS emails_count "
                     "FROM emails "
                     "WHERE TRIM(COALESCE(from_email, '')) != '' "
-                    "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                    # strftime returns TEXT, which compares greater than any
+                    # number: cast it or the window keeps every row.
+                    "AND COALESCE(CAST(strftime('%s', received_at) AS INTEGER), "
+                    "CAST(strftime('%s', created_at) AS INTEGER), 0) >= ?"
                     f"{email_clause} "
                     "GROUP BY LOWER(COALESCE(from_email, '')) "
                     "ORDER BY emails_count DESC "

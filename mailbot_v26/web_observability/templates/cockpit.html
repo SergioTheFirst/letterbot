@@ -58,7 +58,7 @@
         <div class="metric-subtle" id="runtime-last-evidence-relative">{{ runtime.last_runtime_evidence_relative or 'No runtime signals yet.' }}</div>
       </article>
       <article class="metric-card">
-        <div class="metric-label">Emails today</div>
+        <div class="metric-label">Emails (24 h)</div>
         <div class="metric-value" id="preview-emails-today">{{ dashboard_preview.emails_today if dashboard_preview.emails_today is not none else 'unknown' }}</div>
         <div class="metric-subtle">Last hour: <span id="preview-emails-hour">{{ dashboard_preview.emails_last_hour if dashboard_preview.emails_last_hour is not none else 'unknown' }}</span></div>
       </article>

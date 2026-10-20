@@ -252,6 +252,13 @@ _DASHBOARD_CACHE: dict[str, Any] = {
 # The key already carries the DB change token; the entry must outlive one
 # cockpit poll interval or the next poll can never hit it.
 _DASHBOARD_CACHE_TTL = 2 * DASHBOARD_REFRESH_MS / 1000.0
+# strftime('%s', ...) returns TEXT, and TEXT compares greater than any number:
+# window filters must cast it or they count every row ever stored.
+_SQL_EMAIL_EPOCH = (
+    "COALESCE(CAST(strftime('%s', received_at) AS INTEGER), "
+    "CAST(strftime('%s', created_at) AS INTEGER), 0)"
+)
+_SQL_CREATED_EPOCH = "COALESCE(CAST(strftime('%s', created_at) AS INTEGER), 0)"
 
 
 def _open_readonly_connection(db_path: Path) -> sqlite3.Connection:
@@ -5475,10 +5482,10 @@ def create_app(
                             "SELECT "
                             "COUNT(*) AS emails_today, "
                             "SUM(CASE WHEN ("
-                            "COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                            f"{_SQL_EMAIL_EPOCH} >= ?"
                             ") THEN 1 ELSE 0 END) AS emails_last_hour "
                             "FROM emails "
-                            "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                            f"WHERE {_SQL_EMAIL_EPOCH} >= ?"
                             f"{account_clause}"
                         ),
                         (hour_ago_ts, day_ago_ts, *account_params),
@@ -5498,7 +5505,7 @@ def create_app(
                                 "FROM emails "
                                 "WHERE llm_provider IS NOT NULL "
                                 "AND TRIM(llm_provider) != '' "
-                                "AND COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                                f"AND {_SQL_EMAIL_EPOCH} >= ?"
                                 f"{account_clause}"
                             ),
                             (day_ago_ts, *account_params),
@@ -5542,7 +5549,7 @@ def create_app(
                                 "SUM(CASE WHEN priority IN ('🟡', 'yellow', 'YELLOW') THEN 1 ELSE 0 END) AS yellow, "
                                 "SUM(CASE WHEN priority IN ('🔵', 'blue', 'BLUE') THEN 1 ELSE 0 END) AS blue "
                                 "FROM emails "
-                                "WHERE COALESCE(strftime('%s', received_at), strftime('%s', created_at), 0) >= ?"
+                                f"WHERE {_SQL_EMAIL_EPOCH} >= ?"
                                 f"{account_clause}"
                             ),
                             (day_ago_ts, *account_params),
@@ -5565,7 +5572,7 @@ def create_app(
                             "SELECT COUNT(*) AS corrections_week "
                             "FROM priority_feedback "
                             "WHERE kind IN ('correction', 'priority_correction') "
-                            "AND COALESCE(strftime('%s', created_at), 0) >= ?"
+                            f"AND {_SQL_CREATED_EPOCH} >= ?"
                             f"{account_clause}"
                         ),
                         (week_ago_ts, *account_params),
