@@ -4432,7 +4432,10 @@ def create_app(
             not isinstance(support_settings, SupportSettings)
             or not support_settings.enabled
         ):
-            return _text_response("Not Found", 404)
+            if USING_FLASK_STUB:
+                return _text_response("Not Found", 404)
+            # Same in-app 404 page (with navigation) as any unknown address.
+            return not_found(None)
         return _render_template(
             app,
             "support.html",

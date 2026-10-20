@@ -51,6 +51,7 @@
       <div class="toolbar-main">
         <nav class="nav">
           <a href="{{ url_for('index') }}" class="nav-link {% if request.path in ['/', '/cockpit', '/dashboard'] %}active{% endif %}">Home</a>
+          <a href="{{ url_for('accounts') }}" class="nav-link {% if request.path.startswith('/accounts') %}active{% endif %}">Accounts</a>
           <a href="{{ url_for('archive') }}" class="nav-link {% if request.path.startswith('/archive') %}active{% endif %}">Archive</a>
           <a href="{{ url_for('health') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">Health</a>
           <a href="{{ url_for('events') }}" class="nav-link {% if request.path == '/events' %}active{% endif %}">Events</a>

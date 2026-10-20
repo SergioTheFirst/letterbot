@@ -21,6 +21,7 @@ def test_nav_contains_all_required_links(tmp_path: Path) -> None:
         body = resp.get_data(as_text=True)
         assert resp.status_code == 200
         required_hrefs = [
+            "/accounts",
             "/archive",
             "/health",
             "/events",
@@ -35,6 +36,37 @@ def test_nav_contains_all_required_links(tmp_path: Path) -> None:
             assert f'href="{href}"' in body or href in body, (
                 f"Nav link {href} is missing from the cockpit page"
             )
+
+
+def test_every_dashboard_page_links_to_accounts(tmp_path: Path) -> None:
+    """The Accounts/Settings page is reachable from every HTML page, 404 included."""
+    db_path = tmp_path / "nav.sqlite"
+    KnowledgeDB(db_path)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    app = create_app(
+        db_path=db_path, password="pw", secret_key="secret", config_dir=config_dir
+    )
+    paths = sorted(
+        rule.rule
+        for rule in app.url_map.iter_rules()
+        if "GET" in (rule.methods or set())
+        and not rule.arguments
+        and rule.endpoint not in {"static", "login"}
+        and not rule.rule.startswith(("/api/", "/partial/"))
+    )
+    checked: list[str] = []
+    with app.test_client() as client:
+        login_with_csrf(client, "pw")
+        for path in [*paths, "/no-such-page"]:
+            resp = client.get(path)
+            if resp.status_code not in (200, 404) or resp.mimetype != "text/html":
+                continue
+            body = resp.get_data(as_text=True)
+            assert 'href="/accounts"' in body, f"{path} has no link to /accounts"
+            checked.append(path)
+    for path in ("/", "/archive", "/health", "/doctor", "/accounts", "/no-such-page"):
+        assert path in checked, f"{path} was not rendered as an HTML page"
 
 
 def test_learning_page_uses_dark_theme(tmp_path: Path) -> None:
