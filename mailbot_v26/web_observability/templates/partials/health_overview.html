@@ -36,7 +36,13 @@
           <td><span class="badge {{ row.status_class }}">{{ row.status }}</span></td>
           <td class="mono">{% if row.last_ok_relative %}{{ row.last_ok_relative }}{% else %}never{% endif %}</td>
           <td>
+            {% set unknown_shown = 'delivery_unknown_24h' in row and (row.delivery_unknown_24h is none or row.delivery_unknown_24h > 0) %}
+            {% if unknown_shown %}
+            <div data-testid="telegram-delivery-unknown">Unconfirmed deliveries (24h): {{ 'unavailable' if row.delivery_unknown_24h is none else row.delivery_unknown_24h }}</div>
+            {% endif %}
+            {% if row.detail or not unknown_shown %}
             <span class="truncate">{{ row.detail or 'No active issues.' }}</span>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

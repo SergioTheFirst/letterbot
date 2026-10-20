@@ -6006,6 +6006,45 @@ def create_app(
             "low_confidence_warning": item["low_confidence_warning"],
         }
 
+    def _telegram_delivery_unknown_count(
+        account_emails: list[str], *, since_ts: float
+    ) -> int | None:
+        """Emails whose Telegram message may or may not have arrived (WP1a).
+
+        Same evidence as NotificationSLAResult.unknown_24h: TELEGRAM_FAILED
+        events with delivery_state "unknown", minus emails delivered after all.
+        A count only; None when events_v1 cannot be read.
+        """
+        payload_expr = "COALESCE(NULLIF(failed.payload_json, ''), failed.payload)"
+        query = (
+            "SELECT COUNT(DISTINCT failed.email_id) FROM events_v1 AS failed "
+            "WHERE failed.event_type = ? AND failed.ts_utc >= ? "
+            "AND failed.email_id IS NOT NULL "
+            f"AND CASE WHEN json_valid({payload_expr}) "
+            f"THEN json_extract({payload_expr}, '$.delivery_state') END = 'unknown' "
+            "AND NOT EXISTS (SELECT 1 FROM events_v1 AS delivered "
+            "WHERE delivered.event_type = ? AND delivered.email_id = failed.email_id)"
+        )
+        params: list[object] = [
+            EventType.TELEGRAM_FAILED.value,
+            float(since_ts),
+            EventType.TELEGRAM_DELIVERED.value,
+        ]
+        if account_emails:
+            placeholders = ", ".join(["?"] * len(account_emails))
+            query += f" AND failed.account_id IN ({placeholders})"
+            params.extend(account_emails)
+        try:
+            with _open_readonly_connection(app.config["DB_PATH"]) as conn:
+                row = conn.execute(query, params).fetchone()
+        except sqlite3.Error as exc:
+            logger.warning(
+                "web_health_delivery_unknown_unavailable",
+                extra={"error": type(exc).__name__},
+            )
+            return None
+        return int(row[0] or 0) if row else 0
+
     def _health_status_payload(
         account_emails: list[str],
         *,
@@ -6146,6 +6185,9 @@ def create_app(
             "DB": bool(app.config["DB_PATH"].exists()),
             "LLM": llm_canonical_evidence,
         }
+        telegram_delivery_unknown_24h = _telegram_delivery_unknown_count(
+            account_emails, since_ts=now_ts - 86_400
+        )
         latest_imap_payload: dict[str, object] = {}
         if latest_imap_event and latest_imap_event.get("payload_json"):
             try:
@@ -6235,6 +6277,11 @@ def create_app(
             incident = incident_by_component.get(component_name, {})
             raw_detail = str(incident.get("symptom") or "").strip()
             component_last_ok = _parse_datetime_value(last_snapshot_ts)
+            delivery_fields: dict[str, object] = (
+                {"delivery_unknown_24h": telegram_delivery_unknown_24h}
+                if component_name == "Telegram"
+                else {}
+            )
             components.append(
                 {
                     "name": component_name,
@@ -6256,6 +6303,7 @@ def create_app(
                     "canonical_evidence": canonical_evidence,
                     "stale": bool(projection_stale.get("stale")),
                     "snapshot_age_seconds": projection_stale.get("age_seconds"),
+                    **delivery_fields,
                 }
             )
 
@@ -6318,6 +6366,7 @@ def create_app(
                     cooldown_active = bool(resume_dt and resume_dt > now_dt)
         return {
             "components": components,
+            "telegram_delivery_unknown_24h": telegram_delivery_unknown_24h,
             "cooldown_active": cooldown_active,
             "cooldown_resume_at": cooldown_resume_at,
             "cooldown_resume_relative": (
