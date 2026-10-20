@@ -1598,7 +1598,7 @@ def _mask_emails_in_text(value: object) -> str:
 
 
 def _hashed_email_key(key: str) -> str:
-    """Stable web id for an analytics key that embeds an e-mail address."""
+    """Stable web id for an analytics key that embeds a sender (address or name)."""
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
     return f"email-sha256:{digest}"
 
@@ -1620,12 +1620,15 @@ def _display_safe_issuer(item: Mapping[str, object]) -> dict[str, object]:
 def _display_safe_attention_entity(item: Mapping[str, object]) -> dict[str, object]:
     """Web copy of an attention-economics row without the raw sender address.
 
-    Analytics keys attention rows by the sender address (the Telegram digest
-    needs it); the web keeps a stable hashed id and a masked label only.
+    Analytics keys attention rows by the lower-cased from_email string (the
+    Telegram digest needs it). That string is the sender whatever its shape
+    (IDN, dotless host, display name only), so every id is hashed, not only
+    the ones an address pattern recognises; the web keeps a stable hashed id
+    and a masked label only.
     """
     safe = dict(item)
     entity_id = str(item.get("entity_id") or "")
-    if WEB_EMAIL_PATTERN.search(entity_id):
+    if entity_id:
         safe["entity_id"] = _hashed_email_key(entity_id)
     safe["entity_label"] = _mask_emails_in_text(item.get("entity_label"))
     return safe

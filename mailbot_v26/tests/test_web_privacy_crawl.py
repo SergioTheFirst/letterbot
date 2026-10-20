@@ -465,3 +465,105 @@ def test_attention_api_hashes_sender_entity_ids(tmp_path: Path) -> None:
     }
     for marker in MARKERS:
         assert marker not in json.dumps(first, ensure_ascii=False)
+
+
+# --- Unusual sender shapes (P3b D1/C1 fix round) ---
+# The markers above are ASCII dotted addresses, and jsonify escapes non-ASCII
+# as \uXXXX, so a plain substring check never sees an IDN sender. These shapes
+# defeat an ASCII e-mail pattern: IDN local part or domain, a dotless host, and
+# a from_email that is only a display name.
+
+UNUSUAL_SENDERS = (
+    "root@localhost",
+    "ivan@пример.com",
+    "иван@example.com",
+    "иван.петров@почта.рф",
+    "ops.bot@mailhost",
+    "Ivan Petrov Secret",
+    # Generic mail domain: issuer_profile keys and labels it by the address.
+    "иван@mail.ru",
+)
+UNUSUAL_EMAIL_ID_BASE = 100
+
+
+def _raw_forms(value: str) -> set[str]:
+    """The value (and its lower-cased key) as HTML shows it and jsonify escapes it."""
+    forms: set[str] = set()
+    for variant in (value, value.lower()):
+        forms.add(variant)
+        forms.add(json.dumps(variant)[1:-1])
+    return forms
+
+
+def _leaked_unusual_senders(body: str) -> list[str]:
+    return [
+        sender
+        for sender in UNUSUAL_SENDERS
+        if any(form in body for form in _raw_forms(sender))
+    ]
+
+
+def _seed_unusual_senders(
+    db_path: Path, senders: tuple[str, ...] = UNUSUAL_SENDERS
+) -> list[int]:
+    """One received email per sender, interpreted the way the pipeline does."""
+    # Local import keeps this file's existing header untouched (append-only).
+    from mailbot_v26.domain.issuer_profile import build_issuer_profile
+
+    now = datetime.now(timezone.utc)
+    email_ids: list[int] = []
+    for index, sender in enumerate(senders):
+        email_id = UNUSUAL_EMAIL_ID_BASE + index
+        ts_utc = now.timestamp() - 120 - index
+        _insert_event(
+            db_path,
+            event_type=EventType.EMAIL_RECEIVED,
+            ts_utc=ts_utc,
+            payload={"from_email": sender},
+            email_id=email_id,
+        )
+        profile = build_issuer_profile(sender_email=sender)
+        assert profile is not None
+        _insert_event(
+            db_path,
+            event_type=EventType.MESSAGE_INTERPRETATION,
+            ts_utc=ts_utc,
+            payload={
+                "sender_email": sender,
+                "issuer_key": profile.issuer_key,
+                "issuer_label": profile.issuer_label,
+                "doc_kind": "invoice",
+                "priority": "yellow",
+                "confidence": 0.7,
+                "context": "NEW_MESSAGE",
+            },
+            email_id=email_id,
+        )
+        email_ids.append(email_id)
+    return email_ids
+
+
+def test_attention_api_hashes_unusual_sender_ids(tmp_path: Path) -> None:
+    db_path = _seed_db(tmp_path)
+    _seed_unusual_senders(db_path)
+    app = create_app(db_path=db_path, password="pw", secret_key="secret")
+    with app.test_client() as client:
+        response = client.get(
+            "/api/v1/intelligence/attention_economics",
+            query_string={"account_emails": ACCOUNT},
+        )
+
+    assert response.status_code == 200
+    entities = response.get_json()["entities"]
+    # The two senders of _seed_db plus one row per unusual sender.
+    assert len(entities) == 2 + len(UNUSUAL_SENDERS)
+    raw_keys = {SECRET_SENDER, SECRET_ISSUER_SENDER} | {
+        sender.lower() for sender in UNUSUAL_SENDERS
+    }
+    entity_ids = [str(item["entity_id"]) for item in entities]
+    for entity_id in entity_ids:
+        assert entity_id.startswith("email-sha256:"), entity_id
+        assert entity_id not in raw_keys
+    # Still one distinct id per sender, so it keeps working as a client-side id.
+    assert len(set(entity_ids)) == len(entity_ids)
+    assert _leaked_unusual_senders(response.get_data(as_text=True)) == []
