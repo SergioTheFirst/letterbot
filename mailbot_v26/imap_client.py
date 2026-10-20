@@ -5,6 +5,7 @@ from email.header import decode_header
 from email.message import Message
 from email.utils import parsedate_to_datetime
 import logging
+import re
 import socket
 import ssl
 import time
@@ -83,6 +84,21 @@ class CursorCommit:
     dead_uids: Tuple[int, ...]
     failed_uids: Tuple[int, ...]
     carried: Tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class MessageRefetch:
+    """Outcome of fetch_message_by_uid(); raw is None when not found."""
+
+    raw: Optional[bytes]
+    uid: Optional[int]
+    # found: "uid" | "message_id"; not found: "gone" | "message_id_mismatch" |
+    # "ambiguous_message_id" | "uidvalidity_changed" | "message_id_unsearchable"
+    reason: str
+
+    @property
+    def found(self) -> bool:
+        return self.raw is not None
 
 
 @dataclass
@@ -164,11 +180,21 @@ def _parse_message_id(fetch_data: Dict[Any, Any]) -> Optional[str]:
         raw = raw.encode("utf-8", "replace")
     if not isinstance(raw, (bytes, bytearray)):
         return None
-    value = email.message_from_bytes(bytes(raw)).get("Message-ID")
+    return _normalize_message_id(email.message_from_bytes(bytes(raw)).get("Message-ID"))
+
+
+def _normalize_message_id(value: Any) -> Optional[str]:
+    """Message-ID with folding whitespace collapsed; None when empty."""
     if value is None:
         return None
     text = " ".join(str(value).split())
     return text or None
+
+
+# A Message-ID comes from the email itself: SEARCH it only when it is printable
+# ASCII without characters that IMAP quoting or literal syntax could turn
+# into protocol ("()\{} and space).
+_SEARCHABLE_MESSAGE_ID = re.compile(r"[\x21\x23-\x27\x2A-\x5B\x5D-\x7A\x7C\x7E]{1,998}")
 
 
 def _since_criteria(cutoff_utc: datetime) -> list[Any]:
@@ -719,7 +745,6 @@ class ResilientIMAP:
         failures_in_a_row = 0
         # Old-epoch rows reuse UIDs of the new epoch: no known-UID filter then.
         probe_known = None if uidvalidity_changed else is_known_uid
-        max_bytes = int(self.account.max_email_mb) * 1024 * 1024
         for uid, meta, internal_date in eligible:
             if attempts.get(uid, 0) >= MAX_UID_FETCH_ATTEMPTS:
                 dead.add(uid)  # dead-lettered by an earlier commit
@@ -758,11 +783,7 @@ class ResilientIMAP:
             if internal_date and internal_date < start_time_utc:
                 self._last_fetch_included_prestart = True
             try:
-                size = _parse_rfc822_size(meta)
-                if size is not None and size > max_bytes:
-                    raw = self._oversize_stand_in(uid)
-                else:
-                    raw = self._fetch_rfc822_body(uid)
+                raw = self._fetch_within_limit(uid, meta)
             except Exception as exc:
                 failures_in_a_row += 1
                 fetch_failed.add(uid)
@@ -806,6 +827,80 @@ class ResilientIMAP:
         synthetic["Subject"] = header_msg.get("Subject", "")
         synthetic.set_content("Письмо слишком большое и не было загружено полностью.")
         return synthetic.as_bytes()
+
+    def _fetch_within_limit(self, uid: int, meta: Dict[Any, Any]) -> bytes:
+        """RFC822 of uid, or the stand-in when its size is over max_email_mb."""
+        size = _parse_rfc822_size(meta)
+        if size is not None and size > int(self.account.max_email_mb) * 1024 * 1024:
+            return self._oversize_stand_in(uid)
+        return self._fetch_rfc822_body(uid)
+
+    def fetch_message_by_uid(
+        self,
+        uid: int,
+        expected_uidvalidity: Optional[int] = None,
+        expected_message_id: Optional[str] = None,
+    ) -> MessageRefetch:
+        """Refetch one stored message (rebuild a context lost on restart).
+
+        By UID unless the mailbox UIDVALIDITY is known to differ from
+        expected_uidvalidity; when it differs, or the UID no longer holds the
+        message, by SEARCH HEADER Message-ID with exactly one hit. Content is
+        returned only when its Message-ID equals expected_message_id (when
+        known); after a UIDVALIDITY change a message without Message-ID
+        cannot be identified. Over max_email_mb the poll's stand-in comes
+        back. Read-only, writes no state, always logs out. A network failure
+        after retries raises IMAPError (retry later); a message that is gone
+        or does not match returns raw=None and the reason.
+        """
+        try:
+            return self._fetch_message_by_uid(
+                int(uid), expected_uidvalidity, _normalize_message_id(expected_message_id)
+            )
+        finally:
+            self.close()
+
+    def _fetch_message_by_uid(
+        self,
+        uid: int,
+        expected_uidvalidity: Optional[int],
+        expected_message_id: Optional[str],
+    ) -> MessageRefetch:
+        # Connect first: a network failure must raise, not read as "epoch
+        # unknown" the way _fetch_uidvalidity() reports any failure.
+        self._with_retries(lambda client: client)
+        current_uidvalidity = self._fetch_uidvalidity()
+        epoch_changed = (
+            expected_uidvalidity is not None
+            and current_uidvalidity is not None
+            and int(expected_uidvalidity) != current_uidvalidity
+        )
+        mismatch = False
+        if uid > 0 and not epoch_changed:
+            meta = self.fetch_headers_and_size([uid]).get(uid)
+            if meta is not None:
+                if expected_message_id in (None, _parse_message_id(meta)):
+                    return MessageRefetch(self._fetch_within_limit(uid, meta), uid, "uid")
+                mismatch = True
+        if expected_message_id is None:
+            reason = "uidvalidity_changed" if epoch_changed else "gone"
+            return MessageRefetch(None, None, reason)
+        if not _SEARCHABLE_MESSAGE_ID.fullmatch(expected_message_id):
+            return MessageRefetch(None, None, "message_id_unsearchable")
+        criteria = ["HEADER", "Message-ID", expected_message_id]
+        hits = sorted(
+            {int(hit) for hit in (self._with_retries(lambda c: c.search(criteria)) or [])}
+        )
+        if len(hits) > 1:
+            return MessageRefetch(None, None, "ambiguous_message_id")
+        if hits:
+            # SEARCH HEADER matches substrings: verify the exact value.
+            meta = self.fetch_headers_and_size(hits).get(hits[0])
+            if meta is not None and _parse_message_id(meta) == expected_message_id:
+                raw = self._fetch_within_limit(hits[0], meta)
+                return MessageRefetch(raw, hits[0], "message_id")
+            mismatch = True
+        return MessageRefetch(None, None, "message_id_mismatch" if mismatch else "gone")
 
     def commit_cursor(self, persisted_uids: Iterable[int]) -> Optional[CursorCommit]:
         """Move the cursor past what the last fetch_new_messages() resolved.
