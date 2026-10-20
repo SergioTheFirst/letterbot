@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
+from urllib.parse import urlsplit
 
 try:
     from flask import (
@@ -1739,11 +1740,23 @@ def _load_local_smoke_bypass_from_ini(config_dir: Path) -> bool:
     return False
 
 
+def _is_safe_relative_path(candidate: str) -> bool:
+    """True only for a same-site path: one leading slash, no scheme/host.
+
+    Browsers treat ``\\`` like ``/`` and drop tabs/newlines, so ``/\\evil``
+    or ``/<TAB>/evil`` would become a protocol-relative off-site URL.
+    """
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return False
+    if "\\" in candidate or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in candidate):
+        return False
+    parts = urlsplit(candidate)
+    return not parts.scheme and not parts.netloc
+
+
 def _resolve_login_next_target(next_path: str | None) -> str:
     candidate = str(next_path or "").strip()
-    if not candidate.startswith("/") or candidate.startswith("//"):
-        return url_for("index")
-    if candidate == "/l":
+    if not _is_safe_relative_path(candidate) or candidate == "/l":
         return url_for("index")
     return candidate
 
