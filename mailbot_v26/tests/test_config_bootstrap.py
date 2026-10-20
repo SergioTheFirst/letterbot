@@ -287,3 +287,133 @@ def test_autopriority_enabled_in_bootstrap_defaults() -> None:
     parser.read_string(SETTINGS_TEMPLATE)
 
     assert parser.getboolean("features", "enable_auto_priority") is True
+
+
+# --- P3c: structured findings for the dashboard, CLI output byte-identical ---
+
+FINDINGS_ACCOUNTS = (
+    "[Box owner@example.com]\n"
+    "login = a@b.c\n"
+    "[work_mail]\n"
+    "login = owner@example.com\n"
+    "password =\n"
+    "port = 99999\n"
+    "use_ssl = maybe\n"
+    "[telegram]\n"
+    "bot_token = CHANGE_ME\n"
+)
+
+
+def test_validate_config_findings_are_the_cli_lines(tmp_path, capsys) -> None:
+    from mailbot_v26.tools import config_bootstrap
+
+    (tmp_path / "accounts.ini").write_text(FINDINGS_ACCOUNTS, encoding="utf-8")
+
+    exit_code = config_bootstrap.run_validate_config(tmp_path, strict=True)
+    findings = config_bootstrap.validate_config_findings(tmp_path)
+
+    assert exit_code == 1
+    assert capsys.readouterr().out == (
+        "validate-config: configuration report\n"
+        "STATUS: WARN\n"
+        "WARN: Missing settings.ini (or legacy config.ini)\n"
+        "WARN: Invalid account_id 'Box owner@example.com': use lowercase [a-z0-9_], no spaces\n"
+        "WARN: [work_mail] host is required\n"
+        "WARN: [work_mail] password is required\n"
+        "WARN: [work_mail] port must be between 1 and 65535\n"
+        "WARN: [work_mail] use_ssl must be true/false\n"
+        "WARN: [work_mail] telegram_chat_id is recommended for Telegram delivery\n"
+        "WARN: [telegram] bot_token is not configured\n"
+    )
+    assert validate_config(tmp_path) == (False, [finding.text for finding in findings])
+    bad = findings[1]
+    assert bad.section == "Box owner@example.com"
+    assert "owner@example.com" not in bad.message
+    assert bad.shown(lambda section: "<label>") == (
+        "Invalid account_id '<label>': use lowercase [a-z0-9_], no spaces"
+    )
+    assert findings[2].section == "work_mail"
+    assert findings[0].section == ""
+
+
+def test_config_ready_findings_are_the_cli_lines(tmp_path, capsys) -> None:
+    from mailbot_v26.tools import config_bootstrap
+
+    (tmp_path / "accounts.ini").write_text(FINDINGS_ACCOUNTS, encoding="utf-8")
+
+    exit_code = run_config_ready(tmp_path, verbose=True)
+    critical, warnings = config_bootstrap.config_ready_findings(tmp_path)
+
+    assert exit_code == 2
+    assert capsys.readouterr().out == (
+        "config-ready: readiness report\n"
+        "STATUS: NOT_READY\n"
+        "CRITICAL: Invalid IMAP account section 'Box owner@example.com': use lowercase [a-z0-9_], no spaces\n"
+        "CRITICAL: [work_mail] missing required fields: password, host\n"
+        "CRITICAL: No ready IMAP account found in accounts.ini\n"
+        "WARN: [telegram] bot_token is not configured (Telegram delivery may be disabled)\n"
+    )
+    assert check_config_ready(tmp_path) == (
+        False,
+        [finding.text for finding in critical],
+        [finding.text for finding in warnings],
+    )
+    assert critical[0].section == "Box owner@example.com"
+    assert "owner@example.com" not in critical[0].message
+
+
+def _legacy_config(folder: Path) -> dict[str, bytes]:
+    files = {
+        "config.ini": b"[general]\ncheck_interval = 120\n[web_ui]\npassword = LEGACY-WEB-PW-1\n",
+        "config.yaml": b"schema_version: 1\n",
+        "keys.ini": b"[telegram]\nbot_token = 111:LEGACY-TOKEN\n",
+    }
+    for name, data in files.items():
+        (folder / name).write_bytes(data)
+    return files
+
+
+def test_migrate_config_cli_output_is_unchanged(tmp_path, capsys) -> None:
+    from mailbot_v26.tools.config_bootstrap import run_migrate_config
+
+    _legacy_config(tmp_path)
+
+    run_migrate_config(tmp_path)
+
+    assert capsys.readouterr().out.splitlines() == [
+        "Using new 2-file config mode",
+        f"CREATED: {tmp_path / 'settings.ini'}",
+        f"CREATED: {tmp_path / 'accounts.ini'}",
+        f"BACKUP: {tmp_path / 'config.ini.bak'}",
+        f"BACKUP: {tmp_path / 'config.yaml.bak'}",
+        f"BACKUP: {tmp_path / 'keys.ini.bak'}",
+    ]
+    assert "check_interval = 120" in (tmp_path / "settings.ini").read_text(encoding="utf-8")
+
+
+def test_migrate_config_without_legacy_backups_only_writes_the_two_files(tmp_path) -> None:
+    legacy = _legacy_config(tmp_path)
+    stamps = {name: (tmp_path / name).stat().st_mtime_ns for name in legacy}
+    written: dict[str, str] = {}
+
+    def record(path: Path, content: str) -> None:
+        written[path.name] = content
+        path.write_text(content, encoding="utf-8")
+
+    result = migrate_two_file_config(tmp_path, legacy_backups=False, write=record)
+
+    assert sorted(written) == ["accounts.ini", "settings.ini"]
+    assert result == {
+        "created": [tmp_path / "settings.ini", tmp_path / "accounts.ini"],
+        "backups": [],
+    }
+    assert written["settings.ini"] == legacy["config.ini"].decode("utf-8")
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read_string(written["accounts.ini"])
+    assert parser.has_section("telegram")
+    assert sorted(path.name for path in tmp_path.iterdir()) == sorted(
+        [*legacy, "accounts.ini", "settings.ini"]
+    )
+    for name, data in legacy.items():
+        assert (tmp_path / name).read_bytes() == data
+        assert (tmp_path / name).stat().st_mtime_ns == stamps[name]
