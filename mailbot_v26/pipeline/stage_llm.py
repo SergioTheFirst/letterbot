@@ -36,13 +36,14 @@ def run_llm_stage(
         return None
 
     attachments = attachments or []
+    # Lengths and counts only: raw subjects/senders never go to the log.
     logger.error(
         "processing_error",
         stage="llm",
         email_id=None,
         error=(
-            "LLM stage is not configured; subject=%s from=%s attachments=%d"
-            % (subject or "", from_email or "", len(attachments))
+            "LLM stage is not configured; subject_len=%d sender_present=%s "
+            "attachments=%d" % (len(subject or ""), bool(from_email), len(attachments))
         ),
     )
     return None

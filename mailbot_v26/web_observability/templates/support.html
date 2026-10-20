@@ -22,14 +22,14 @@
       <li>
         <span class="support-field-label">Phone</span>
         <code id="phone-{{ loop.index }}">{{ method.phone }}</code>
-        <button type="button" class="ghost" onclick="copySupportValue('phone-{{ loop.index }}', this)">Copy</button>
+        <button type="button" class="ghost" data-copy-target="phone-{{ loop.index }}">Copy</button>
       </li>
     {% endif %}
     {% if method.number %}
       <li>
         <span class="support-field-label">Card</span>
         <code id="card-{{ loop.index }}">{{ method.number }}</code>
-        <button type="button" class="ghost" onclick="copySupportValue('card-{{ loop.index }}', this)">Copy</button>
+        <button type="button" class="ghost" data-copy-target="card-{{ loop.index }}">Copy</button>
       </li>
     {% endif %}
     {% if method.url %}
@@ -56,7 +56,7 @@
 </section>
 {% endif %}
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function copySupportValue(elementId, button) {
   const node = document.getElementById(elementId);
   if (!node) return;
@@ -79,5 +79,10 @@ function copySupportValue(elementId, button) {
   document.body.removeChild(input);
   success();
 }
+document.querySelectorAll('[data-copy-target]').forEach(function(button) {
+  button.addEventListener('click', function() {
+    copySupportValue(button.getAttribute('data-copy-target'), button);
+  });
+});
 </script>
 {% endblock %}

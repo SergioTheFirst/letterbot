@@ -7997,12 +7997,14 @@ def process_message(
         policy_inputs = _collect_policy_inputs()
 
         # ---------- Stage PARSE (Commitment Tracker) ----------
+        # Lengths and counts only: raw subjects/senders never go to the log.
         logger.info(
             "email_received",
             email_id=message_id,
             account=account_email,
-            from_email=from_email,
-            subject=subject,
+            subject_len=len(subject or ""),
+            body_len=len(body_text or ""),
+            attachments=len(attachments or []),
             received_at=received_at.isoformat(),
         )
         thread_key = compute_thread_key(

@@ -56,6 +56,30 @@ def _scrub_support_text(text: str) -> str:
     return _SUPPORT_EMAIL_RE.sub("\\1\u2026@\\2", scrubbed)
 
 
+def _scrub_support_value(value: Any) -> Any:
+    """Scrub every string (dict keys too) of a JSON-like value, keeping it valid.
+
+    Masked keys can collide (two addresses with the same first letter and
+    domain); later ones get a ``#n`` suffix instead of overwriting.
+    """
+    if isinstance(value, str):
+        return _scrub_support_text(value)
+    if isinstance(value, (list, tuple)):
+        return [_scrub_support_value(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    scrubbed: dict[Any, Any] = {}
+    for key, item in value.items():
+        new_key = _scrub_support_text(key) if isinstance(key, str) else key
+        if new_key in scrubbed:
+            suffix = 2
+            while f"{new_key}#{suffix}" in scrubbed:
+                suffix += 1
+            new_key = f"{new_key}#{suffix}"
+        scrubbed[new_key] = _scrub_support_value(item)
+    return scrubbed
+
+
 def _is_secret_key(key: str) -> bool:
     lowered = key.strip().lower().replace("-", "_")
     return any(marker in lowered for marker in SECRET_KEY_MARKERS)
@@ -211,7 +235,12 @@ def build_diagnostics_zip(
 
         archive.writestr(
             "health/health.json",
-            json.dumps(health_payload, ensure_ascii=False, indent=2, sort_keys=True),
+            json.dumps(
+                _scrub_support_value(health_payload),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
         )
         archive.writestr(
             "build/manifest_status.json",
@@ -219,7 +248,9 @@ def build_diagnostics_zip(
         )
 
         if config_path.exists():
-            redacted = _redact_yaml_text(config_path.read_text(encoding="utf-8"))
+            redacted = _scrub_support_text(
+                _redact_yaml_text(config_path.read_text(encoding="utf-8"))
+            )
             archive.writestr("config/config.redacted.yaml", redacted)
         else:
             missing_sources.append(str(config_path))

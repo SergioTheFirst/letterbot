@@ -63,6 +63,64 @@ def test_doctor_zip_scrubs_log_files(
         _assert_log_scrubbed(files[name].decode("utf-8"))
 
 
+def test_doctor_zip_scrubs_config_and_health(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C9: account logins (e-mail addresses) and subjects never leave raw."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "accounts:\n"
+        "  - login: ivan.petrov@example.com\n"
+        "    password: hunter2\n"
+        "note: subject=Invoice 42 for ACME\n",
+        encoding="utf-8",
+    )
+    log_path = tmp_path / "mailbot.log"
+    log_path.write_text("ok\n", encoding="utf-8")
+    monkeypatch.setattr(
+        doctor_export,
+        "_latest_health_snapshot",
+        lambda _db_path: {
+            "accounts": {
+                "jane.doe@corp.example.org": {"status": "ok"},
+                "jack.doe@corp.example.org": {"status": "warn"},
+            },
+            "last_error": f"login failed for ivan.petrov@example.com bot{_FAKE_BOT_TOKEN}",
+            "recent": ["subject=Invoice 42 for ACME from=ivan.petrov@example.com"],
+            "count": 3,
+        },
+    )
+
+    payload = build_diagnostics_zip(
+        config_path=config_path,
+        log_path=log_path,
+        db_path=tmp_path / "mailbot.sqlite",
+        dist_root=tmp_path,
+    )
+
+    files = _read_zip(payload)
+    config_text = files["config/config.redacted.yaml"].decode("utf-8")
+    assert "ivan.petrov@example.com" not in config_text
+    assert "login: i…@example.com" in config_text
+    assert "hunter2" not in config_text
+    assert "Invoice 42 for ACME" not in config_text
+
+    health_text = files["health/health.json"].decode("utf-8")
+    health = json.loads(health_text)
+    for raw in (
+        "jane.doe@corp.example.org",
+        "jack.doe@corp.example.org",
+        "ivan.petrov@example.com",
+        "Invoice 42 for ACME",
+        _FAKE_BOT_TOKEN.split(":", 1)[1],
+    ):
+        assert raw not in health_text
+    # Masked keys that collide stay distinct instead of overwriting each other.
+    assert sorted(health["accounts"]) == ["j…@corp.example.org", "j…@corp.example.org#2"]
+    assert health["count"] == 3
+    assert health["recent"] == ["subject=<redacted> from=<redacted>"]
+
+
 def test_doctor_redacts_secrets(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

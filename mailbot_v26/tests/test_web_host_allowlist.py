@@ -92,11 +92,15 @@ def test_lan_mode_accepts_machine_addresses(tmp_path: Path, fake_lan) -> None:
         web_ui_bind="0.0.0.0",
         web_ui_port=8787,
         allow_cidrs=["192.168.0.0/16"],
+        api_token="lan-token",
     )
     with app.test_client() as client:
         for host in (f"{LAN_IP}:8787", f"{LAN_ALIAS_IP}:8787", "testpc:8787"):
+            # LAN clients must authenticate (C3); the token header does that.
             response = client.get(
-                "/doctor", headers={"Host": host}, environ_base=LAN_CLIENT
+                "/doctor",
+                headers={"Host": host, "X-Api-Token": "lan-token"},
+                environ_base=LAN_CLIENT,
             )
             assert response.status_code == 200, host
         rejected = client.get(

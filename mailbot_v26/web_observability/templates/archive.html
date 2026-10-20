@@ -149,7 +149,7 @@
     {% if next_url %}<a class="btn ghost" href="{{ next_url }}">Next</a>{% endif %}
   </div>
 
-  <script>
+  <script nonce="{{ csp_nonce }}">
     document.addEventListener('DOMContentLoaded', function() {
       document.querySelectorAll('[data-row-link]').forEach(function(row) {
         row.addEventListener('click', function() {
