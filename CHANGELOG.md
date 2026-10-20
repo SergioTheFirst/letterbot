@@ -37,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Single-file Windows installer `dist/Letterbot-Setup.exe` built on top of the verified `dist/Letterbot` one-folder bundle; ships only manifest-listed files, refuses to run while Letterbot is running, and shows its errors (log: `%TEMP%\Letterbot-install.log`).
 - Dashboard "Accounts" page (`/accounts`): each mailbox's connection state with a plain-language fix hint (including "Outlook is not supported"); passwords and tokens are never shown.
 - Unknown dashboard addresses show a "Page not found" page inside the app; every page has its own browser-tab title.
+- Dashboard "Commands" page (`/commands`, in the top navigation): every command-line command and `.bat` launcher with its place in the dashboard. Read-only checks run on the page (configuration check, startup readiness, cleanup status, version, network address); commands that change data or start/stop Letterbot show the exact command for this installation with a copy button and the reason. The Accounts page gains "Create missing configuration files" and "Convert legacy configuration" buttons, and is linked from the navigation of every page.
 - Dashboard Settings editor on the Accounts page: add, edit and remove mailboxes and the Telegram bot in the browser, with "Test connection" buttons (a read-only mail login check; Telegram getMe or a test message). Saves are validated, written atomically with a timestamped backup (newest 10 kept, restorable from History) and logged without values; passwords and tokens are write-only. The dashboard password can be set or changed there, and network access switched on (only with a password; restart to apply).
 
 ### Changed
@@ -48,6 +49,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Packaged `Letterbot.exe` now reads feature flags, policy settings, backup/restore/export/cleanup paths and the doctor manifest from `<exe>\mailbot_v26\config` / the exe folder instead of `_internal`.
 - Startup with an unwritable data folder exits with a clear message instead of a traceback.
 - Letterbot no longer marks incoming emails as read (mailbox is opened read-only).
+- `cleanup --status` reads the database through a read-only connection (it could checkpoint the WAL and crashed on tables not created yet).
 - No more duplicate-notification storm when the queue dispatcher hits an error; a broken snooze row no longer stops queue processing.
 - Daily and weekly digests are no longer sent on days/weeks without content, follow `/langru`, and escape sender/subject text.
 - Telegram button edits that Telegram rejects are no longer reported as "Priority updated"; "message is not modified" counts as success.
