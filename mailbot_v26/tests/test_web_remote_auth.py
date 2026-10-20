@@ -153,6 +153,36 @@ def test_lan_login_requires_csrf_token(tmp_path: Path) -> None:
         assert client.get("/doctor", environ_base=LAN).status_code == 302
 
 
+@pytest.mark.parametrize("bad_token", ["tök", "токен"])
+def test_lan_login_non_ascii_csrf_token_is_403_not_500(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, bad_token: str
+) -> None:
+    # hmac.compare_digest raises TypeError on non-ASCII str: that was a 500.
+    caplog.set_level(logging.INFO)
+    app = _app(tmp_path)
+    with app.test_client() as client:
+        assert client.get("/login", environ_base=LAN).status_code == 200
+        response = client.post(
+            "/login",
+            data={"password": PASSWORD, "csrf_token": bad_token},
+            environ_base=LAN,
+        )
+        assert response.status_code == 403
+        assert client.get("/doctor", environ_base=LAN).status_code == 302
+    assert "WEB_UI_LOGIN_CSRF_REJECTED" in caplog.text
+
+
+@pytest.mark.parametrize("bad_token", ["tök", "токен"])
+def test_loopback_post_non_ascii_csrf_token_is_403_not_500(
+    tmp_path: Path, bad_token: str
+) -> None:
+    app = _app(tmp_path)
+    with app.test_client() as client:
+        assert client.get("/doctor").status_code == 200
+        response = client.post("/doctor/export", data={"csrf_token": bad_token})
+    assert response.status_code == 403
+
+
 def test_lan_api_token_header_authenticates(tmp_path: Path) -> None:
     app = _app(tmp_path)
     with app.test_client() as client:

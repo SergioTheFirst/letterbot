@@ -3559,12 +3559,10 @@ def _get_or_create_csrf_token() -> str:
 
 def _validate_csrf_token() -> bool:
     expected = session.get("csrf_token")
-    provided = request.form.get("csrf_token", "")
     if not isinstance(expected, str) or not expected:
         return False
-    if not isinstance(provided, str) or not provided:
-        return False
-    return hmac.compare_digest(provided, expected)
+    # Bytes compare: hmac.compare_digest raises TypeError on non-ASCII str.
+    return _secret_matches(request.form.get("csrf_token", ""), expected)
 
 
 def _text_response(body: str, status_code: int) -> Response:
