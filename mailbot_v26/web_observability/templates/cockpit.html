@@ -253,12 +253,42 @@
         </section>
 
         {% if engineer_mode %}
-        <section class="card data-card" data-testid="engineer-blocks">
+        <section class="card data-card engineer-card" data-testid="engineer-blocks">
           <div class="section-title">
             <h2>Engineer detail</h2>
             <div class="hint">Read-only drill-down for slow spans and recent errors.</div>
           </div>
-          <div class="empty-state">{% if engineer_slowest or engineer_errors %}Engineer mode enabled.{% else %}No extra engineer-only samples in this scope.{% endif %}</div>
+          {% if engineer_slowest %}
+          <h3>Slowest spans</h3>
+          <div class="table-scroll">
+            <table class="table compact">
+              <thead><tr><th>Started (UTC)</th><th>Total ms</th><th>Outcome</th><th>LLM</th></tr></thead>
+              <tbody>
+                {% for span in engineer_slowest[:5] %}
+                <tr><td class="mono">{{ span.started }}</td><td>{{ span.total_ms }}</td><td>{{ span.outcome }}</td><td>{{ span.llm }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+          {% if engineer_errors %}
+          <h3>Recent errors</h3>
+          <div class="table-scroll">
+            <table class="table compact">
+              <thead><tr><th>Time (UTC)</th><th>Error</th><th>LLM</th><th>Total ms</th></tr></thead>
+              <tbody>
+                {% for error in engineer_errors[:5] %}
+                <tr><td class="mono">{{ error.ts }}</td><td>{{ error.error_code }}</td><td>{{ error.llm }}</td><td>{{ error.total_ms }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+          {% if engineer_slowest or engineer_errors %}
+          <div class="hint">Up to 5 rows each. <a href="{{ url_for('latency') }}">All spans on the Latency page</a></div>
+          {% else %}
+          <div class="empty-state">No extra engineer-only samples in this scope.</div>
+          {% endif %}
         </section>
         {% endif %}
       </div>
