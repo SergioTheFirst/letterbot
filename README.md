@@ -143,7 +143,7 @@ Navigate to `http://127.0.0.1:8787` in your browser.
 | Gmail | `imap.gmail.com` | 993 | Requires app password + 2FA enabled |
 | Yandex Mail | `imap.yandex.ru` | 993 | Create app password in account security |
 | Mail.ru | `imap.mail.ru` | 993 | Works for @bk.ru, @list.ru, @internet.ru |
-| Outlook / Microsoft 365 | `outlook.office365.com` | 993 | App password if 2FA is on |
+| Outlook.com / Microsoft 365 | — | — | Not supported: Microsoft no longer accepts passwords for IMAP (OAuth only since Sept 2024). Forward mail to a supported mailbox. |
 
 ### Bot commands
 
@@ -362,7 +362,7 @@ chat_id   = 123456789
 | Яндекс.Почта | `imap.yandex.ru` | 993 | Создать пароль приложения в безопасности аккаунта |
 | Mail.ru | `imap.mail.ru` | 993 | Работает для @bk.ru, @list.ru, @internet.ru |
 | Gmail | `imap.gmail.com` | 993 | Нужен пароль приложения + включена 2FA |
-| Outlook / Microsoft 365 | `outlook.office365.com` | 993 | Пароль приложения при включённой 2FA |
+| Outlook.com / Microsoft 365 | — | — | Не поддерживается: Microsoft больше не принимает пароли для IMAP (только OAuth с сентября 2024). Перенаправьте почту в поддерживаемый ящик. |
 
 ### Команды бота
 
