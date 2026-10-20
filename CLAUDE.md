@@ -10,7 +10,7 @@ Letterbot (LetterBot.ru) is a local, Windows-first layer over e-mail: it parses 
   - A plain Windows PC must be enough; external services only enhance - degrade, never crash.
   - User data stays local (SQLite, exportable). Raw emails and attachments never go to the cloud; events never store raw body, subject or Telegram text; logs and telemetry keep PII local.
   - Telegram: one email -> one notification. Tier-1 never waits on slow extraction/LLM past `MAX_TELEGRAM_WAIT_SECONDS` (then a minimal Tier-1 goes out once); later enrichment only by edit-in-place; no batching or deferral. Tier-1 = facts -> conclusion -> action, at most 15 lines, emoji only from Appendix A.
-  - The web UI is read-only and shows sanitized aggregates only - never raw email text, subjects or senders.
+  - The web UI is read-only and shows sanitized aggregates only - never raw email text, subjects or senders. Single exception (CONSTITUTION IV, rev. 2026-10): the loopback-only Settings page may write config files (accounts.ini, settings.ini), never the DB; secrets are write-only and never shown, logged or exported; saves are validated, atomic, backed up and recorded as a secret-free event.
   - Heuristic and threshold changes go through shadow validation, metrics and a rollback path.
   - No heavy dependencies (no LibreOffice); strict IMAP UID idempotency; ingest only mail that arrives after process start unless a maintenance backfill flag is set.
 
