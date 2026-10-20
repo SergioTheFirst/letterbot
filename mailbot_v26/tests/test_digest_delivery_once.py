@@ -237,3 +237,20 @@ def test_unavailable_reservation_store_sends_nothing(
 
     assert sender.payloads == []
     assert _errors(logger, "digest_reserve_failed")
+
+
+def test_sender_without_a_delivery_result_keeps_the_window_and_the_tick_going(
+    monkeypatch, tmp_path
+) -> None:
+    config, storage = _setup(monkeypatch, tmp_path, "daily", accounts=(LOGIN, OTHER))
+    sender = ScriptedSender(None)
+
+    first = tick(config, storage, sender, DUE)
+    # The second chat is still served in the same tick.
+    assert sender.chats == ["chat-a", "chat-o"]
+    assert _errors(first, "digest_failed")[0]["account_email"] == LOGIN
+
+    tick(config, storage, sender, LATER_SAME_DAY)
+
+    # The first chat's outcome is unknown: kept, never resent.
+    assert sender.chats == ["chat-a", "chat-o"]

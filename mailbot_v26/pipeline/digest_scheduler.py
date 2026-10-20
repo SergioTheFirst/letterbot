@@ -754,24 +754,27 @@ def _send_digest_once(
         error = _error_text(exc)
         logger.error("digest_failed", **log_fields, delivery="unknown", error=error)
         return _SendOutcome("unknown", error)
-    if result.delivered:
+    if getattr(result, "delivered", False):
         return _SendOutcome("delivered")
-    if result.maybe_delivered:
+    retryable = bool(getattr(result, "retryable", False))
+    if getattr(result, "maybe_delivered", False):
         status = "unknown"
-    elif result.retryable:
+    elif retryable:
         status = "retryable"
         _release_sent_marker(
             storage, sent_key, window, logger=logger, log_fields=log_fields
         )
     else:
         status = "failed"
-    error = redact_secrets(result.error or "telegram delivery failed")
+    error = redact_secrets(
+        getattr(result, "error", None) or "telegram delivery failed"
+    )
     logger.error(
         "digest_failed",
         **log_fields,
         delivery=status,
         error=error,
-        retryable=result.retryable,
+        retryable=retryable,
     )
     return _SendOutcome(status, error)
 
