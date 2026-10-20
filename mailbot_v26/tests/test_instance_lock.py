@@ -220,6 +220,25 @@ def test_lock_file_is_opened_without_following_symlinks(
     assert all(flags & sentinel for flags in seen)
 
 
+@pytest.mark.parametrize("code", [errno.ELOOP, errno.EMLINK], ids=["ELOOP", "EMLINK"])
+def test_open_refused_by_o_nofollow_is_reported_as_a_symlink(
+    tmp_path: Path, monkeypatch, code: int
+) -> None:
+    # Any platform: how the error O_NOFOLLOW raises on a symlink (ELOOP on
+    # Linux and macOS, EMLINK on FreeBSD) is reported.
+    db_path = tmp_path / "mailbot.sqlite"
+    instance_lock_path(db_path).write_bytes(b"")
+
+    def _symlink_refused(*_args, **_kwargs):
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(instance_lock, "_O_NOFOLLOW", 1 << 30, raising=False)
+    monkeypatch.setattr(instance_lock.os, "open", _symlink_refused)
+    for check in (acquire_instance_lock, is_instance_running):
+        with pytest.raises(InstanceLockError, match="symbolic link"):
+            check(db_path)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW is POSIX-only")
 def test_symlinked_lock_path_is_refused_without_touching_the_target(
     tmp_path: Path,
