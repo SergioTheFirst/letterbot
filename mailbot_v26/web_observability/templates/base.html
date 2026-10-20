@@ -93,12 +93,6 @@
             </select>
           </div>
           {% endif %}
-          {% if pii_allowed %}
-          <div class="var-field var-checkbox">
-            <label for="scope-pii">PII</label>
-            <input id="scope-pii" name="pii" type="checkbox" value="1" {% if vars and vars.pii %}checked{% endif %}>
-          </div>
-          {% endif %}
           {% if lane is defined %}
           <input type="hidden" name="lane" value="{{ lane }}">
           {% endif %}

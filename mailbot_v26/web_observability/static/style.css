@@ -105,16 +105,6 @@ input:focus-visible {
   border-radius: 8px;
 }
 
-.var-checkbox {
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
-}
-
-.var-checkbox label {
-  margin: 0;
-}
-
 .var-actions {
   display: flex;
   gap: 8px;
