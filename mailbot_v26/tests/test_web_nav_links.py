@@ -26,6 +26,7 @@ def test_nav_contains_all_required_links(tmp_path: Path) -> None:
             "/health",
             "/events",
             "/doctor",
+            "/commands",
             "/commitments",
             "/latency",
             "/attention",
@@ -64,9 +65,28 @@ def test_every_dashboard_page_links_to_accounts(tmp_path: Path) -> None:
                 continue
             body = resp.get_data(as_text=True)
             assert 'href="/accounts"' in body, f"{path} has no link to /accounts"
+            assert 'href="/commands"' in body, f"{path} has no link to /commands"
             checked.append(path)
-    for path in ("/", "/archive", "/health", "/doctor", "/accounts", "/no-such-page"):
+    for path in (
+        "/",
+        "/archive",
+        "/health",
+        "/doctor",
+        "/accounts",
+        "/commands",
+        "/no-such-page",
+    ):
         assert path in checked, f"{path} was not rendered as an HTML page"
+
+
+def test_commands_link_follows_doctor_in_the_nav() -> None:
+    base_template = Path("mailbot_v26/web_observability/templates/base.html")
+    content = base_template.read_text(encoding="utf-8")
+    doctor = content.index(">Doctor</a>")
+    commands = content.index(">Commands</a>")
+    commitments = content.index(">Commitments</a>")
+    assert doctor < commands < commitments
+    assert "url_for('commands')" in content
 
 
 def test_learning_page_uses_dark_theme(tmp_path: Path) -> None:

@@ -782,3 +782,86 @@ def test_issuer_label_shows_only_a_masked_sender_token() -> None:
         label("domain:vendor.example", "Vendor <ops@vendor.example>")
         == "Vendor <o…@vendor.example>"
     )
+
+
+# --- Commands page (P3c): /commands and /api/commands/* run the read-only
+# command-line checks (validate-config, config-ready, cleanup --status,
+# version, doctor --print-lan-url). No secret from accounts.ini/settings.ini
+# and no raw address reaches them; section names are shown masked.
+
+COMMANDS_SECRETS = (
+    "CMD-MAILBOX-PASSWORD-3T",
+    "424242:CMD-BOT-TOKEN-ABCDEFGHIJKLMNOP",
+    "CMD-CLOUDFLARE-TOKEN-6Y",
+    "CMD-GIGACHAT-KEY-8U",
+    "CMD-WEB-PASSWORD-1P",
+)
+
+
+def _seed_commands_config(tmp_path: Path) -> Path:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.ini").write_text(
+        "[ui]\nlocale = en\n[web_ui]\npassword = CMD-WEB-PASSWORD-1P\n", encoding="utf-8"
+    )
+    (config_dir / "accounts.ini").write_text(
+        "[work_mail]\n"
+        f"login = {SETTINGS_LOGIN}\n"
+        "password = CMD-MAILBOX-PASSWORD-3T\n"
+        "port = 993\n"
+        "use_ssl = true\n"
+        f"[Box {SECRET_SENDER}]\n"
+        "password = CMD-MAILBOX-PASSWORD-3T\n"
+        "[telegram]\n"
+        "bot_token = 424242:CMD-BOT-TOKEN-ABCDEFGHIJKLMNOP\n"
+        "[cloudflare]\n"
+        "account_id = CHANGE_ME\n"
+        "api_token = CMD-CLOUDFLARE-TOKEN-6Y\n"
+        "[gigachat]\n"
+        "api_key = CMD-GIGACHAT-KEY-8U\n",
+        encoding="utf-8",
+    )
+    return config_dir
+
+
+@pytest.mark.parametrize("allow_pii", [False, True], ids=["pii_off", "pii_on"])
+def test_commands_page_and_apis_show_no_secrets(tmp_path: Path, allow_pii: bool) -> None:
+    db_path = _seed_db(tmp_path)
+    config_dir = _seed_commands_config(tmp_path)
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        allow_pii=allow_pii,
+        api_token=API_TOKEN,
+        config_dir=config_dir,
+    )
+    paths = [
+        path
+        for path in _crawl_paths(app)
+        if path == "/commands" or path.startswith("/api/commands/")
+    ]
+    assert "/commands" in paths and len(paths) >= 6, paths
+
+    leaks: dict[str, list[str]] = {}
+    bodies: dict[str, str] = {}
+    with app.test_client() as client:
+        for path in paths:
+            target = _with_pii(path) if allow_pii else path
+            response = client.get(target, headers={"X-Api-Token": API_TOKEN})
+            assert response.status_code == 200, path
+            body = response.get_data(as_text=True)
+            bodies[path] = body
+            found = [
+                marker
+                for marker in (*MARKERS, *SETTINGS_MARKERS, *COMMANDS_SECRETS)
+                if marker in body
+            ]
+            if found:
+                leaks[path] = found
+
+    assert leaks == {}
+    # Not vacuous: the findings name the sections, the address masked.
+    page = bodies["/commands"]
+    assert "[work_mail] host is required" in page
+    assert "Box s…@example.com" in page

@@ -1,0 +1,170 @@
+/* Commands page (/commands). Colours and radii come from style.css tokens. */
+.commands-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.commands-intro {
+  margin: 0;
+}
+
+.commands-checks-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.commands-page h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.commands-run-again {
+  text-decoration: none;
+}
+
+.commands-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.commands-panel {
+  padding: 12px 14px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+
+.commands-panel h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.commands-panel h4 {
+  margin: 12px 0 6px;
+  font-size: 13px;
+}
+
+.commands-panel p {
+  margin: 0 0 6px;
+}
+
+.commands-findings {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+
+.commands-findings li {
+  margin-bottom: 4px;
+}
+
+.commands-path {
+  overflow-wrap: anywhere;
+}
+
+.commands-group summary {
+  cursor: pointer;
+}
+
+.commands-group summary h2 {
+  display: inline;
+}
+
+.commands-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.commands-entry {
+  padding: 10px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.commands-entry:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.commands-entry-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.commands-label {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.commands-options,
+.commands-reason,
+.commands-where,
+.commands-cli p {
+  margin: 6px 0 0;
+}
+
+.commands-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.commands-cli {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.commands-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.commands-line pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.commands-copy-status {
+  margin: 0;
+  color: var(--success);
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .commands-line {
+    flex-direction: column;
+  }
+
+  .commands-line pre {
+    width: 100%;
+  }
+}
