@@ -63,19 +63,33 @@ class EventV1:
     schema_version: int = 1
 
 
-def fingerprint(event: EventV1) -> str:
-    payload_value = (
-        event.payload_json if event.payload_json is not None else event.payload
-    )
+def fingerprint_fields(
+    *,
+    event_type: EventType | str,
+    ts_utc: float,
+    account_id: str,
+    entity_id: str | None,
+    email_id: int | None,
+    payload: Any,
+    schema_version: int,
+) -> str:
+    """Dedupe fingerprint from plain field values (e.g. a stored events_v1 row).
+
+    ``payload`` is the value that gets fingerprinted: the payload dict, or the
+    explicit payload_json string when the event carried one. Stored event
+    types outside the enum are accepted as strings.
+    """
     stable = json.dumps(
         {
-            "event_type": event.event_type.value,
-            "ts_utc": event.ts_utc,
-            "account_id": event.account_id,
-            "entity_id": event.entity_id,
-            "email_id": event.email_id,
-            "payload": payload_value,
-            "schema_version": event.schema_version,
+            "event_type": (
+                event_type.value if isinstance(event_type, EventType) else event_type
+            ),
+            "ts_utc": ts_utc,
+            "account_id": account_id,
+            "entity_id": entity_id,
+            "email_id": email_id,
+            "payload": payload,
+            "schema_version": schema_version,
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -83,4 +97,19 @@ def fingerprint(event: EventV1) -> str:
     return hashlib.sha256(stable.encode("utf-8")).hexdigest()
 
 
-__all__ = ["EventType", "EventV1", "fingerprint"]
+def fingerprint(event: EventV1) -> str:
+    payload_value = (
+        event.payload_json if event.payload_json is not None else event.payload
+    )
+    return fingerprint_fields(
+        event_type=event.event_type,
+        ts_utc=event.ts_utc,
+        account_id=event.account_id,
+        entity_id=event.entity_id,
+        email_id=event.email_id,
+        payload=payload_value,
+        schema_version=event.schema_version,
+    )
+
+
+__all__ = ["EventType", "EventV1", "fingerprint", "fingerprint_fields"]

@@ -9,6 +9,7 @@ from typing import Iterable
 
 from mailbot_v26.events.contract import EventType, EventV1, fingerprint
 from mailbot_v26.events.emitter import EventEmitter as ContractEventEmitter
+from mailbot_v26.events.privacy import scrub_email_received
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.observability import get_logger
 from mailbot_v26.observability.event_emitter import (
@@ -119,6 +120,24 @@ def _insert_events(conn: sqlite3.Connection, events: list[EventV1]) -> BackfillS
     return BackfillStats(inserted=inserted, attempted=len(events))
 
 
+def _email_ids_with_email_received(conn: sqlite3.Connection) -> set[int]:
+    """Emails that already have an EMAIL_RECEIVED event, live or backfilled.
+
+    The backfill dedupes EMAIL_RECEIVED by (event_type, email_id): its payload
+    is scrubbed, so it never matches older rows byte for byte and the
+    fingerprint alone would add a second event per email.
+    """
+    rows = conn.execute(
+        """
+        SELECT DISTINCT email_id
+        FROM events_v1
+        WHERE event_type = ? AND typeof(email_id) = 'integer'
+        """,
+        (EventType.EMAIL_RECEIVED.value,),
+    ).fetchall()
+    return {int(row[0]) for row in rows}
+
+
 def _load_email_events(conn: sqlite3.Connection) -> list[EventV1]:
     try:
         attachments_rows = conn.execute("""
@@ -147,25 +166,32 @@ def _load_email_events(conn: sqlite3.Connection) -> list[EventV1]:
             """).fetchall()
     except sqlite3.OperationalError:
         return []
+    existing_email_received = _email_ids_with_email_received(conn)
+    skipped_existing = 0
     for row in rows:
         received_at = _parse_ts(row["received_at"])
         email_id = int(row["id"])
         attachments_count = attachments.get(email_id, 0)
-        events.append(
-            EventV1(
-                event_type=EventType.EMAIL_RECEIVED,
-                ts_utc=received_at.timestamp(),
-                account_id=str(row["account_email"]),
-                entity_id=None,
-                email_id=email_id,
-                payload={
-                    "from_email": row["from_email"],
-                    "subject": row["subject"],
-                    "body_summary": row["body_summary"],
-                    "attachments_count": attachments_count,
-                },
+        if email_id in existing_email_received:
+            skipped_existing += 1
+        else:
+            events.append(
+                EventV1(
+                    event_type=EventType.EMAIL_RECEIVED,
+                    ts_utc=received_at.timestamp(),
+                    account_id=str(row["account_email"]),
+                    entity_id=None,
+                    email_id=email_id,
+                    payload=scrub_email_received(
+                        {
+                            "from_email": row["from_email"],
+                            "subject": row["subject"],
+                            "body_summary": row["body_summary"],
+                            "attachments_count": attachments_count,
+                        }
+                    ),
+                )
             )
-        )
         if int(row["deferred_for_digest"] or 0) == 1:
             attachments_only = bool(
                 (row["raw_body_hash"] or "") == "" and attachments_count > 0
@@ -184,6 +210,10 @@ def _load_email_events(conn: sqlite3.Connection) -> list[EventV1]:
                     },
                 )
             )
+    if skipped_existing:
+        logger.info(
+            "events_backfill_email_received_skipped", existing=skipped_existing
+        )
     return events
 
 
