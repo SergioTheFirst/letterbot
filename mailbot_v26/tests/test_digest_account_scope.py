@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime
 
+from mailbot_v26 import config_loader
+from mailbot_v26.account_identity import normalize_login
 from mailbot_v26.events.contract import EventType
 from mailbot_v26.insights.anomaly_engine import Anomaly
 from mailbot_v26.pipeline import daily_digest, weekly_digest
@@ -263,3 +266,82 @@ def test_digest_collectors_get_the_accounts_routed_to_the_chat(
         ("weekly", ALPHA): [ALPHA, ALPHA_SECOND],
         ("weekly", BETA): [BETA],
     }
+
+
+# --- logins as configured vs. normalize_login(login) as stored --------------
+
+MIXED_CASE = "Owner@Example.COM"
+
+
+def test_mixed_case_login_finds_rows_stored_under_the_normalized_login(
+    monkeypatch, tmp_path
+) -> None:
+    write_config(tmp_path, monkeypatch, daily=True, weekly=False)
+    storage = build_storage(tmp_path)
+    # Ingest stores normalize_login(login).
+    seed_deferred(storage, normalize_login(MIXED_CASE))
+    sender = ScriptedSender()
+
+    tick(
+        bot_config(tmp_path, [account(MIXED_CASE, "chat-o")]),
+        storage,
+        sender,
+        DAILY_DUE,
+    )
+
+    assert sender.chats == ["chat-o"]
+    # digest_state and the sent event keep the login as configured.
+    assert storage.knowledge_db.get_last_digest_sent_at(account_email=MIXED_CASE)
+    with sqlite3.connect(storage.knowledge_db.path) as conn:
+        account_id, payload_json = conn.execute(
+            "SELECT account_id, payload_json FROM events_v1 WHERE event_type = ?",
+            (EventType.DAILY_DIGEST_SENT.value,),
+        ).fetchone()
+    assert account_id == MIXED_CASE
+    assert json.loads(payload_json)["account_emails"] == [MIXED_CASE]
+
+
+def test_digest_scope_holds_both_login_forms(monkeypatch, tmp_path) -> None:
+    write_config(tmp_path, monkeypatch, daily=False, weekly=True)
+    storage = build_storage(tmp_path)
+    seen: list[object] = []
+    real = weekly_digest._collect_weekly_data
+
+    def _collect(**kwargs):
+        seen.append(kwargs.get("account_emails"))
+        return real(**kwargs)
+
+    monkeypatch.setattr(weekly_digest, "_collect_weekly_data", _collect)
+    config = bot_config(
+        tmp_path, [account(MIXED_CASE, "chat-o"), account(ALPHA_SECOND, "chat-o")]
+    )
+
+    tick(config, storage, ScriptedSender(), MONDAY_DUE)
+
+    assert seen == [[MIXED_CASE, "owner@example.com", ALPHA_SECOND]]
+
+
+def test_account_scope_from_accounts_ini_holds_both_login_forms(tmp_path) -> None:
+    (tmp_path / "accounts.ini").write_text(
+        "[boss]\n"
+        f"login = {MIXED_CASE}\n"
+        "password = pass\n"
+        "telegram_chat_id = chat-o\n"
+        "\n"
+        "[deputy]\n"
+        f"login = {ALPHA_SECOND}\n"
+        "password = pass\n"
+        "telegram_chat_id = chat-o\n",
+        encoding="utf-8",
+    )
+    config_loader._load_account_scopes.cache_clear()
+    try:
+        scope = config_loader.resolve_account_scope(
+            "owner@example.com", base_dir=tmp_path
+        )
+    finally:
+        config_loader._load_account_scopes.cache_clear()
+
+    assert scope is not None
+    assert scope.chat_id == "chat-o"
+    assert scope.account_emails == [MIXED_CASE, "owner@example.com", ALPHA_SECOND]

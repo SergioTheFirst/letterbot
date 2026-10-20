@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
+from mailbot_v26.account_identity import normalize_login
 from mailbot_v26.behavior.silence_detector import run_silence_scan
 from mailbot_v26.config.paths import default_config_dir, resolve_config_paths
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
@@ -624,6 +625,21 @@ def _group_accounts_by_chat_id(accounts) -> dict[str, list[str]]:
     return groups
 
 
+def _chat_scope_ids(logins: Iterable[str]) -> list[str]:
+    """Account ids that match a chat's accounts in stored rows (B8).
+
+    Ingest stores rows under normalize_login(login); older rows may hold the
+    login as configured, so both forms match. digest_state, the sent events
+    and the marker keys keep the configured login.
+    """
+    scope: list[str] = []
+    for login in logins:
+        for candidate in (str(login or "").strip(), normalize_login(login)):
+            if candidate and candidate not in scope:
+                scope.append(candidate)
+    return scope
+
+
 def _is_primary_account(
     *,
     account_email: str,
@@ -834,7 +850,7 @@ def _run_daily_digest(
     # `now` is local time (due hour, day window); data and stored times use UTC.
     now_utc = now.astimezone(timezone.utc)
     # Data of the accounts routed to this chat only (B8), from the live config.
-    scope_account_emails = list(account_emails)
+    scope_account_emails = _chat_scope_ids(account_emails)
     if not _is_daily_due(now, config):
         logger.info(
             "digest_tick_checked",
@@ -1101,7 +1117,7 @@ def _run_weekly_digest(
         analytics=storage.analytics,
         account_email=account_email,
         # Data of the accounts routed to this chat only (B8).
-        account_emails=list(account_emails),
+        account_emails=_chat_scope_ids(account_emails),
         week_key=week_key,
         include_anomalies=include_anomalies,
         include_attention_economics=include_attention_economics,
