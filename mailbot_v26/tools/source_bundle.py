@@ -14,11 +14,20 @@ EXCLUDED_TOP_LEVEL_DIRS = {
     "dist",
     "logs",
     "runtime",
+    "backups",
+    ".venv",
+    "venv",
+    ".claude",
+    ".codegraph",
 }
 EXCLUDED_DIR_NAMES = {
     ".pytest_cache",
     ".ruff_cache",
     "__pycache__",
+    # Runtime folders inside the package (runtime_health.json, local DBs).
+    "data",
+    ".venv",
+    "venv",
 }
 EXCLUDED_SUFFIXES = {
     ".db",
@@ -27,11 +36,28 @@ EXCLUDED_SUFFIXES = {
     ".pyo",
     ".sqlite",
     ".sqlite3",
+    ".sqlite-wal",
+    ".sqlite-shm",
+    ".db-wal",
+    ".db-shm",
+    ".lock",
+    ".key",
+    ".bak",
+    ".tmp",
 }
+# Secrets and runtime state: credentials, legacy secret keys, IMAP cursors and
+# account logins never belong in a source bundle.
 EXCLUDED_FILENAMES = {
     "accounts.ini",
     "settings.ini",
+    "keys.ini",
+    "config.ini",
+    "state.json",
+    "runtime_health.json",
+    ".env",
 }
+# Timestamped backups (accounts.ini.bak-YYYYMMDD-HHMMSS, *.prescrub-*.sqlite).
+EXCLUDED_NAME_MARKERS = (".bak-", ".prescrub-")
 
 
 def _is_excluded(path: Path, root: Path, output_zip: Path) -> bool:
@@ -48,6 +74,10 @@ def _is_excluded(path: Path, root: Path, output_zip: Path) -> bool:
     if path.suffix.lower() in EXCLUDED_SUFFIXES:
         return True
     if path.name in EXCLUDED_FILENAMES:
+        return True
+    if path.name.startswith(".env.") or any(
+        marker in path.name for marker in EXCLUDED_NAME_MARKERS
+    ):
         return True
     if rel_posix.startswith("runtime/tmp_") and path.suffix.lower() == ".ps1":
         return True

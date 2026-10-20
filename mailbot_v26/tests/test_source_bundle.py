@@ -143,6 +143,12 @@ def test_no_runtime_garbage_tracked_in_repo() -> None:
             "logs/decision_trace_failures.ndjson.1",
             "logs/priority_calibration_cache.json",
             "mailbot_v26/tools/_audit_webui_minimal.txt",
+            # Runtime state holds account logins and IMAP cursors.
+            "state.json",
+            "mailbot_v26/state.json",
+            "mailbot_v26/data/runtime_health.json",
+            "database.sqlite",
+            "mailbot_v26/mailbot.log",
         ],
         cwd=repo_root,
         check=True,
@@ -151,3 +157,38 @@ def test_no_runtime_garbage_tracked_in_repo() -> None:
     ).stdout.strip()
 
     assert tracked == ""
+
+
+def test_source_bundle_excludes_secrets_state_and_tool_folders(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _touch(repo / "mailbot_v26" / "start.py", "print('ok')\n")
+    _touch(repo / ".codex" / "skills" / "README.md", "tracked agent guidance\n")
+    leaks = [
+        "mailbot_v26/state.json",
+        "state.json",
+        "mailbot_v26/config/keys.ini",
+        "mailbot_v26/config/config.ini",
+        "mailbot_v26/config/accounts.ini.bak-20261020-140501",
+        "mailbot_v26/data/runtime_health.json",
+        "database.sqlite-wal",
+        "database.sqlite-shm",
+        "database.sqlite.lock",
+        "database.sqlite.subject.key",
+        "database.sqlite.prescrub-20261020.sqlite",
+        "backups/backup_20261020.zip",
+        ".env",
+        ".env.local",
+        ".venv/Lib/site.py",
+        ".claude/worktrees/wf-1/mailbot_v26/start.py",
+        ".codegraph/codegraph.db",
+    ]
+    for rel in leaks:
+        _touch(repo / rel)
+
+    output = repo / "dist" / "letterbot-source.zip"
+    build_source_bundle(output, repo_root=repo)
+    names = _zip_names(output)
+
+    assert "mailbot_v26/start.py" in names
+    assert ".codex/skills/README.md" in names
+    assert sorted(set(leaks) & names) == []

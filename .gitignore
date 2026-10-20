@@ -60,3 +60,8 @@ build/
 *.sqlite-wal
 *.sqlite-shm
 .claude/worktrees/
+
+# Runtime state (account logins, IMAP cursors)
+state.json
+mailbot_v26/state.json
+mailbot_v26/data/runtime_health.json
