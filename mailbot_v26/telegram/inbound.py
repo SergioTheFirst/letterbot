@@ -55,6 +55,7 @@ from mailbot_v26.telegram.callback_data import (
 )
 from mailbot_v26.telegram.keyboard_builder import build_notification_keyboard
 from mailbot_v26.telegram_utils import escape_tg_html, telegram_safe
+from mailbot_v26.ui.emoji_whitelist import strip_disallowed_emojis
 from mailbot_v26.ui.i18n import DEFAULT_LOCALE, get_locale, humanize_mode, t
 from mailbot_v26.text.mojibake import normalize_mojibake_text
 from mailbot_v26.config.llm_queue import load_llm_queue_config
@@ -1202,7 +1203,8 @@ class TelegramInboundProcessor:
         url = f"https://api.telegram.org/bot{self.bot_token}/answerCallbackQuery"
         payload = {
             "callback_query_id": callback_id,
-            "text": normalize_mojibake_text(text)[:200],
+            # Toasts bypass send_telegram, so apply the Appendix A guard here.
+            "text": strip_disallowed_emojis(normalize_mojibake_text(text))[:200],
             "show_alert": False,
         }
         try:

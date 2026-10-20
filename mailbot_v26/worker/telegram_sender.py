@@ -11,6 +11,10 @@ from mailbot_v26.observability.redact import redact_secrets
 from mailbot_v26.pipeline.telegram_payload import TelegramPayload
 from mailbot_v26.telegram_utils import cap_telegram_text, telegram_text_units
 from mailbot_v26.text.mojibake import normalize_mojibake_text
+from mailbot_v26.ui.emoji_whitelist import (
+    find_disallowed_emojis,
+    strip_disallowed_emojis,
+)
 
 requests_spec = importlib.util.find_spec("requests")
 if requests_spec is None:
@@ -207,6 +211,54 @@ def _sanitize_user_facing_text(text: str) -> str:
     return normalize_mojibake_text(text)
 
 
+_EMPTY_BUTTON_LABEL = "•"
+
+
+def _guard_button_row(row: object, stripped: set[str]) -> object:
+    if not isinstance(row, list):
+        return row
+    guarded: list[object] = []
+    for button in row:
+        label = button.get("text") if isinstance(button, dict) else None
+        found = find_disallowed_emojis(label) if isinstance(label, str) else set()
+        if found:
+            stripped |= found
+            clean = strip_disallowed_emojis(label).strip() or _EMPTY_BUTTON_LABEL
+            button = {**button, "text": clean}
+        guarded.append(button)
+    return guarded
+
+
+def _enforce_emoji_whitelist(
+    text: str, reply_markup: dict[str, object] | None, *, kind: str
+) -> tuple[str, dict[str, object] | None]:
+    """CONSTITUTION Appendix A at the send boundary: text and button labels.
+
+    Returns new objects when something is stripped; the caller's payload is
+    never mutated. Every strip is logged (code points only, no content).
+    """
+    stripped = find_disallowed_emojis(text)
+    clean_text = strip_disallowed_emojis(text) if stripped else text
+    clean_markup = reply_markup
+    rows = reply_markup.get("inline_keyboard") if isinstance(reply_markup, dict) else None
+    if isinstance(rows, list):
+        button_found: set[str] = set()
+        guarded_rows = [_guard_button_row(row, button_found) for row in rows]
+        if button_found:
+            stripped = stripped | button_found
+            clean_markup = {**reply_markup, "inline_keyboard": guarded_rows}
+    if stripped:
+        log.warning(
+            "telegram_emoji_stripped kind=%s count=%s codepoints=%s",
+            kind,
+            len(stripped),
+            ",".join(
+                sorted("+".join(f"U+{ord(char):04X}" for char in seq) for seq in stripped)
+            ),
+        )
+    return clean_text, clean_markup
+
+
 def _cap_outgoing_text(text: str, *, kind: str) -> str:
     # Safety net: callers cap already; an over-long text would be a lost 400.
     capped = cap_telegram_text(text)
@@ -297,7 +349,11 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
     """
     bot_token = payload.metadata.get("bot_token")
     chat_id = payload.metadata.get("chat_id")
-    normalized_text = _sanitize_user_facing_text(payload.html_text)
+    normalized_text, reply_markup = _enforce_emoji_whitelist(
+        _sanitize_user_facing_text(payload.html_text),
+        payload.reply_markup,
+        kind="send",
+    )
     if not bot_token or not chat_id or not normalized_text:
         log.error("Telegram send failed: empty token, chat_id or text")
         return DeliveryResult(
@@ -329,7 +385,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
             chat_id=chat_id,
             text=normalized_text,
             parse_mode="HTML",
-            reply_markup=payload.reply_markup,
+            reply_markup=reply_markup,
         )
     except Exception as exc:
         return _send_exception_result(exc, mode="html")
@@ -351,7 +407,7 @@ def send_telegram(payload: TelegramPayload) -> DeliveryResult:
                     chat_id=chat_id,
                     text=stripped_text,
                     parse_mode=None,
-                    reply_markup=payload.reply_markup,
+                    reply_markup=reply_markup,
                 )
             except Exception as exc:
                 return _send_exception_result(exc, mode="plain_salvage")
@@ -461,7 +517,9 @@ def edit_telegram_message(
     Callers must check the result: False means Telegram did not apply the edit
     (the reason is logged here).
     """
-    normalized_text = _sanitize_user_facing_text(html_text)
+    normalized_text, reply_markup = _enforce_emoji_whitelist(
+        _sanitize_user_facing_text(html_text), reply_markup, kind="edit"
+    )
     if not bot_token or not chat_id or not message_id or not normalized_text:
         log.error(
             "telegram_edit_failed chat_id=%s message_id=%s reason=%s",
