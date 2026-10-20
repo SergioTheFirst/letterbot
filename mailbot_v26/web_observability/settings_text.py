@@ -436,6 +436,10 @@ _EN: dict[str, str] = {
     "editor.tg.TOKEN_MISSING": "Enter the bot token first.",
     "editor.tg.TOKEN_FORMAT": "This doesn't look like a bot token.",
     "editor.tg.CHAT_MISSING": "Enter a chat id or save a default chat first.",
+    "editor.tg.CHAT_FORMAT": (
+        "This doesn't look like a chat id: a number like 272250747, or -100… for "
+        "groups."
+    ),
     "editor.web_title": "Dashboard password and network access",
     "editor.web_password_set": "Dashboard password: set",
     "editor.web_password_missing": (
@@ -910,6 +914,9 @@ _RU: dict[str, str] = {
     "editor.tg.TOKEN_MISSING": "Сначала введите токен бота.",
     "editor.tg.TOKEN_FORMAT": "Это не похоже на токен бота.",
     "editor.tg.CHAT_MISSING": "Введите ID чата или сначала сохраните чат по умолчанию.",
+    "editor.tg.CHAT_FORMAT": (
+        "Это не похоже на ID чата: нужно число вида 272250747 или -100… для групп."
+    ),
     "editor.web_title": "Пароль панели и доступ по сети",
     "editor.web_password_set": "Пароль панели: задан",
     "editor.web_password_missing": (

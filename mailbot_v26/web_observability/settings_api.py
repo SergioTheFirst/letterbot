@@ -130,6 +130,7 @@ _CONTROL_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
 # could join it to more text (space, ";", "=", ":", "#").
 _LOGIN_SHAPE_RE = re.compile(r"[\w.+'@\\-]{1,254}")
 _TOKEN_RE = re.compile(r"\d{3,20}:[A-Za-z0-9_-]{20,128}")
+_NUMERIC_LABEL_RE = re.compile(r"(?:0x[0-9a-fA-F]*|\d+)")
 _BOT_USERNAME_RE = re.compile(r"[A-Za-z0-9_]{3,64}")
 
 
@@ -793,7 +794,9 @@ def _ip_not_allowed(host: str) -> bool:
     try:
         address = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
-        return False
+        # "0251.0376.0251.0376" or "0x7f.1": an address in disguise that
+        # the system resolver may still accept.
+        return all(_NUMERIC_LABEL_RE.fullmatch(label) for label in host.rstrip(".").split("."))
     return (
         address.is_unspecified
         or address.is_multicast
@@ -1206,11 +1209,12 @@ def register_settings_routes(app: Any, *, config_dir: Path | None) -> None:
         chat_id = ""
         if action == "send":
             chat = body.get("chat_id")
-            chat_id = (
-                _chat_value(chat, issues, "telegram", "chat_id") or ""
-                if chat not in (None, "")
-                else str(stored.get("chat_id") or "")
-            )
+            if chat in (None, ""):
+                chat_id = str(stored.get("chat_id") or "")
+            else:
+                chat_id = _chat_value(chat, issues, "telegram", "chat_id") or ""
+                if not chat_id:
+                    return _error(422, "CHAT_FORMAT")
             if not chat_id:
                 return _error(422, "CHAT_MISSING")
         limited = _rate_limited(app, f"telegram-{action}")

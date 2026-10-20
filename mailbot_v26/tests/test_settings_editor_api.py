@@ -673,6 +673,8 @@ def test_stored_password_is_used_only_for_the_saved_server(tmp_path: Path, fake_
         ("imap.gmail.com", 25, "PORT_NOT_ALLOWED"),
         ("169.254.169.254", 993, "HOST_NOT_ALLOWED"),
         ("0.0.0.0", 993, "HOST_NOT_ALLOWED"),
+        ("0251.0376.0251.0376", 993, "HOST_NOT_ALLOWED"),
+        ("0xa9.0xfe.0xa9.0xfe", 993, "HOST_NOT_ALLOWED"),
         ("http://imap.gmail.com", 993, "INVALID"),
         ("imap.gmail.com:993", 993, "INVALID"),
     ],
@@ -813,6 +815,27 @@ def test_telegram_test_without_any_token(tmp_path: Path, fake_telegram) -> None:
 
     assert response.status_code == 422
     assert response.get_json()["code"] == "TOKEN_MISSING"
+    assert fake_telegram[0] == []
+
+
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [
+        ({"action": "send", "chat_id": "my chat"}, "CHAT_FORMAT"),
+        ({"action": "getme", "bot_token": "123:../../evil"}, "TOKEN_FORMAT"),
+        ({"action": "delete"}, "BAD_REQUEST"),
+    ],
+)
+def test_telegram_test_refuses_odd_input_before_any_call(
+    tmp_path: Path, fake_telegram, body: dict, code: str
+) -> None:
+    app = _app(tmp_path, _config(tmp_path))
+    with app.test_client() as client:
+        token = _csrf(client)
+        response = _post(client, "/api/settings/telegram/test", body, token=token)
+
+    assert response.status_code in (400, 422)
+    assert response.get_json()["code"] == code
     assert fake_telegram[0] == []
 
 
