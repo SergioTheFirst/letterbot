@@ -36,7 +36,12 @@ from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.version import get_version
-from mailbot_v26.system_health import OperationalMode, system_health
+from mailbot_v26.system_health import (
+    COMPONENT_DEGRADED,
+    COMPONENT_OFF,
+    OperationalMode,
+    system_health,
+)
 from mailbot_v26.telegram.decision_trace_ui import (
     DETAILS_PREFIX,
     HIDE_PREFIX,
@@ -202,11 +207,21 @@ def _format_percent(value: float) -> str:
     return f"{value * 100:.1f}%"
 
 
-def _status_llm_delivery_mode() -> str:
-    if system_health.mode in {
+def _status_ai_state() -> str:
+    """AI line for /status: "off" (disabled on purpose), "degraded" or "active"."""
+    llm_state = system_health.component_state("LLM")
+    if llm_state == COMPONENT_OFF:
+        return "off"
+    if llm_state == COMPONENT_DEGRADED or system_health.mode in {
         OperationalMode.DEGRADED_NO_LLM,
         OperationalMode.EMERGENCY_READ_ONLY,
     }:
+        return "degraded"
+    return "active"
+
+
+def _status_llm_delivery_mode() -> str:
+    if _status_ai_state() != "active":
         return "heuristic"
     try:
         queue = load_llm_queue_config()
@@ -2294,11 +2309,13 @@ class TelegramInboundProcessor:
         anomalies = _t("inbound.status.short_on") if self.feature_flags.ENABLE_ANOMALY_ALERTS else _t("inbound.status.short_off")
         quality = _t("inbound.status.short_on") if self.feature_flags.ENABLE_QUALITY_METRICS else _t("inbound.status.short_off")
 
-        llm_active = system_health.mode not in {
-            OperationalMode.DEGRADED_NO_LLM,
-            OperationalMode.EMERGENCY_READ_ONLY,
-        }
-        llm_state = _ui_text("active", "активен") if llm_active else _ui_text("degraded", "деградировал")
+        ai_state = _status_ai_state()
+        if ai_state == "off":
+            llm_state = _ui_text("off", "выключен")
+        elif ai_state == "degraded":
+            llm_state = _ui_text("degraded", "деградировал")
+        else:
+            llm_state = _ui_text("active", "активен")
         delivery_mode = _status_llm_delivery_mode()
 
         status_lines = [

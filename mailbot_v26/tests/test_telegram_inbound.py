@@ -1933,6 +1933,72 @@ def test_status_not_degraded_when_direct_llm_is_active(tmp_path: Path) -> None:
     assert _norm("Деградация: без AI") not in _norm(sent[-1])
 
 
+def _status_gate_result() -> GateResult:
+    return GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="priority_v2_auto",
+    )
+
+
+def test_status_shows_ai_off_when_llm_is_disabled(tmp_path: Path) -> None:
+    sent: list[str] = []
+    processor = _build_processor(tmp_path, sent, _status_gate_result())
+
+    from mailbot_v26.system_health import system_health
+
+    system_health.reset()
+    system_health.update_component("CRM", True)
+    system_health.update_component("Telegram", True)
+    system_health.disable_component("LLM", reason="llm_stage_not_wired")
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
+    system_health.reset()
+
+    status = _norm(sent[-1])
+    assert _norm("Режим: Полный режим") in status
+    assert _norm("AI: выключен") in status
+    assert "LLM delivery: heuristic" in status
+    assert _norm("деградировал") not in status
+
+
+def test_status_shows_ai_off_in_english(tmp_path: Path) -> None:
+    sent: list[str] = []
+    processor = _build_processor(tmp_path, sent, _status_gate_result(), locale="en")
+
+    from mailbot_v26.system_health import system_health
+
+    system_health.reset()
+    system_health.disable_component("LLM", reason="llm_not_configured")
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
+    system_health.reset()
+
+    assert "AI: off" in sent[-1]
+    assert "LLM delivery: heuristic" in sent[-1]
+
+
+def test_status_shows_ai_degraded_when_enabled_llm_fails(tmp_path: Path) -> None:
+    sent: list[str] = []
+    processor = _build_processor(tmp_path, sent, _status_gate_result())
+
+    from mailbot_v26.system_health import system_health
+
+    system_health.reset()
+    system_health.update_component("LLM", False, reason="provider down")
+
+    processor.handle_message({"chat": {"id": "chat"}, "text": "/status"})
+    system_health.reset()
+
+    status = _norm(sent[-1])
+    assert _norm("AI: деградировал") in status
+    assert "LLM delivery: heuristic" in status
+
+
 def test_priority_callback_edits_message_with_manual_priority_marker(
     tmp_path: Path, monkeypatch
 ) -> None:
