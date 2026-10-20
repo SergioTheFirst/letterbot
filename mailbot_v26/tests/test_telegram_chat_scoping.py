@@ -13,6 +13,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from mailbot_v26.account_identity import normalize_login
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
 from mailbot_v26.config_loader import (
     AccountConfig,
@@ -86,7 +89,11 @@ class _Stub:
 
 
 def _build_processor(
-    tmp_path: Path, sent: list[tuple[str, str]], *, admin_chat_id: str = ""
+    tmp_path: Path,
+    sent: list[tuple[str, str]],
+    *,
+    admin_chat_id: str = "",
+    accounts: list[AccountConfig] | None = None,
 ) -> TelegramInboundProcessor:
     db_path = tmp_path / "knowledge.sqlite"
 
@@ -94,7 +101,9 @@ def _build_processor(
         sent.append((chat_id, text))
         return DeliveryResult(delivered=True, retryable=False)
 
-    scopes = build_chat_account_scopes(_accounts(), admin_chat_id=admin_chat_id)
+    scopes = build_chat_account_scopes(
+        _accounts() if accounts is None else accounts, admin_chat_id=admin_chat_id
+    )
     allowed = {CHAT_A, CHAT_B} | ({admin_chat_id} if admin_chat_id else set())
     return TelegramInboundProcessor(
         knowledge_db=KnowledgeDB(db_path),
@@ -260,6 +269,102 @@ def test_chat_without_accounts_sees_no_account_data(tmp_path: Path) -> None:
 
     assert ACCOUNT_A not in sent[0][1]
     assert "Задача Алисы" not in _norm(sent[1][1])
+
+
+# --- configured login vs. the normalized id that ingest stores --------------
+
+
+def _emit(
+    processor: TelegramInboundProcessor,
+    event_type: EventType,
+    *,
+    account_id: str,
+    email_id: int,
+    payload: dict[str, object],
+) -> None:
+    processor.contract_event_emitter.emit(
+        EventV1(
+            event_type=event_type,
+            ts_utc=datetime.now(timezone.utc).timestamp(),
+            account_id=account_id,
+            entity_id=None,
+            email_id=email_id,
+            payload=payload,
+        )
+    )
+
+
+@pytest.mark.parametrize("login", ["Alice@Example.com", "HQ/User"])
+def test_commands_count_rows_stored_under_normalized_login(
+    tmp_path: Path, login: str
+) -> None:
+    # accounts.ini keeps the login as typed; ingest stores normalize_login().
+    stored = normalize_login(login)
+    assert stored != login
+    sent: list[tuple[str, str]] = []
+    processor = _build_processor(
+        tmp_path, sent, accounts=[_account("acc_a", login, CHAT_A)]
+    )
+    email_id = _insert_email(processor.knowledge_db.path, account_email=stored)
+    _insert_commitment(processor.knowledge_db.path, email_id=email_id, text="Задача Алисы")
+    _emit(
+        processor,
+        EventType.EMAIL_RECEIVED,
+        account_id=stored,
+        email_id=email_id,
+        payload={"attachments_count": 0},
+    )
+    _emit(
+        processor,
+        EventType.PRIORITY_CORRECTION_RECORDED,
+        account_id=stored,
+        email_id=email_id,
+        payload={"old_priority": "🔵", "new_priority": "🔴"},
+    )
+
+    for command in ("/week", "/stats", "/commitments"):
+        processor.handle_message(_message(CHAT_A, command))
+
+    week, stats, commitments = (_norm(text) for _, text in sent)
+    assert _norm("Писем: 1 · Важных: 1 · Низких: 0") in week
+    assert _norm("Исправления: 1 · Точность: 100%") in week
+    assert _norm("Открытых обязательств: 1") in week
+    assert _norm("Исправления: 1") in stats.splitlines()
+    assert _norm("🔵→🔴 ×1") in stats
+    assert "Задача Алисы" in commitments
+
+
+def test_week_counts_legacy_rows_stored_under_raw_login(tmp_path: Path) -> None:
+    login = "Alice@Example.com"
+    sent: list[tuple[str, str]] = []
+    processor = _build_processor(
+        tmp_path, sent, accounts=[_account("acc_a", login, CHAT_A)]
+    )
+    for account_email in (login, normalize_login(login)):
+        _insert_email(processor.knowledge_db.path, account_email=account_email)
+
+    processor.handle_message(_message(CHAT_A, "/week"))
+
+    assert _norm("Важных: 2 ·") in _norm(sent[-1][1])
+
+
+def test_status_shows_configured_login_with_its_digest_state(tmp_path: Path) -> None:
+    # The digest scheduler keys digest_state by the configured login as typed.
+    login = "HQ/User"
+    sent: list[tuple[str, str]] = []
+    processor = _build_processor(
+        tmp_path, sent, accounts=[_account("acc_a", login, CHAT_A)]
+    )
+    processor.knowledge_db.set_last_digest_sent_at(
+        account_email=login,
+        sent_at=datetime(2026, 10, 19, 9, 0, tzinfo=timezone.utc),
+    )
+
+    processor.handle_message(_message(CHAT_A, "/status"))
+
+    status = _norm(sent[-1][1])
+    assert _norm(f"{login}: день 19.10 09:00") in status
+    assert normalize_login(login) not in status
 
 
 def test_digest_off_applies_only_to_requesting_chat(tmp_path: Path) -> None:

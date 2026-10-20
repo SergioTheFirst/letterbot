@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
+from mailbot_v26.account_identity import normalize_login
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
 from mailbot_v26.config_loader import SupportSettings, load_support_settings
 from mailbot_v26.events.contract import EventType, EventV1
@@ -2025,7 +2026,7 @@ class TelegramInboundProcessor:
         self.send_reply(chat_id, reply)
 
     def _handle_commitments(self, chat_id: str) -> None:
-        account_emails = self._account_emails(chat_id)
+        account_emails = self._account_scope(chat_id)
         if not account_emails:
             self._reply(chat_id, _ui_text("• No open commitments", "• Нет открытых обязательств"))
             return
@@ -2102,7 +2103,7 @@ class TelegramInboundProcessor:
         primary = account_emails[0]
         summary = self.analytics.weekly_compact_summary(
             account_email=primary,
-            account_emails=account_emails,
+            account_emails=self._account_scope(chat_id),
             days=7,
         )
         accuracy_pct = summary.get("accuracy_pct")
@@ -2145,6 +2146,7 @@ class TelegramInboundProcessor:
             return "\n".join(lines)
 
         primary = account_emails[0]
+        scope = self._account_scope(chat_id)
         accuracy: dict[str, object] = {}
         calibration_totals: dict[str, object] = {}
 
@@ -2152,7 +2154,7 @@ class TelegramInboundProcessor:
             accuracy = self.analytics.weekly_accuracy_report(
                 account_email=primary,
                 days=days,
-                account_emails=account_emails,
+                account_emails=scope,
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("telegram_stats_accuracy_failed", error=str(exc))
@@ -2180,7 +2182,7 @@ class TelegramInboundProcessor:
             db_path=self.knowledge_db.path,
             days=days,
             limit=3,
-            account_emails=account_emails,
+            account_emails=scope,
         )
         if transitions:
             transitions_text = ", ".join(
@@ -2362,6 +2364,18 @@ class TelegramInboundProcessor:
     def _account_emails(self, chat_id: str) -> list[str]:
         """Accounts routed to this chat (B16); never other chats' accounts."""
         return list(self.chat_account_emails.get(_safe_chat_id(chat_id), ()))
+
+    def _account_scope(self, chat_id: str) -> list[str]:
+        """Ids that match this chat's accounts in emails / events_v1 (B16).
+
+        Ingest stores normalize_login(login); legacy rows may hold the login
+        as configured, so both forms match. Display and the digest_state
+        lookup keep the configured login (_account_emails).
+        """
+        scope: set[str] = set()
+        for login in self._account_emails(chat_id):
+            scope.update((login, normalize_login(login)))
+        return sorted(scope)
 
 
 def run_inbound_polling(
