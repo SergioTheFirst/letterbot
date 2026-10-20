@@ -376,15 +376,6 @@ def _collect_digest_data(
             now=now or datetime.now(timezone.utc),
         )
 
-        compute_attention_economics(
-            analytics=analytics,
-            account_email=account_email,
-            account_emails=scope_account_emails,
-            window_days=30,
-            include_anomalies=include_anomalies,
-            now=now or datetime.now(timezone.utc),
-        )
-
     quality_metrics: QualityMetricsSnapshot | None = None
     if include_quality_metrics:
         try:

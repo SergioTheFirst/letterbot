@@ -651,15 +651,6 @@ def _collect_weekly_data(
             event_emitter=event_emitter,
             now=now or datetime.now(timezone.utc),
         )
-        compute_attention_economics(
-            analytics=analytics,
-            account_email=account_email,
-            account_emails=account_emails,
-            window_days=30,
-            include_anomalies=include_anomalies,
-            event_emitter=event_emitter,
-            now=now or datetime.now(timezone.utc),
-        )
 
     anomaly_alerts: list[str] = []
     if include_anomalies:
