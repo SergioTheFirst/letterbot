@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -22,6 +23,10 @@ from mailbot_v26.account_identity import normalize_login
 DEFAULT_STATE_PATH = Path(__file__).resolve().parent / "state.json"
 
 log = logging.getLogger(__name__)
+
+# One state file write at a time in this process, across StateManager
+# instances: Windows refuses a rename over a file another rename is replacing.
+_SAVE_LOCK = threading.Lock()
 
 
 @dataclass
@@ -379,15 +384,46 @@ class StateManager:
                 "context_dead_letters": dict(self._state.context_dead_letters),
             }
 
-            tmp_file = self.state_file.with_suffix(".tmp")
-            with open(tmp_file, "w", encoding="utf-8") as fh:
+            with _SAVE_LOCK:
+                self._write_state_file(payload)
+            self._dirty = False
+            self._last_save_ts = now
+
+    def _write_state_file(self, payload: Mapping[str, Any]) -> None:
+        """Write payload to a temp file of its own beside the state file
+        (mkstemp: unique, private), fsync it, then rename it over the state
+        file. On failure the temp file is removed and the error propagates,
+        so the state stays dirty and the next save writes it."""
+        tmp_name: Optional[str] = None
+        try:
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{self.state_file.name}.",
+                suffix=".tmp",
+                dir=self.state_file.parent,
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, indent=2, ensure_ascii=False)
                 # The cursor must be on disk before the rename makes it live.
                 fh.flush()
                 os.fsync(fh.fileno())
-            tmp_file.replace(self.state_file)
-            self._dirty = False
-            self._last_save_ts = now
+            os.replace(tmp_name, self.state_file)
+        except BaseException as exc:
+            log.warning(
+                "state_save_failed file=%s error=%s: %s",
+                self.state_file,
+                type(exc).__name__,
+                exc,
+            )
+            if tmp_name is not None:
+                try:
+                    Path(tmp_name).unlink(missing_ok=True)
+                except OSError as cleanup_exc:
+                    log.warning(
+                        "state_temp_cleanup_failed file=%s error=%s",
+                        tmp_name,
+                        cleanup_exc,
+                    )
+            raise
 
     def _mark_dirty(self) -> None:
         self._dirty = True
