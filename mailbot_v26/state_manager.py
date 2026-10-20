@@ -9,15 +9,19 @@ and prefer safe defaults over crashes.
 from __future__ import annotations
 
 import json
+import logging
+import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from mailbot_v26.account_identity import normalize_login
 
 DEFAULT_STATE_PATH = Path(__file__).resolve().parent / "state.json"
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,6 +53,10 @@ class BotState:
     accounts: Dict[str, AccountState] = field(default_factory=dict)
     llm: LLMState = field(default_factory=LLMState)
     meta: MetaState = field(default_factory=MetaState)
+    # Top-level keys, never AccountState fields: an older build loads
+    # accounts with AccountState(**data) and ignores unknown top-level keys.
+    uid_attempts: Dict[str, Dict[int, int]] = field(default_factory=dict)
+    dead_letter_alert_at: Dict[str, str] = field(default_factory=dict)
 
 
 class StateManager:
@@ -101,7 +109,42 @@ class StateManager:
             accounts=accounts,
             llm=LLMState(**llm_raw),
             meta=MetaState(**meta_raw),
+            uid_attempts=self._load_uid_attempts(raw.get("uid_attempts")),
+            dead_letter_alert_at=self._load_alert_times(
+                raw.get("dead_letter_alert_at")
+            ),
         )
+
+    def _load_uid_attempts(self, raw: Any) -> Dict[str, Dict[int, int]]:
+        attempts: Dict[str, Dict[int, int]] = {}
+        if not isinstance(raw, Mapping):
+            return attempts
+        for login, entries in raw.items():
+            key = normalize_login(str(login))
+            if not key or not isinstance(entries, Mapping):
+                continue
+            target = attempts.setdefault(key, {})
+            for uid, count in entries.items():
+                try:
+                    uid_value, count_value = int(uid), int(count)
+                except (TypeError, ValueError):
+                    log.warning(
+                        "state_uid_attempt_entry_ignored file=%s", self.state_file
+                    )
+                    continue
+                target[uid_value] = max(target.get(uid_value, 0), count_value)
+        return attempts
+
+    @staticmethod
+    def _load_alert_times(raw: Any) -> Dict[str, str]:
+        if not isinstance(raw, Mapping):
+            return {}
+        times: Dict[str, str] = {}
+        for login, value in raw.items():
+            key = normalize_login(str(login))
+            if key and isinstance(value, str) and value:
+                times[key] = max(times.get(key, ""), value)
+        return times
 
     def get_last_uid(self, login: str) -> int:
         key = normalize_login(login)
@@ -175,6 +218,44 @@ class StateManager:
             account.last_error = error
             self._mark_dirty()
 
+    def get_uid_attempts(self, login: str) -> Dict[int, int]:
+        """UID -> failed fetch/persist attempts for UIDs above the cursor."""
+        key = normalize_login(login)
+        with self._lock:
+            return dict(self._state.uid_attempts.get(key, {}))
+
+    def set_uid_attempts(self, login: str, attempts: Mapping[int, int]) -> None:
+        key = normalize_login(login)
+        if not key:
+            return
+        with self._lock:
+            cleaned = {int(uid): int(count) for uid, count in attempts.items()}
+            if cleaned:
+                self._state.uid_attempts[key] = cleaned
+            else:
+                self._state.uid_attempts.pop(key, None)
+            self._mark_dirty()
+
+    def get_dead_letter_alert_at(self, login: str) -> Optional[datetime]:
+        key = normalize_login(login)
+        with self._lock:
+            raw = self._state.dead_letter_alert_at.get(key)
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            log.warning("state_dead_letter_alert_time_invalid file=%s", self.state_file)
+            return None
+
+    def set_dead_letter_alert_at(self, login: str, timestamp: datetime) -> None:
+        key = normalize_login(login)
+        if not key:
+            return
+        with self._lock:
+            self._state.dead_letter_alert_at[key] = timestamp.isoformat()
+            self._mark_dirty()
+
     def get_accounts_snapshot(self) -> Dict[str, AccountState]:
         with self._lock:
             return {
@@ -215,11 +296,19 @@ class StateManager:
                 },
                 "llm": self._state.llm.__dict__,
                 "meta": {**self._state.meta.__dict__, "last_save": now.isoformat()},
+                "uid_attempts": {
+                    login: {str(uid): count for uid, count in sorted(entries.items())}
+                    for login, entries in self._state.uid_attempts.items()
+                },
+                "dead_letter_alert_at": dict(self._state.dead_letter_alert_at),
             }
 
             tmp_file = self.state_file.with_suffix(".tmp")
             with open(tmp_file, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, indent=2, ensure_ascii=False)
+                # The cursor must be on disk before the rename makes it live.
+                fh.flush()
+                os.fsync(fh.fileno())
             tmp_file.replace(self.state_file)
             self._dirty = False
             self._last_save_ts = now
