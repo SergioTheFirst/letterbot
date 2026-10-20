@@ -18,6 +18,7 @@ import socket
 import ssl
 import threading
 from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -998,6 +999,45 @@ def test_page_ships_the_editor_without_inline_script(tmp_path: Path) -> None:
     assert json.loads(html.unescape(data.group(1)))["texts"]["editor.add"] == "Add mailbox"
     _assert_no_secrets(page)
     assert 'autocomplete="new-password"' in page
+
+
+class _EditorAncestry(HTMLParser):
+    """Records, for the editor and web-card sections, whether they sit inside
+    div.settings-page (only div/section are tracked: always closed explicitly)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[tuple[str, bool]] = []
+        self.inside: dict[str, bool] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        names = dict(attrs)
+        for marker in ("data-settings-editor", "data-web-card"):
+            if marker in names:
+                self.inside[marker] = any(flag for _, flag in self.stack)
+        if tag in ("div", "section"):
+            self.stack.append((tag, "settings-page" in (names.get("class") or "").split()))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("div", "section"):
+            for index in range(len(self.stack) - 1, -1, -1):
+                if self.stack[index][0] == tag:
+                    del self.stack[index:]
+                    break
+
+
+def test_hidden_editor_parts_stay_hidden_despite_display_rules(tmp_path: Path) -> None:
+    # .settings-field / .settings-toolbar / .status-pill set display, and an
+    # author rule beats the browser's own [hidden] rule: without this one a
+    # "Password saved" pill shows next to an empty password box.
+    css = (Path(settings_api.__file__).parent / "static" / "settings.css").read_text(encoding="utf-8")
+    assert re.search(r"\.settings-page\s+\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}", css)
+    app = _app(tmp_path, _config(tmp_path))
+    with app.test_client() as client:
+        page = client.get("/accounts").get_data(as_text=True)
+    parser = _EditorAncestry()
+    parser.feed(page)
+    assert parser.inside == {"data-settings-editor": True, "data-web-card": True}
 
 
 def test_applied_reports_the_saved_hash(tmp_path: Path) -> None:

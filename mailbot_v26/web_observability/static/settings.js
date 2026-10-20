@@ -575,7 +575,7 @@
 
   root.addEventListener("click", function (event) {
     var target = event.target.closest ? event.target.closest("button") : null;
-    if (!target || !root.contains(target)) {
+    if (!target || !root.contains(target) || !state) {
       return;
     }
     var action = target.getAttribute("data-action");

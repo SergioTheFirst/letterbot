@@ -5,6 +5,13 @@
   gap: 16px;
 }
 
+/* settings.js shows and hides parts with the hidden attribute; rules below
+   (and .status-pill in style.css) set display, which would override the
+   browser's own [hidden] rule and show a "saved" pill with no secret saved. */
+.settings-page [hidden] {
+  display: none !important;
+}
+
 .settings-intro {
   margin: 0;
 }
