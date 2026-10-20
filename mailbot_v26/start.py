@@ -1890,7 +1890,15 @@ def _build_snooze_return_text(
     reminder_text: str,
     snoozed_at_utc: str = "",
     locale: str,
+    now_utc: datetime | None = None,
+    local_tz: timezone | None = None,
 ) -> str:
+    """Prefix a due snooze reminder with Smart Return context.
+
+    ``now_utc`` defaults to the current time and ``local_tz`` (the user's
+    calendar for "yesterday") to the machine's local time zone.
+    """
+
     def _parse_utc(raw_value: str) -> datetime | None:
         value = str(raw_value or "").strip()
         if not value:
@@ -1910,11 +1918,6 @@ def _build_snooze_return_text(
         delta_seconds = max(int((now_utc - snoozed_at).total_seconds()), 0)
         if delta_seconds < 60:
             return "just now" if is_english else "только что"
-        if (
-            now_utc.date() != snoozed_at.date()
-            and (now_utc.date() - snoozed_at.date()).days == 1
-        ):
-            return "yesterday" if is_english else "вчера"
         minutes = delta_seconds // 60
         if minutes < 60:
             if is_english:
@@ -1928,6 +1931,14 @@ def _build_snooze_return_text(
                 suffix = "минут"
             return f"{minutes} {suffix} назад"
         hours = delta_seconds // 3600
+        # "Yesterday" is the user's local calendar day: UTC dates disagree with
+        # it between local midnight and UTC midnight. Past 48 hours it never
+        # applies, which also keeps absurd stored dates away from astimezone().
+        if hours < 48:
+            local_today = now_utc.astimezone(local_tz).date()
+            local_snooze_day = snoozed_at.astimezone(local_tz).date()
+            if (local_today - local_snooze_day).days == 1:
+                return "yesterday" if is_english else "вчера"
         if hours < 24:
             if is_english:
                 unit = "hour" if hours == 1 else "hours"
@@ -1979,7 +1990,10 @@ def _build_snooze_return_text(
         locale=locale,
     )
     prefix_lines: list[str] = []
-    delay_text = _render_delay(datetime.now(timezone.utc), _parse_utc(snoozed_at_utc))
+    delay_text = _render_delay(
+        now_utc if now_utc is not None else datetime.now(timezone.utc),
+        _parse_utc(snoozed_at_utc),
+    )
     if delay_text:
         prefix_lines.append(
             "⏰ You snoozed this email " + delay_text
