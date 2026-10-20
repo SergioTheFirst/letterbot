@@ -20,6 +20,7 @@ from mailbot_v26.domain.issuer_identity import (
 )
 from mailbot_v26.domain.issuer_profile import issuer_profile_from_interpretation_payload
 from mailbot_v26.events.contract import EventType
+from mailbot_v26.events.privacy import TEXT_MARKERS, count_words
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 
 logger = logging.getLogger(__name__)
@@ -3626,7 +3627,7 @@ class KnowledgeAnalytics:
         if resolved_limit <= 0:
             return []
         query = """
-        SELECT ts_utc, payload, payload_json
+        SELECT ts_utc, email_id, payload, payload_json
         FROM events_v1
         WHERE event_type = ?
           AND ts_utc >= ?
@@ -3643,7 +3644,7 @@ class KnowledgeAnalytics:
             rows = self._execute_select(query, params)
         except sqlite3.OperationalError:
             return []
-        items: list[dict[str, object]] = []
+        selected: list[tuple[object, dict[str, object], int]] = []
         for row in rows:
             payload = self._event_payload(row)
             raw_confidence = payload.get("confidence")
@@ -3654,18 +3655,49 @@ class KnowledgeAnalytics:
             confidence = max(0, min(100, confidence))
             if confidence >= min_confidence:
                 continue
-            sender = str(payload.get("sender") or "")
-            subject = str(payload.get("subject") or "")
+            selected.append((row.get("email_id"), payload, confidence))
+            if len(selected) >= resolved_limit:
+                break
+        # Event payloads carry no subject (CONSTITUTION VII): the email's own
+        # row holds it. Rows written before WP3a still carry one, used when
+        # the email row is gone.
+        subjects = self._email_subjects_by_id(email_id for email_id, _, _ in selected)
+        items: list[dict[str, object]] = []
+        for email_id, payload, confidence in selected:
+            stored_subject = subjects.get(email_id) if isinstance(email_id, int) else None
             items.append(
                 {
-                    "sender": sender,
-                    "subject": subject,
+                    "sender": str(payload.get("sender") or ""),
+                    "subject": stored_subject or str(payload.get("subject") or ""),
                     "confidence": confidence,
                 }
             )
-            if len(items) >= resolved_limit:
-                break
         return items
+
+    def _email_subjects_by_id(self, email_ids: Iterable[object]) -> dict[int, str]:
+        """Stored subjects of the given ``emails`` rows (missing ids are left out).
+
+        A lookup failure is logged and gives no subjects; callers fall back.
+        """
+        ids = sorted(
+            {value for value in email_ids if isinstance(value, int) and not isinstance(value, bool)}
+        )
+        batch_size = 500  # well below SQLite's bound-parameter limit (999 on old builds)
+        subjects: dict[int, str] = {}
+        for start in range(0, len(ids), batch_size):
+            batch = ids[start : start + batch_size]
+            placeholders = ", ".join(["?"] * len(batch))
+            try:
+                rows = self._execute_select(
+                    f"SELECT id, subject FROM emails WHERE id IN ({placeholders})",
+                    batch,
+                )
+            except sqlite3.Error as exc:
+                logger.warning("email_subject_lookup_failed ids=%d error=%s", len(ids), exc)
+                return {}
+            for row in rows:
+                subjects[int(row["id"])] = str(row.get("subject") or "")
+        return subjects
 
     def recent_email_events(
         self,
@@ -4611,16 +4643,17 @@ class KnowledgeAnalytics:
             payload_text = str(
                 row.get("payload_json") or row.get("payload") or ""
             ).lower()
-            if "invoice_paid" in event_type or (
-                "invoice" in payload_text and "paid" in payload_text
-            ):
+            # Only words of TEXT_MARKERS: scrubbed payloads keep exactly those
+            # (under "text_markers"), so raw and scrubbed rows score alike.
+            markers = {marker for marker in TEXT_MARKERS if marker in payload_text}
+            if "invoice_paid" in event_type or {"invoice", "paid"} <= markers:
                 trust_score += 1
             if "overdue" in event_type or "expired" in event_type:
                 overdue_count += 1
                 trust_score -= 2
-            if "fast_reply" in event_type or "fast reply" in payload_text:
+            if "fast_reply" in event_type or "fast reply" in markers:
                 trust_score += 1
-            if "dispute" in event_type or "dispute" in payload_text:
+            if "dispute" in event_type or "dispute" in markers:
                 trust_score -= 1
         trust_score = max(0, min(5, trust_score))
 
@@ -5883,13 +5916,10 @@ class KnowledgeAnalytics:
             sender = str(payload.get("from_email") or "").strip()
             if not sender:
                 continue
-            summary = str(payload.get("body_summary") or "").strip()
-            subject = str(payload.get("subject") or "").strip()
-            text = summary or subject
-            if not text:
+            words = self._attention_word_count(payload)
+            if words is None:
                 continue
-            words = re.findall(r"\b\w+\b", text)
-            totals[sender] = totals.get(sender, 0) + len(words)
+            totals[sender] = totals.get(sender, 0) + words
         results = [
             {"entity": sender, "words": words} for sender, words in totals.items()
         ]
@@ -5897,6 +5927,26 @@ class KnowledgeAnalytics:
             key=lambda item: (-int(item["words"]), str(item["entity"]).lower())
         )
         return results
+
+    @staticmethod
+    def _attention_word_count(payload: Mapping[str, object]) -> int | None:
+        """Words weekly attention counts for one EMAIL_RECEIVED payload, or None.
+
+        The body summary wins over the subject; blank text is skipped. Scrubbed
+        payloads carry the counts (``summary_words`` / ``subject_words``, present
+        only for non-blank text, see events.privacy); rows written before WP3a
+        still carry the raw text, counted the same way.
+        """
+        for key in ("summary_words", "subject_words"):
+            count = payload.get(key)
+            if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+                return count
+        summary = str(payload.get("body_summary") or "").strip()
+        subject = str(payload.get("subject") or "").strip()
+        text = summary or subject
+        if not text:
+            return None
+        return count_words(text)
 
     def attention_entity_metrics(
         self,
