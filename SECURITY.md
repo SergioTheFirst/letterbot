@@ -20,6 +20,12 @@
 - Performance issues without a confidentiality, integrity, or availability impact
 - Local placeholder/example credentials such as `CHANGE_ME`
 
+## Local secrets on disk
+
+- `accounts.ini`, `settings.ini` and `keys.ini` hold passwords and tokens in plain text. They are git-ignored and never go into the source bundle or the installer.
+- Each save on the Settings page first keeps the previous file next to it as `<name>.ini.bak-YYYYMMDD-HHMMSS` (the newest 10 per file); `python -m mailbot_v26 migrate-config` keeps `<name>.ini.bak`. These copies hold the same secrets: old and new mailbox passwords, the bot token and earlier dashboard passwords. They are git-ignored (`*.ini.bak`, `*.ini.bak-*`, and `.*.ini.*.tmp` for a write interrupted by a crash) and excluded from the source bundle and the installer.
+- After rotating a leaked secret, delete the backups that still contain it.
+
 ## Secret exposure response
 
 - Rotate or revoke any real leaked credential outside this PR.

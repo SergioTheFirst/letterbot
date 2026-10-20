@@ -12,13 +12,16 @@ Writes are atomic (temporary file in the same folder, fsync, os.replace) and
 first copy the current file to "<name>.bak-YYYYMMDD-HHMMSS" (local time; the
 newest BACKUP_KEEP are kept). Backups hold secrets: they stay next to the
 file, match no "*.ini" glob, and are only ever addressed by a name that
-matches the backup pattern.
+matches the backup pattern. SECRET_COPY_PATTERNS names them (and the temp
+file of an interrupted write) for .gitignore, the source bundle and the
+installer, which must never pick them up.
 """
 
 from __future__ import annotations
 
 import codecs
 import configparser
+import fnmatch
 import hashlib
 import logging
 import os
@@ -46,6 +49,17 @@ _NAME_RE = re.compile(r"[a-z0-9_]{1,64}")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
 _REPLACE_ATTEMPTS = 3
 _REPLACE_RETRY_SECONDS = 0.05
+# Copies of a user INI file, holding the same passwords and tokens: backups
+# made here ("<name>.bak-<stamp>[-n]") and by migrate-config ("<name>.bak"),
+# and what an interrupted atomic_write leaves (".<name>.<random>.tmp").
+# .gitignore lists the same patterns.
+SECRET_COPY_PATTERNS = ("*.ini.bak", "*.ini.bak-*", ".*.ini.*.tmp")
+
+
+def is_secret_copy_name(name: str) -> bool:
+    """True for a backup or temp copy of an INI file: never commit or ship it."""
+    lowered = name.lower()
+    return any(fnmatch.fnmatchcase(lowered, pattern) for pattern in SECRET_COPY_PATTERNS)
 
 
 class IniEditError(ValueError):
@@ -496,11 +510,13 @@ __all__ = [
     "IniEditError",
     "RemoveKey",
     "RemoveSection",
+    "SECRET_COPY_PATTERNS",
     "SetValue",
     "apply_edits",
     "atomic_write",
     "check_readable",
     "file_etag",
+    "is_secret_copy_name",
     "list_backups",
     "read_backup",
     "restore_backup",

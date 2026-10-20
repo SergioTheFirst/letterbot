@@ -52,6 +52,11 @@ config.ini
 config.local.yaml
 *.local.ini
 *.local.yaml
+# Copies of the INI files with the same secrets (Settings page, migrate-config):
+# <name>.ini.bak, <name>.ini.bak-<stamp>[-n], .<name>.ini.<random>.tmp
+*.ini.bak
+*.ini.bak-*
+.*.ini.*.tmp
 # Build artifacts 
 dist/ 
 build/ 

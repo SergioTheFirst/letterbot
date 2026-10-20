@@ -233,6 +233,34 @@ def test_list_backups_ignores_other_names(tmp_path: Path) -> None:
     assert list_backups(path) == []
 
 
+def test_backup_and_temp_names_are_marked_as_secret_copies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # .gitignore, the source bundle and the installer exclude these names:
+    # they hold the same passwords and tokens as the live file.
+    temp_names: list[str] = []
+    real_mkstemp = ini_editor.tempfile.mkstemp
+
+    def recording_mkstemp(*args: object, **kwargs: object):
+        handle, name = real_mkstemp(*args, **kwargs)
+        temp_names.append(Path(name).name)
+        return handle, name
+
+    monkeypatch.setattr(ini_editor.tempfile, "mkstemp", recording_mkstemp)
+    path = tmp_path / "accounts.ini"
+    path.write_bytes(b"old")
+    backups = [write_with_backup(path, b"new", now=NOW), write_with_backup(path, b"newer", now=NOW)]
+    settings = tmp_path / "settings.ini"
+    settings.write_bytes(b"old")
+    backups.append(write_with_backup(settings, b"new", now=NOW))
+
+    assert len(temp_names) == 6
+    for name in [*backups, *temp_names, "keys.ini.bak", "config.ini.bak"]:
+        assert ini_editor.is_secret_copy_name(name), name
+    for name in ("accounts.ini", "settings.ini", "accounts.ini.example", "settings.ini.example", "notes.tmp"):
+        assert not ini_editor.is_secret_copy_name(name), name
+
+
 def test_failed_replace_keeps_the_original_and_leaves_no_temp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -218,7 +218,15 @@ def test_build_windows_installer_timeout_is_a_build_error(
 
 
 @pytest.mark.parametrize(
-    "rel", ["mailbot_v26/config/accounts.ini", "data/mailbot.sqlite", "a\\b.txt"]
+    "rel",
+    [
+        "mailbot_v26/config/accounts.ini",
+        "mailbot_v26/config/accounts.ini.bak-20261020-190949",
+        "mailbot_v26/config/.settings.ini.k3j2.tmp",
+        "mailbot_v26/config/keys.ini.bak",
+        "data/mailbot.sqlite",
+        "a\\b.txt",
+    ],
 )
 def test_payload_rejects_runtime_or_unsafe_manifest_entries(tmp_path: Path, rel: str) -> None:
     dist_dir = tmp_path / "dist" / "Letterbot"

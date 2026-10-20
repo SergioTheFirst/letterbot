@@ -37,6 +37,20 @@ def test_source_bundle_excludes_runtime_artifacts(tmp_path: Path) -> None:
     _touch(repo / "mailbot_v26" / "config" / "accounts.ini")
     _touch(repo / "config.local.yaml")
     _touch(repo / "mailbot_v26" / "config" / "settings.local.ini")
+    # Same secrets as the live files: Settings-page backups, the temp file of
+    # an interrupted atomic write, migrate-config backups, legacy key files.
+    secret_copies = [
+        "mailbot_v26/config/accounts.ini.bak-20261020-190949",
+        "mailbot_v26/config/settings.ini.bak-20261020-190949-1",
+        "mailbot_v26/config/.accounts.ini.k3j2.tmp",
+        "mailbot_v26/config/.settings.ini.bak-20261020-190949.x8y9.tmp",
+        "mailbot_v26/config/keys.ini.bak",
+        "mailbot_v26/config/keys.ini",
+        "mailbot_v26/config/config.ini",
+        "accounts.ini.bak-20261020-190949",
+    ]
+    for rel in secret_copies:
+        _touch(repo / rel)
 
     output = repo / "dist" / "letterbot-source.zip"
     build_source_bundle(output, repo_root=repo)
@@ -56,6 +70,7 @@ def test_source_bundle_excludes_runtime_artifacts(tmp_path: Path) -> None:
     assert "mailbot_v26/config/accounts.ini" not in names
     assert "config.local.yaml" not in names
     assert "mailbot_v26/config/settings.local.ini" not in names
+    assert sorted(set(secret_copies) & names) == []
 
 
 def test_source_bundle_includes_required_docs_examples_and_templates(

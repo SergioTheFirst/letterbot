@@ -78,8 +78,24 @@ def test_local_real_config_files_are_gitignored() -> None:
     if not is_git_repo:
         pytest.skip("not a git repository — skipping gitignore check")
 
+    # Copies the Settings page and migrate-config leave next to the live files
+    # hold the same passwords and tokens: backups, and the temp file of an
+    # interrupted atomic write.
+    secret_copies = [
+        f"{folder}{name}"
+        for folder in ("", "mailbot_v26/config/")
+        for name in (
+            "accounts.ini.bak-20261020-190949",
+            "settings.ini.bak-20261020-190949-1",
+            ".accounts.ini.k3j2.tmp",
+            ".accounts.ini.bak-20261020-190949.x8y9.tmp",
+            "keys.ini.bak",
+            "config.ini.bak",
+        )
+    ]
+    expected = {"settings.ini", "accounts.ini", "keys.ini", ".env", *secret_copies}
     result = subprocess.run(
-        [git, "check-ignore", "settings.ini", "accounts.ini", "keys.ini", ".env"],
+        [git, "check-ignore", *sorted(expected)],
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
@@ -87,7 +103,7 @@ def test_local_real_config_files_are_gitignored() -> None:
     ).stdout
     ignored = {line.strip() for line in result.splitlines() if line.strip()}
 
-    assert {"settings.ini", "accounts.ini", "keys.ini", ".env"}.issubset(ignored)
+    assert sorted(expected - ignored) == []
 
 
 def test_readme_exists() -> None:
