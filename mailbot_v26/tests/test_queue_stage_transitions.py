@@ -4,6 +4,9 @@ The finished stage's row is replaced by the next stage's row atomically. A
 crash or a failed write between the two used to leave an emails row with no
 queue row: status NEW, never notified, never re-ingested (the next poll skips
 it as a duplicate).
+
+A dead letter (email ERROR, queue row removed) is one transaction as well: an
+email left ERROR but still queued could later be delivered and keep ERROR.
 """
 
 from __future__ import annotations
@@ -45,6 +48,22 @@ def _fail_inserts_of(storage: Storage, stage: str) -> None:
 def _allow_inserts_of(storage: Storage, stage: str) -> None:
     with storage.conn:
         storage.conn.execute(f"DROP TRIGGER fail_{stage}_insert")
+
+
+def _fail_queue_deletes(storage: Storage) -> None:
+    """Every DELETE of a queue row fails, like a crash mid-dead-letter."""
+    with storage.conn:
+        storage.conn.execute(
+            """
+            CREATE TRIGGER fail_queue_delete BEFORE DELETE ON queue
+            BEGIN SELECT RAISE(ABORT, 'injected queue delete failure'); END;
+            """
+        )
+
+
+def _allow_queue_deletes(storage: Storage) -> None:
+    with storage.conn:
+        storage.conn.execute("DROP TRIGGER fail_queue_delete")
 
 
 def _queue_detail(storage: Storage) -> list[tuple[str, int, str | None]]:
@@ -132,3 +151,44 @@ def test_failed_transition_keeps_the_email_queued_and_retries_it(
     assert len(telegram.email_messages()) == 1
     assert _queue_rows(storage) == []
     assert _email_row(storage, email_id)[2]
+
+
+def test_dead_letter_marks_the_email_error_and_drops_the_row_in_one_step(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    email_id = _stored_email(storage)
+    item = storage.claim_next(["PARSE"])
+    assert item is not None
+
+    storage.dead_letter_queue_item(
+        item["queue_id"], email_id, "context_unavailable:gone"
+    )
+
+    assert _queue_detail(storage) == []
+    assert _email_row(storage, email_id)[:2] == ("ERROR", "context_unavailable:gone")
+
+
+def test_failed_dead_letter_leaves_the_email_queued_and_not_error(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    email_id = _stored_email(storage)
+    item = storage.claim_next(["PARSE"])
+    assert item is not None
+    _fail_queue_deletes(storage)
+
+    with pytest.raises(sqlite3.DatabaseError, match="injected"):
+        storage.dead_letter_queue_item(
+            item["queue_id"], email_id, "context_unavailable:gone"
+        )
+
+    # Rolled back as a whole: still queued for the retry, and not ERROR.
+    assert _queue_detail(storage) == [("PARSE", 1, None)]
+    assert _email_row(storage, email_id)[:2] == ("NEW", None)
+    assert not storage.conn.in_transaction
+    _allow_queue_deletes(storage)
+    storage.dead_letter_queue_item(
+        item["queue_id"], email_id, "context_unavailable:gone"
+    )
+    assert _queue_detail(storage) == []

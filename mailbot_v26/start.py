@@ -1388,12 +1388,12 @@ def _dead_letter_unavailable_context(
 
     No content means no fail-open send: the email turns ERROR, IMAP_HEALTH
     shows it (dead_letter, stage CONTEXT) and the account's next poll folds
-    it into the aggregated alert (D-P2-1).
+    it into the aggregated alert (D-P2-1). The alert count and the event come
+    first, then the ERROR status and the queue removal in one transaction: a
+    crash before that write, or a failed write, leaves the item queued, so a
+    later pass dead-letters it again (shown twice rather than never).
     """
     login = normalize_login(lost.account_email)
-    storage.set_email_error(email_id, str(lost))
-    storage.mark_done(queue_id)
-    _cleanup_pipeline_cache(email_id)
     _record_context_dead_letter(state, login)
     logger.error(
         "pipeline_context_dead_lettered email_id=%s stage=%s uid=%s reason=%s",
@@ -1411,6 +1411,8 @@ def _dead_letter_unavailable_context(
         attempt_count=attempts,
         extra_payload={"stage": "CONTEXT", "queue_stage": stage, "reason": lost.reason},
     )
+    storage.dead_letter_queue_item(queue_id, email_id, str(lost))
+    _cleanup_pipeline_cache(email_id)
 
 
 def _context_refetch_delay_seconds(waited_seconds: float) -> int:

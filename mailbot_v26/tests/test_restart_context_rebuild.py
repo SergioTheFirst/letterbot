@@ -47,6 +47,10 @@ from mailbot_v26.tests.test_imap_refetch import (
     raw_email,
     server_item,
 )
+from mailbot_v26.tests.test_queue_stage_transitions import (
+    _allow_queue_deletes,
+    _fail_queue_deletes,
+)
 
 # Shared fixtures, re-exported by assignment so pytest discovers them here.
 events = _invariants.events
@@ -96,17 +100,22 @@ def _ingest(storage: Storage, config, server: RefetchIMAPClient, tmp_path: Path)
     return email_id
 
 
+def _restart(storage: Storage) -> Storage:
+    """Drop every in-memory cache and reopen the DB, like a worker restart."""
+    storage.close()
+    PIPELINE_CACHE.clear()
+    PIPELINE_INBOUND_CACHE.clear()
+    PIPELINE_RAW_CACHE.clear()
+    return Storage(storage.db_path)
+
+
 def _crash_at(storage: Storage, email_id: int, stage: str) -> Storage:
     """Leave only `stage` queued, drop every in-memory cache, reopen the DB."""
     if stage != "PARSE":
         with storage.conn:
             storage.conn.execute("DELETE FROM queue WHERE email_id = ?", (email_id,))
         storage.enqueue_stage(email_id, stage)
-    storage.close()
-    PIPELINE_CACHE.clear()
-    PIPELINE_INBOUND_CACHE.clear()
-    PIPELINE_RAW_CACHE.clear()
-    return Storage(storage.db_path)
+    return _restart(storage)
 
 
 def _context_dead_letters(events) -> list:
@@ -577,3 +586,118 @@ def test_context_dead_letters_join_the_next_aggregated_alert(
     assert "after a restart: 2" in sent[0] or "после перезапуска: 2" in sent[0]
     assert "attempts" not in sent[0] and "попыток" not in sent[0]
     assert start_module._CONTEXT_DEAD_LETTERS == {}
+
+
+class _ProcessKilled(BaseException):
+    """The process dies here (power loss, closed console): nothing after runs."""
+
+
+def _unavailable_after_restart(
+    reason: str, storage: Storage, config, server, tmp_path: Path, monkeypatch
+) -> tuple[Storage, int]:
+    """A TG item whose message cannot be refetched after a restart: deleted
+    from the mailbox (gone), or IMAP down past the maximum wait (R2)."""
+    server.set_messages({7: server_item(raw_email(subject=SUBJECT))})
+    email_id = _ingest(storage, config, server, tmp_path)
+    if reason == "gone":
+        server.set_messages({})
+        return _crash_at(storage, email_id, "TG"), email_id
+    server.login_error = OSError("connection refused")
+    restarted = _crash_at(storage, email_id, "TG")
+    started = (
+        datetime.now(timezone.utc)
+        - start_module.CONTEXT_IMAP_MAX_WAIT
+        - timedelta(minutes=1)
+    )
+    monkeypatch.setattr(start_module, "_WORKER_STARTED_AT", started)
+    _queued_at(restarted, started - timedelta(hours=1))
+    return restarted, email_id
+
+
+@pytest.mark.parametrize("reason", ["gone", "imap_unavailable"])
+def test_crash_before_the_dead_letter_is_shown_keeps_the_email_queued(
+    tmp_path, monkeypatch, telegram, events, server, reason
+) -> None:
+    config, storage, _legacy_processor, flags = _setup(
+        tmp_path, monkeypatch, premium=False
+    )
+    restarted, email_id = _unavailable_after_restart(
+        reason, storage, config, server, tmp_path, monkeypatch
+    )
+    state_path = tmp_path / "worker-state.json"
+    emit_imap_health_event = start_module._emit_imap_health_event
+
+    def killed_before_the_event(**_kwargs) -> None:
+        raise _ProcessKilled
+
+    monkeypatch.setattr(
+        start_module, "_emit_imap_health_event", killed_before_the_event
+    )
+    with pytest.raises(_ProcessKilled):
+        start_module._process_queue(
+            restarted,
+            config,
+            _fail_open_processor(),
+            flags,
+            state=StateManager(state_path),
+        )
+
+    # Not dead-lettered before it is shown: still queued, so the next run
+    # repeats the dead letter instead of losing the email silently.
+    assert [
+        (stage, attempts) for stage, attempts, _ in _queue_rows(restarted)
+    ] == [("TG", 1)]
+    assert _email_row(restarted, email_id)[0] == "NEW"
+
+    monkeypatch.setattr(start_module, "_emit_imap_health_event", emit_imap_health_event)
+    after_restart = _restart(restarted)
+    start_module._process_queue(
+        after_restart,
+        config,
+        _fail_open_processor(),
+        flags,
+        state=StateManager(state_path),
+    )
+
+    assert telegram.calls == 0
+    assert _queue_rows(after_restart) == []
+    status, error_last, _ = _email_row(after_restart, email_id)
+    assert (status, error_last) == ("ERROR", f"context_unavailable:{reason}")
+    assert [event.payload["reason"] for event in _context_dead_letters(events)] == [
+        reason
+    ]
+    # Counted by the crashed run and again by the repeat: twice beats never.
+    assert StateManager(state_path).pop_context_dead_letters(_ACCOUNT.login) == 2
+
+
+def test_failed_dead_letter_write_keeps_the_email_queued_and_retries_it(
+    tmp_path, monkeypatch, telegram, events, server
+) -> None:
+    config, storage, _legacy_processor, flags = _setup(
+        tmp_path, monkeypatch, premium=False
+    )
+    restarted, email_id = _unavailable_after_restart(
+        "gone", storage, config, server, tmp_path, monkeypatch
+    )
+    _fail_queue_deletes(restarted)
+
+    start_module._process_queue(restarted, config, _fail_open_processor(), flags)
+
+    # Rolled back as a whole: not ERROR while still queued (a later delivery
+    # would keep that status), and the dead letter is already shown.
+    rows = _queue_rows(restarted)
+    assert [(stage, attempts) for stage, attempts, _ in rows] == [("TG", 1)]
+    assert "injected" in str(rows[0][2])
+    assert _email_row(restarted, email_id)[0] == "NEW"
+    assert len(_context_dead_letters(events)) == 1
+
+    _allow_queue_deletes(restarted)
+    _make_ready(restarted)
+    start_module._process_queue(restarted, config, _fail_open_processor(), flags)
+
+    assert telegram.calls == 0
+    assert _queue_rows(restarted) == []
+    status, error_last, _ = _email_row(restarted, email_id)
+    assert (status, error_last) == ("ERROR", "context_unavailable:gone")
+    assert len(_context_dead_letters(events)) == 2
+    assert start_module._CONTEXT_DEAD_LETTERS == {_ACCOUNT.login: 2}

@@ -847,5 +847,29 @@ class Storage:
                 (error, not_before.isoformat(), now.isoformat(), queue_id),
             )
 
+    def dead_letter_queue_item(self, queue_id: int, email_id: int, error: str) -> None:
+        """Mark the email ERROR and remove its queue row in one transaction:
+        a crash or a failed write cannot leave it ERROR but still queued (a
+        later delivery would keep ERROR) or dead-lettered halfway."""
+        now = self._now()
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE;")
+            cursor.execute(
+                """
+                UPDATE emails
+                SET status = 'ERROR', error_last = ?, updated_at = ?
+                WHERE id = ?;
+                """,
+                (error, now, email_id),
+            )
+            cursor.execute("DELETE FROM queue WHERE id = ?;", (queue_id,))
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        finally:
+            cursor.close()
+
 
 __all__ = ["Storage", "normalize_message_id"]
