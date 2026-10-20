@@ -4327,6 +4327,24 @@ def create_app(
         # Every response, including guard rejections, static files and 404s.
         app.after_request(_apply_security_headers)
 
+        @app.errorhandler(404)
+        def not_found(_error):
+            # The access guard has already run. The requested address is never
+            # echoed back into the page (no reflected input).
+            if request.path.startswith("/api/"):
+                response = jsonify({"error": "not found"})
+                response.status_code = 404
+                return response
+            return (
+                _render_template(
+                    app,
+                    "not_found.html",
+                    title=app.config["APP_TITLE"],
+                    page_title="Page not found",
+                ),
+                404,
+            )
+
     @app.route("/login", methods=["GET", "POST"])
     def login():
         next_raw = request.form.get("next") if request.method == "POST" else None

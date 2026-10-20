@@ -62,6 +62,7 @@
           <a href="{{ url_for('relationships') }}" class="nav-link {% if request.path.startswith('/relationships') %}active{% endif %}">Relationships</a>
           {% if cfg.features.donate_enabled and support_nav_enabled %}<a href="{{ url_for('support') }}" class="nav-link {% if request.path.startswith('/support') %}active{% endif %}">Support</a>{% endif %}
         </nav>
+        {% block scope_form %}
         <form method="get" action="{{ request.path }}" class="dashboard-vars">
           <div class="var-field">
             <label for="scope-account-emails">Accounts</label>
@@ -102,6 +103,7 @@
             <button type="submit">Apply</button>
           </div>
         </form>
+        {% endblock %}
       </div>
     </section>
     {% endif %}

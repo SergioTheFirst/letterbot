@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Page not found · LetterBot.ru{% endblock %}
+{% block scope_form %}{% endblock %}
+{% block content %}
+  <section class="card empty-state not-found" data-testid="not-found">
+    <p>This page does not exist. The link may be mistyped, or the page has moved.</p>
+    <ul class="simple-links">
+      <li><a href="{{ url_for('index') }}">Go to Home</a></li>
+      <li><a href="{{ url_for('archive') }}">Open the Archive</a></li>
+      <li><a href="{{ url_for('health') }}">Check system health</a></li>
+    </ul>
+  </section>
+{% endblock %}
