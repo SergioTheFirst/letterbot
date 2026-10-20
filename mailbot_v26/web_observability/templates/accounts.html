@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='settings.css') }}">
+<div class="settings-page" data-testid="accounts-page">
+  {% if http_warning %}
+  <div class="alert settings-http-warning" role="note">{{ st('accounts.http_warning') }}</div>
+  {% endif %}
+
+  {% if status is none %}
+  <section class="card settings-section">
+    <p>{{ st('accounts.unavailable') }}</p>
+  </section>
+  {% else %}
+  <p class="hint settings-intro">{{ st('accounts.read_only') }}</p>
+
+  <section class="card settings-summary">
+    <span class="status-pill {{ status.summary.severity }}" data-testid="accounts-summary">{{ status.summary.text }}</span>
+    <span class="hint">{{ st('accounts.updated', time=status.generated_clock) }}</span>
+    <a class="ghost settings-refresh" href="{{ url_for('accounts') }}">{{ st('accounts.refresh') }}</a>
+    {% if status.file.path %}
+    <div class="hint settings-file">{{ st('accounts.file_label') }}: <span class="mono">{{ status.file.path }}</span></div>
+    {% endif %}
+  </section>
+
+  {% if status.file.state == 'no_config_dir' %}
+  <div class="alert" role="note">{{ st('notice.no_config_dir') }}</div>
+  {% elif status.evidence.db == 'unavailable' %}
+  <div class="alert" role="note">{{ st('notice.db_unavailable') }}</div>
+  {% endif %}
+
+  {% if status.blocking %}
+  <section class="card settings-blocking" aria-labelledby="settings-blocking-title" data-testid="accounts-blocking">
+    <h2 id="settings-blocking-title">{{ st('accounts.blocking.title') }}</h2>
+    <p>{{ st('accounts.blocking.intro') }}</p>
+    <ul>
+      {% for item in status.blocking %}
+      <li>{{ item.text }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if status.accounts %}
+  <section class="card settings-section" aria-labelledby="settings-mailboxes-title">
+    <h2 id="settings-mailboxes-title">{{ st('accounts.mailboxes') }}</h2>
+    <div class="table-scroll">
+      <table class="table settings-accounts-table">
+        <thead>
+          <tr>
+            <th scope="col">{{ st('accounts.col.mailbox') }}</th>
+            <th scope="col">{{ st('accounts.col.login') }}</th>
+            <th scope="col">{{ st('accounts.col.provider') }}</th>
+            <th scope="col">{{ st('accounts.col.server') }}</th>
+            <th scope="col">{{ st('accounts.col.last_check') }}</th>
+            <th scope="col">{{ st('accounts.col.chat') }}</th>
+            <th scope="col">{{ st('accounts.col.state') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in status.accounts %}
+          <tr data-testid="account-row" data-state="{{ row.state }}">
+            <th scope="row" class="mono">[{{ row.id }}]</th>
+            <td>{{ row.login or '—' }}</td>
+            <td>{{ row.provider_label }}</td>
+            <td class="mono">{{ row.server }}</td>
+            <td>
+              {% if row.last_success_at %}
+              <time datetime="{{ row.last_success_at }}" title="{{ row.last_check_title }}">{{ row.last_check }}</time>
+              {% else %}
+              {{ row.last_check }}
+              {% endif %}
+            </td>
+            <td><span class="status-pill {{ 'success' if row.chat.status == 'set' else 'warn' }}">{{ row.chat.label }}</span></td>
+            <td>
+              <span class="status-pill {{ row.severity }}">{{ row.state_label }}</span>
+              {% if row.detail %}<div class="hint settings-detail">{{ row.detail }}</div>{% endif %}
+              {% if row.issues %}
+              <ul class="hint settings-issues">
+                {% for issue in row.issues %}
+                <li>{{ issue.text }}</li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if status.file.state == 'ok' %}
+  {% set default_chat = status.telegram.default_chat %}
+  <section class="card settings-section" aria-labelledby="settings-telegram-title">
+    <h2 id="settings-telegram-title">{{ st('accounts.telegram.title') }}</h2>
+    <dl class="settings-facts">
+      <div>
+        <dt>{{ st('accounts.telegram.token') }}</dt>
+        <dd><span class="status-pill {{ 'success' if status.telegram.token_set else 'danger' }}">{{ status.telegram.token_label }}</span></dd>
+      </div>
+      <div>
+        <dt>{{ st('accounts.telegram.default_chat') }}</dt>
+        <dd><span class="status-pill {{ {'set': 'success', 'invalid': 'danger'}.get(default_chat.status, 'muted') }}">{{ default_chat.label }}</span></dd>
+      </div>
+    </dl>
+    {% for hint in status.telegram.hints %}
+    <p class="hint">{{ hint }}</p>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if status.cards %}
+  <section class="settings-section" aria-labelledby="settings-fix-title">
+    <h2 id="settings-fix-title">{{ st('accounts.fix.title') }}</h2>
+    <div class="settings-cards">
+      {% for card in status.cards %}
+      <article class="card settings-fix-card" data-card="{{ card.id }}">
+        <h3>{{ card.title }}</h3>
+        {% if card.intro %}<p>{{ card.intro }}</p>{% endif %}
+        {% if card.server %}<p class="mono">{{ st('card.server') }}: {{ card.server }}</p>{% endif %}
+        <ol>
+          {% for step in card.steps %}
+          <li>{{ step }}</li>
+          {% endfor %}
+        </ol>
+        {% if card.snippet %}
+        <div class="settings-snippet">
+          <div class="hint">{{ st('card.snippet_label') }}</div>
+          <pre id="snippet-{{ card.id }}">{{ card.snippet }}</pre>
+          <button type="button" class="ghost" data-copy-target="snippet-{{ card.id }}" data-copied-text="{{ st('card.copied') }}" data-failed-text="{{ st('card.copy_failed') }}">{{ st('card.copy') }}</button>
+        </div>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+  {% endif %}
+
+  <p class="settings-copy-status" role="status" aria-live="polite" data-copy-status></p>
+</div>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='settings.js') }}" defer></script>
+{% endblock %}

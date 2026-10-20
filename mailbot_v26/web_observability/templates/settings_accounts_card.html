@@ -1,0 +1,19 @@
+{#- Home-page card with the mailbox status (Settings lane, S1).
+    Include it anywhere: {% include "settings_accounts_card.html" %}.
+    Pass accounts_card (a dict from accounts_status.build_home_card) to reuse
+    a status you already built; otherwise the card reads it itself. -#}
+{%- if accounts_card is defined and accounts_card -%}
+  {%- set card = accounts_card -%}
+{%- elif settings_accounts_home_card is defined -%}
+  {%- set card = settings_accounts_home_card() -%}
+{%- else -%}
+  {%- set card = none -%}
+{%- endif -%}
+{%- if card %}
+<article class="metric-card accounts-card" data-testid="accounts-card">
+  <div class="metric-label">{{ card.label }}</div>
+  <div class="metric-value"><span class="status-pill {{ card.severity }}">{{ card.headline }}</span></div>
+  {% if card.note %}<div class="metric-subtle">{{ card.note }}</div>{% endif %}
+  <div class="metric-subtle"><a href="{{ card.url }}">{{ card.link_text }}</a></div>
+</article>
+{%- endif %}
