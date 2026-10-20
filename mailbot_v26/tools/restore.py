@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import configparser
 import os
+import sqlite3
 import subprocess
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
 from mailbot_v26.tools.backup import MASKED_VALUE, create_backup
 from mailbot_v26.config.paths import app_root
+from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 from mailbot_v26.system.instance_lock import InstanceLockError, is_instance_running
 
 _IS_WINDOWS = os.name == "nt"
@@ -142,6 +145,30 @@ def _extract_to_temp(
     return temp_path
 
 
+def _db_member_refusal(path: Path) -> str | None:
+    """Why the extracted backup database must not replace the current one."""
+    # immutable=1: the private temp copy never changes, and SQLite creates
+    # no -wal/-shm next to it.
+    uri = f"{sqlite_readonly_uri(path)}&immutable=1"
+    try:
+        with closing(sqlite3.connect(uri, uri=True)) as conn:
+            columns = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(emails);")
+            }
+    except sqlite3.Error as exc:
+        return (
+            f"The database in this backup cannot be read ({type(exc).__name__}); "
+            "nothing was restored. Use another backup archive."
+        )
+    if columns and "uid" not in columns:
+        return (
+            "The database in this backup has an emails table without the uid "
+            "column (an older format Letterbot cannot run on); nothing was "
+            "restored. Use a backup created by Letterbot's backup command."
+        )
+    return None
+
+
 def _remove_sqlite_sidecars(db_path: Path) -> None:
     # A stale -wal/-shm from the replaced database would corrupt the restored one.
     for suffix in _SQLITE_SIDECARS:
@@ -171,6 +198,9 @@ def _restore_member(
     temp_path = _extract_to_temp(archive, info, destination)
     try:
         if member == _DB_MEMBER:
+            refusal = _db_member_refusal(temp_path)
+            if refusal is not None:
+                raise RestoreRefusedError(refusal)
             _remove_sqlite_sidecars(destination)
         os.replace(temp_path, destination)
     except BaseException:
@@ -189,7 +219,9 @@ def restore_from_backup(
 
     ensure_letterbot_stopped(db_path=root / _DB_MEMBER)
     with zipfile.ZipFile(archive_path, "r") as archive:
-        for info in archive.infolist():
+        # The database first: when it is refused no other file has changed.
+        members = sorted(archive.infolist(), key=lambda info: info.filename != _DB_MEMBER)
+        for info in members:
             member = info.filename
             if not _is_safe_member(member) or not _is_allowed_path(member):
                 skipped.append(member)

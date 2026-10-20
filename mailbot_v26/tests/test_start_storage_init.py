@@ -6,6 +6,8 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+import pytest
+
 import mailbot_v26.start as start_module
 from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.config_loader import AccountConfig
@@ -51,3 +53,40 @@ def test_main_on_new_database_keeps_knowledge_columns_after_storage_init(
     assert {"uid", "priority", "action_line", "body_summary"} <= _email_columns(
         db_path
     )
+
+
+def test_main_exits_2_on_populated_database_without_uid_and_keeps_rows(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from mailbot_v26.storage.knowledge_db import KnowledgeDB
+    from mailbot_v26.system.instance_lock import acquire_instance_lock
+
+    db_path = _install(monkeypatch, tmp_path)
+    monkeypatch.setattr(start_module, "Storage", Storage)
+    kdb = KnowledgeDB(db_path)
+    for index in range(2):
+        kdb.save_email(
+            account_email="account@example.com",
+            from_email="sender@example.com",
+            subject=f"Archived canary-subject {index}",
+            received_at="2025-01-01T09:00:00+00:00",
+            priority="🔵",
+            action_line="Read",
+            body_summary="Summary",
+            raw_body="Body",
+            attachment_summaries=[],
+        )
+
+    with pytest.raises(SystemExit) as exit_info:
+        start_module.main(max_cycles=1)
+
+    assert exit_info.value.code == 2
+    output = capsys.readouterr().out
+    assert str(db_path) in output
+    assert "uid" in output
+    assert "canary-subject" not in output
+    with closing(sqlite3.connect(db_path)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM emails").fetchone()[0] == 2
+    released = acquire_instance_lock(db_path)
+    assert released is not None
+    released.release()
