@@ -14,6 +14,12 @@ exception: it may write accounts.ini and settings.ini, never the database.
   token (X-CSRF-Token header), a same-origin Origin/Referer and a JSON body.
 - Secrets (mailbox passwords, the bot token, the dashboard password) are
   write-only: requests may carry them, no response, log line or error does.
+  No answer tells whether a typed secret equals the stored one either: a
+  typed secret is always listed as changed and written, etags are keyed and
+  change on every write, and saves that carry a secret are limited to one
+  per client per 5 s. A stored mailbox password goes only to the server it
+  was saved for: moving it to another host, port or SSL setting needs it
+  typed again (password_required).
   A login is returned only in its expected shape (a malformed line can carry
   a password into it, see accounts_status).
 - Every save is validated (the same rules as the worker's preflight, via
@@ -54,8 +60,8 @@ from mailbot_v26.config.ini_editor import (
     SetValue,
     apply_edits,
     atomic_write,
-    file_etag,
     list_backups,
+    read_versioned,
     restore_backup,
     write_with_backup,
 )
@@ -117,6 +123,7 @@ LAN_BIND = "0.0.0.0"
 LOOPBACK_BIND = "127.0.0.1"
 TELEGRAM_API = "https://api.telegram.org"
 EDITABLE_FIELDS = ("login", "host", "port", "use_ssl", "telegram_chat_id")
+SECRET_KEYS = frozenset({"password", "bot_token"})
 PROVIDER_PRESETS: dict[str, dict[str, object]] = {
     "gmail": {"host": "imap.gmail.com", "port": 993, "use_ssl": True},
     "yandex": {"host": "imap.yandex.ru", "port": 993, "use_ssl": True},
@@ -396,9 +403,9 @@ def _web_state(app: Any, config_dir: Path) -> dict[str, object]:
 
 def _editor_state(app: Any, config_dir: Path, locale: str) -> dict[str, object]:
     accounts_path = config_dir / "accounts.ini"
-    raw = _read_bytes(accounts_path)
+    raw, etag = read_versioned(accounts_path)
     state: dict[str, object] = {
-        "etag": file_etag(raw),
+        "etag": etag,
         "file": "ok",
         "accounts": [],
         "telegram": _telegram_state(None),
@@ -681,6 +688,8 @@ class _Plan:
     issues: list[ConfigIssue]
     blocking: bool
     changed: list[str]
+    # "[section] key" of each secret the request typed (password, bot_token).
+    secret_fields: tuple[str, ...] = ()
 
 
 def _snapshot(raw: bytes) -> dict[str, dict[str, str]]:
@@ -730,7 +739,18 @@ def _plan(base: bytes | None, body: dict[str, Any], *, settings_present: bool) -
     except IniEditError as exc:
         issues.add("bad_characters" if exc.code == "bad_value" else "layout")
         return _Plan(None, issues.items, True, [])
-    changed = _changed(_snapshot(raw), _snapshot(candidate))
+    # A typed secret counts as changed without being compared with the stored
+    # one: equal or not, the answer (and the write) must be the same.
+    secret_fields = tuple(
+        sorted(
+            {
+                f"[{edit.section}] {edit.key}"
+                for edit in edits
+                if isinstance(edit, SetValue) and edit.key in SECRET_KEYS
+            }
+        )
+    )
+    changed = sorted(set(_changed(_snapshot(raw), _snapshot(candidate))) | set(secret_fields))
     if not changed and base is not None:
         return _Plan(None, issues.items, issues.blocking, [])
     before = set(all_issues(inspect_accounts(parser, settings_present=settings_present)))
@@ -748,7 +768,7 @@ def _plan(base: bytes | None, body: dict[str, Any], *, settings_present: bool) -
     combined = list(issues.items)
     combined.extend(issue for issue in after if issue not in combined)
     blocking = issues.blocking or bool(new_blocking)
-    return _Plan(candidate if not blocking else None, combined, blocking, changed)
+    return _Plan(candidate if not blocking else None, combined, blocking, changed, secret_fields)
 
 
 # ---------------------------------------------------------------- tests (probes)
@@ -980,10 +1000,10 @@ def _ensure_settings_file(config_dir: Path) -> bool:
 def _save_accounts(app: Any, config_dir: Path, body: dict[str, Any]) -> Any:
     path = config_dir / "accounts.ini"
     with app.config["SETTINGS_WRITE_LOCK"]:
-        raw = _read_bytes(path)
-        if str(body.get("etag") or "") != file_etag(raw):
+        raw, etag = read_versioned(path)
+        if str(body.get("etag") or "") != etag:
             logger.info("settings_save_conflict file=accounts.ini")
-            return _error(409, "CONFLICT", etag=file_etag(raw))
+            return _error(409, "CONFLICT", etag=etag)
         try:
             plan = _plan(raw, body, settings_present=_settings_path(config_dir)[1] != "missing")
         except (UnicodeDecodeError, configparser.Error):
@@ -994,15 +1014,23 @@ def _save_accounts(app: Any, config_dir: Path, body: dict[str, Any]) -> Any:
                 422,
             )
         if plan.candidate is None:
-            # Nothing differs: no write, no backup.
-            return _json({"ok": True, "unchanged": True, "changed": [], "etag": file_etag(raw)})
+            # Nothing differs (and no secret was typed): no write, no backup.
+            return _json({"ok": True, "unchanged": True, "changed": [], "etag": etag})
+        if plan.secret_fields:
+            # Defence in depth on top of identical answers: a typed secret is
+            # written at most once per client per interval.
+            limited = _rate_limited(app, "secret-save")
+            if limited is not None:
+                logger.warning("settings_save_throttled file=accounts.ini client=%s", _client_key())
+                return limited
         backup = write_with_backup(path, plan.candidate, now=_now(app))
         settings_created = _ensure_settings_file(config_dir)
+        etag = read_versioned(path)[1]
     _log_saved("accounts.ini", plan.changed, backup)
     return _json(
         {
             "ok": True,
-            "etag": file_etag(plan.candidate),
+            "etag": etag,
             "changed": plan.changed,
             "settings_created": settings_created,
             "issues": _issue_dicts(plan.issues, _locale(app)),
@@ -1148,9 +1176,9 @@ def register_settings_routes(app: Any, *, config_dir: Path | None) -> None:
             return _error(400, "BAD_REQUEST")
         path = folder / "accounts.ini"
         with app.config["SETTINGS_WRITE_LOCK"]:
-            raw = _read_bytes(path)
-            if str((body or {}).get("etag") or "") != file_etag(raw):
-                return _error(409, "CONFLICT", etag=file_etag(raw))
+            _, etag = read_versioned(path)
+            if str((body or {}).get("etag") or "") != etag:
+                return _error(409, "CONFLICT", etag=etag)
             try:
                 backup = restore_backup(path, name, now=_now(app))
             except IniEditError as exc:
@@ -1159,7 +1187,7 @@ def register_settings_routes(app: Any, *, config_dir: Path | None) -> None:
             except OSError as exc:
                 logger.error("settings_restore_failed error_class=%s at=%s", type(exc).__name__, _where(exc))
                 return _error(500, "WRITE_FAILED")
-            etag = file_etag(_read_bytes(path))
+            etag = read_versioned(path)[1]
         _log_saved("accounts.ini", [f"restored {name}"], backup)
         return _json({"ok": True, "etag": etag, "restored": name, **_saved_message_fields(app, backup)})
 
@@ -1169,16 +1197,11 @@ def register_settings_routes(app: Any, *, config_dir: Path | None) -> None:
         if denial is not None:
             return denial
         folder = _config_dir(app)
-        raw = _read_bytes(folder / "accounts.ini") if folder is not None else None
-        # S3 adds the worker's applied hash and time.
-        return _json(
-            {
-                "ok": True,
-                "saved_sha12": file_etag(raw)[:12] if raw is not None else None,
-                "applied_sha12": None,
-                "applied_at": None,
-            }
-        )
+        etag = read_versioned(folder / "accounts.ini")[1] if folder is not None else "missing"
+        # S3 adds whether the worker applied this version and when. It compares
+        # versions here on the server: no hash of the file (it holds secrets)
+        # goes to the page.
+        return _json({"ok": True, "etag": etag, "applied": None, "applied_at": None})
 
     @app.route("/api/settings/accounts/test-imap", methods=["POST"])
     def api_settings_test_imap():

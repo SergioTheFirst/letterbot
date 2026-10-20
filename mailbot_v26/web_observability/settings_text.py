@@ -371,6 +371,7 @@ _EN: dict[str, str] = {
     "editor.conflict": "accounts.ini changed on disk. Reload.",
     "editor.no_changes": "Nothing to save: no field changed.",
     "editor.rejected": "Not saved: fix the marked fields.",
+    "editor.save_wait": "Not saved: wait a few seconds before saving a password or token again.",
     "editor.failed": (
         "Not saved: the file could not be written. Details are in the Letterbot "
         "log."
@@ -848,6 +849,7 @@ _RU: dict[str, str] = {
     "editor.conflict": "accounts.ini изменён на диске. Обновите страницу.",
     "editor.no_changes": "Нечего сохранять: поля не изменились.",
     "editor.rejected": "Не сохранено: исправьте отмеченные поля.",
+    "editor.save_wait": "Не сохранено: подождите несколько секунд, прежде чем снова сохранять пароль или токен.",
     "editor.failed": (
         "Не сохранено: файл не удалось записать. Подробности — в журнале Letterbot."
     ),

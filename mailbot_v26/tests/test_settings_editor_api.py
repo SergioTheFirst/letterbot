@@ -539,6 +539,74 @@ def test_saving_unchanged_values_writes_nothing(tmp_path: Path) -> None:
     assert list_backups(config_dir / "accounts.ini") == []
 
 
+WRONG_PASSWORD = "Wrong-Guess-PW-1"
+WRONG_TOKEN = "123456789:AAWrongGuessTokenMarkerQWERTYUIOPAS"
+
+
+@pytest.mark.parametrize(
+    ("right", "wrong"),
+    [
+        (
+            {"changes": [{"op": "update", "id": "work_mail", "fields": {}, "password": PASSWORD}]},
+            {"changes": [{"op": "update", "id": "work_mail", "fields": {}, "password": WRONG_PASSWORD}]},
+        ),
+        ({"changes": [], "telegram": {"bot_token": TOKEN}}, {"changes": [], "telegram": {"bot_token": WRONG_TOKEN}}),
+    ],
+    ids=["mailbox_password", "bot_token"],
+)
+def test_a_typed_secret_never_reveals_whether_it_matches(tmp_path: Path, right: dict, wrong: dict) -> None:
+    # Secrets are write-only: validate and save answer the same for the stored
+    # value and for any other one (no "unchanged", the same "changed", a fresh
+    # etag), and no response carries a hash of the file.
+    import hashlib
+
+    seen = {}
+    for label, body in (("right", right), ("wrong", wrong)):
+        base = tmp_path / label
+        base.mkdir()
+        config_dir = _config(base)
+        app = _app(base, config_dir)
+        with app.test_client() as client:
+            token = _csrf(client)
+            before = _state(client)["etag"]
+            checked = _post(client, "/api/settings/accounts/validate", body, token=token)
+            saved = _post(client, "/api/settings/accounts", {"etag": before, **body}, token=token)
+            after = _state(client)
+            applied = client.get("/api/settings/applied").get_json()
+        assert saved.status_code == 200, saved.get_data(as_text=True)
+        data = saved.get_json()
+        assert data["etag"] != before and after["etag"] == data["etag"] == applied["etag"]
+        digest = hashlib.sha256((config_dir / "accounts.ini").read_bytes()).hexdigest()
+        assert digest[:12] not in json.dumps([data, after, applied])
+        seen[label] = (checked.status_code, checked.get_json(), {k: v for k, v in data.items() if k != "etag"}, after["backups"])
+
+    assert seen["right"] == seen["wrong"]
+    assert seen["right"][1]["changed"] and "unchanged" not in seen["right"][2]
+
+
+def test_secret_saves_are_rate_limited_per_client(tmp_path: Path) -> None:
+    config_dir = _config(tmp_path)
+    app = _app(tmp_path, config_dir)
+    app.config["SETTINGS_TEST_INTERVAL_SECONDS"] = 5
+    with app.test_client() as client:
+        token = _csrf(client)
+
+        def save(change: dict):
+            return _post(client, "/api/settings/accounts", {"etag": _state(client)["etag"], "changes": [change]}, token=token)
+
+        refused = save({"op": "update", "id": "work_mail", "fields": {"port": "abc"}, "password": NEW_PASSWORD})
+        first = save({"op": "update", "id": "work_mail", "fields": {}, "password": NEW_PASSWORD})
+        second = save({"op": "update", "id": "work_mail", "fields": {}, "password": WRONG_PASSWORD})
+        plain = save({"op": "update", "id": "work_mail", "fields": {"login": "new@gmail.com"}})
+
+    assert refused.status_code == 422  # a refused save does not use up the slot
+    assert first.status_code == 200, first.get_data(as_text=True)
+    assert second.status_code == 429 and second.get_json()["code"] == "RATE_LIMIT"
+    assert second.get_json()["retry_after"] >= 1
+    assert plain.status_code == 200
+    assert [(a.login, a.password) for a in load_accounts_config(config_dir)] == [("new@gmail.com", NEW_PASSWORD)]
+
+
 def test_request_without_client_address_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     app = _app(tmp_path, _config(tmp_path))
     monkeypatch.setattr(web_app, "_request_remote_addr", lambda: None)
@@ -1125,10 +1193,12 @@ def test_hidden_editor_parts_stay_hidden_despite_display_rules(tmp_path: Path) -
     assert parser.inside == {"data-settings-editor": True, "data-web-card": True}
 
 
-def test_applied_reports_the_saved_hash(tmp_path: Path) -> None:
+def test_applied_reports_the_version_not_a_content_hash(tmp_path: Path) -> None:
     app = _app(tmp_path, _config(tmp_path))
     with app.test_client() as client:
         applied = client.get("/api/settings/applied").get_json()
         etag = _state(client)["etag"]
 
-    assert applied == {"ok": True, "saved_sha12": etag[:12], "applied_sha12": None, "applied_at": None}
+    # S3 compares the worker's applied version on the server; no hash of the
+    # secret-bearing file goes to the page.
+    assert applied == {"ok": True, "etag": etag, "applied": None, "applied_at": None}

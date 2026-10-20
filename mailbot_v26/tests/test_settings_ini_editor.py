@@ -183,6 +183,28 @@ def test_etag_changes_with_the_bytes() -> None:
     assert len(file_etag(b"a")) == 16
 
 
+def test_etag_is_no_content_hash_and_changes_on_every_rewrite(tmp_path: Path) -> None:
+    # An etag that is a plain content hash tells a client whether a typed
+    # secret equals the stored one (same bytes -> same etag) and lets it test
+    # guesses offline. It is keyed and bound to this write of the file.
+    import hashlib
+
+    path = tmp_path / "accounts.ini"
+    data = b"[a]\npassword = secret\n"
+    path.write_bytes(data)
+
+    raw, first = ini_editor.read_versioned(path)
+    again = ini_editor.read_versioned(path)[1]
+    ini_editor.atomic_write(path, data)
+    rewritten = ini_editor.read_versioned(path)[1]
+
+    assert raw == data
+    assert first == again
+    assert rewritten != first
+    assert hashlib.sha256(data).hexdigest()[:12] not in first
+    assert ini_editor.read_versioned(tmp_path / "missing.ini") == (None, "missing")
+
+
 def test_write_with_backup_keeps_the_previous_bytes(tmp_path: Path) -> None:
     path = tmp_path / "accounts.ini"
     path.write_bytes(b"old")

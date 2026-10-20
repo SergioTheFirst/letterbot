@@ -291,6 +291,10 @@
       say(messageNode, t("editor.rejected"), "error");
       return;
     }
+    if (result.status === 429) {
+      say(messageNode, t("editor.save_wait"), "error");
+      return;
+    }
     say(messageNode, t(result.status === 500 ? "editor.failed" : "editor.request_failed"), "error");
   }
 

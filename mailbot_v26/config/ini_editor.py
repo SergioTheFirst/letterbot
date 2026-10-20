@@ -23,9 +23,11 @@ import codecs
 import configparser
 import fnmatch
 import hashlib
+import hmac
 import logging
 import os
 import re
+import secrets
 import tempfile
 import time
 from dataclasses import dataclass
@@ -54,6 +56,7 @@ _REPLACE_RETRY_SECONDS = 0.05
 # and what an interrupted atomic_write leaves (".<name>.<random>.tmp").
 # .gitignore lists the same patterns.
 SECRET_COPY_PATTERNS = ("*.ini.bak", "*.ini.bak-*", ".*.ini.*.tmp")
+_ETAG_KEY = secrets.token_bytes(32)
 
 
 def is_secret_copy_name(name: str) -> bool:
@@ -368,11 +371,34 @@ def check_readable(raw: bytes) -> None:
         raise IniEditError("unreadable") from exc
 
 
-def file_etag(raw: bytes | None) -> str:
-    """Short content hash for optimistic locking ("missing" without a file)."""
+def file_etag(raw: bytes | None, stat: os.stat_result | None = None) -> str:
+    """Opaque version tag for optimistic locking ("missing" without a file).
+
+    Keyed with a per-process random key, so it is no hash a client could
+    test guessed file contents (a secret in the file) against. With ``stat``
+    it is also bound to this write of the file (file id, modification time,
+    size): rewriting identical bytes still gives a new tag, so a save never
+    shows whether a typed secret equals the stored one. Tags do not survive
+    a restart (an open page then gets a conflict and reloads).
+    """
     if raw is None:
         return "missing"
-    return hashlib.sha256(raw).hexdigest()[:16]
+    mac = hmac.new(_ETAG_KEY, digestmod=hashlib.sha256)
+    if stat is not None:
+        mac.update(f"{stat.st_ino}:{stat.st_mtime_ns}:{stat.st_size}:".encode("ascii"))
+    mac.update(raw)
+    return mac.hexdigest()[:16]
+
+
+def read_versioned(path: Path) -> tuple[bytes | None, str]:
+    """The file's bytes and etag, both from one open handle; (None, "missing") without a file."""
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read()
+            stat = os.fstat(stream.fileno())
+    except FileNotFoundError:
+        return None, "missing"
+    return raw, file_etag(raw, stat)
 
 
 # ---------------------------------------------------------------- files
@@ -519,6 +545,7 @@ __all__ = [
     "is_secret_copy_name",
     "list_backups",
     "read_backup",
+    "read_versioned",
     "restore_backup",
     "write_with_backup",
 ]
