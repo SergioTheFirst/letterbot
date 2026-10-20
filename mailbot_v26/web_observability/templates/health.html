@@ -10,11 +10,11 @@
 
 {% block content %}
   <div class="status-strip" id="status-strip">
-    <div class="status-strip-content" id="status-strip-content">
+    <div class="status-strip-content" id="status-strip-content" data-live-partial="{{ url_for('status_strip_partial') }}" data-live-interval-ms="{{ status_refresh_ms }}">
       {% include "partials/status_strip.html" %}
     </div>
-    <div class="status-strip-offline" id="status-strip-offline">offline</div>
   </div>
+  <p class="refresh-status" data-refresh-status role="status" aria-live="polite" data-error-text="Couldn't refresh; data from {time}"></p>
 
   <div class="health-grid">
     <div class="health-main stack">
@@ -36,10 +36,9 @@
       </div>
 
       <div class="health-overview" id="health-overview">
-        <div id="health-overview-content">
+        <div id="health-overview-content" data-live-partial="{{ url_for('health_partial') }}" data-live-interval-ms="{{ health_refresh_ms }}">
           {% include "partials/health_overview.html" %}
         </div>
-        <div class="status-strip-offline" id="health-overview-offline">health refresh paused</div>
       </div>
     </div>
 
@@ -143,56 +142,5 @@
   </div>
   {% endif %}
 
-  <script nonce="{{ csp_nonce }}">
-    (function() {
-      const strip = document.getElementById('status-strip-content');
-      const offline = document.getElementById('status-strip-offline');
-      if (!strip || !offline) return;
-      const refresh = () => {
-        fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' })
-          .then((resp) => {
-            if (!resp.ok) throw new Error('status');
-            return resp.text();
-          })
-          .then((html) => {
-            strip.innerHTML = html;
-            offline.classList.remove('active');
-          })
-          .catch(() => {
-            offline.classList.add('active');
-          });
-      };
-      document.addEventListener('letterbot:page-visible', refresh);
-      setInterval(() => { if (!document.hidden) refresh(); }, {{ status_refresh_ms }});
-    })();
-
-    (function() {
-      const container = document.getElementById('health-overview-content');
-      const offline = document.getElementById('health-overview-offline');
-      if (!container || !offline) return;
-      const refresh = () => {
-        fetch(`/partial/health${window.location.search}`, { credentials: 'same-origin' })
-          .then((resp) => {
-            if (!resp.ok) throw new Error('health');
-            return resp.text();
-          })
-          .then((html) => {
-            container.innerHTML = html;
-            offline.classList.remove('active');
-          })
-          .catch(() => {
-            offline.classList.add('active');
-          });
-      };
-      document.addEventListener('letterbot:page-visible', refresh);
-      setInterval(() => { if (!document.hidden) refresh(); }, {{ health_refresh_ms }});
-    })();
-  </script>
-  <script nonce="{{ csp_nonce }}">
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        document.dispatchEvent(new Event('letterbot:page-visible'));
-      }
-    });
-  </script>
+  <script src="{{ url_for('static', filename='live.js') }}" nonce="{{ csp_nonce }}" defer></script>
 {% endblock %}

@@ -22,40 +22,5 @@
     </div>
   </div>
 
-  <script nonce="{{ csp_nonce }}">
-    (function() {
-      const el = document.getElementById("contact-data");
-      if (!el) return;
-      let payload = {};
-      try {
-        payload = JSON.parse(el.dataset.contact || "{}");
-      } catch (e) {
-        payload = {};
-      }
-      const contact = payload.contact || {};
-      const content = document.getElementById("contact-content");
-      if (!content) return;
-      if (!contact || !contact.id) {
-        content.innerHTML = '<div class="hint">No data for this contact.</div>';
-        return;
-      }
-
-      const esc = (value) => String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;");
-
-      const trust = typeof contact.trust_score === "number" ? contact.trust_score.toFixed(2) : "-";
-      const count = contact.email_count ?? contact.emails_total ?? 0;
-
-      content.innerHTML = `
-        <div class="detail-grid">
-          <div><div class="detail-label">Entity</div><div class="detail-value">${esc(contact.id)}</div></div>
-          <div><div class="detail-label">Label</div><div class="detail-value">${esc(contact.label || "-")}</div></div>
-          <div><div class="detail-label">Trust score</div><div class="detail-value">${esc(trust)}</div></div>
-          <div><div class="detail-label">Emails</div><div class="detail-value">${esc(count)}</div></div>
-        </div>`;
-    })();
-  </script>
+  <script src="{{ url_for('static', filename='relationships.js') }}" nonce="{{ csp_nonce }}" defer></script>
 {% endblock %}

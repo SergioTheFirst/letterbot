@@ -1286,15 +1286,19 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.status-strip-offline {
-  display: none;
-  margin-top: 8px;
-  color: var(--warn);
+.refresh-status {
+  margin: 6px 0 0;
+  min-height: 0;
+  color: var(--muted);
   font-size: 13px;
 }
 
-.status-strip-offline.active {
-  display: block;
+.refresh-status:empty {
+  display: none;
+}
+
+.refresh-status.is-error {
+  color: var(--warn);
 }
 
 .app-footer {
@@ -1611,16 +1615,6 @@ small {
 .status-meta {
   color: var(--muted);
   font-size: 12px;
-}
-
-.status-strip-offline {
-  font-size: 12px;
-  color: var(--danger);
-  display: none;
-}
-
-.status-strip-offline.active {
-  display: block;
 }
 
 .mode-toggle {

@@ -26,13 +26,13 @@
   {% set donate_card_target = donate_card_url or (url_for('support') if donate_card_qr and support_nav_enabled else '') %}
 
   <div class="status-strip" id="status-strip">
-    <div class="status-strip-content" id="status-strip-content">
+    <div class="status-strip-content" id="status-strip-content" data-live-partial="{{ url_for('status_strip_partial') }}" data-live-interval-ms="{{ status_refresh_ms }}">
       {% include "partials/status_strip.html" %}
     </div>
-    <div class="status-strip-offline" id="status-strip-offline">offline</div>
   </div>
+  <p class="refresh-status" data-refresh-status role="status" aria-live="polite" data-error-text="Couldn't refresh; data from {time}"></p>
 
-  <section class="dashboard-shell" data-testid="live-dashboard">
+  <section class="dashboard-shell" data-testid="live-dashboard" data-dashboard-url="{{ url_for('api_dashboard') }}" data-dashboard-refresh-ms="{{ dashboard_refresh_ms }}">
     <section class="hero-card">
       <div>
         <div class="eyebrow">Read-only observability</div>
@@ -327,7 +327,7 @@
             <h2>Top contacts</h2>
             <div class="hint">Secondary analytics view. Sender identity remains hidden.</div>
           </div>
-          <ul class="simple-links" id="top-contacts-list"><li class="hint">Live contact summary updates after refresh.</li></ul>
+          <ul class="simple-links" id="top-contacts-list" data-empty-text="{% if ui_locale[:2] == 'ru' %}Для этого scope пока нет contact summary.{% else %}No contact summary for this scope yet.{% endif %}"><li class="hint">Live contact summary updates after refresh.</li></ul>
         </section>
 
         <section class="card data-card">
@@ -335,7 +335,7 @@
             <h2>Top issuers</h2>
             <div class="hint">Business concentration from derived analytics.</div>
           </div>
-          <ul class="simple-links" id="top-issuers-list"><li class="hint">Live issuer summary updates after refresh.</li></ul>
+          <ul class="simple-links" id="top-issuers-list" data-empty-text="{% if ui_locale[:2] == 'ru' %}Для этого scope пока нет issuer summary.{% else %}No issuer summary for this scope yet.{% endif %}"><li class="hint">Live issuer summary updates after refresh.</li></ul>
         </section>
 
         {% if donate_card_target or donate_card_qr %}
@@ -379,112 +379,6 @@
     </div>
   </section>
 
-  <script nonce="{{ csp_nonce }}">
-    (function () {
-      const byId = (id) => document.getElementById(id);
-      const strip = byId('status-strip-content');
-      const offline = byId('status-strip-offline');
-      const body = byId('processed-table-body');
-      const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-      const displayValue = (value, fallback = 'unknown') => value === null || value === undefined || value === '' ? fallback : String(value);
-      const setText = (id, value) => { const node = byId(id); if (node) node.textContent = String(value); };
-      const setBadge = (id, label, klass) => { const node = byId(id); if (node) { node.className = `badge ${klass || 'muted'}`; node.textContent = String(label || 'UNKNOWN'); } };
-      const metaSummary = (meta) => {
-        const sections = meta && meta.sections ? meta.sections : {};
-        const issues = Object.entries(sections).filter(([, entry]) => entry && entry.status && entry.status !== 'ok').map(([name, entry]) => `${name}: ${entry.detail || entry.status}`);
-        return issues.length ? issues.slice(0, 4).join(' · ') : 'Canonical runtime storage and events are in sync for visible sections.';
-      };
-      const maskEmail = (value) => {
-        const text = String(value || '').trim();
-        if (!text || !text.includes('@')) return text || 'Sender hidden';
-        const parts = text.split('@', 2);
-        return `${parts[0].slice(0, 1) || ''}…@${parts[1] || ''}`;
-      };
-      const renderList = (id, items, emptyText, mapper) => {
-        const node = byId(id);
-        if (!node) return;
-        const rows = Array.isArray(items) ? items : [];
-        if (!rows.length) {
-          node.innerHTML = `<li class="hint">${escapeHtml(emptyText)}</li>`;
-          return;
-        }
-        node.innerHTML = rows.map(mapper).join('');
-      };
-      const renderProcessed = (processed) => {
-        setBadge('processed-table-status', processed && processed.status_label, processed && processed.status_class);
-        setText('processed-table-detail', displayValue(processed && processed.detail, 'No processed emails yet for this scope.'));
-        setText('processed-count', displayValue(processed && processed.available_count, '0'));
-        if (!body) return;
-        const rows = processed && Array.isArray(processed.rows) ? processed.rows : [];
-        if (!rows.length) {
-          body.innerHTML = '<tr><td colspan="5" class="table-empty">No processed emails yet for this scope.</td></tr>';
-          return;
-        }
-        body.innerHTML = rows.map((row) => `<tr><td class="mono">${escapeHtml(displayValue(row.date, 'UNAVAILABLE'))}</td><td class="mono">${escapeHtml(displayValue(row.time, 'UNAVAILABLE'))}</td><td>${escapeHtml(displayValue(row.sender_display, 'Sender hidden'))}</td><td><span class="badge ${escapeHtml(String(row.priority_class || 'muted'))}">${escapeHtml(displayValue(row.priority_label, 'UNKNOWN'))}</span></td><td><div class="info-primary">${escapeHtml(displayValue(row.info_primary, 'UNAVAILABLE'))}</div>${row.info_secondary ? `<div class="info-secondary">${escapeHtml(String(row.info_secondary))}</div>` : ''}</td></tr>`).join('');
-      };
-      const noContactSummaryText = {% if ui_locale[:2] == 'ru' %}'Для этого scope пока нет contact summary.'{% else %}'No contact summary for this scope yet.'{% endif %};
-      const noIssuerSummaryText = {% if ui_locale[:2] == 'ru' %}'Для этого scope пока нет issuer summary.'{% else %}'No issuer summary for this scope yet.'{% endif %};
-      const renderDashboard = (data) => {
-        setText('preview-emails-today', displayValue(data.emails_today));
-        setText('preview-emails-hour', displayValue(data.emails_last_hour));
-        setText('preview-llm-calls', displayValue(data.llm_calls_today));
-        setText('preview-llm-fallback', displayValue(data.llm_fallback_today));
-        setText('preview-priority-red', displayValue(data.priority && data.priority.red));
-        setText('preview-dashboard-status', displayValue((data.health && data.health.status_label) || (data.meta && data.meta.status), 'UNKNOWN'));
-        setText('preview-dashboard-updated', `Updated: ${displayValue(data.meta && data.meta.generated_at, 'unknown')}`);
-        setText('preview-dashboard-detail', metaSummary(data.meta || {}));
-        setText('dashboard-meta-detail', metaSummary(data.meta || {}));
-        setText('preview-events-count', Array.isArray(data.recent_events) ? data.recent_events.length : '0');
-        setBadge('dashboard-meta-status', (data.health && data.health.status_label) || 'UNKNOWN', (data.health && data.health.status_class) || 'muted');
-        setBadge('health-imap-status', (data.runtime && data.runtime.imap_status_label) || 'UNKNOWN', (data.runtime && data.runtime.imap_status_class) || 'muted');
-        setBadge('health-pipeline-status', (data.runtime && data.runtime.status_label) || 'UNKNOWN', (data.runtime && data.runtime.status_class) || 'muted');
-        setText('home-health-detail', displayValue(data.health && data.health.detail, 'No health evidence yet for this scope.'));
-        setText('health-imap-meta', displayValue(data.runtime && data.runtime.last_imap_success_display, 'UNAVAILABLE'));
-        setText('health-pipeline-meta', displayValue(data.runtime && data.runtime.last_processed_display, 'UNAVAILABLE'));
-        setText('runtime-last-evidence', displayValue(data.runtime && data.runtime.last_runtime_evidence_display, 'UNAVAILABLE'));
-        setText('runtime-last-evidence-relative', displayValue(data.runtime && data.runtime.last_runtime_evidence_relative, 'No runtime evidence yet.'));
-        setText('runtime-started-at', displayValue(data.runtime && data.runtime.started_at_display, 'UNAVAILABLE'));
-        setText('runtime-uptime', displayValue(data.runtime && data.runtime.uptime_display, 'UNAVAILABLE'));
-        setText('runtime-last-evidence-side', displayValue(data.runtime && data.runtime.last_runtime_evidence_display, 'UNAVAILABLE'));
-        setText('runtime-last-processed', displayValue(data.runtime && data.runtime.last_processed_display, 'UNAVAILABLE'));
-        setBadge('home-latency-status', data.latency && data.latency.status_label, data.latency && data.latency.status_class);
-        setText('home-latency-detail', displayValue(data.latency && data.latency.detail, 'No latency data yet for this scope.'));
-        setText('home-latency-p50', displayValue(data.latency && data.latency.pipeline_p50, '—'));
-        setText('home-latency-p95', displayValue(data.latency && data.latency.pipeline_p95, '—'));
-        setText('metric-latency-p95', displayValue(data.latency && data.latency.pipeline_p95, 'NO DATA'));
-        setText('home-latency-llm-p90', displayValue(data.latency && data.latency.llm_p90, '—'));
-        setText('home-latency-samples', displayValue(data.latency && data.latency.sample_count_display, '0 spans'));
-        setText('home-latency-error-rate', displayValue(data.latency && data.latency.error_rate, '—'));
-        setText('home-latency-fallback-rate', displayValue(data.latency && data.latency.fallback_rate, '—'));
-        setText('home-latency-empty', data.latency && data.latency.available ? '' : displayValue(data.latency && data.latency.status_label, 'NO LATENCY DATA'));
-        setBadge('home-ai-status', data.ai && data.ai.status_label, data.ai && data.ai.status_class);
-        setText('home-ai-detail', displayValue(data.ai && data.ai.detail, 'No recent LLM calls or decision traces for this scope.'));
-        setText('home-ai-calls', displayValue(data.ai && data.ai.llm_calls_today, 'unknown'));
-        setText('home-ai-fallback', displayValue(data.ai && data.ai.llm_fallback_today, 'unknown'));
-        setText('home-ai-trace-coverage', displayValue(data.ai && data.ai.trace_coverage, '0/0'));
-        setText('metric-ai-trace-coverage', displayValue(data.ai && data.ai.trace_coverage, '0/0'));
-        renderList('preview-recent-events', data.recent_events, 'No recent events yet.', (item) => `<li>${escapeHtml(String(item.text || item.type || 'event'))}</li>`);
-        renderList('home-health-components', data.health && data.health.components, 'No health evidence yet for this scope.', (item) => `<li><span class="badge ${escapeHtml(String(item.status_class || 'muted'))}">${escapeHtml(String(item.name || 'Component'))}: ${escapeHtml(String(item.status || 'UNKNOWN'))}</span>${item.detail ? ` ${escapeHtml(String(item.detail))}` : ''}</li>`);
-        const aiItems = [];
-        (Array.isArray(data.ai && data.ai.recent_providers) ? data.ai.recent_providers : []).forEach((item) => aiItems.push({ html: `<li>Provider: ${escapeHtml(String(item.label || 'unknown'))}</li>` }));
-        (Array.isArray(data.ai && data.ai.recent_traces) ? data.ai.recent_traces : []).forEach((item) => aiItems.push({ html: `<li>${escapeHtml(String(item.decision_kind || 'decision'))}: ${escapeHtml(String(item.codes_text || 'no explain codes'))}</li>` }));
-        renderList('home-ai-items', aiItems.map((item) => item.html), 'No recent AI decision traces recorded yet.', (item) => item);
-        renderList('top-contacts-list', data.top_contacts, noContactSummaryText, (item) => `<li>${escapeHtml(maskEmail(item.sender_email))} - ${escapeHtml(displayValue(item.emails_count, '0'))} emails</li>`);
-        renderList('top-issuers-list', data.top_issuers, noIssuerSummaryText, (item) => `<li>${escapeHtml(String(item.issuer_label || item.issuer_key || 'issuer'))} - waiting ${escapeHtml(displayValue(item.documents_waiting_attention_count, '0'))}</li>`);
-        renderProcessed(data.processed_table || {});
-      };
-      const refreshStatus = () => fetch(`/partial/status_strip${window.location.search}`, { credentials: 'same-origin' }).then((resp) => { if (!resp.ok) throw new Error('status'); return resp.text(); }).then((html) => { if (strip) strip.innerHTML = html; if (offline) offline.classList.remove('active'); }).catch(() => { if (offline) offline.classList.add('active'); });
-      const refreshDashboard = () => fetch('/api/dashboard' + window.location.search, { credentials: 'same-origin' }).then((resp) => { if (!resp.ok) throw new Error('dashboard'); return resp.json(); }).then(renderDashboard).catch(() => { setBadge('dashboard-meta-status', 'UNAVAILABLE', 'warn'); setText('preview-dashboard-updated', 'Update failed'); });
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-          refreshStatus();
-          refreshDashboard();
-        }
-      });
-      refreshStatus();
-      refreshDashboard();
-      setInterval(() => { if (!document.hidden) refreshStatus(); }, {{ status_refresh_ms }});
-      setInterval(() => { if (!document.hidden) refreshDashboard(); }, {{ dashboard_refresh_ms }});
-    })();
-  </script>
+  <script src="{{ url_for('static', filename='live.js') }}" nonce="{{ csp_nonce }}" defer></script>
+  <script src="{{ url_for('static', filename='cockpit.js') }}" nonce="{{ csp_nonce }}" defer></script>
 {% endblock %}

@@ -144,16 +144,5 @@
     {% if next_url %}<a class="btn ghost" href="{{ next_url }}">Next</a>{% endif %}
   </div>
 
-  <script nonce="{{ csp_nonce }}">
-    document.addEventListener('DOMContentLoaded', function() {
-      document.querySelectorAll('[data-row-link]').forEach(function(row) {
-        row.addEventListener('click', function() {
-          const target = row.getAttribute('data-row-link');
-          if (target) {
-            window.location.href = target;
-          }
-        });
-      });
-    });
-  </script>
+  <script src="{{ url_for('static', filename='archive.js') }}" nonce="{{ csp_nonce }}" defer></script>
 {% endblock %}

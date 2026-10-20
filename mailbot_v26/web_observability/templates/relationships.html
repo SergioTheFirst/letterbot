@@ -49,43 +49,5 @@
     </div>
   </div>
 
-  <script nonce="{{ csp_nonce }}">
-    (function() {
-      const el = document.getElementById("relationships-data");
-      if (!el) return;
-      const raw = el.dataset.graph || "{}";
-      let graph = {};
-      try {
-        graph = JSON.parse(raw);
-      } catch (e) {
-        graph = {};
-      }
-      const nodes = Array.isArray(graph.nodes)
-        ? graph.nodes.filter((n) => n && n.id !== "user:me")
-        : [];
-      const content = document.getElementById("graph-content");
-      if (!content) return;
-      if (!nodes.length) {
-        content.innerHTML = '<div class="hint">No relationship data yet. Adjust scope or window.</div>';
-        return;
-      }
-
-      const esc = (value) => String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;");
-
-      const rows = nodes.map((n) => {
-        const name = n.display_name || n.label || n.entity_id || n.id || "unknown";
-        const trust = typeof n.trust_score === "number" ? n.trust_score.toFixed(2) : "-";
-        const count = n.email_count ?? n.emails_total ?? 0;
-        return `<tr><td>${esc(name)}</td><td>${esc(count)}</td><td>${esc(trust)}</td></tr>`;
-      }).join("");
-
-      content.innerHTML = `<div class="table-scroll"><table class="table compact">
-        <thead><tr><th>Contact</th><th>Emails</th><th>Trust</th></tr></thead>
-        <tbody>${rows}</tbody></table></div>`;
-    })();
-  </script>
+  <script src="{{ url_for('static', filename='relationships.js') }}" nonce="{{ csp_nonce }}" defer></script>
 {% endblock %}

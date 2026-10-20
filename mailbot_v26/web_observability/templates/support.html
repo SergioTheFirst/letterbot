@@ -56,33 +56,5 @@
 </section>
 {% endif %}
 
-<script nonce="{{ csp_nonce }}">
-function copySupportValue(elementId, button) {
-  const node = document.getElementById(elementId);
-  if (!node) return;
-  const value = (node.textContent || '').trim();
-  if (!value) return;
-  const success = function() {
-    const oldText = button.textContent;
-    button.textContent = 'Copied';
-    setTimeout(function() { button.textContent = oldText; }, 1200);
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(value).then(success);
-    return;
-  }
-  const input = document.createElement('textarea');
-  input.value = value;
-  document.body.appendChild(input);
-  input.select();
-  try { document.execCommand('copy'); } catch (e) {}
-  document.body.removeChild(input);
-  success();
-}
-document.querySelectorAll('[data-copy-target]').forEach(function(button) {
-  button.addEventListener('click', function() {
-    copySupportValue(button.getAttribute('data-copy-target'), button);
-  });
-});
-</script>
+<script src="{{ url_for('static', filename='support.js') }}" nonce="{{ csp_nonce }}" defer></script>
 {% endblock %}
