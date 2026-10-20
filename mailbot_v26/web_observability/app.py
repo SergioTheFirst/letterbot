@@ -8313,6 +8313,21 @@ def main() -> None:
         raise
 
 
+WEB_THREAD_READY_TIMEOUT_SECONDS = 15.0
+
+
+def _web_start_failure_message(exc: BaseException, host: str, port: int) -> str:
+    if isinstance(exc, SystemExit):
+        # werkzeug prints the OS error and calls sys.exit() when bind() fails.
+        reason = "the port is busy or the address is unavailable"
+    else:
+        reason = f"{type(exc).__name__}: {exc}"
+    hint = ""
+    if isinstance(exc, (SystemExit, OSError)):
+        hint = " Free the port or change [web] port in settings.ini, then restart."
+    return f"Web UI could not start on {host}:{port}: {reason}.{hint}"
+
+
 def start_web_in_thread(
     *,
     config_dir: Path,
@@ -8320,27 +8335,33 @@ def start_web_in_thread(
     host: str = "127.0.0.1",
     port: int = 8787,
     password: str = "",
-) -> None:
+    ready_timeout: float = WEB_THREAD_READY_TIMEOUT_SECONDS,
+) -> Any:
     """Start the Flask web UI in a background daemon thread.
 
     Safe to call from a frozen PyInstaller EXE where subprocess
-    cannot spawn a separate web process.
+    cannot spawn a separate web process. Returns the running server only once
+    it listens; raises RuntimeError when it cannot start (busy port, bad
+    config) or is not listening within ``ready_timeout`` seconds, so callers
+    report "[OK]" only for a server that accepts connections.
     """
-    import threading
+    ready = threading.Event()
+    outcome: dict[str, Any] = {}
 
     def _run() -> None:
         try:
-            from mailbot_v26.config_loader import (
-                load_web_config,
-                load_web_ui_password_from_ini,
-            )
-            import os
+            from werkzeug.serving import make_server
 
             ini_password = load_web_ui_password_from_ini(config_dir)
             env_password = str(os.environ.get("WEB_PASSWORD") or "").strip()
             resolved_password = env_password or ini_password or password
 
             secret_key, attention_cost = _load_web_ui_secrets(config_dir)
+            local_smoke_bypass = _load_local_smoke_bypass_from_ini(config_dir)
+            if local_smoke_bypass:
+                logger.warning(
+                    "WEB_UI_LOCAL_SMOKE_BYPASS_ACTIVE allow_local_smoke_bypass=true"
+                )
 
             app = create_app(
                 db_path=db_path,
@@ -8353,23 +8374,38 @@ def start_web_in_thread(
                 dist_root=app_root(),
                 web_ui_bind=host,
                 web_ui_port=int(port),
-                allow_local_smoke_bypass=True,
+                allow_local_smoke_bypass=local_smoke_bypass,
                 support_settings=None,
             )
-            app.run(
-                host=host,
-                port=int(port),
-                debug=False,
-                use_reloader=False,
-                threaded=True,
-            )
+            # make_server binds in its constructor, so "ready" means listening.
+            server = make_server(host, int(port), app, threaded=True)
+        except (SystemExit, Exception) as exc:
+            message = _web_start_failure_message(exc, host, int(port))
+            logger.error("web_thread_failed error=%s", message)
+            print(f"[ERROR] {message}")
+            outcome["error"] = message
+            ready.set()
+            return
+        outcome["server"] = server
+        logger.info("WEB_UI_LISTENING host=%s port=%s", host, port)
+        ready.set()
+        try:
+            server.serve_forever()
         except Exception as exc:
-            import logging
-
-            logging.getLogger("mailbot").error("web_thread_failed error=%s", exc)
+            logger.error("web_thread_stopped error=%s", exc)
+            print(f"[ERROR] Web UI stopped: {type(exc).__name__}: {exc}")
 
     thread = threading.Thread(target=_run, name="web-ui", daemon=True)
     thread.start()
+    if not ready.wait(ready_timeout):
+        message = (
+            f"Web UI on {host}:{port} was not listening after {ready_timeout:g}s"
+        )
+        logger.error("web_thread_not_ready error=%s", message)
+        raise RuntimeError(message)
+    if "error" in outcome:
+        raise RuntimeError(outcome["error"])
+    return outcome["server"]
 
 
 if __name__ == "__main__":
