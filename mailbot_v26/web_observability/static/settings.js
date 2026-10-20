@@ -723,6 +723,60 @@
     });
   }
 
+  /* ---------- configuration files (init-config / migrate-config) */
+
+  var setupCard = document.querySelector("[data-setup-card]");
+
+  function renderSetup() {
+    if (!setupCard) {
+      return;
+    }
+    var setup = state.setup || {};
+    var missing = setup.missing || [];
+    var legacy = setup.legacy || [];
+    var line = t("editor.setup_present");
+    if (setup.can_migrate) {
+      line = t("editor.setup_legacy", { files: legacy.join(", ") });
+    } else if (missing.length) {
+      line = t("editor.setup_missing", { files: missing.join(", ") });
+    }
+    setupCard.querySelector("[data-setup-state]").textContent = line;
+    show(setupCard.querySelector('[data-action="init-config"]'), missing.length > 0 && !setup.can_migrate);
+    show(setupCard.querySelector('[data-action="migrate-config"]'), !!setup.can_migrate);
+  }
+
+  if (setupCard) {
+    setupCard.addEventListener("click", function (event) {
+      var button = event.target.closest ? event.target.closest("button[data-action]") : null;
+      var action = button ? button.getAttribute("data-action") : "";
+      if (!state || (action !== "init-config" && action !== "migrate-config")) {
+        return;
+      }
+      var message = setupCard.querySelector("[data-setup-message]");
+      var done = busy(button, t("editor.setup_working"));
+      api("POST", "/api/settings/" + action, {}).then(
+        function (result) {
+          done();
+          var data = result.data || {};
+          if (result.status === 200 && data.ok) {
+            var created = data.created || [];
+            rememberFlash(
+              created.length ? t("editor.setup_created", { files: created.join(", ") }) : t("editor.setup_nothing")
+            );
+            window.location.reload();
+            return;
+          }
+          var key = "editor.setup." + (data.code || "FAILED");
+          say(message, Object.prototype.hasOwnProperty.call(TEXTS, key) ? t(key) : t("editor.setup.FAILED"), "error");
+        },
+        function () {
+          done();
+          failed(message)();
+        }
+      );
+    });
+  }
+
   /* ---------- load */
 
   function render() {
@@ -737,6 +791,7 @@
     }
     renderList();
     renderWeb();
+    renderSetup();
   }
 
   var flashMessage = takeFlash();

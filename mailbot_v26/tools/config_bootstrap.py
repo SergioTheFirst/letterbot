@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from mailbot_v26.config_loader import ACCOUNT_ID_PATTERN, CONFIG_DIR
 from mailbot_v26.config.ini_utils import new_user_ini_parser, read_user_ini_with_defaults
@@ -15,6 +18,28 @@ from mailbot_v26.config_yaml import (
 
 SYSTEM_SECTIONS = {"telegram", "cloudflare", "gigachat", "llm"}
 BOOTSTRAP_EXAMPLE_ACCOUNT_ID = "example_account"
+
+
+@dataclass(frozen=True)
+class ConfigFinding:
+    """One validate-config / config-ready line, also shown on the dashboard.
+
+    ``message`` writes the INI section it is about as "{section}" and never
+    carries an option value; ``text`` is the exact line the CLI prints.
+    """
+
+    message: str
+    section: str = ""
+
+    @property
+    def text(self) -> str:
+        return self.shown(lambda section: section)
+
+    def shown(self, label: Callable[[str], str]) -> str:
+        """The line with the section name passed through ``label`` (masking)."""
+        if not self.section:
+            return self.message
+        return self.message.replace("{section}", label(self.section))
 
 
 SETTINGS_TEMPLATE = """[general]
@@ -299,7 +324,24 @@ def run_init_config(base_dir: Path = CONFIG_DIR) -> None:
         print(f"EXAMPLE: {path}")
 
 
-def migrate_two_file_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]]:
+def _write_text(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+
+
+def migrate_two_file_config(
+    base_dir: Path = CONFIG_DIR,
+    *,
+    legacy_backups: bool = True,
+    write: Callable[[Path, str], None] = _write_text,
+) -> dict[str, list[Path]]:
+    """Convert config.ini / config.yaml / keys.ini to settings.ini + accounts.ini.
+
+    Both new files are computed before either is written, and ``write`` is the
+    only way settings.ini / accounts.ini are written (the Settings page passes
+    an atomic writer with backup). The legacy files are only read; with
+    ``legacy_backups=False`` (the Settings page) no ``.bak`` copy of them is
+    written either.
+    """
     base_dir.mkdir(parents=True, exist_ok=True)
     backups: list[Path] = []
     created: list[Path] = []
@@ -310,49 +352,54 @@ def migrate_two_file_config(base_dir: Path = CONFIG_DIR) -> dict[str, list[Path]
     legacy_keys = base_dir / "keys.ini"
     legacy_yaml = base_dir / "config.yaml"
 
+    settings_text: str | None = None
     if not settings_path.exists():
         if legacy_settings.exists():
-            settings_path.write_text(
-                legacy_settings.read_text(encoding="utf-8"), encoding="utf-8"
-            )
+            settings_text = legacy_settings.read_text(encoding="utf-8")
         else:
-            settings_path.write_text(SETTINGS_TEMPLATE, encoding="utf-8")
-        created.append(settings_path)
+            settings_text = SETTINGS_TEMPLATE
 
-    if not accounts_path.exists():
-        accounts_path.write_text(ACCOUNTS_TEMPLATE, encoding="utf-8")
-        created.append(accounts_path)
-
-    if legacy_settings.exists():
-        backup = legacy_settings.with_suffix(".ini.bak")
-        if not backup.exists():
-            backup.write_text(
-                legacy_settings.read_text(encoding="utf-8"), encoding="utf-8"
-            )
-            backups.append(backup)
-
-    if legacy_yaml.exists():
-        backup = legacy_yaml.with_suffix(".yaml.bak")
-        if not backup.exists():
-            backup.write_text(legacy_yaml.read_text(encoding="utf-8"), encoding="utf-8")
-            backups.append(backup)
-
+    accounts_missing = not accounts_path.exists()
+    accounts_text = ACCOUNTS_TEMPLATE if accounts_missing else None
     if legacy_keys.exists():
         # utf-8-sig: Notepad's "UTF-8 with BOM" must parse like plain UTF-8.
         # Values as written (no %-interpolation), like every user INI reader.
         parser = new_user_ini_parser()
-        parser.read(accounts_path, encoding="utf-8-sig")
+        if accounts_text is None:
+            parser.read(accounts_path, encoding="utf-8-sig")
+        else:
+            parser.read_string(accounts_text)
         legacy = new_user_ini_parser()
         legacy.read(legacy_keys, encoding="utf-8-sig")
         for section in ("telegram", "cloudflare"):
             if section in legacy and section not in parser:
                 parser[section] = dict(legacy[section])
-        with accounts_path.open("w", encoding="utf-8") as fh:
-            parser.write(fh)
-        backup = legacy_keys.with_suffix(".ini.bak")
-        if not backup.exists():
-            backup.write_text(legacy_keys.read_text(encoding="utf-8"), encoding="utf-8")
-            backups.append(backup)
+        buffer = io.StringIO()
+        parser.write(buffer)
+        accounts_text = buffer.getvalue()
+
+    if settings_text is not None:
+        write(settings_path, settings_text)
+        created.append(settings_path)
+    if accounts_text is not None:
+        write(accounts_path, accounts_text)
+        if accounts_missing:
+            created.append(accounts_path)
+
+    if legacy_backups:
+        for legacy_path, suffix in (
+            (legacy_settings, ".ini.bak"),
+            (legacy_yaml, ".yaml.bak"),
+            (legacy_keys, ".ini.bak"),
+        ):
+            if not legacy_path.exists():
+                continue
+            backup = legacy_path.with_suffix(suffix)
+            if not backup.exists():
+                backup.write_text(
+                    legacy_path.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+                backups.append(backup)
 
     return {"created": created, "backups": backups}
 
@@ -379,24 +426,25 @@ def _is_bootstrap_example_account(section_name: str) -> bool:
     return section_name.strip().lower() == BOOTSTRAP_EXAMPLE_ACCOUNT_ID
 
 
-def check_config_ready(
+def config_ready_findings(
     base_dir: Path = CONFIG_DIR,
-) -> tuple[bool, list[str], list[str]]:
-    critical: list[str] = []
-    warnings: list[str] = []
+) -> tuple[list[ConfigFinding], list[ConfigFinding]]:
+    """(critical, warnings) of config-ready; check_config_ready prints them."""
+    critical: list[ConfigFinding] = []
+    warnings: list[ConfigFinding] = []
 
     accounts_path = base_dir / "accounts.ini"
     if not accounts_path.exists():
-        critical.append("Missing accounts.ini")
-        return False, critical, warnings
+        critical.append(ConfigFinding("Missing accounts.ini"))
+        return critical, warnings
 
     parser = read_user_ini_with_defaults(
         accounts_path,
         scope_label="config-ready accounts.ini",
     )
     if not parser.sections():
-        critical.append("accounts.ini has no sections")
-        return False, critical, warnings
+        critical.append(ConfigFinding("accounts.ini has no sections"))
+        return critical, warnings
 
     has_valid_imap_account = False
     for section_name in parser.sections():
@@ -405,14 +453,19 @@ def check_config_ready(
 
         if not ACCOUNT_ID_PATTERN.fullmatch(section_name):
             critical.append(
-                f"Invalid IMAP account section '{section_name}': use lowercase [a-z0-9_], no spaces"
+                ConfigFinding(
+                    "Invalid IMAP account section '{section}': use lowercase [a-z0-9_], no spaces",
+                    section_name,
+                )
             )
             continue
 
         if _is_bootstrap_example_account(section_name):
             critical.append(
-                "[example_account] is still the bootstrap template: rename the section "
-                "and replace example login/host values"
+                ConfigFinding(
+                    "[example_account] is still the bootstrap template: rename the section "
+                    "and replace example login/host values"
+                )
             )
             continue
 
@@ -424,39 +477,57 @@ def check_config_ready(
         ]
         if missing:
             critical.append(
-                f"[{section_name}] missing required fields: {', '.join(missing)}"
+                ConfigFinding(
+                    f"[{{section}}] missing required fields: {', '.join(missing)}",
+                    section_name,
+                )
             )
             continue
 
         try:
             port = section.getint("port")
             if not (1 <= port <= 65535):
-                critical.append(f"[{section_name}] port must be between 1 and 65535")
+                critical.append(
+                    ConfigFinding("[{section}] port must be between 1 and 65535", section_name)
+                )
                 continue
         except ValueError:
-            critical.append(f"[{section_name}] port must be an integer")
+            critical.append(ConfigFinding("[{section}] port must be an integer", section_name))
             continue
 
         try:
             section.getboolean("use_ssl")
         except ValueError:
-            critical.append(f"[{section_name}] use_ssl must be true/false")
+            critical.append(ConfigFinding("[{section}] use_ssl must be true/false", section_name))
             continue
 
         has_valid_imap_account = True
 
     if not has_valid_imap_account:
-        critical.append("No ready IMAP account found in accounts.ini")
+        critical.append(ConfigFinding("No ready IMAP account found in accounts.ini"))
 
     telegram_section = parser["telegram"] if parser.has_section("telegram") else None
     if telegram_section is None or _is_placeholder(
         telegram_section.get("bot_token", "")
     ):
         warnings.append(
-            "[telegram] bot_token is not configured (Telegram delivery may be disabled)"
+            ConfigFinding(
+                "[telegram] bot_token is not configured (Telegram delivery may be disabled)"
+            )
         )
 
-    return not critical, critical, warnings
+    return critical, warnings
+
+
+def check_config_ready(
+    base_dir: Path = CONFIG_DIR,
+) -> tuple[bool, list[str], list[str]]:
+    critical, warnings = config_ready_findings(base_dir)
+    return (
+        not critical,
+        [finding.text for finding in critical],
+        [finding.text for finding in warnings],
+    )
 
 
 def run_config_ready(base_dir: Path = CONFIG_DIR, *, verbose: bool = False) -> int:
@@ -471,24 +542,25 @@ def run_config_ready(base_dir: Path = CONFIG_DIR, *, verbose: bool = False) -> i
     return 0 if ready else 2
 
 
-def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
-    issues: list[str] = []
+def validate_config_findings(base_dir: Path = CONFIG_DIR) -> list[ConfigFinding]:
+    """validate-config's findings; validate_config returns their CLI lines."""
+    issues: list[ConfigFinding] = []
 
     settings_path = base_dir / "settings.ini"
     legacy_settings_path = base_dir / "config.ini"
     accounts_path = base_dir / "accounts.ini"
 
     if not base_dir.exists():
-        issues.append(f"Config directory not found: {base_dir}")
-        return False, issues
+        issues.append(ConfigFinding(f"Config directory not found: {base_dir}"))
+        return issues
 
     if not settings_path.exists() and not legacy_settings_path.exists():
-        issues.append("Missing settings.ini (or legacy config.ini)")
+        issues.append(ConfigFinding("Missing settings.ini (or legacy config.ini)"))
     if not accounts_path.exists():
-        issues.append("Missing accounts.ini")
+        issues.append(ConfigFinding("Missing accounts.ini"))
 
     if not accounts_path.exists():
-        return False, issues
+        return issues
 
     parser = read_user_ini_with_defaults(
         accounts_path,
@@ -496,8 +568,8 @@ def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
     )
 
     if not parser.sections():
-        issues.append("accounts.ini has no account sections")
-        return False, issues
+        issues.append(ConfigFinding("accounts.ini has no account sections"))
+        return issues
 
     has_imap_section = False
     # [telegram] chat_id is the default chat for mailboxes without their own.
@@ -513,73 +585,84 @@ def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
 
         if lowered == "telegram":
             if _is_placeholder(section.get("bot_token", "")):
-                issues.append("[telegram] bot_token is not configured")
+                issues.append(ConfigFinding("[telegram] bot_token is not configured"))
             continue
 
         if lowered == "cloudflare":
             if _is_placeholder(section.get("account_id", "")):
-                issues.append("[cloudflare] account_id is not configured")
+                issues.append(ConfigFinding("[cloudflare] account_id is not configured"))
             if _is_placeholder(section.get("api_token", "")):
-                issues.append("[cloudflare] api_token is not configured")
+                issues.append(ConfigFinding("[cloudflare] api_token is not configured"))
             continue
 
         if lowered == "gigachat":
             if _is_placeholder(section.get("api_key", "")):
-                issues.append("[gigachat] api_key is not configured")
+                issues.append(ConfigFinding("[gigachat] api_key is not configured"))
             continue
 
         if lowered == "llm":
             if _is_placeholder(section.get("primary", "")):
-                issues.append("[llm] primary is not configured")
+                issues.append(ConfigFinding("[llm] primary is not configured"))
             continue
 
         has_imap_section = True
+        messages: list[str] = []
         if not ACCOUNT_ID_PATTERN.fullmatch(section_name):
             issues.append(
-                f"Invalid account_id '{section_name}': use lowercase [a-z0-9_], no spaces"
+                ConfigFinding(
+                    "Invalid account_id '{section}': use lowercase [a-z0-9_], no spaces",
+                    section_name,
+                )
             )
             continue
 
         host = section.get("host", "").strip()
         if not host:
-            issues.append(f"[{section_name}] host is required")
+            messages.append("[{section}] host is required")
 
         login = section.get("login", "").strip()
         if not login:
-            issues.append(f"[{section_name}] login is required")
+            messages.append("[{section}] login is required")
 
         password = section.get("password", "").strip()
         if not password:
-            issues.append(f"[{section_name}] password is required")
+            messages.append("[{section}] password is required")
 
         if "port" not in section:
-            issues.append(f"[{section_name}] port is required")
+            messages.append("[{section}] port is required")
         else:
             try:
                 port = section.getint("port")
                 if not (1 <= port <= 65535):
-                    issues.append(f"[{section_name}] port must be between 1 and 65535")
+                    messages.append("[{section}] port must be between 1 and 65535")
             except ValueError:
-                issues.append(f"[{section_name}] port must be an integer")
+                messages.append("[{section}] port must be an integer")
 
         if "use_ssl" not in section:
-            issues.append(f"[{section_name}] use_ssl is required (true/false)")
+            messages.append("[{section}] use_ssl is required (true/false)")
         else:
             try:
                 section.getboolean("use_ssl")
             except ValueError:
-                issues.append(f"[{section_name}] use_ssl must be true/false")
+                messages.append("[{section}] use_ssl must be true/false")
 
         telegram_chat_id = section.get("telegram_chat_id", "").strip()
         if not telegram_chat_id and _is_placeholder(default_chat_id):
-            issues.append(
-                f"[{section_name}] telegram_chat_id is recommended for Telegram delivery"
+            messages.append(
+                "[{section}] telegram_chat_id is recommended for Telegram delivery"
             )
+        for message in messages:
+            issues.append(ConfigFinding(message, section_name))
 
     if not has_imap_section:
-        issues.append("accounts.ini has no IMAP account sections")
+        issues.append(ConfigFinding("accounts.ini has no IMAP account sections"))
 
-    return not issues, issues
+    return issues
+
+
+def validate_config(base_dir: Path = CONFIG_DIR) -> tuple[bool, list[str]]:
+    findings = validate_config_findings(base_dir)
+    return not findings, [finding.text for finding in findings]
 
 
 def _resolve_yaml_config_path(base_dir: Path = CONFIG_DIR) -> Path | None:

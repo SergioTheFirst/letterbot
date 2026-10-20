@@ -8409,6 +8409,9 @@ def create_app(
     from mailbot_v26.web_observability.settings_api import register_settings_routes
 
     register_settings_routes(app, config_dir=config_dir)
+    from mailbot_v26.web_observability.commands_page import register_commands_routes
+
+    register_commands_routes(app)
     return app
 
 

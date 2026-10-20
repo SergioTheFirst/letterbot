@@ -56,6 +56,7 @@
           <a href="{{ url_for('health') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">Health</a>
           <a href="{{ url_for('events') }}" class="nav-link {% if request.path == '/events' %}active{% endif %}">Events</a>
           <a href="{{ url_for('doctor') }}" class="nav-link {% if request.path.startswith('/doctor') %}active{% endif %}">Doctor</a>
+          <a href="{{ url_for('commands') }}" class="nav-link {% if request.path == '/commands' %}active{% endif %}">Commands</a>
           <a href="{{ url_for('commitments') }}" class="nav-link {% if request.path.startswith('/commitments') %}active{% endif %}">Commitments</a>
           <a href="{{ url_for('latency') }}" class="nav-link {% if request.path == '/latency' %}active{% endif %}">Latency</a>
           <a href="{{ url_for('attention') }}" class="nav-link {% if request.path == '/attention' %}active{% endif %}">Attention</a>

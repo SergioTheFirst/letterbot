@@ -484,6 +484,31 @@ _EN: dict[str, str] = {
         "Other devices sign in with the dashboard password. The connection is not "
         "encrypted: use it only on a trusted network."
     ),
+    "editor.setup_title": "Configuration files",
+    "editor.setup_hint": (
+        "The same as the init-config and migrate-config commands. Existing files "
+        "are never overwritten, and older configuration files stay unchanged."
+    ),
+    "editor.setup_present": "accounts.ini and settings.ini are in place.",
+    "editor.setup_missing": "Missing: {files}.",
+    "editor.setup_legacy": (
+        "An older configuration was found ({files}). Convert it to accounts.ini and "
+        "settings.ini."
+    ),
+    "editor.setup_init": "Create missing configuration files",
+    "editor.setup_migrate": "Convert legacy configuration",
+    "editor.setup_working": "Working…",
+    "editor.setup_created": "Created: {files}.",
+    "editor.setup_nothing": "Nothing to create: the files are already there.",
+    "editor.setup.LEGACY_CONFIG": (
+        "An older configuration was found: convert it instead."
+    ),
+    "editor.setup.ACCOUNTS_EXIST": "accounts.ini already exists: there is nothing to convert.",
+    "editor.setup.NO_LEGACY": "No older configuration was found.",
+    "editor.setup.FILE_UNREADABLE": (
+        "An older configuration file could not be read: check that it is saved as UTF-8."
+    ),
+    "editor.setup.FAILED": "The files could not be written. Details are in the Letterbot log.",
 }
 
 _RU: dict[str, str] = {
@@ -966,6 +991,31 @@ _RU: dict[str, str] = {
         "Другие устройства входят по паролю панели. Соединение не шифруется: "
         "используйте только в доверенной сети."
     ),
+    "editor.setup_title": "Файлы настроек",
+    "editor.setup_hint": (
+        "То же, что команды init-config и migrate-config. Существующие файлы не "
+        "перезаписываются, старые файлы настроек остаются без изменений."
+    ),
+    "editor.setup_present": "accounts.ini и settings.ini на месте.",
+    "editor.setup_missing": "Не хватает: {files}.",
+    "editor.setup_legacy": (
+        "Найдены старые настройки ({files}). Преобразуйте их в accounts.ini и "
+        "settings.ini."
+    ),
+    "editor.setup_init": "Создать недостающие файлы настроек",
+    "editor.setup_migrate": "Преобразовать старые настройки",
+    "editor.setup_working": "Выполняется…",
+    "editor.setup_created": "Созданы: {files}.",
+    "editor.setup_nothing": "Создавать нечего: файлы уже на месте.",
+    "editor.setup.LEGACY_CONFIG": (
+        "Найдены старые настройки: преобразуйте их."
+    ),
+    "editor.setup.ACCOUNTS_EXIST": "accounts.ini уже есть: преобразовывать нечего.",
+    "editor.setup.NO_LEGACY": "Старые настройки не найдены.",
+    "editor.setup.FILE_UNREADABLE": (
+        "Не удалось прочитать старый файл настроек: проверьте, что он сохранён в UTF-8."
+    ),
+    "editor.setup.FAILED": "Не удалось записать файлы. Подробности — в журнале Letterbot.",
 }
 
 _CATALOGS: dict[str, dict[str, str]] = {"en": _EN, "ru": _RU}

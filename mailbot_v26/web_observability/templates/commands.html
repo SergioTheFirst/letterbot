@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{# Commands page (P3c): every command-line command and its place in the dashboard
+   (commands_registry). Read-only results come from commands_page on this request;
+   static/commands.js only copies command lines. No inline script or handler (CSP). #}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block scope_form %}{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='commands.css') }}">
+<div class="commands-page" data-testid="commands-page">
+  <p class="hint commands-intro">{{ ct('page.intro') }}</p>
+  {% if not config_dir_known %}
+  <div class="alert" role="note">{{ ct('page.no_config_dir') }}</div>
+  {% endif %}
+
+  <section class="card commands-checks" aria-labelledby="commands-checks-title">
+    <div class="commands-checks-head">
+      <h2 id="commands-checks-title">{{ ct('checks.title') }}</h2>
+      <a class="ghost commands-run-again" href="{{ url_for('commands') }}">{{ ct('checks.run_again') }}</a>
+    </div>
+    <p class="hint">{{ ct('checks.intro') }}</p>
+    <div class="commands-panels">
+
+      {% set v = results.validate %}
+      <article class="commands-panel" id="validate-config" data-testid="panel-validate-config">
+        <h3>{{ ct('validate.title') }}</h3>
+        {% if v.state == 'no_config_dir' %}
+        <p class="hint">{{ ct('check.no_config_dir') }}</p>
+        {% elif v.state == 'unavailable' %}
+        <p><span class="status-pill danger">{{ ct('check.unavailable', error=v.error) }}</span></p>
+        {% elif v.findings %}
+        <p><span class="status-pill warn">{{ ct('validate.warn', count=v.findings|length) }}</span></p>
+        <ul class="commands-findings">
+          {% for finding in v.findings %}<li>{{ finding.text }}</li>{% endfor %}
+        </ul>
+        {% else %}
+        <p><span class="status-pill success">{{ ct('validate.ok') }}</span></p>
+        {% endif %}
+        {% if v.compat %}
+        <h4>{{ ct('compat.title') }}</h4>
+        {% if v.compat.state == 'absent' %}
+        <p class="hint">{{ ct('compat.absent') }}</p>
+        {% elif v.compat.state == 'unreadable' %}
+        <p><span class="status-pill danger">{{ ct('compat.unreadable', error=v.compat.error) }}</span></p>
+        {% else %}
+        <p>{{ ct('compat.versions', supported=v.compat.supported, version=v.compat.version) }}</p>
+        <p><span class="status-pill {{ 'success' if v.compat.state == 'ok' else 'danger' }}">{{ ct('compat.ok' if v.compat.state == 'ok' else 'compat.fail') }}</span></p>
+        {% endif %}
+        {% endif %}
+      </article>
+
+      {% set r = results.ready %}
+      <article class="commands-panel" id="config-ready" data-testid="panel-config-ready">
+        <h3>{{ ct('ready.title') }}</h3>
+        {% if r.state == 'no_config_dir' %}
+        <p class="hint">{{ ct('check.no_config_dir') }}</p>
+        {% elif r.state == 'unavailable' %}
+        <p><span class="status-pill danger">{{ ct('check.unavailable', error=r.error) }}</span></p>
+        {% else %}
+        <p><span class="status-pill {{ 'success' if r.state == 'ready' else 'danger' }}">{{ ct('ready.ok' if r.state == 'ready' else 'ready.not_ready') }}</span></p>
+        {% if r.critical %}
+        <h4>{{ ct('ready.critical') }}</h4>
+        <ul class="commands-findings">{% for item in r.critical %}<li>{{ item }}</li>{% endfor %}</ul>
+        {% endif %}
+        {% if r.warnings %}
+        <h4>{{ ct('ready.warnings') }}</h4>
+        <ul class="commands-findings">{% for item in r.warnings %}<li>{{ item }}</li>{% endfor %}</ul>
+        {% endif %}
+        {% endif %}
+      </article>
+
+      {% set c = results.cleanup %}
+      <article class="commands-panel" id="cleanup-status" data-testid="panel-cleanup-status">
+        <h3>{{ ct('cleanup.title') }}</h3>
+        {% if c.state == 'unavailable' %}
+        <p><span class="status-pill danger">{{ ct('check.unavailable', error=c.error) }}</span></p>
+        {% elif c.state == 'database_missing' %}
+        <p class="hint">{{ ct('cleanup.missing_db') }}</p>
+        <p class="hint mono commands-path">{{ ct('cleanup.db', path=c.db_path) }}</p>
+        {% else %}
+        <p class="hint mono commands-path">{{ ct('cleanup.db', path=c.db_path) }}</p>
+        <p><strong>{{ ct('cleanup.total', count=c.eligible_total) }}</strong></p>
+        <p>{{ ct('cleanup.freelist', count=c.freelist) }}</p>
+        <ul class="commands-findings">
+          {% for target in c.targets %}
+          {% if target.missing %}
+          <li class="hint">{{ ct('cleanup.not_created', table=target.table, name=target.name) }}</li>
+          {% else %}
+          <li>{{ ct('cleanup.target', table=target.table, name=target.name, days=target.retention_days, count=target.eligible) }}</li>
+          {% endif %}
+          {% endfor %}
+        </ul>
+        <p class="hint">{{ ct('cleanup.protected', count=c.protected_event_types|length, tables=c.protected_tables|join(', ')) }}</p>
+        {% endif %}
+      </article>
+
+      {% set ver = results.version %}
+      <article class="commands-panel" id="version" data-testid="panel-version">
+        <h3>{{ ct('version.title') }}</h3>
+        <p>{{ ct('version.text', version=ver.version) }}</p>
+      </article>
+
+      {% set lan = results.lan %}
+      <article class="commands-panel" id="lan-url" data-testid="panel-lan-url">
+        <h3>{{ ct('lan.title') }}</h3>
+        {% if lan.state == 'no_config_dir' %}
+        <p class="hint">{{ ct('check.no_config_dir') }}</p>
+        {% elif lan.state == 'unavailable' %}
+        <p><span class="status-pill danger">{{ ct('check.unavailable', error=lan.error) }}</span></p>
+        {% elif lan.state == 'local_only' %}
+        <p class="mono">{{ ct('lan.local_only', url=lan.url) }}</p>
+        <p class="hint">{{ ct('lan.local_hint') }} <a href="{{ url_for('accounts') }}">{{ ct('place.settings') }}</a></p>
+        {% elif lan.state == 'lan_undetected' %}
+        <p>{{ ct('lan.undetected', port=lan.port) }}</p>
+        <p class="hint">{{ ct('lan.firewall') }}</p>
+        {% else %}
+        <p class="mono">{{ ct('lan.lan', url=lan.url) }}</p>
+        <p class="hint">{{ ct('lan.firewall') }}</p>
+        {% endif %}
+      </article>
+    </div>
+  </section>
+
+  {% for group in groups %}
+  {% if group.collapsed %}
+  <details class="card commands-group" id="group-{{ group.id }}">
+    <summary><h2>{{ group.title }}</h2></summary>
+    <p class="hint">{{ ct('group.developer_hint') }}</p>
+  {% else %}
+  <section class="card commands-group" id="group-{{ group.id }}" aria-labelledby="group-{{ group.id }}-title">
+    <h2 id="group-{{ group.id }}-title">{{ group.title }}</h2>
+  {% endif %}
+    <ul class="commands-list">
+      {% for entry in group.entries %}
+      <li class="commands-entry" id="cmd-{{ entry.key }}" data-module="{{ entry.module }}" data-subcommand="{{ entry.subcommand }}" data-script="{{ entry.script }}">
+        <div class="commands-entry-head">
+          <code class="commands-label">{{ entry.label }}</code>
+          <span class="commands-purpose">{{ entry.purpose }}</span>
+        </div>
+        {% if entry.options %}<p class="hint commands-options">{{ entry.options }}</p>{% endif %}
+        {% if entry.href %}
+        <p class="commands-where">
+          <span class="status-pill success">{{ ct('entry.in_dashboard') }}</span>
+          <a href="{{ entry.href }}">{{ entry.place }}</a>
+        </p>
+        {% else %}
+        <div class="commands-cli">
+          <span class="status-pill muted">{{ ct('entry.cli_only') }}</span>
+          <div class="commands-line">
+            <pre id="line-{{ entry.key }}">{{ entry.command }}</pre>
+            <button type="button" class="ghost" data-copy-target="line-{{ entry.key }}" data-copied-text="{{ ct('copy.done') }}" data-failed-text="{{ ct('copy.failed') }}">{{ ct('copy.label') }}</button>
+          </div>
+          {% if entry.source_note %}<p class="hint">{{ entry.source_note }}</p>{% endif %}
+          <p class="hint commands-reason">{{ entry.reason }}</p>
+        </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  {% if group.collapsed %}
+  </details>
+  {% else %}
+  </section>
+  {% endif %}
+  {% endfor %}
+
+  <p class="commands-copy-status" role="status" aria-live="polite" data-copy-status></p>
+</div>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='commands.js') }}" defer></script>
+{% endblock %}
