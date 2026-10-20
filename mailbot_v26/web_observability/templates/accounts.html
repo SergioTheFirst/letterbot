@@ -141,6 +141,10 @@
   {% endif %}
   {% endif %}
 
+  {% if editor_enabled %}
+  {% include "settings_editor.html" %}
+  {% endif %}
+
   <p class="settings-copy-status" role="status" aria-live="polite" data-copy-status></p>
 </div>
 <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='settings.js') }}" defer></script>

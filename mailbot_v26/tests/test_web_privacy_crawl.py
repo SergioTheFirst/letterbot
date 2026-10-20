@@ -323,6 +323,7 @@ def test_no_route_shows_settings_secrets(tmp_path: Path, allow_pii: bool) -> Non
     app.config["SETTINGS_RUNTIME_HEALTH_PATH"] = runtime_path
     paths = _crawl_paths(app)
     assert "/accounts" in paths and "/api/accounts/status" in paths
+    assert {"/api/settings/accounts", "/api/settings/applied"} <= set(paths)
 
     leaks: dict[str, list[str]] = {}
     with app.test_client() as client:
@@ -334,6 +335,11 @@ def test_no_route_shows_settings_secrets(tmp_path: Path, allow_pii: bool) -> Non
             found = [
                 marker for marker in (*MARKERS, *SETTINGS_MARKERS) if marker in body
             ]
+            if path == "/api/settings/accounts":
+                # S2 editor form data: the owner's own login is shown back for
+                # editing (loopback or signed in); secrets never are.
+                assert SETTINGS_LOGIN in body
+                found.remove(SETTINGS_LOGIN)
             if found:
                 leaks[path] = found
 

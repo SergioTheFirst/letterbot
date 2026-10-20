@@ -3561,8 +3561,13 @@ def _validate_csrf_token() -> bool:
     expected = session.get("csrf_token")
     if not isinstance(expected, str) or not expected:
         return False
+    provided = request.form.get("csrf_token", "")
+    if not provided:
+        # Page scripts posting JSON (the Settings editor) send it as a header.
+        headers = getattr(request, "headers", None)
+        provided = headers.get("X-CSRF-Token", "") if headers is not None else ""
     # Bytes compare: hmac.compare_digest raises TypeError on non-ASCII str.
-    return _secret_matches(request.form.get("csrf_token", ""), expected)
+    return _secret_matches(provided, expected)
 
 
 def _text_response(body: str, status_code: int) -> Response:
@@ -8360,6 +8365,17 @@ def main() -> None:
 
 
 WEB_THREAD_READY_TIMEOUT_SECONDS = 15.0
+# settings.ini [web] host outside loopback (the Settings page's "local
+# network" switch) admits only private and link-local addresses; every such
+# client still has to sign in with the dashboard password.
+LAN_PRIVATE_CIDRS = (
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+    "fc00::/7",
+    "fe80::/10",
+)
 
 
 def _web_start_failure_message(exc: BaseException, host: str, port: int) -> str:
@@ -8408,12 +8424,20 @@ def start_web_in_thread(
                 logger.warning(
                     "WEB_UI_LOCAL_SMOKE_BYPASS_ACTIVE allow_local_smoke_bypass=true"
                 )
+            lan = not _is_loopback_bind(host)
+            if lan:
+                logger.info(
+                    "WEB_UI_LAN_ENABLED bind=%s port=%s allow_cidrs=private",
+                    host,
+                    port,
+                )
 
             app = create_app(
                 db_path=db_path,
                 password=resolved_password,
                 secret_key=secret_key,
                 attention_cost_per_hour=attention_cost,
+                allow_cidrs=list(LAN_PRIVATE_CIDRS) if lan else None,
                 config_dir=config_dir,
                 config_path=None,
                 log_path=runtime_log_path(),
@@ -8423,6 +8447,9 @@ def start_web_in_thread(
                 allow_local_smoke_bypass=local_smoke_bypass,
                 support_settings=None,
             )
+            # This launcher binds to settings.ini [web] host, so the Settings
+            # page may switch network access (it applies after a restart).
+            app.config["SETTINGS_LAN_TOGGLE"] = True
             # make_server binds in its constructor, so "ready" means listening.
             server = make_server(host, int(port), app, threaded=True)
         except (SystemExit, Exception) as exc:
