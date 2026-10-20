@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
+
+
+def normalize_message_id(value: object) -> str | None:
+    """Message-ID as stored and compared: folding whitespace collapsed and
+    stripped, angle brackets and case kept (the local part is case-sensitive
+    and IMAP refetch compares exactly). None when empty."""
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    return text or None
 
 
 class Storage:
@@ -94,6 +107,13 @@ class Storage:
             # UIDVALIDITY epoch of uid; NULL for rows stored before WP2b.
             if "uidvalidity" not in email_columns:
                 self.conn.execute("ALTER TABLE emails ADD COLUMN uidvalidity INTEGER;")
+            # Message-ID is stored normalized since WP2c; older rows hold the
+            # raw (possibly folded) header.
+            self._normalize_stored_message_ids()
+            self.conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_emails_account_message_id
+                ON emails(account_email, message_id);
+                """)
             self.conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_emails_status
                 ON emails(status);
@@ -543,9 +563,11 @@ class Storage:
         (account_email, uid) is left as is and nothing is enqueued; a crash
         can no longer leave an email row without its queue row (F5).
         uidvalidity is the epoch of uid, used to refetch after a restart.
+        message_id is stored normalized (normalize_message_id).
         """
         now = self._now()
         attach_count = attachments_count if attachments_count is not None else 0
+        message_id = normalize_message_id(message_id)
         cursor = self.conn.cursor()
         try:
             cursor.execute("BEGIN IMMEDIATE;")
@@ -599,7 +621,7 @@ class Storage:
         """Where an email lives in IMAP: account, uid, its epoch, Message-ID.
 
         None when the email is not stored. uidvalidity is None for rows
-        stored before the column existed; message_id is the raw header.
+        stored before the column existed; message_id is normalized.
         """
         row = self.conn.execute(
             """
@@ -618,5 +640,21 @@ class Storage:
             "message_id": str(row[3]) if row[3] is not None else None,
         }
 
+    def _normalize_stored_message_ids(self) -> int:
+        """Normalize Message-IDs stored raw before WP2c (folded headers), so
+        lookups by normalized Message-ID find them. Returns rows changed."""
+        rows = self.conn.execute(
+            "SELECT id, message_id FROM emails WHERE message_id GLOB ?;",
+            ("*[ \t\r\n]*",),
+        ).fetchall()
+        for email_id, message_id in rows:
+            self.conn.execute(
+                "UPDATE emails SET message_id = ? WHERE id = ?;",
+                (normalize_message_id(message_id), email_id),
+            )
+        if rows:
+            logger.info("emails_message_id_normalized rows=%d", len(rows))
+        return len(rows)
 
-__all__ = ["Storage"]
+
+__all__ = ["Storage", "normalize_message_id"]

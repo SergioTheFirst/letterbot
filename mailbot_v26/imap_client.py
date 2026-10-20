@@ -25,6 +25,8 @@ from typing import (
 )
 
 from mailbot_v26.account_identity import normalize_login
+# Header values are compared with what storage holds: one normal form.
+from mailbot_v26.bot_core.storage import normalize_message_id as _normalize_message_id
 from mailbot_v26.state_manager import StateManager
 
 try:
@@ -181,14 +183,6 @@ def _parse_message_id(fetch_data: Dict[Any, Any]) -> Optional[str]:
     if not isinstance(raw, (bytes, bytearray)):
         return None
     return _normalize_message_id(email.message_from_bytes(bytes(raw)).get("Message-ID"))
-
-
-def _normalize_message_id(value: Any) -> Optional[str]:
-    """Message-ID with folding whitespace collapsed; None when empty."""
-    if value is None:
-        return None
-    text = " ".join(str(value).split())
-    return text or None
 
 
 # A Message-ID comes from the email itself: SEARCH it only when it is printable
