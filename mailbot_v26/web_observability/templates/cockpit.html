@@ -89,12 +89,12 @@
           <div class="metric-pair-grid">
             <div class="metric-pair">
               <span class="metric-label">IMAP</span>
-              <span class="badge muted" id="health-imap-status">UNKNOWN</span>
+              <span class="badge {{ runtime.imap_status_class or 'muted' }}" id="health-imap-status">{{ runtime.imap_status_label or 'UNKNOWN' }}</span>
               <div class="metric-subtle" id="health-imap-meta">{{ runtime.last_imap_success_display or 'UNAVAILABLE' }}</div>
             </div>
             <div class="metric-pair">
               <span class="metric-label">Pipeline</span>
-              <span class="badge muted" id="health-pipeline-status">{{ runtime.status_label or 'UNKNOWN' }}</span>
+              <span class="badge {{ runtime.status_class or 'muted' }}" id="health-pipeline-status">{{ runtime.status_label or 'UNKNOWN' }}</span>
               <div class="metric-subtle" id="health-pipeline-meta">{{ runtime.last_processed_display or 'UNAVAILABLE' }}</div>
             </div>
           </div>
@@ -406,7 +406,8 @@
         setText('dashboard-meta-detail', metaSummary(data.meta || {}));
         setText('preview-events-count', Array.isArray(data.recent_events) ? data.recent_events.length : '0');
         setBadge('dashboard-meta-status', (data.health && data.health.status_label) || 'UNKNOWN', (data.health && data.health.status_class) || 'muted');
-        setBadge('home-health-status', (data.runtime && data.runtime.status_label) || 'UNKNOWN', (data.runtime && data.runtime.status_class) || 'muted');
+        setBadge('health-imap-status', (data.runtime && data.runtime.imap_status_label) || 'UNKNOWN', (data.runtime && data.runtime.imap_status_class) || 'muted');
+        setBadge('health-pipeline-status', (data.runtime && data.runtime.status_label) || 'UNKNOWN', (data.runtime && data.runtime.status_class) || 'muted');
         setText('home-health-detail', displayValue(data.health && data.health.detail, 'No health evidence yet for this scope.'));
         setText('health-imap-meta', displayValue(data.runtime && data.runtime.last_imap_success_display, 'UNAVAILABLE'));
         setText('health-pipeline-meta', displayValue(data.runtime && data.runtime.last_processed_display, 'UNAVAILABLE'));

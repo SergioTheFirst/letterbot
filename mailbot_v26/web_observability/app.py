@@ -2291,10 +2291,35 @@ def _dashboard_runtime_view(
             "Process start and uptime are not persisted; showing the latest runtime evidence instead."
         )
 
+    # The IMAP badge repeats the IMAP health component listed on the same
+    # card, so the page never shows two different IMAP verdicts.
+    raw_components = health_map.get("components")
+    imap_component = next(
+        (
+            item
+            for item in (raw_components if isinstance(raw_components, list) else [])
+            if isinstance(item, Mapping)
+            and str(item.get("name") or "").strip().lower() == "imap"
+        ),
+        None,
+    )
+    imap_status_label = (
+        str(imap_component.get("status") or "").strip().upper()
+        if imap_component is not None
+        else ""
+    ) or "UNKNOWN"
+    imap_status_class = (
+        str(imap_component.get("status_class") or "").strip()
+        if imap_component is not None
+        else ""
+    ) or "muted"
+
     return {
         "status": status,
         "status_label": status_label,
         "status_class": _status_class_for_label(status),
+        "imap_status_label": imap_status_label,
+        "imap_status_class": imap_status_class,
         "detail": detail,
         "started_at": None,
         "started_at_display": "UNAVAILABLE",
@@ -5900,10 +5925,14 @@ def create_app(
     def _imap_health_payload(account_emails: list[str]) -> dict[str, object]:
         now_ts = datetime.now(timezone.utc).timestamp()
         since_24h = now_ts - 86_400
+        # dead_letter_count is kept as an alias of dead_letter_count_24h. An
+        # all-time count kept IMAP "degraded" forever after one poison UID; the
+        # worker reports dead letters in Telegram (one aggregated alert / 24 h).
         payload: dict[str, object] = {
             "status": "unknown",
             "last_success_ts": None,
             "reconnect_count_24h": None,
+            "dead_letter_count_24h": None,
             "dead_letter_count": None,
         }
         account_clause = ""
@@ -5942,10 +5971,11 @@ def create_app(
                         "SELECT COUNT(*) AS dead_letters "
                         "FROM events_v1 "
                         "WHERE event_type = ? "
+                        "AND ts_utc >= ? "
                         "AND json_extract(payload, '$.subtype') = 'dead_letter'"
                         f"{account_clause}"
                     ),
-                    (EventType.IMAP_HEALTH.value, *account_params),
+                    (EventType.IMAP_HEALTH.value, since_24h, *account_params),
                 ).fetchone()
         except sqlite3.Error:
             payload["status"] = "unavailable"
@@ -5966,6 +5996,7 @@ def create_app(
         )
         payload["last_success_ts"] = last_success_ts or None
         payload["reconnect_count_24h"] = reconnect_count
+        payload["dead_letter_count_24h"] = dead_letter_count
         payload["dead_letter_count"] = dead_letter_count
 
         if last_success_utc <= 0:
