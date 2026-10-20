@@ -5393,10 +5393,18 @@ class KnowledgeAnalytics:
         return output
 
     def has_daily_digest_sent(self, *, account_email: str, day: datetime) -> bool:
+        """True when a daily digest went out on ``day``'s calendar day.
+
+        The day is taken in ``day``'s own timezone: the scheduler passes local
+        time (B6); a naive value is read as UTC.
+        """
         if not account_email:
             return False
-        start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp()
-        end = start + 24 * 60 * 60
+        day_start = datetime(
+            day.year, day.month, day.day, tzinfo=day.tzinfo or timezone.utc
+        )
+        start = day_start.timestamp()
+        end = (day_start + timedelta(days=1)).timestamp()
         try:
             rows = self._execute_select(
                 """

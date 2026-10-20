@@ -3031,7 +3031,7 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                             logger.exception("Queue dispatcher failure")
 
                     run_digest_tick(
-                        now=datetime.now(timezone.utc),
+                        now=datetime.now().astimezone(),
                         config=config,
                         storage=digest_storage,
                         telegram_sender=send_telegram,

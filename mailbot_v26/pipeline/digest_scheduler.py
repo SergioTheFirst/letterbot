@@ -284,14 +284,20 @@ def _is_daily_due(now: datetime, config: DailyDigestConfig) -> bool:
     return True
 
 
-def _is_weekly_due(now: datetime, config: WeeklyDigestConfig) -> bool:
-    if now.weekday() != config.weekday:
-        return False
-    if now.hour < config.hour:
-        return False
-    if now.hour == config.hour and now.minute < config.minute:
-        return False
-    return True
+def _weekly_window(now: datetime, config: WeeklyDigestConfig) -> tuple[str, bool]:
+    """(week_key, due) of the weekly digest for the local time ``now`` (B6).
+
+    A digest week starts at local midnight of the configured weekday. The
+    digest is due from the configured time that day until the next such
+    midnight, so a worker that was off at the slot catches up later in the
+    week, whatever the weekday. The key is the ISO week of the slot day: the
+    key the UTC build wrote as well, so the switch day sends no duplicate.
+    """
+    days_since_slot_day = (now.weekday() - config.weekday) % 7
+    slot_day = now - timedelta(days=days_since_slot_day)
+    past_slot_time = (now.hour, now.minute) >= (config.hour, config.minute)
+    due = days_since_slot_day > 0 or past_slot_time
+    return weekly_digest._iso_week_key(slot_day), due
 
 
 def _collect_policy_inputs(storage: DigestStorage, logger: LoggerLike) -> PolicyInputs:
@@ -637,6 +643,15 @@ def run_digest_tick(
     telegram_sender: Callable[[TelegramPayload], DeliveryResult],
     logger: LoggerLike,
 ) -> None:
+    """Send due daily/weekly digests.
+
+    ``now`` is the local wall-clock time (the worker passes
+    ``datetime.now().astimezone()``): the due hour, weekday and day/week
+    windows follow the user's clock (B6). A naive value is read as local time.
+    Stored timestamps stay UTC.
+    """
+    if now.tzinfo is None:
+        now = now.astimezone()
     try:
         flags = FeatureFlags(base_dir=_CONFIG_PATH.parent)
         override_store = RuntimeOverrideStore(storage.knowledge_db.path)
@@ -817,6 +832,8 @@ def _run_daily_digest(
     include_quality_metrics: bool = False,
     include_weekly_accuracy_report: bool = False,
 ) -> None:
+    # `now` is local time (due hour, day window); data and stored times use UTC.
+    now_utc = now.astimezone(timezone.utc)
     resolved_scope = resolve_account_scope(account_email, base_dir=_CONFIG_PATH.parent)
     scope_account_emails = resolved_scope.account_emails if resolved_scope else None
     if not _is_daily_due(now, config):
@@ -860,7 +877,7 @@ def _run_daily_digest(
                     event_emitter=storage.contract_event_emitter,
                     account_email=account_email,
                     account_emails=scope_account_emails,
-                    now_ts=now.timestamp(),
+                    now_ts=now_utc.timestamp(),
                     policy=silence_policy,
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
@@ -888,7 +905,7 @@ def _run_daily_digest(
         include_regret_minimization=flags.ENABLE_REGRET_MINIMIZATION,
         regret_minimization_config=regret_minimization_config.settings,
         locale=locale,
-        now=now,
+        now=now_utc,
         contract_event_emitter=storage.contract_event_emitter,
     )
     has_content = daily_digest._has_digest_content(data)
@@ -950,7 +967,7 @@ def _run_daily_digest(
         for email in account_emails:
             storage.knowledge_db.set_last_digest_sent_at(
                 account_email=email,
-                sent_at=now,
+                sent_at=now_utc,
             )
         logger.info(
             "digest_sent",
@@ -962,7 +979,7 @@ def _run_daily_digest(
                 storage.contract_event_emitter.emit(
                     EventV1(
                         event_type=EventType.DAILY_DIGEST_SENT,
-                        ts_utc=now.timestamp(),
+                        ts_utc=now_utc.timestamp(),
                         account_id=account_email,
                         entity_id=None,
                         email_id=0,
@@ -1013,10 +1030,12 @@ def _run_weekly_digest(
     include_weekly_accuracy_report: bool = False,
     include_weekly_calibration_report: bool = False,
 ) -> None:
-    week_key = weekly_digest._iso_week_key(now)
+    # `now` is local time (due slot, digest week); data and stored times use UTC.
+    week_key, due = _weekly_window(now, config)
+    now_utc = now.astimezone(timezone.utc)
     marker_store = RuntimeOverrideStore(storage.knowledge_db.path)
 
-    if not _is_weekly_due(now, config):
+    if not due:
         logger.info(
             "digest_tick_checked",
             digest_type="weekly",
@@ -1031,7 +1050,7 @@ def _run_weekly_digest(
             account_email=account_email,
             week_key=week_key,
             reason="not_due",
-            now=now,
+            now=now_utc,
         )
         return
 
@@ -1053,7 +1072,7 @@ def _run_weekly_digest(
             account_email=account_email,
             week_key=week_key,
             reason="already_sent",
-            now=now,
+            now=now_utc,
         )
         return
 
@@ -1094,7 +1113,7 @@ def _run_weekly_digest(
         locale=locale,
         event_emitter=storage.event_emitter,
         contract_event_emitter=storage.contract_event_emitter,
-        now=now,
+        now=now_utc,
     )
     has_content = _has_weekly_content(data)
     if not has_content:
@@ -1113,7 +1132,7 @@ def _run_weekly_digest(
             account_email=account_email,
             week_key=week_key,
             reason="no_content",
-            now=now,
+            now=now_utc,
         )
         return
 
@@ -1139,14 +1158,14 @@ def _run_weekly_digest(
             account_email=account_email,
             week_key=week_key,
             reason="policy_denied",
-            now=now,
+            now=now_utc,
         )
         return
     support_footer = ""
     support_cfg = _load_support_telegram_config()
     try:
         support_footer = _resolve_weekly_support_footer(
-            now_utc=now,
+            now_utc=now_utc,
             account_email=account_email,
             chat_id=chat_id,
             override_store=RuntimeOverrideStore(storage.knowledge_db.path),
@@ -1182,7 +1201,7 @@ def _run_weekly_digest(
         if storage.event_emitter:
             storage.event_emitter.emit(
                 type="weekly_digest_failed",
-                timestamp=now,
+                timestamp=now_utc,
                 email_id=0,
                 payload={
                     "week_key": week_key,
@@ -1197,7 +1216,7 @@ def _run_weekly_digest(
             storage.knowledge_db.set_last_weekly_digest_state(
                 account_email=email,
                 week_key=week_key,
-                sent_at=now,
+                sent_at=now_utc,
             )
         logger.info(
             "digest_sent",
@@ -1208,7 +1227,7 @@ def _run_weekly_digest(
         if storage.event_emitter:
             storage.event_emitter.emit(
                 type="weekly_digest_sent",
-                timestamp=now,
+                timestamp=now_utc,
                 email_id=0,
                 payload={
                     "week_key": week_key,
@@ -1222,7 +1241,7 @@ def _run_weekly_digest(
                 storage.contract_event_emitter.emit(
                     EventV1(
                         event_type=EventType.WEEKLY_DIGEST_SENT,
-                        ts_utc=now.timestamp(),
+                        ts_utc=now_utc.timestamp(),
                         account_id=account_email,
                         entity_id=None,
                         email_id=0,
@@ -1255,7 +1274,7 @@ def _run_weekly_digest(
     if storage.event_emitter:
         storage.event_emitter.emit(
             type="weekly_digest_failed",
-            timestamp=now,
+            timestamp=now_utc,
             email_id=0,
             payload={
                 "week_key": week_key,
