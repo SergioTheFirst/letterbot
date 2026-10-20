@@ -24,6 +24,7 @@ from mailbot_v26.telegram.inbound import (
     _render_tier1_message,
     parse_callback_data,
     parse_command,
+    read_chat_digest_override,
     run_inbound_polling,
     set_inbound_locale,
 )
@@ -172,6 +173,7 @@ def _build_processor(
         allowed_chat_ids=frozenset({"chat"}),
         bot_token="token",
         locale=locale,
+        chat_account_emails={"chat": ("account@example.com",)},
     )
 
 
@@ -585,9 +587,10 @@ def test_digest_toggle_command_updates_override(tmp_path: Path) -> None:
     processor = _build_processor(tmp_path, sent, gate_result)
 
     processor.handle_message({"chat": {"id": "chat"}, "text": "/digest on"})
-    overrides = processor.override_store.get_overrides()
 
-    assert overrides.digest_enabled is True
+    assert read_chat_digest_override(processor.override_store, "chat") is True
+    # B16: /digest is per chat; the legacy global key stays untouched.
+    assert processor.override_store.get_overrides().digest_enabled is None
     assert _norm(sent[-1]) == _norm("Дайджесты включены.")
 
 
@@ -1142,7 +1145,8 @@ def test_stats_command_handles_analytics_failures_without_crash(
     assert "Исправления: 0" in normalized
     assert "Доля сюрпризов: н/д" in normalized
     assert "Переходы: нет данных" in normalized
-    assert "Пока данных мало · будьте осторожны." in normalized
+    # The chat now has a configured account, so the failing analytics path runs.
+    assert "Автоприоритету можно доверять: осторожно, мало данных" in normalized
 
 
 def test_support_command_disabled_returns_honest_message(tmp_path: Path) -> None:

@@ -4,10 +4,10 @@ import importlib.util
 import json
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
 from mailbot_v26.config_loader import SupportSettings, load_support_settings
@@ -219,6 +219,64 @@ def _safe_chat_id(chat_id: object) -> str:
     return str(chat_id or "").strip()
 
 
+def build_chat_account_scopes(
+    accounts: Iterable[object], *, admin_chat_id: str = ""
+) -> dict[str, tuple[str, ...]]:
+    """Map each chat to the account logins its commands may show (B16).
+
+    An account chat sees only the accounts routed to it (``telegram_chat_id``);
+    the admin chat (settings ``admin_chat_id``) is the operator's and sees all.
+    """
+    by_chat: dict[str, list[str]] = {}
+    all_logins: list[str] = []
+    for account in accounts:
+        login = str(getattr(account, "login", "") or "").strip()
+        if not login:
+            continue
+        if login not in all_logins:
+            all_logins.append(login)
+        chat_id = _safe_chat_id(getattr(account, "telegram_chat_id", ""))
+        if chat_id and login not in by_chat.setdefault(chat_id, []):
+            by_chat[chat_id].append(login)
+    admin = _safe_chat_id(admin_chat_id)
+    if admin:
+        by_chat[admin] = list(all_logins)
+    return {chat_id: tuple(logins) for chat_id, logins in by_chat.items()}
+
+
+_DIGEST_CHAT_OVERRIDE_PREFIX = "digest_enabled:chat:"
+_OVERRIDE_TRUE = frozenset({"1", "true", "yes", "on"})
+_OVERRIDE_FALSE = frozenset({"0", "false", "no", "off"})
+
+
+def _chat_digest_override_key(chat_id: str) -> str:
+    return f"{_DIGEST_CHAT_OVERRIDE_PREFIX}{_safe_chat_id(chat_id)}"
+
+
+def read_chat_digest_override(
+    store: RuntimeOverrideStore, chat_id: str
+) -> bool | None:
+    """/digest on|off of one chat; falls back to the legacy global override."""
+    if _safe_chat_id(chat_id):
+        raw = str(store.get_value(_chat_digest_override_key(chat_id)) or "").lower()
+        if raw in _OVERRIDE_TRUE:
+            return True
+        if raw in _OVERRIDE_FALSE:
+            return False
+    return store.get_overrides().digest_enabled
+
+
+def write_chat_digest_override(
+    store: RuntimeOverrideStore, chat_id: str, enabled: bool
+) -> None:
+    store.set_value(_chat_digest_override_key(chat_id), "1" if enabled else "0")
+    logger.info(
+        "telegram_digest_override_set",
+        chat_id=_safe_chat_id(chat_id),
+        enabled=enabled,
+    )
+
+
 def _is_trace_expanded(message: dict[str, object] | None) -> bool:
     if not message or not isinstance(message, dict):
         return False
@@ -256,22 +314,27 @@ def _load_email_snapshot(db_path: Path, email_id: int) -> dict[str, object] | No
 
 
 def _top_priority_transitions(
-    *, db_path: Path, days: int, limit: int = 3
+    *, db_path: Path, days: int, limit: int = 3, account_emails: Iterable[str]
 ) -> list[tuple[str, int]]:
+    scope = sorted({str(email).casefold() for email in account_emails if email})
+    if not scope:
+        return []
     since_ts = datetime.now(timezone.utc).timestamp() - (max(1, int(days)) * 86400)
     totals: dict[str, int] = {}
+    placeholders = ",".join("?" for _ in scope)
     try:
         with sqlite3.connect(db_path) as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT payload
                 FROM events_v1
                 WHERE event_type = 'priority_correction_recorded'
                   AND ts_utc >= ?
+                  AND lower(account_id) IN ({placeholders})
                 ORDER BY ts_utc DESC
                 LIMIT 2000
                 """,
-                (since_ts,),
+                (since_ts, *scope),
             ).fetchall()
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("telegram_stats_transitions_failed", error=str(exc))
@@ -913,6 +976,9 @@ class TelegramInboundProcessor:
     locale: str = DEFAULT_LOCALE
     show_decision_trace: bool = False
     support_settings: SupportSettings | None = None
+    # chat_id -> account logins that chat may see (build_chat_account_scopes).
+    # A chat missing here sees no account data (B16).
+    chat_account_emails: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
     def handle_update(self, update: dict[str, object]) -> None:
         if "callback_query" in update:
@@ -1106,10 +1172,10 @@ class TelegramInboundProcessor:
             self._handle_commitments(chat_id)
             return
         if command in {"/week", "week"}:
-            self._reply(chat_id, self._week_text())
+            self._reply(chat_id, self._week_text(chat_id))
             return
         if command in {"/stats", "stats"}:
-            self._reply(chat_id, self._stats_text())
+            self._reply(chat_id, self._stats_text(chat_id))
             return
         if command in {"/support", "support"}:
             self._reply(chat_id, self._support_text())
@@ -1832,7 +1898,7 @@ class TelegramInboundProcessor:
         value = payload.get("value")
         if flag == "digest":
             enabled = value == "on"
-            self.override_store.set_digest_enabled(enabled)
+            write_chat_digest_override(self.override_store, chat_id, enabled)
             message_key = (
                 "inbound.digest_enabled" if enabled else "inbound.digest_disabled"
             )
@@ -1848,7 +1914,7 @@ class TelegramInboundProcessor:
             self._reply(chat_id, _t("inbound.digest_usage"))
             return
         enabled = args[0] == "on"
-        self.override_store.set_digest_enabled(enabled)
+        write_chat_digest_override(self.override_store, chat_id, enabled)
         message_key = "inbound.digest_enabled" if enabled else "inbound.digest_disabled"
         self._reply(chat_id, _t(message_key))
 
@@ -1944,7 +2010,7 @@ class TelegramInboundProcessor:
             self.send_reply(chat_id, "✓ Язык изменён на русский.")
 
     def _handle_commitments(self, chat_id: str) -> None:
-        account_emails = list(self._account_emails())
+        account_emails = self._account_emails(chat_id)
         if not account_emails:
             self._reply(chat_id, _ui_text("• No open commitments", "• Нет открытых обязательств"))
             return
@@ -2005,8 +2071,8 @@ class TelegramInboundProcessor:
             ),
         )
 
-    def _week_text(self) -> str:
-        account_emails = list(self._account_emails())
+    def _week_text(self, chat_id: str) -> str:
+        account_emails = self._account_emails(chat_id)
         no_data = _ui_text("n/a", "н/д")
         if not account_emails:
             base = (
@@ -2015,7 +2081,9 @@ class TelegramInboundProcessor:
                 f"{_ui_text('Corrections', 'Исправления')}: 0 · {_ui_text('Accuracy', 'Точность')}: {no_data}\n"
                 f"{_ui_text('Open commitments', 'Открытых обязательств')}: 0"
             )
-            return "\n".join([base, self._stats_text(days=7, include_header=False)])
+            return "\n".join(
+                [base, self._stats_text(chat_id, days=7, include_header=False)]
+            )
         primary = account_emails[0]
         summary = self.analytics.weekly_compact_summary(
             account_email=primary,
@@ -2030,10 +2098,14 @@ class TelegramInboundProcessor:
             f"{_ui_text('Corrections', 'Исправления')}: {int(summary.get('corrections') or 0)} · {_ui_text('Accuracy', 'Точность')}: {accuracy_text}\n"
             f"{_ui_text('Open commitments', 'Открытых обязательств')}: {int(summary.get('open_commitments') or 0)}"
         )
-        return "\n".join([base, self._stats_text(days=7, include_header=False)])
+        return "\n".join(
+            [base, self._stats_text(chat_id, days=7, include_header=False)]
+        )
 
-    def _stats_text(self, *, days: int = 7, include_header: bool = True) -> str:
-        account_emails = list(self._account_emails())
+    def _stats_text(
+        self, chat_id: str, *, days: int = 7, include_header: bool = True
+    ) -> str:
+        account_emails = self._account_emails(chat_id)
         no_data = _ui_text("n/a", "н/д")
         if not account_emails:
             header = _ui_text(
@@ -2090,7 +2162,10 @@ class TelegramInboundProcessor:
 
         transitions_text = _ui_text("no data", "нет данных")
         transitions = _top_priority_transitions(
-            db_path=self.knowledge_db.path, days=days, limit=3
+            db_path=self.knowledge_db.path,
+            days=days,
+            limit=3,
+            account_emails=account_emails,
         )
         if transitions:
             transitions_text = ", ".join(
@@ -2164,10 +2239,10 @@ class TelegramInboundProcessor:
     def _status_text(self, *, chat_id: str) -> str:
         mode_label = humanize_mode(system_health.mode.value, locale=_UI_LOCALE)
         sla = compute_notification_sla(analytics=self.analytics)
-        digest_override = self.override_store.get_overrides().digest_enabled
+        digest_override = read_chat_digest_override(self.override_store, chat_id)
 
         accounts = []
-        for account_email in self._account_emails():
+        for account_email in self._account_emails(chat_id):
             daily = self.knowledge_db.get_last_digest_sent_at(account_email=account_email)
             weekly = self.knowledge_db.get_last_weekly_digest_sent_at(account_email=account_email)
             accounts.append(
@@ -2269,15 +2344,9 @@ class TelegramInboundProcessor:
             lines.append(f"- {entry.component}: {status}{detail}")
         return "\n".join(lines)
 
-    def _account_emails(self) -> Iterable[str]:
-        try:
-            with sqlite3.connect(self.knowledge_db.path) as conn:
-                rows = conn.execute(
-                    "SELECT DISTINCT account_email FROM emails ORDER BY account_email"
-                ).fetchall()
-        except Exception:
-            return []
-        return [str(row[0]) for row in rows if row and row[0]]
+    def _account_emails(self, chat_id: str) -> list[str]:
+        """Accounts routed to this chat (B16); never other chats' accounts."""
+        return list(self.chat_account_emails.get(_safe_chat_id(chat_id), ()))
 
 
 def run_inbound_polling(

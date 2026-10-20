@@ -54,6 +54,7 @@ from mailbot_v26.storage.knowledge_db import KnowledgeDB
 from mailbot_v26.storage.runtime_overrides import RuntimeOverrideStore
 from mailbot_v26.system.orchestrator import SystemOrchestrator, SystemPolicyDecision
 from mailbot_v26.system_health import OperationalMode, system_health
+from mailbot_v26.telegram.inbound import read_chat_digest_override
 from mailbot_v26.telegram_utils import telegram_safe
 from mailbot_v26.ui.branding import append_watermark
 from mailbot_v26.worker.telegram_sender import DeliveryResult
@@ -638,7 +639,7 @@ def run_digest_tick(
 ) -> None:
     try:
         flags = FeatureFlags(base_dir=_CONFIG_PATH.parent)
-        overrides = RuntimeOverrideStore(storage.knowledge_db.path).get_overrides()
+        override_store = RuntimeOverrideStore(storage.knowledge_db.path)
         daily_config = _load_daily_digest_config()
         weekly_config = _load_weekly_digest_config()
         weekly_accuracy_report_config = _load_weekly_accuracy_report_config()
@@ -676,8 +677,10 @@ def run_digest_tick(
                 )
                 continue
 
+            # /digest on|off is per chat (B16), legacy global key as fallback.
+            digest_override = read_chat_digest_override(override_store, chat_id)
             daily_enabled, daily_reason = _override_flag(
-                flags.ENABLE_DAILY_DIGEST, overrides.digest_enabled
+                flags.ENABLE_DAILY_DIGEST, digest_override
             )
             if daily_enabled:
                 if not _is_primary_account(
@@ -728,7 +731,7 @@ def run_digest_tick(
                 )
 
             weekly_enabled, weekly_reason = _override_flag(
-                flags.ENABLE_WEEKLY_DIGEST, overrides.digest_enabled
+                flags.ENABLE_WEEKLY_DIGEST, digest_override
             )
             if weekly_enabled:
                 if not _is_primary_account(
