@@ -8410,10 +8410,12 @@ def start_web_in_thread(
             server = make_server(host, int(port), app, threaded=True)
         except (SystemExit, Exception) as exc:
             message = _web_start_failure_message(exc, host, int(port))
-            logger.error("web_thread_failed error=%s", message)
-            print(f"[ERROR] {message}")
             outcome["error"] = message
-            ready.set()
+            logger.error("web_thread_failed error=%s", message)
+            try:
+                print(f"[ERROR] {message}")
+            finally:
+                ready.set()
             return
         outcome["server"] = server
         logger.info("WEB_UI_LISTENING host=%s port=%s", host, port)
