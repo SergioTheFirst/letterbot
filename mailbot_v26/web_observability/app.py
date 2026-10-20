@@ -8214,6 +8214,10 @@ def create_app(
             detail=detail or {},
         )
 
+    # Settings lane routes (/accounts); imported here, the module imports app.
+    from mailbot_v26.web_observability.settings_api import register_settings_routes
+
+    register_settings_routes(app, config_dir=config_dir)
     return app
 
 

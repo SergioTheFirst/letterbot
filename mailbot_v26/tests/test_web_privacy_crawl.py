@@ -258,3 +258,86 @@ def test_archive_row_has_no_raw_subject_or_sender_fields(tmp_path: Path) -> None
     # Masked, still useful: first letter and domain.
     assert items[EMAIL_ID]["sender_display"] == "s…@example.com"
     assert items[ISSUER_EMAIL_ID]["sender_display"] == "s…@gmail.com"
+
+
+# Settings lane (S1): /accounts reads accounts.ini and runtime_health.json.
+SETTINGS_LOGIN = "settings.owner@gmail.com"
+SETTINGS_PASSWORD = "SETTINGS-PASSWORD-2W"
+SETTINGS_TOKEN = "555666777:SETTINGS-TOKEN-ZXCVBNMASDFGHJKL"
+SETTINGS_ERROR = "SETTINGS-LAST-ERROR-7M"
+SETTINGS_MARKERS = (
+    SETTINGS_LOGIN,
+    SETTINGS_PASSWORD,
+    SETTINGS_TOKEN,
+    "SETTINGS-TOKEN",
+    SETTINGS_ERROR,
+)
+
+
+def _seed_settings(tmp_path: Path) -> tuple[Path, Path]:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.ini").write_text("[ui]\nlocale = en\n", encoding="utf-8")
+    (config_dir / "accounts.ini").write_text(
+        "[work_mail]\n"
+        f"login = {SETTINGS_LOGIN}\n"
+        f"password = {SETTINGS_PASSWORD}\n"
+        "host = imap.gmail.com\n"
+        "port = 993\n"
+        "use_ssl = true\n"
+        "telegram_chat_id = 272250747\n"
+        "[telegram]\n"
+        f"bot_token = {SETTINGS_TOKEN}\n",
+        encoding="utf-8",
+    )
+    runtime_path = tmp_path / "runtime_health.json"
+    runtime_path.write_text(
+        json.dumps(
+            {
+                "work_mail": {
+                    "failure_bucket": "imap_auth",
+                    "consecutive_failures": 1,
+                    "last_error": SETTINGS_ERROR,
+                    "last_error_class": "LoginError",
+                    "last_alert_fingerprint": f"LoginError:{SETTINGS_ERROR}:h:993",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return config_dir, runtime_path
+
+
+@pytest.mark.parametrize("allow_pii", [False, True], ids=["pii_off", "pii_on"])
+def test_no_route_shows_settings_secrets(tmp_path: Path, allow_pii: bool) -> None:
+    db_path = _seed_db(tmp_path)
+    config_dir, runtime_path = _seed_settings(tmp_path)
+    app = create_app(
+        db_path=db_path,
+        password="pw",
+        secret_key="secret",
+        allow_pii=allow_pii,
+        api_token=API_TOKEN,
+        config_dir=config_dir,
+    )
+    app.config["SETTINGS_RUNTIME_HEALTH_PATH"] = runtime_path
+    paths = _crawl_paths(app)
+    assert "/accounts" in paths and "/api/accounts/status" in paths
+
+    leaks: dict[str, list[str]] = {}
+    with app.test_client() as client:
+        accounts_page = client.get("/accounts").get_data(as_text=True)
+        for path in paths:
+            target = _with_pii(path) if allow_pii else path
+            response = client.get(target, headers={"X-Api-Token": API_TOKEN})
+            body = response.get_data(as_text=True)
+            found = [
+                marker for marker in (*MARKERS, *SETTINGS_MARKERS) if marker in body
+            ]
+            if found:
+                leaks[path] = found
+
+    # Not vacuous: the page rendered the mailbox row with the masked login.
+    assert "s…@gmail.com" in accounts_page
+    assert "Login rejected" in accounts_page
+    assert leaks == {}
