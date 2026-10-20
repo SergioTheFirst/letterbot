@@ -65,3 +65,9 @@ build/
 state.json
 mailbot_v26/state.json
 mailbot_v26/data/runtime_health.json
+
+# Runtime backups, locks and keys (may contain passwords or user data)
+*.bak-*
+*.prescrub-*
+*.subject.key
+*.sqlite.lock
