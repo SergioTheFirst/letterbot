@@ -260,6 +260,39 @@ def test_lang_command_propagates_to_processor_module(
     assert override_calls == [("ui_locale", "en")]
 
 
+def test_lang_command_reports_processor_locale_failure(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    sent: list[str] = []
+    gate_result = GateResult(
+        passed=True,
+        reason="ok",
+        window_days=30,
+        samples=10,
+        corrections=0,
+        correction_rate=0.0,
+        engine="test",
+    )
+    processor = _build_processor(tmp_path, sent, gate_result)
+
+    def _broken_configure(_locale: str) -> None:
+        raise RuntimeError("locale store unavailable")
+
+    monkeypatch.setattr(
+        "mailbot_v26.pipeline.processor.configure_processor_locale",
+        _broken_configure,
+    )
+    caplog.set_level("ERROR")
+
+    processor.handle_update(
+        {"update_id": 1, "message": {"chat": {"id": "chat"}, "text": "/lang en"}}
+    )
+
+    assert processor.override_store.get_value("ui_locale") == "en"
+    assert "telegram_lang_processor_locale_failed" in caplog.text
+    assert "restart" in sent[-1]
+
+
 def test_parse_callback_data_priority() -> None:
     parsed = parse_callback_data("mb:prio:123:R")
     assert parsed == ("priority", {"email_id": "123", "priority": "🔴"})

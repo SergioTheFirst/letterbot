@@ -1999,15 +1999,28 @@ class TelegramInboundProcessor:
         self.override_store.set_value("ui_locale", new_locale)
         set_inbound_locale(new_locale)
         self.locale = new_locale
+        processor_locale_applied = True
         try:
             from mailbot_v26.pipeline import processor as _proc_mod
             _proc_mod.configure_processor_locale(new_locale)
-        except Exception:
-            pass
+        except Exception as exc:
+            processor_locale_applied = False
+            logger.error(
+                "telegram_lang_processor_locale_failed",
+                locale=new_locale,
+                error_type=type(exc).__name__,
+                error=_safe_log_text(exc),
+            )
         if new_locale == "en":
-            self.send_reply(chat_id, "✓ Language set to English.")
+            reply = "✓ Language set to English."
         else:
-            self.send_reply(chat_id, "✓ Язык изменён на русский.")
+            reply = "✓ Язык изменён на русский."
+        if not processor_locale_applied:
+            reply += "\n" + _ui_text(
+                "Some messages will switch after a restart.",
+                "Часть сообщений переключится после перезапуска.",
+            )
+        self.send_reply(chat_id, reply)
 
     def _handle_commitments(self, chat_id: str) -> None:
         account_emails = self._account_emails(chat_id)
