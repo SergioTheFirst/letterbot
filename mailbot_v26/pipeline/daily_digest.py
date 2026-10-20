@@ -767,7 +767,8 @@ def _build_digest_text(data: DigestData, locale: str = DEFAULT_LOCALE) -> str:
     if data.anomaly_alerts:
         lines.append(t("digest.anomalies", locale=locale))
         lines.extend(f"  - {alert}" for alert in data.anomaly_alerts[:5])
-    if data.quality_metrics is not None:
+    # "0 corrections" is not news: the line needs at least one correction.
+    if data.quality_metrics is not None and data.quality_metrics.corrections_total > 0:
         qm = data.quality_metrics
         rate_display = ""
         if qm.correction_rate is not None:
