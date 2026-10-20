@@ -51,7 +51,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Config files saved by Notepad as "UTF-8 with BOM" are read correctly; ANSI files give a clear error instead of silently loading defaults.
 - Launch scripts (`run.bat`, `update_and_run.bat`, `open_config_folder.bat`) are ASCII-only and the config retry loop no longer reopens Notepad after a correct edit.
 
+- No more lost emails on the way in: the IMAP cursor only moves past mail that was actually stored (more than 50 new emails, a failed download or a crash between saving and queuing no longer drop mail); an email that cannot be fetched three times is reported in one combined IMAP alert per account per day instead of vanishing.
+- Queued emails survive a restart (the message is fetched again by UID or Message-ID).
+- After the mail server renumbers a mailbox (UIDVALIDITY change), already-notified emails are not sent again and new mail is not mistaken for old.
+- Exactly one Telegram notification per email across retries, timeouts, restarts and the fallback path; if Telegram accepted a message but the reply was lost, it is never re-sent and is shown as "unconfirmed delivery" in /status and on the web health page.
+- A second running copy of Letterbot refuses to start (it would notify every email twice); restore also refuses while Letterbot runs.
+- Telegram rate limits (429 retry_after) are honoured; a rejected oversized message gets one minimal fallback notification; long texts are capped at Telegram's 4096-character limit; notifications list the first 2 attachments plus "… and N more".
+- An email whose enrichment produced nothing is still notified (it previously could be dropped silently).
+- Notification SLA alerts are actually delivered (they were silently skipped); IMAP dates are timezone-correct; the snooze reminder no longer says "yesterday" for a snooze made minutes ago around midnight.
+
 ### Performance
+- IMAP headers are fetched in batches with one logout per poll and a per-connection timeout; text clean-up is linear in length (a long Russian email no longer takes ~25 s).
 - Text normalization is memoized (bounded) and the per-email metrics snapshot is reused within a poll cycle, with a new `decision_traces(created_at)` index; duplicate indexes on `emails(priority)` and `events_v1(event_type, ts_utc)` are dropped.
 - Web cache is bounded, discarded dashboard queries are removed, and hidden browser tabs stop polling.
 

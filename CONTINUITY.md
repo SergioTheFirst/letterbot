@@ -14,6 +14,10 @@ Key decisions:
 - Quiet hours use local machine time; no Telegram DND detection.
 - Digest no-content evaluation is recorded once per UTC day / ISO week per account (runtime_overrides keys `digest:*_no_content_*`); mail arriving later in the same window waits for the next window. Skip events are emitted only on state change.
 - Web UI security baseline: loopback stays login-free (CONTINUITY: login UI removed); unknown Host headers get 400 (DNS rebinding); the session secret is random per process unless configured; archive/dashboard never carry raw subjects or sender addresses (privacy crawl test guards every GET route).
+- Delivery is at-most-once per email with a visible DELIVERY_UNKNOWN state: one reservation (`email:{id}` in telegram_delivery_log, `pipeline/delivery_guard.py`) wraps every send path; accepted-then-timeout is never re-sent; the reservation store failing means fail closed (retry, never POST without a key). A single-instance lock (`<db>.lock`, `system/instance_lock.py`) prevents two workers.
+- Ingest: the IMAP cursor commits only after durable persist+enqueue (`commit_cursor`); a UID failing 3 times is dead-lettered (IMAP_HEALTH dead_letter) and reported in at most one aggregated alert per account per 24 h (no subjects/senders); UIDVALIDITY resync dedups by normalized Message-ID across polls; queued items rebuild context by refetching after a restart.
+- Attachments in Tier-1: CONSTITUTION III.6 "up to 2" is read as: 3 or more attachments show the first 2 plus "… and N more".
+- Importing the pipeline opens no database (lazy singletons; `LETTERBOT_DEFAULT_DB_PATH` overrides the import-time placeholder, used by the test suite); tests cannot open the repo's live database.
 - Secrets: Telegram bot tokens are redacted at the source (worker/telegram_sender) and by a RedactingFormatter on every runtime log handler (`mailbot_v26.observability.redact`).
 State:
 - Public-facing brand rename to `LetterBot.ru` is in progress for user-visible runtime/web/docs copy only; internal package/file/path/config identifiers remain unchanged.
