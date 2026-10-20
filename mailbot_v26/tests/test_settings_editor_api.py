@@ -1060,6 +1060,51 @@ def test_network_password_change_needs_the_current_password(tmp_path: Path) -> N
     assert app.config["WEB_PASSWORD"] == NEW_WEB_PASSWORD
 
 
+def test_password_change_signs_out_every_other_session(tmp_path: Path) -> None:
+    # Replacing a leaked dashboard password must lock out whoever holds an old
+    # session cookie; the session that made the change stays signed in.
+    app = _app(tmp_path, _config(tmp_path))
+    other, owner, local = app.test_client(), app.test_client(), app.test_client()
+    _login(other)
+    assert other.get("/api/settings/accounts", environ_base=LAN).status_code == 200
+    _login(owner)
+    changed = _post(
+        owner,
+        "/api/settings/web-password",
+        {"new_password": NEW_WEB_PASSWORD, "current_password": WEB_PASSWORD},
+        token=_csrf(owner, LAN),
+        environ=LAN,
+    )
+
+    assert changed.status_code == 200, changed.get_data(as_text=True)
+    assert other.get("/api/settings/accounts", environ_base=LAN).status_code in (401, 403)
+    assert other.get("/accounts", environ_base=LAN).status_code in (302, 401, 403)
+    assert owner.get("/api/settings/accounts", environ_base=LAN).status_code == 200
+
+    # A change made on this computer signs out the network sessions too.
+    second = _post(local, "/api/settings/web-password", {"new_password": "Another-Dashboard-PW-9"}, token=_csrf(local))
+    assert second.status_code == 200
+    assert owner.get("/api/settings/accounts", environ_base=LAN).status_code in (401, 403)
+
+
+def test_session_from_before_a_credential_change_is_refused(tmp_path: Path) -> None:
+    # The same check after a restart with another password in settings.ini
+    # (a persistent WEB_SECRET_KEY keeps old cookies signed).
+    app = _app(tmp_path, _config(tmp_path))
+    client = app.test_client()
+    _login(client)
+    assert client.get("/api/settings/accounts", environ_base=LAN).status_code == 200
+
+    app.config["WEB_PASSWORD"] = NEW_WEB_PASSWORD
+
+    # Every page and API, not only the Settings routes.
+    assert client.get("/api/settings/accounts", environ_base=LAN).status_code in (401, 403)
+    assert client.get("/api/health/status", environ_base=LAN).status_code == 401
+    app.config["WEB_PASSWORD"] = WEB_PASSWORD
+    assert client.get("/api/settings/accounts", environ_base=LAN).status_code == 200
+    assert client.get("/api/health/status", environ_base=LAN).status_code == 200
+
+
 def test_env_password_is_reported_not_overwritten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WEB_PASSWORD", "from-the-environment-1")
     config_dir = _config(tmp_path)

@@ -1318,6 +1318,7 @@ def register_settings_routes(app: Any, *, config_dir: Path | None) -> None:
             return _error(422, "LENGTH", min=MIN_WEB_PASSWORD_LENGTH)
         if _is_default_weak_web_password(new_password):
             return _error(422, "WEAK")
+        caller_signed_in = web_app._session_authenticated(app)
         try:
             backup, error = _write_settings_value(app, folder, "web_ui", "password", new_password)
         except OSError as exc:
@@ -1325,8 +1326,17 @@ def register_settings_routes(app: Any, *, config_dir: Path | None) -> None:
             return _error(500, "WRITE_FAILED")
         if error is not None:
             return error
-        # Network logins use the new password right away.
+        # Network logins use the new password right away, and every session
+        # signed in with the old one ends (sessions carry a credential tag);
+        # the caller's own session is moved to the new password.
         app.config["WEB_PASSWORD"] = new_password
+        if caller_signed_in:
+            web_app._stamp_session_credentials(app)
+        logger.info(
+            "settings_web_sessions_reset kept_caller_session=%s client=%s",
+            caller_signed_in,
+            "loopback" if _is_local_request() else _client_key(),
+        )
         return _json({"ok": True, **_saved_message_fields(app, backup)})
 
     @app.route("/api/settings/web-access", methods=["POST"])

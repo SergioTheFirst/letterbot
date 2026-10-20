@@ -3646,6 +3646,7 @@ def _local_smoke_bypass_allowed(app: Flask, remote_addr: str | None) -> bool:
 
 
 REMOTE_SESSION_MAX_AGE_SECONDS = 12 * 3600
+_SESSION_TAG_FALLBACK_KEY = secrets.token_bytes(32)
 # Fetched by page scripts or non-browser clients: answer 401, never a redirect.
 _REMOTE_AUTH_NO_REDIRECT_PREFIXES = ("/api/", "/partial/")
 _REMOTE_ACCESS_DISABLED_TEXT = (
@@ -3733,22 +3734,54 @@ def _remote_auth_configured(app: Flask) -> bool:
     return bool(_remote_password(app) or _remote_api_token(app))
 
 
+def _credential_tag(app: Flask) -> str:
+    """HMAC of the current network credentials under the app's secret key.
+
+    A login session keeps the tag of the credentials it signed in with: once
+    the dashboard password or API token changes (Settings page, or a restart
+    with another value), every older session stops working. Keyed, so the
+    cookie holds nothing that tests password guesses without the key.
+    """
+    key = app.secret_key
+    key_bytes = key if isinstance(key, bytes) else str(key or "").encode("utf-8")
+    if not key_bytes:
+        # create_app always sets a key; never put an unkeyed password hash in a cookie.
+        key_bytes = _SESSION_TAG_FALLBACK_KEY
+    message = "\x00".join(
+        ("letterbot-session-v1", _remote_password(app), _remote_api_token(app))
+    )
+    return hmac.new(key_bytes, message.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _stamp_session_credentials(app: Flask) -> None:
+    """Bind the caller's session to the credentials as they are now."""
+    session["credential_tag"] = _credential_tag(app)
+
+
+def _session_authenticated(app: Flask) -> bool:
+    """True for a fresh login session made with the current credentials."""
+    authenticated_at = session.get("authenticated_at")
+    if session.get("authenticated") is not True or not isinstance(
+        authenticated_at, (int, float)
+    ):
+        return False
+    max_age = float(
+        app.config.get(
+            "WEB_UI_REMOTE_SESSION_MAX_AGE_SECONDS", REMOTE_SESSION_MAX_AGE_SECONDS
+        )
+    )
+    if time.time() - float(authenticated_at) > max_age:
+        return False
+    return _secret_matches(session.get("credential_tag"), _credential_tag(app))
+
+
 def _ensure_authenticated(app: Flask) -> bool:
     """True when the request carries a fresh login session or the API token.
 
     Only non-loopback requests are asked for this; loopback stays login-free.
     """
-    authenticated_at = session.get("authenticated_at")
-    if session.get("authenticated") is True and isinstance(
-        authenticated_at, (int, float)
-    ):
-        max_age = float(
-            app.config.get(
-                "WEB_UI_REMOTE_SESSION_MAX_AGE_SECONDS", REMOTE_SESSION_MAX_AGE_SECONDS
-            )
-        )
-        if time.time() - float(authenticated_at) <= max_age:
-            return True
+    if _session_authenticated(app):
+        return True
     # Werkzeug EnvironHeaders is not a collections.abc.Mapping; the Flask stub
     # request has no headers at all.
     headers = getattr(request, "headers", None)
@@ -3837,6 +3870,7 @@ def _handle_remote_login(app: Flask, remote_addr: str | None, target: str) -> Re
         session.clear()
         session["authenticated"] = True
         session["authenticated_at"] = time.time()
+        _stamp_session_credentials(app)
         logger.info("WEB_UI_LOGIN_OK remote=%s", client)
         return redirect(target)
     failures, lockout_seconds = throttle.record_failure(client)
