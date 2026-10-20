@@ -37,9 +37,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Single-file Windows installer `dist/Letterbot-Setup.exe` built on top of the verified `dist/Letterbot` one-folder bundle; ships only manifest-listed files, refuses to run while Letterbot is running, and shows its errors (log: `%TEMP%\Letterbot-install.log`).
 - Dashboard "Accounts" page (`/accounts`): each mailbox's connection state with a plain-language fix hint (including "Outlook is not supported"); passwords and tokens are never shown.
 - Unknown dashboard addresses show a "Page not found" page inside the app; every page has its own browser-tab title.
+- Dashboard Settings editor on the Accounts page: add, edit and remove mailboxes and the Telegram bot in the browser, with "Test connection" buttons (a read-only mail login check; Telegram getMe or a test message). Saves are validated, written atomically with a timestamped backup (newest 10 kept, restorable from History) and logged without values; passwords and tokens are write-only. The dashboard password can be set or changed there, and network access switched on (only with a password; restart to apply).
 
 ### Changed
 - CI publishes both `Letterbot.zip` and the smoke-installed `Letterbot-Setup.exe`; locally the installer is built only with `LETTERBOT_BUILD_INSTALLER=1`.
+- `accounts.ini` / `settings.ini` values are read literally: a `%` no longer needs doubling, and a value already written as `%%` now means two percent signs (the Accounts page warns about it).
+- The packaged app admits private-network clients (after login) when the dashboard is bound to the network; before, every LAN client got 403.
 
 ### Fixed
 - Packaged `Letterbot.exe` now reads feature flags, policy settings, backup/restore/export/cleanup paths and the doctor manifest from `<exe>\mailbot_v26\config` / the exe folder instead of `_internal`.
@@ -82,6 +85,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web UI rejects unknown `Host` headers (DNS rebinding); the session secret is random per process when not configured; the calibration report opens the database read-only.
 - The dashboard asks for a password when opened from another computer (no password needed on the computer running Letterbot); without a configured password, network access is refused; repeated wrong passwords are throttled.
 - Every dashboard page sends a nonce-based Content-Security-Policy and anti-framing headers; the login redirect accepts only same-site paths; the diagnostics zip also masks addresses in the bundled config and health files; logs no longer contain email subjects or senders.
+- Settings: pointing a mailbox at another server requires its password again; no answer reveals whether a typed secret matches the stored one; saves that carry a secret are rate-limited; changing the dashboard password signs out other sessions; config backups are git-ignored and kept out of the source bundle and installer; "Test connection" accepts only IMAP ports 143/993 (or the saved server), refuses internal and reserved addresses, and reports result codes only.
 - The attention-economics API no longer exposes sender addresses for selected accounts; over-long Message-IDs from the mail server are ignored; stored delivery errors are truncated; more encoded forms of a bot token are redacted.
 
 ## [28.0.0-rc] - 2026-03-21
