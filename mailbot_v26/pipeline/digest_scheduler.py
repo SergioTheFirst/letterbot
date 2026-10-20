@@ -528,6 +528,36 @@ def _digest_marker_key(prefix: str, account_email: str) -> str:
     return f"{prefix}:{account_email.strip().lower()}"
 
 
+# Last digest_tick_checked state per (database, digest type, account). The
+# scheduler ticks every few minutes, so a decision is logged when it changes
+# (or a new day/week starts), not on every tick (B14).
+_TICK_LOG_STATES: dict[tuple[str, str, str], tuple[object, ...]] = {}
+
+
+def _log_tick_checked(
+    logger: LoggerLike,
+    storage: DigestStorage,
+    *,
+    digest_type: str,
+    account_email: str,
+    window: str | None = None,
+    level: str = "info",
+    **fields: object,
+) -> None:
+    key = (str(storage.knowledge_db.path), digest_type, account_email)
+    state = (window, tuple(sorted(fields.items())))
+    if _TICK_LOG_STATES.get(key) == state:
+        return
+    _TICK_LOG_STATES[key] = state
+    log = logger.warning if level == "warning" else logger.info
+    log(
+        "digest_tick_checked",
+        digest_type=digest_type,
+        account_email=account_email,
+        **fields,
+    )
+
+
 def _daily_window_key(now: datetime) -> str:
     return f"{now.year:04d}-{now.month:02d}-{now.day:02d}"
 
@@ -822,20 +852,16 @@ def run_digest_tick(
             bot_token = config.keys.telegram_bot_token
 
             if not chat_id:
-                logger.warning(
-                    "digest_tick_checked",
-                    digest_type="daily",
-                    decision="skipped",
-                    reason="missing_chat_id",
-                    account_email=account_email,
-                )
-                logger.warning(
-                    "digest_tick_checked",
-                    digest_type="weekly",
-                    decision="skipped",
-                    reason="missing_chat_id",
-                    account_email=account_email,
-                )
+                for digest_type in ("daily", "weekly"):
+                    _log_tick_checked(
+                        logger,
+                        storage,
+                        level="warning",
+                        digest_type=digest_type,
+                        decision="skipped",
+                        reason="missing_chat_id",
+                        account_email=account_email,
+                    )
                 continue
 
             # /digest on|off is per chat (B16), legacy global key as fallback.
@@ -849,8 +875,9 @@ def run_digest_tick(
                     chat_id=chat_id,
                     chat_groups=chat_groups,
                 ):
-                    logger.info(
-                        "digest_tick_checked",
+                    _log_tick_checked(
+                        logger,
+                        storage,
                         digest_type="daily",
                         decision="skipped",
                         reason="dedup_chat_id_already_processed",
@@ -883,8 +910,9 @@ def run_digest_tick(
                         include_quality_metrics=flags.ENABLE_QUALITY_METRICS,
                     )
             else:
-                logger.info(
-                    "digest_tick_checked",
+                _log_tick_checked(
+                    logger,
+                    storage,
                     digest_type="daily",
                     decision="skipped",
                     reason=daily_reason,
@@ -900,8 +928,9 @@ def run_digest_tick(
                     chat_id=chat_id,
                     chat_groups=chat_groups,
                 ):
-                    logger.info(
-                        "digest_tick_checked",
+                    _log_tick_checked(
+                        logger,
+                        storage,
                         digest_type="weekly",
                         decision="skipped",
                         reason="dedup_chat_id_already_processed",
@@ -933,8 +962,9 @@ def run_digest_tick(
                         include_weekly_calibration_report=flags.ENABLE_WEEKLY_CALIBRATION_REPORT,
                     )
             else:
-                logger.info(
-                    "digest_tick_checked",
+                _log_tick_checked(
+                    logger,
+                    storage,
                     digest_type="weekly",
                     decision="skipped",
                     reason=weekly_reason,
@@ -980,19 +1010,24 @@ def _run_daily_digest(
 ) -> None:
     # `now` is local time (due hour, day window); data and stored times use UTC.
     now_utc = now.astimezone(timezone.utc)
+    day_key = _daily_window_key(now)
     # Data of the accounts routed to this chat only (B8), from the live config.
     scope_account_emails = _chat_scope_ids(account_emails)
-    if not _is_daily_due(now, config):
-        logger.info(
-            "digest_tick_checked",
+
+    def _checked(**fields: object) -> None:
+        _log_tick_checked(
+            logger,
+            storage,
             digest_type="daily",
-            decision="skipped",
-            reason="not_due",
             account_email=account_email,
+            window=day_key,
+            **fields,
         )
+
+    if not _is_daily_due(now, config):
+        _checked(decision="skipped", reason="not_due")
         return
 
-    day_key = _daily_window_key(now)
     sent_key = _digest_marker_key(_DAILY_SENT_KEY, account_email)
     try:
         # The marker covers this build's sends; the events also cover what
@@ -1012,24 +1047,29 @@ def _run_daily_digest(
         )
         return
     if already_sent:
-        logger.info(
-            "digest_tick_checked",
-            digest_type="daily",
-            decision="skipped",
-            reason="already_sent",
-            account_email=account_email,
-        )
+        _checked(decision="skipped", reason="already_sent")
         return
 
     marker_store = RuntimeOverrideStore(storage.knowledge_db.path)
     no_content_key = _digest_marker_key(_DAILY_NO_CONTENT_KEY, account_email)
     if marker_store.get_value(no_content_key) == day_key:
-        logger.info(
-            "digest_tick_checked",
-            digest_type="daily",
+        _checked(decision="skipped", reason="no_content_already_evaluated")
+        return
+
+    # The policy needs only "has content", so it is asked first (assuming
+    # content): a denial costs no collection, silence scan or ANOMALY events
+    # per tick, and the digest goes out in this window once it allows (B14).
+    policy_decision = _evaluate_policy(
+        policy_inputs=policy_inputs,
+        flags=flags,
+        has_daily_digest_content=True,
+        has_weekly_digest_content=False,
+    )
+    if not policy_decision.allow_daily_digest:
+        _checked(
             decision="skipped",
-            reason="no_content_already_evaluated",
-            account_email=account_email,
+            reason="policy_denied",
+            system_mode=policy_decision.mode.value,
         )
         return
 
@@ -1073,41 +1113,12 @@ def _run_daily_digest(
         now=now_utc,
         contract_event_emitter=storage.contract_event_emitter,
     )
-    has_content = daily_digest._has_digest_content(data)
-    if not has_content:
+    if not daily_digest._has_digest_content(data):
         marker_store.set_value(no_content_key, day_key)
-        logger.info(
-            "digest_tick_checked",
-            digest_type="daily",
-            decision="skipped",
-            reason="no_content",
-            account_email=account_email,
-        )
+        _checked(decision="skipped", reason="no_content")
         return
 
-    policy_decision = _evaluate_policy(
-        policy_inputs=policy_inputs,
-        flags=flags,
-        has_daily_digest_content=has_content,
-        has_weekly_digest_content=False,
-    )
-    if not policy_decision.allow_daily_digest:
-        logger.info(
-            "digest_tick_checked",
-            digest_type="daily",
-            decision="skipped",
-            reason="policy_denied",
-            account_email=account_email,
-            system_mode=policy_decision.mode.value,
-        )
-        return
-
-    logger.info(
-        "digest_tick_checked",
-        digest_type="daily",
-        decision="due",
-        account_email=account_email,
-    )
+    _checked(decision="due")
 
     payload = _build_daily_payload(
         account_email=account_email,
@@ -1127,13 +1138,7 @@ def _run_daily_digest(
         log_fields={"digest_type": "daily", "account_email": account_email},
     )
     if outcome.status == "taken":
-        logger.info(
-            "digest_tick_checked",
-            digest_type="daily",
-            decision="skipped",
-            reason="already_sent",
-            account_email=account_email,
-        )
+        _checked(decision="skipped", reason="already_sent")
         return
     if outcome.status != "delivered":
         return
@@ -1200,23 +1205,31 @@ def _run_weekly_digest(
     now_utc = now.astimezone(timezone.utc)
     marker_store = RuntimeOverrideStore(storage.knowledge_db.path)
 
-    if not due:
-        logger.info(
-            "digest_tick_checked",
+    def _checked(**fields: object) -> None:
+        _log_tick_checked(
+            logger,
+            storage,
             digest_type="weekly",
-            decision="skipped",
-            reason="not_due",
             account_email=account_email,
+            window=week_key,
             week_key=week_key,
+            **fields,
         )
-        _emit_weekly_skip_on_change(
-            storage=storage,
-            marker_store=marker_store,
-            account_email=account_email,
-            week_key=week_key,
-            reason="not_due",
-            now=now_utc,
-        )
+
+    def _skipped(reason: str, *, skip_event: bool = True, **fields: object) -> None:
+        _checked(decision="skipped", reason=reason, **fields)
+        if skip_event:
+            _emit_weekly_skip_on_change(
+                storage=storage,
+                marker_store=marker_store,
+                account_email=account_email,
+                week_key=week_key,
+                reason=reason,
+                now=now_utc,
+            )
+
+    if not due:
+        _skipped("not_due")
         return
 
     sent_key = _digest_marker_key(_WEEKLY_SENT_KEY, account_email)
@@ -1239,35 +1252,27 @@ def _run_weekly_digest(
         )
         return
     if already_sent:
-        _skip_weekly_already_sent(
-            storage=storage,
-            marker_store=marker_store,
-            logger=logger,
-            account_email=account_email,
-            week_key=week_key,
-            now_utc=now_utc,
-        )
+        _skipped("already_sent")
         return
 
     no_content_key = _digest_marker_key(_WEEKLY_NO_CONTENT_KEY, account_email)
     if marker_store.get_value(no_content_key) == week_key:
-        logger.info(
-            "digest_tick_checked",
-            digest_type="weekly",
-            decision="skipped",
-            reason="no_content_already_evaluated",
-            account_email=account_email,
-            week_key=week_key,
-        )
+        _skipped("no_content_already_evaluated", skip_event=False)
         return
 
-    logger.info(
-        "digest_tick_checked",
-        digest_type="weekly",
-        decision="due",
-        account_email=account_email,
-        week_key=week_key,
+    # Policy first, assuming content: a denial costs no collection or ANOMALY
+    # events per tick, and the digest goes out once it allows (B14).
+    policy_decision = _evaluate_policy(
+        policy_inputs=policy_inputs,
+        flags=flags,
+        has_daily_digest_content=False,
+        has_weekly_digest_content=True,
     )
+    if not policy_decision.allow_weekly_digest:
+        _skipped("policy_denied", system_mode=policy_decision.mode.value)
+        return
+
+    _checked(decision="due")
 
     locale = _resolve_outbound_ui_locale()
     data = weekly_digest._collect_weekly_data(
@@ -1290,52 +1295,11 @@ def _run_weekly_digest(
         contract_event_emitter=storage.contract_event_emitter,
         now=now_utc,
     )
-    has_content = _has_weekly_content(data)
-    if not has_content:
+    if not _has_weekly_content(data):
         marker_store.set_value(no_content_key, week_key)
-        logger.info(
-            "digest_tick_checked",
-            digest_type="weekly",
-            decision="skipped",
-            reason="no_content",
-            account_email=account_email,
-            week_key=week_key,
-        )
-        _emit_weekly_skip_on_change(
-            storage=storage,
-            marker_store=marker_store,
-            account_email=account_email,
-            week_key=week_key,
-            reason="no_content",
-            now=now_utc,
-        )
+        _skipped("no_content")
         return
 
-    policy_decision = _evaluate_policy(
-        policy_inputs=policy_inputs,
-        flags=flags,
-        has_daily_digest_content=False,
-        has_weekly_digest_content=has_content,
-    )
-    if not policy_decision.allow_weekly_digest:
-        logger.info(
-            "digest_tick_checked",
-            digest_type="weekly",
-            decision="skipped",
-            reason="policy_denied",
-            account_email=account_email,
-            week_key=week_key,
-            system_mode=policy_decision.mode.value,
-        )
-        _emit_weekly_skip_on_change(
-            storage=storage,
-            marker_store=marker_store,
-            account_email=account_email,
-            week_key=week_key,
-            reason="policy_denied",
-            now=now_utc,
-        )
-        return
     support_footer = ""
     support_cfg = _load_support_telegram_config()
     try:
@@ -1377,14 +1341,7 @@ def _run_weekly_digest(
         },
     )
     if outcome.status == "taken":
-        _skip_weekly_already_sent(
-            storage=storage,
-            marker_store=marker_store,
-            logger=logger,
-            account_email=account_email,
-            week_key=week_key,
-            now_utc=now_utc,
-        )
+        _skipped("already_sent")
         return
     if outcome.status == "unavailable":
         return
@@ -1451,33 +1408,6 @@ def _run_weekly_digest(
                 event_type=EventType.WEEKLY_DIGEST_SENT.value,
                 error=str(exc),
             )
-
-
-def _skip_weekly_already_sent(
-    *,
-    storage: DigestStorage,
-    marker_store: RuntimeOverrideStore,
-    logger: LoggerLike,
-    account_email: str,
-    week_key: str,
-    now_utc: datetime,
-) -> None:
-    logger.info(
-        "digest_tick_checked",
-        digest_type="weekly",
-        decision="skipped",
-        reason="already_sent",
-        account_email=account_email,
-        week_key=week_key,
-    )
-    _emit_weekly_skip_on_change(
-        storage=storage,
-        marker_store=marker_store,
-        account_email=account_email,
-        week_key=week_key,
-        reason="already_sent",
-        now=now_utc,
-    )
 
 
 __all__ = [
