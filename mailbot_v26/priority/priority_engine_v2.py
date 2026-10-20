@@ -7,14 +7,15 @@ from dataclasses import asdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable, Mapping
 
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
-from mailbot_v26.events.privacy import normalize_reminder_subject
+from mailbot_v26.events.privacy import normalize_reminder_subject, subject_hash
 from mailbot_v26.facts.fact_extractor import FactExtractor
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.insights.commitment_tracker import Commitment, extract_deadline_ru
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
+from mailbot_v26.storage.privacy_key import load_subject_key, subject_key_path
 from mailbot_v26.observability.decision_trace_v1 import compute_model_fingerprint
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
 from mailbot_v26.config.paths import default_config_dir
@@ -172,6 +173,40 @@ def load_vip_senders(base_dir: Path | None = None) -> VipSenderMatcher:
     return VipSenderMatcher(tuple(patterns))
 
 
+class _ReminderSubject:
+    """The current subject as reminder chains compare stored events with it.
+
+    Legacy ``email_received`` events written before WP3a carry the raw subject,
+    compared after normalization. Newer and scrubbed events carry only
+    ``subject_hash`` (keyed hash of the normalized subject); the current
+    subject's hash is computed at most once, on the first such event. Without
+    the key such events never match by subject.
+    """
+
+    __slots__ = ("_subject", "_key_loader", "_hash", "_hash_ready", "normalized")
+
+    def __init__(self, subject: str, key_loader: Callable[[], bytes | None]) -> None:
+        self._subject = subject
+        self._key_loader = key_loader
+        self._hash: str | None = None
+        self._hash_ready = False
+        self.normalized = normalize_reminder_subject(subject)
+
+    def matches(self, payload: Mapping[str, object]) -> bool:
+        stored_hash = payload.get("subject_hash")
+        if not isinstance(stored_hash, str):
+            stored_subject = str(payload.get("subject") or "")
+            return normalize_reminder_subject(stored_subject) == self.normalized
+        if not self._hash_ready:
+            self._hash_ready = True
+            key = self._key_loader()
+            if key:
+                # Hash the raw subject: normalization strips one reply prefix,
+                # so it must run exactly once, as it did for the stored hash.
+                self._hash = subject_hash(self._subject, key)
+        return self._hash is not None and stored_hash == self._hash
+
+
 class PriorityEngineV2:
     _URGENCY_KEYWORDS = {
         *MailTypeClassifier.URGENCY_KEYWORDS,
@@ -223,6 +258,8 @@ class PriorityEngineV2:
         self._config = config or load_priority_v2_config()
         self._vip_senders = vip_senders or load_vip_senders()
         self._fact_extractor = FactExtractor()
+        self._subject_key: bytes | None = None
+        self._subject_key_loaded = False
 
     def compute(
         self,
@@ -626,18 +663,17 @@ class PriorityEngineV2:
         subject: str,
     ) -> int:
         normalized_sender = (from_email or "").strip().lower()
-        normalized_subject = self._normalize_subject(subject)
+        current_subject = _ReminderSubject(subject, self._subject_hash_key)
         threshold = reference_time - timedelta(days=14)
         count = 0
         for row in events:
             payload = self._analytics.event_payload(row)
             sender = str(payload.get("from_email") or "").strip().lower()
-            event_subject = self._normalize_subject(str(payload.get("subject") or ""))
             mail_type = str(payload.get("mail_type") or "").strip().upper()
             if mail_type not in self._REMINDER_TYPES:
                 continue
             if normalized_sender and sender != normalized_sender:
-                if normalized_subject and event_subject != normalized_subject:
+                if current_subject.normalized and not current_subject.matches(payload):
                     continue
             event_time = parse_sqlite_datetime(str(row.get("timestamp") or ""))
             if event_time is None:
@@ -645,6 +681,27 @@ class PriorityEngineV2:
             if event_time >= threshold:
                 count += 1
         return count
+
+    def _subject_hash_key(self) -> bytes | None:
+        """Subject-hash key of the events database: read-only, loaded once.
+
+        Only the worker creates the key (storage.privacy_key). Without it,
+        events that carry only a subject hash join a reminder chain only from
+        the same sender; that degraded state is logged once per engine.
+        """
+        if self._subject_key_loaded:
+            return self._subject_key
+        self._subject_key_loaded = True
+        db_path = getattr(self._analytics, "path", None)
+        key = load_subject_key(db_path) if db_path is not None else None
+        if key is None:
+            _LOGGER.warning(
+                "subject_hash_key_unavailable path=%s "
+                "effect=reminder_chain_cross_sender_subject_matching_off",
+                subject_key_path(db_path) if db_path is not None else "unknown",
+            )
+        self._subject_key = key
+        return key
 
     def _mail_type_boost(self, mail_type: str) -> tuple[int, str | None]:
         if mail_type == "INVOICE_FINAL":
