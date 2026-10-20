@@ -131,6 +131,47 @@ def test_launch_report_deterministic() -> None:
     assert report_a == report_b
 
 
+@pytest.fixture
+def wired_llm_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The per-email LLM stage is not wired yet (WP5a / owner decision D1):
+    # simulate a wired stage to test the provider-based delivery modes.
+    monkeypatch.setattr(
+        "mailbot_v26.pipeline.stage_llm.llm_stage_disabled_reason", lambda: None
+    )
+
+
+def test_launch_report_says_ai_is_off_while_the_llm_stage_is_unwired(
+    tmp_path,
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.ini").write_text(
+        "[llm]\nprimary = cloudflare\n\n[cloudflare]\nenabled = true\n",
+        encoding="utf-8",
+    )
+    (config_dir / "accounts.ini").write_text(
+        "[cloudflare]\naccount_id = account\napi_token = token\n",
+        encoding="utf-8",
+    )
+
+    report = LaunchReportBuilder(config_dir=config_dir).build(
+        results=[
+            {
+                "component": "LLM Direct",
+                "status": HealthStatus.OK,
+                "details": "configured + capability probe passed",
+            }
+        ],
+        mode=SimpleNamespace(value="FULL"),
+    )
+
+    # A configured provider that passes its probe is not used per email while
+    # the stage is unwired: the report must not claim direct AI summaries.
+    assert "LLM delivery mode: DISABLED (llm_stage_not_wired)" in report
+    assert "Immediate TG summaries: heuristic" in report
+
+
+@pytest.mark.usefixtures("wired_llm_stage")
 def test_launch_report_includes_honest_llm_delivery_mode(tmp_path) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
@@ -204,6 +245,7 @@ def test_startup_health_checker_probe_failure_is_non_blocking(
     assert results["LLM Direct"]["status"] == HealthStatus.FAILED
 
 
+@pytest.mark.usefixtures("wired_llm_stage")
 def test_launch_report_marks_direct_delivery_mode(tmp_path) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
@@ -374,9 +416,11 @@ def test_dispatch_launch_report_does_not_raise(
 
 
 def test_startup_health_import_has_no_pipeline_side_effects(monkeypatch) -> None:
+    # monkeypatch puts the modules back afterwards: a later lazy import must
+    # not create second copies (tests patch the modules they imported).
     for module_name in list(sys.modules):
         if module_name.startswith("mailbot_v26.pipeline"):
-            del sys.modules[module_name]
+            monkeypatch.delitem(sys.modules, module_name)
     importlib.reload(sys.modules["mailbot_v26.system.startup_health"])
     assert not any(name.startswith("mailbot_v26.pipeline") for name in sys.modules)
 

@@ -408,7 +408,11 @@ def test_startup_with_wired_stage_degrades_only_on_provider_failure(
     expected_mode: OperationalMode,
     expected_state: str,
 ) -> None:
-    monkeypatch.setattr(stage_llm, "llm_stage_disabled_reason", lambda: None)
+    # By import path: startup_health imports the stage lazily, so patch the
+    # module object it will get even if another test re-imported the package.
+    monkeypatch.setattr(
+        "mailbot_v26.pipeline.stage_llm.llm_stage_disabled_reason", lambda: None
+    )
 
     mode = _checker(tmp_path).evaluate_mode(
         _llm_results(cloudflare=cloudflare, gigachat=gigachat)

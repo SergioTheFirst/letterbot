@@ -345,6 +345,13 @@ class LaunchReportBuilder:
         return sanitized[:180]
 
     def _get_llm_delivery_mode(self, index: dict[str, dict[str, str]]) -> str:
+        # Lazy import, as in _update_llm_health: a configured provider is not
+        # used per email while the stage is off, so never claim DIRECT then.
+        from mailbot_v26.pipeline import stage_llm
+
+        stage_off_reason = stage_llm.llm_stage_disabled_reason()
+        if stage_off_reason:
+            return f"DISABLED ({stage_off_reason})"
         llm_config = llm_router._load_llm_config(self._config_dir)
         has_direct_provider = (
             bool(llm_config.cloudflare_enabled)
