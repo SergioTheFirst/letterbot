@@ -69,6 +69,7 @@ from mailbot_v26.storage.sqlite_uri import sqlite_readonly_uri
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.config_yaml import (
     ConfigError as YamlConfigError,
+    _is_default_weak_web_password,
     load_config as load_yaml_config,
     validate_config as validate_yaml_config,
     resolve_support_enabled,
@@ -3646,11 +3647,11 @@ REMOTE_SESSION_MAX_AGE_SECONDS = 12 * 3600
 _REMOTE_AUTH_NO_REDIRECT_PREFIXES = ("/api/", "/partial/")
 _REMOTE_ACCESS_DISABLED_TEXT = (
     "Remote access to the LetterBot.ru web UI is disabled because no web "
-    "password or API token is configured. On the Letterbot computer set "
-    "password under [web_ui] in settings.ini (or the WEB_PASSWORD environment "
-    "variable), or web_ui.api_token in config.yaml, then restart Letterbot. "
-    "Local access on this computer (http://127.0.0.1) keeps working without a "
-    "password."
+    "password or API token is configured (placeholders such as CHANGE_ME do "
+    "not count). On the Letterbot computer set password under [web_ui] in "
+    "settings.ini (or the WEB_PASSWORD environment variable), or "
+    "web_ui.api_token in config.yaml, then restart Letterbot. Local access on "
+    "this computer (http://127.0.0.1) keeps working without a password."
 )
 
 
@@ -3711,8 +3712,22 @@ def _secret_matches(provided: object, expected: str) -> bool:
     return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
 
 
+def _usable_secret(value: object) -> str:
+    """The configured secret, or "" for empty or shipped placeholder values."""
+    secret = str(value or "")
+    return "" if _is_default_weak_web_password(secret) else secret
+
+
+def _remote_password(app: Flask) -> str:
+    return _usable_secret(app.config.get("WEB_PASSWORD"))
+
+
+def _remote_api_token(app: Flask) -> str:
+    return _usable_secret(app.config.get("COCKPIT_API_TOKEN"))
+
+
 def _remote_auth_configured(app: Flask) -> bool:
-    return bool(app.config.get("WEB_PASSWORD") or app.config.get("COCKPIT_API_TOKEN"))
+    return bool(_remote_password(app) or _remote_api_token(app))
 
 
 def _ensure_authenticated(app: Flask) -> bool:
@@ -3735,7 +3750,7 @@ def _ensure_authenticated(app: Flask) -> bool:
     # request has no headers at all.
     headers = getattr(request, "headers", None)
     header_token = headers.get("X-Api-Token") if headers is not None else None
-    return _secret_matches(header_token, str(app.config.get("COCKPIT_API_TOKEN") or ""))
+    return _secret_matches(header_token, _remote_api_token(app))
 
 
 def _render_login_page(
@@ -3812,8 +3827,8 @@ def _handle_remote_login(app: Flask, remote_addr: str | None, target: str) -> Re
         logger.warning("WEB_UI_LOGIN_CSRF_REJECTED remote=%s", client)
         return _text_response("Forbidden: invalid CSRF token", 403)
     provided = request.form.get("password", "")
-    if _secret_matches(provided, str(app.config.get("WEB_PASSWORD") or "")) or (
-        _secret_matches(provided, str(app.config.get("COCKPIT_API_TOKEN") or ""))
+    if _secret_matches(provided, _remote_password(app)) or _secret_matches(
+        provided, _remote_api_token(app)
     ):
         throttle.reset(client)
         session.clear()
@@ -4121,7 +4136,7 @@ def create_app(
     if allowed_networks and not _remote_auth_configured(app):
         logger.warning(
             "WEB_UI_REMOTE_AUTH_NOT_CONFIGURED allow_cidrs=%d: LAN requests get 403 "
-            "until web_ui password or api_token is set",
+            "until a non-placeholder web_ui password or api_token is set",
             len(allowed_networks),
         )
     app.config["WEB_UI_STARTED_AT"] = time.monotonic()
@@ -4187,7 +4202,7 @@ def create_app(
             headers = getattr(request, "headers", None)
             header_token = headers.get("X-Api-Token") if headers is not None else None
             token = header_token or request.args.get("token")
-            if not _cockpit_token_ok(token, app.config["COCKPIT_API_TOKEN"]):
+            if not _cockpit_token_ok(token, _remote_api_token(app)):
                 return Response("Forbidden", status=403)
             return None
         if request.endpoint == "static" or request.path.startswith("/static"):

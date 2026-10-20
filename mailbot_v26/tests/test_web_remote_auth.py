@@ -202,6 +202,40 @@ def test_lan_fails_closed_without_credentials(
     assert local.status_code == 200
 
 
+@pytest.mark.parametrize("placeholder", ["CHANGE_ME", "changeme", "password"])
+def test_shipped_placeholder_password_counts_as_unconfigured(
+    tmp_path: Path, placeholder: str
+) -> None:
+    # settings.ini.example ships "password = CHANGE_ME": never a LAN credential.
+    app = _app(tmp_path, password=placeholder, api_token="")
+    with app.test_client() as client:
+        page = client.get("/doctor", environ_base=LAN)
+        login = client.get("/login", environ_base=LAN)
+    assert page.status_code == 403
+    assert login.status_code == 403
+    assert "CHANGE_ME" in page.get_data(as_text=True)
+
+
+def test_placeholder_api_token_is_never_accepted(tmp_path: Path) -> None:
+    app = _app(tmp_path, api_token="CHANGE_ME")
+    with app.test_client() as client:
+        api = client.get(
+            "/api/health/status", environ_base=LAN, headers={"X-Api-Token": "CHANGE_ME"}
+        )
+        login = _login(client, "CHANGE_ME")
+    assert api.status_code == 401
+    assert login.status_code == 401
+
+
+def test_placeholder_token_does_not_open_cockpit_endpoints(tmp_path: Path) -> None:
+    app = _app(tmp_path, api_token="CHANGE_ME")
+    with app.test_client() as client:
+        response = client.get(
+            "/api/v1/cockpit/calibration", headers={"X-Api-Token": "CHANGE_ME"}
+        )
+    assert response.status_code == 403
+
+
 def test_forwarded_for_does_not_bypass_remote_auth(tmp_path: Path) -> None:
     app = _app(tmp_path)
     with app.test_client() as client:
