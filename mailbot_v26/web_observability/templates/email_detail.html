@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}{{ page_title or "Email" }} · LetterBot.ru{% endblock %}
 {% block page_actions %}
   <div class="mode-toggle">
     <a class="mode-pill {% if cockpit_mode == 'basic' %}active{% endif %}" href="{{ mode_basic_url }}">Basic</a>
