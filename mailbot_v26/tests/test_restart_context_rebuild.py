@@ -295,6 +295,32 @@ def test_unknown_email_keeps_the_no_context_path(tmp_path) -> None:
     )
 
 
+@pytest.mark.parametrize("failing_step", ["parse_raw_email", "store_inbound"])
+def test_failed_rebuild_leaves_no_cached_content(
+    tmp_path, monkeypatch, telegram, events, server, failing_step
+) -> None:
+    config, storage, _legacy_processor, _flags = _setup(
+        tmp_path, monkeypatch, premium=False
+    )
+    server.set_messages({7: server_item(raw_email(subject=SUBJECT))})
+    email_id = _ingest(storage, config, server, tmp_path)
+    restarted = _crash_at(storage, email_id, "PARSE")
+
+    def broken_step(*_args, **_kwargs):
+        raise RuntimeError(f"{failing_step} failed")
+
+    monkeypatch.setattr(start_module, failing_step, broken_step)
+    with pytest.raises(RuntimeError, match=f"{failing_step} failed"):
+        start_module._rebuild_pipeline_context(
+            storage=restarted, config=config, email_id=email_id, stage="PARSE"
+        )
+
+    # R8: a half-built context must not be reused by the retry.
+    assert email_id not in PIPELINE_RAW_CACHE
+    assert email_id not in PIPELINE_INBOUND_CACHE
+    assert email_id not in PIPELINE_CACHE
+
+
 def test_context_dead_letters_join_the_next_aggregated_alert(
     tmp_path, monkeypatch
 ) -> None:

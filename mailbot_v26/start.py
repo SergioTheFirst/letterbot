@@ -1306,11 +1306,11 @@ def _rebuild_pipeline_context(
         raise PipelineContextUnavailable(
             refetch.reason, account_email=account_email, uid=uid
         )
-    inbound = parse_raw_email(refetch.raw, config)
     ctx = PipelineContext(email_id=email_id, account_email=account_email, uid=uid)
-    remember_raw_email(email_id, refetch.raw)
-    store_inbound(email_id, inbound)
     try:
+        inbound = parse_raw_email(refetch.raw, config)
+        remember_raw_email(email_id, refetch.raw)
+        store_inbound(email_id, inbound)
         if stage in ("LLM", "TG"):
             stage_parse(ctx)
         if stage == "TG":
