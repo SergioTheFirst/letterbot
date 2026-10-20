@@ -765,9 +765,11 @@ def _persist_inbound_and_enqueue_parse(
     attachments_count: int,
     raw_email: bytes,
     inbound: InboundMessage,
+    uidvalidity: int | None = None,
 ) -> tuple[int, bool]:
     normalized_account_email = normalize_login(account_email)
-    # Email row and PARSE queue row in one transaction (F5).
+    # Email row and PARSE queue row in one transaction (F5). uidvalidity lets
+    # a restart refetch the message by UID (WP2b).
     email_id, created = storage.persist_email_and_enqueue(
         account_email=normalized_account_email,
         uid=uid,
@@ -777,6 +779,7 @@ def _persist_inbound_and_enqueue_parse(
         subject=subject,
         received_at=received_at,
         attachments_count=attachments_count,
+        uidvalidity=uidvalidity,
     )
     if not created:
         logger.info(
@@ -2513,6 +2516,10 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
                                                 attachments_count=attachments_count,
                                                 raw_email=raw,
                                                 inbound=inbound,
+                                                # getattr: fakes lack it (F10)
+                                                uidvalidity=getattr(
+                                                    imap, "current_uidvalidity", None
+                                                ),
                                             )
                                         )
                                         if enqueued:

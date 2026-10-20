@@ -91,6 +91,9 @@ class Storage:
                 self.conn.execute(
                     "ALTER TABLE emails ADD COLUMN telegram_delivered_at TEXT;"
                 )
+            # UIDVALIDITY epoch of uid; NULL for rows stored before WP2b.
+            if "uidvalidity" not in email_columns:
+                self.conn.execute("ALTER TABLE emails ADD COLUMN uidvalidity INTEGER;")
             self.conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_emails_status
                 ON emails(status);
@@ -185,6 +188,7 @@ class Storage:
         subject: str | None,
         received_at: str | None,
         attachments_count: int | None,
+        uidvalidity: int | None = None,
     ) -> int:
         now = self._now()
         attach_count = attachments_count if attachments_count is not None else 0
@@ -193,8 +197,9 @@ class Storage:
                 """
                 INSERT INTO emails (
                     account_email, uid, message_id, from_email, from_name, subject,
-                    received_at, attachments_count, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, ?)
+                    received_at, attachments_count, status, created_at, updated_at,
+                    uidvalidity
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, ?, ?)
                 ON CONFLICT(account_email, uid) DO UPDATE SET
                     message_id=excluded.message_id,
                     from_email=excluded.from_email,
@@ -202,7 +207,8 @@ class Storage:
                     subject=excluded.subject,
                     received_at=excluded.received_at,
                     attachments_count=excluded.attachments_count,
-                    updated_at=excluded.updated_at
+                    updated_at=excluded.updated_at,
+                    uidvalidity=COALESCE(excluded.uidvalidity, emails.uidvalidity)
                 RETURNING id;
                 """,
                 (
@@ -216,6 +222,7 @@ class Storage:
                     attach_count,
                     now,
                     now,
+                    uidvalidity,
                 ),
             )
             row = cursor.fetchone()
@@ -528,12 +535,14 @@ class Storage:
         received_at: str | None,
         attachments_count: int | None,
         stage: str = "PARSE",
+        uidvalidity: int | None = None,
     ) -> tuple[int, bool]:
         """Store a new email and its first queue row in one transaction.
 
         Returns (email_id, created). An email already stored for
         (account_email, uid) is left as is and nothing is enqueued; a crash
         can no longer leave an email row without its queue row (F5).
+        uidvalidity is the epoch of uid, used to refetch after a restart.
         """
         now = self._now()
         attach_count = attachments_count if attachments_count is not None else 0
@@ -551,8 +560,9 @@ class Storage:
                 """
                 INSERT INTO emails (
                     account_email, uid, message_id, from_email, from_name, subject,
-                    received_at, attachments_count, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, ?);
+                    received_at, attachments_count, status, created_at, updated_at,
+                    uidvalidity
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, ?, ?);
                 """,
                 (
                     account_email,
@@ -565,6 +575,7 @@ class Storage:
                     attach_count,
                     now,
                     now,
+                    uidvalidity,
                 ),
             )
             email_id = int(cursor.lastrowid)
@@ -583,6 +594,29 @@ class Storage:
             raise
         finally:
             cursor.close()
+
+    def get_email_locator(self, email_id: int) -> Dict[str, Any] | None:
+        """Where an email lives in IMAP: account, uid, its epoch, Message-ID.
+
+        None when the email is not stored. uidvalidity is None for rows
+        stored before the column existed; message_id is the raw header.
+        """
+        row = self.conn.execute(
+            """
+            SELECT account_email, uid, uidvalidity, message_id
+            FROM emails
+            WHERE id = ?;
+            """,
+            (email_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "account_email": str(row[0]),
+            "uid": int(row[1]),
+            "uidvalidity": int(row[2]) if row[2] is not None else None,
+            "message_id": str(row[3]) if row[3] is not None else None,
+        }
 
 
 __all__ = ["Storage"]

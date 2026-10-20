@@ -242,6 +242,7 @@ class ResilientIMAP:
         self._last_resync_reason = "normal_poll"
         self._last_bootstrap_active = False
         self._last_message_ids: Dict[int, Optional[str]] = {}
+        self._current_uidvalidity: Optional[int] = None
         self._plan: Optional[FetchPlan] = None
         self.connect_timeout = float(connect_timeout)
         self.io_timeout = float(io_timeout)
@@ -346,6 +347,12 @@ class ResilientIMAP:
         """UID -> Message-ID (None when absent) for every UID whose headers the
         last fetch_new_messages() call fetched."""
         return dict(self._last_message_ids)
+
+    @property
+    def current_uidvalidity(self) -> Optional[int]:
+        """UIDVALIDITY the last fetch_new_messages() call saw (None: unknown);
+        the epoch of the UIDs it returned."""
+        return self._current_uidvalidity
 
     def _fetch_uidvalidity(self) -> Optional[int]:
         def _status(client) -> Optional[int]:
@@ -599,6 +606,7 @@ class ResilientIMAP:
                 except Exception:
                     previous_uidvalidity = None
         current_uidvalidity = self._fetch_uidvalidity()
+        self._current_uidvalidity = current_uidvalidity
         uidvalidity_changed = (
             previous_uidvalidity is not None
             and current_uidvalidity is not None
