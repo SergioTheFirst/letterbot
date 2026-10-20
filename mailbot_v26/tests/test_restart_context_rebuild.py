@@ -10,7 +10,7 @@ retried; a message that is gone or does not match is dead-lettered visibly
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -34,6 +34,7 @@ from mailbot_v26.tests.test_delivery_invariants import (  # noqa: F401 - fixture
     _email_row,
     _fail_open_processor,
     _isolated_runtime,
+    _make_ready,
     _patch_premium,
     _queue_rows,
     _setup,
@@ -256,7 +257,7 @@ def test_message_id_mismatch_after_restart_is_dead_lettered(
 
 
 @pytest.mark.parametrize("stage", ["PARSE", "TG"])
-def test_network_error_during_refetch_is_retried(
+def test_network_error_during_refetch_is_retried_without_using_attempts(
     tmp_path, monkeypatch, telegram, events, server, stage
 ) -> None:
     config, storage, legacy_processor, flags = _setup(
@@ -271,8 +272,10 @@ def test_network_error_during_refetch_is_retried(
 
     assert telegram.calls == 0
     rows = _queue_rows(restarted)
-    assert [(row_stage, attempts) for row_stage, attempts, _ in rows] == [(stage, 1)]
+    # R2: an IMAP outage is not the email's fault; its attempt is given back.
+    assert [(row_stage, attempts) for row_stage, attempts, _ in rows] == [(stage, 0)]
     assert "IMAP" in str(rows[0][2])
+    assert _deferred_seconds(restarted) == pytest.approx(60, abs=10)
     assert _email_row(restarted, email_id)[0] == "NEW"
     assert _context_dead_letters(events) == []
 
@@ -284,6 +287,140 @@ def test_network_error_during_refetch_is_retried(
 
     assert len(telegram.email_messages()) == 1
     assert _queue_rows(restarted) == []
+
+
+def _naive_utc(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+
+
+def _deferred_seconds(storage: Storage) -> float:
+    row = storage.conn.execute("SELECT not_before FROM queue").fetchone()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return (datetime.fromisoformat(row[0]) - now).total_seconds()
+
+
+def _queued_at(storage: Storage, moment: datetime) -> None:
+    with storage.conn:
+        storage.conn.execute("UPDATE queue SET created_at = ?", (_naive_utc(moment),))
+
+
+@pytest.mark.parametrize("stage", ["PARSE", "TG"])
+def test_imap_outage_after_restart_backs_off_and_never_exhausts_attempts(
+    tmp_path, monkeypatch, telegram, events, server, caplog, stage
+) -> None:
+    config, storage, legacy_processor, flags = _setup(
+        tmp_path, monkeypatch, premium=False
+    )
+    server.set_messages({7: server_item(raw_email(subject=SUBJECT))})
+    email_id = _ingest(storage, config, server, tmp_path)
+    server.login_error = OSError("connection refused")
+    restarted = _crash_at(storage, email_id, stage)
+    now = datetime.now(timezone.utc)
+    # Queued two days ago, before a long shutdown: the wait counts from the
+    # worker start, so the outage is not mistaken for a day-old one.
+    _queued_at(restarted, now - timedelta(days=2))
+
+    schedule = [(0, 60), (2, 120), (5, 300), (10, 600), (20, 1800), (23 * 60, 1800)]
+    with caplog.at_level("WARNING", logger=start_module.logger.name):
+        for waited_minutes, expected_delay in schedule:
+            monkeypatch.setattr(
+                start_module,
+                "_WORKER_STARTED_AT",
+                now - timedelta(minutes=waited_minutes),
+            )
+            _make_ready(restarted)
+            start_module._process_queue(restarted, config, legacy_processor, flags)
+
+            rows = _queue_rows(restarted)
+            assert [(row_stage, attempts) for row_stage, attempts, _ in rows] == [
+                (stage, 0)
+            ]
+            assert _deferred_seconds(restarted) == pytest.approx(
+                expected_delay, abs=10
+            )
+
+    # More passes than the attempt budget, and nothing failed or was sent.
+    assert len(schedule) > start_module.MAX_PIPELINE_STAGE_ATTEMPTS
+    assert telegram.calls == 0
+    assert _email_row(restarted, email_id)[0] == "NEW"
+    assert _context_dead_letters(events) == []
+    deferrals = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("pipeline_context_refetch_deferred")
+    ]
+    assert len(deferrals) == len(schedule)
+    assert f"email_id={email_id}" in deferrals[0]
+    assert "error_class=IMAPError" in deferrals[0]
+    for line in deferrals:  # counts and ids only
+        assert SUBJECT not in line
+        assert MESSAGE_ID not in line
+        assert _ACCOUNT.login not in line
+
+    # IMAP is back: the next pass rebuilds the context and notifies once.
+    server.login_error = None
+    _make_ready(restarted)
+    start_module._process_queue(restarted, config, legacy_processor, flags)
+    assert len(telegram.email_messages()) == 1
+    assert _queue_rows(restarted) == []
+
+
+def test_item_queued_after_the_worker_start_waits_from_its_queue_time(
+    tmp_path, monkeypatch, telegram, events, server
+) -> None:
+    config, storage, legacy_processor, flags = _setup(
+        tmp_path, monkeypatch, premium=False
+    )
+    server.set_messages({7: server_item(raw_email(subject=SUBJECT))})
+    email_id = _ingest(storage, config, server, tmp_path)
+    server.login_error = OSError("connection refused")
+    restarted = _crash_at(storage, email_id, "LLM")
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(start_module, "_WORKER_STARTED_AT", now - timedelta(hours=30))
+    _queued_at(restarted, now - timedelta(seconds=90))
+
+    start_module._process_queue(restarted, config, legacy_processor, flags)
+
+    # Waited 90 s, not 30 h: second step of the backoff, not a dead letter.
+    assert [(row_stage, attempts) for row_stage, attempts, _ in _queue_rows(restarted)] == [
+        ("LLM", 0)
+    ]
+    assert _deferred_seconds(restarted) == pytest.approx(120, abs=10)
+    assert _context_dead_letters(events) == []
+
+
+def test_imap_outage_past_the_maximum_wait_is_dead_lettered_visibly(
+    tmp_path, monkeypatch, telegram, events, server
+) -> None:
+    config, storage, _legacy_processor, flags = _setup(
+        tmp_path, monkeypatch, premium=False
+    )
+    server.set_messages({7: server_item(raw_email(subject=SUBJECT))})
+    email_id = _ingest(storage, config, server, tmp_path)
+    server.login_error = OSError("connection refused")
+    restarted = _crash_at(storage, email_id, "TG")
+    now = datetime.now(timezone.utc)
+    started = now - start_module.CONTEXT_IMAP_MAX_WAIT - timedelta(minutes=1)
+    monkeypatch.setattr(start_module, "_WORKER_STARTED_AT", started)
+    _queued_at(restarted, started - timedelta(hours=1))
+    state_path = tmp_path / "worker-state.json"
+
+    start_module._process_queue(
+        restarted, config, _fail_open_processor(), flags, state=StateManager(state_path)
+    )
+
+    # No content to fail open with: no message, no "delivery failed" notice.
+    assert telegram.calls == 0
+    assert _queue_rows(restarted) == []
+    status, error_last, delivered_at = _email_row(restarted, email_id)
+    assert (status, error_last) == ("ERROR", "context_unavailable:imap_unavailable")
+    assert delivered_at is None
+    dead = _context_dead_letters(events)
+    assert [(event.payload["stage"], event.payload["reason"]) for event in dead] == [
+        ("CONTEXT", "imap_unavailable")
+    ]
+    assert dead[0].payload["queue_stage"] == "TG"
+    assert StateManager(state_path).pop_context_dead_letters(_ACCOUNT.login) == 1
 
 
 def test_unknown_email_keeps_the_no_context_path(tmp_path) -> None:

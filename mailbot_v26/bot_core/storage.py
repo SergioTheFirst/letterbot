@@ -821,5 +821,31 @@ class Storage:
         logger.info("storage_migration_applied name=%s", name)
         return True
 
+    def get_queue_created_at(self, queue_id: int) -> str | None:
+        """When the queue row was created (naive-UTC isoformat); None when
+        the row is gone."""
+        row = self.conn.execute(
+            "SELECT created_at FROM queue WHERE id = ?;", (queue_id,)
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+
+    def defer_queue_item(self, queue_id: int, error: str, delay_seconds: int) -> None:
+        """Retry the item after delay_seconds without using an attempt: the
+        one claim_next counted is given back (a transient outage, R2)."""
+        now = datetime.utcnow()
+        not_before = now + timedelta(seconds=delay_seconds)
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE queue
+                SET attempts = MAX(attempts - 1, 0),
+                    last_error = ?,
+                    not_before = ?,
+                    updated_at = ?
+                WHERE id = ?;
+                """,
+                (error, not_before.isoformat(), now.isoformat(), queue_id),
+            )
+
 
 __all__ = ["Storage", "normalize_message_id"]

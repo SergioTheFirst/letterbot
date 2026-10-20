@@ -61,7 +61,7 @@ from mailbot_v26.health.mail_accounts import (
     _mask_login,
     run_startup_mail_account_healthcheck,
 )
-from mailbot_v26.imap_client import MAX_UID_FETCH_ATTEMPTS, ResilientIMAP
+from mailbot_v26.imap_client import MAX_UID_FETCH_ATTEMPTS, IMAPError, ResilientIMAP
 from mailbot_v26.integrity import verify_shipped_files
 from mailbot_v26.mail_health.runtime_health import AccountRuntimeHealthManager
 from mailbot_v26.pipeline.processor import (
@@ -1265,6 +1265,21 @@ def _settle_email_delivery(
 # A context refetch retries its IMAP session once: a queue pass must not
 # block on a dead server (the queue item retries with backoff).
 CONTEXT_REFETCH_IMAP_RETRIES = 1
+# R2: IMAP unreachable during a context refetch is an outage, not a broken
+# email. The item retries after 1, 2, 5, 10, then every 30 min without using
+# its attempts: (waited under N seconds, retry in M seconds), else the cap.
+CONTEXT_IMAP_RETRY_DELAYS: tuple[tuple[int, int], ...] = (
+    (60, 60),
+    (180, 120),
+    (480, 300),
+    (1080, 600),
+)
+CONTEXT_IMAP_RETRY_MAX_DELAY_SECONDS = 1800
+# Then it is dead-lettered (stage CONTEXT), as a message that is gone.
+CONTEXT_IMAP_MAX_WAIT = timedelta(hours=24)
+# An item queued before this worker started waits from the start: after a
+# long shutdown the queue still holds old items.
+_WORKER_STARTED_AT = datetime.now(timezone.utc)
 
 
 class PipelineContextUnavailable(Exception):
@@ -1274,6 +1289,17 @@ class PipelineContextUnavailable(Exception):
     def __init__(self, reason: str, *, account_email: str, uid: int) -> None:
         super().__init__(f"context_unavailable:{reason}")
         self.reason = reason
+        self.account_email = account_email
+        self.uid = uid
+
+
+class PipelineContextImapUnavailable(Exception):
+    """IMAP could not be reached to refetch a queued email (R2): the item is
+    retried later without using its attempts."""
+
+    def __init__(self, cause: BaseException, *, account_email: str, uid: int) -> None:
+        super().__init__(f"context_imap_unavailable: {cause}")
+        self.error_class = cause.__class__.__name__
         self.account_email = account_email
         self.uid = uid
 
@@ -1289,9 +1315,9 @@ def _rebuild_pipeline_context(
 
     Refetches the message from IMAP (WP2b), parses it and fills the caches;
     a TG item runs the LLM stage inline first (no premium re-run). None when
-    the email is not stored (the "no pipeline context" retry path). A
-    network error propagates, so the item is retried; a message that is gone
-    or does not match raises PipelineContextUnavailable.
+    the email is not stored (the "no pipeline context" retry path). IMAP
+    unreachable raises PipelineContextImapUnavailable (retried, R2); a
+    message that is gone or does not match raises PipelineContextUnavailable.
     """
     locator = storage.get_email_locator(email_id)
     if locator is None:
@@ -1309,11 +1335,16 @@ def _rebuild_pipeline_context(
         max_email_mb=config.general.max_email_mb,
         retries=CONTEXT_REFETCH_IMAP_RETRIES,
     )
-    refetch = imap.fetch_message_by_uid(
-        uid,
-        expected_uidvalidity=locator["uidvalidity"],
-        expected_message_id=locator["message_id"],
-    )
+    try:
+        refetch = imap.fetch_message_by_uid(
+            uid,
+            expected_uidvalidity=locator["uidvalidity"],
+            expected_message_id=locator["message_id"],
+        )
+    except (IMAPError, OSError) as exc:
+        raise PipelineContextImapUnavailable(
+            exc, account_email=account_email, uid=uid
+        ) from exc
     logger.info(
         "pipeline_context_refetch email_id=%s stage=%s uid=%s found_uid=%s reason=%s",
         email_id,
@@ -1379,6 +1410,76 @@ def _dead_letter_unavailable_context(
         message_uid=lost.uid,
         attempt_count=attempts,
         extra_payload={"stage": "CONTEXT", "queue_stage": stage, "reason": lost.reason},
+    )
+
+
+def _context_refetch_delay_seconds(waited_seconds: float) -> int:
+    for waited_under, delay in CONTEXT_IMAP_RETRY_DELAYS:
+        if waited_seconds < waited_under:
+            return delay
+    return CONTEXT_IMAP_RETRY_MAX_DELAY_SECONDS
+
+
+def _context_wait_started_at(storage: Storage, queue_id: int) -> datetime:
+    """When the item started waiting in this run: its queue time, or the
+    worker start for an item queued before it (R2)."""
+    created_at = storage.get_queue_created_at(queue_id)
+    queued: datetime | None = None
+    if created_at:
+        try:
+            queued = datetime.fromisoformat(created_at)
+        except ValueError:
+            logger.warning("queue_created_at_unreadable queue_id=%s", queue_id)
+    if queued is not None and queued.tzinfo is None:
+        queued = queued.replace(tzinfo=timezone.utc)  # stored naive UTC
+    if queued is None or queued < _WORKER_STARTED_AT:
+        return _WORKER_STARTED_AT
+    return queued
+
+
+def _defer_context_refetch(
+    *,
+    storage: Storage,
+    queue_id: int,
+    email_id: int,
+    stage: str,
+    attempts: int,
+    unavailable: PipelineContextImapUnavailable,
+    state: StateManager | None,
+) -> None:
+    """R2: IMAP is unreachable while a lost context is rebuilt.
+
+    The item retries with a growing delay and gets back the attempt
+    claim_next counted, so an outage after a restart cannot exhaust its
+    budget. After CONTEXT_IMAP_MAX_WAIT it is dead-lettered visibly
+    (stage CONTEXT, reason imap_unavailable).
+    """
+    waited = datetime.now(timezone.utc) - _context_wait_started_at(storage, queue_id)
+    if waited >= CONTEXT_IMAP_MAX_WAIT:
+        _dead_letter_unavailable_context(
+            storage=storage,
+            queue_id=queue_id,
+            email_id=email_id,
+            stage=stage,
+            attempts=attempts,
+            lost=PipelineContextUnavailable(
+                "imap_unavailable",
+                account_email=unavailable.account_email,
+                uid=unavailable.uid,
+            ),
+            state=state,
+        )
+        return
+    delay = _context_refetch_delay_seconds(waited.total_seconds())
+    storage.defer_queue_item(queue_id, str(unavailable), delay)
+    logger.warning(
+        "pipeline_context_refetch_deferred email_id=%s stage=%s uid=%s waited_seconds=%d delay_seconds=%d error_class=%s",
+        email_id,
+        stage,
+        unavailable.uid,
+        waited.total_seconds(),
+        delay,
+        unavailable.error_class,
     )
 
 
@@ -1550,6 +1651,17 @@ def _process_queue(
                     ctx = _rebuild_pipeline_context(
                         storage=storage, config=config, email_id=email_id, stage=stage
                     )
+                except PipelineContextImapUnavailable as unavailable:
+                    _defer_context_refetch(
+                        storage=storage,
+                        queue_id=queue_id,
+                        email_id=email_id,
+                        stage=stage,
+                        attempts=attempts,
+                        unavailable=unavailable,
+                        state=state,
+                    )
+                    continue
                 except PipelineContextUnavailable as lost:
                     _dead_letter_unavailable_context(
                         storage=storage,
