@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Iterable
 
 from mailbot_v26.domain.mail_type_classifier import MailTypeClassifier
+from mailbot_v26.events.privacy import normalize_reminder_subject
 from mailbot_v26.facts.fact_extractor import FactExtractor
 from mailbot_v26.insights.commitment_lifecycle import parse_sqlite_datetime
 from mailbot_v26.insights.commitment_tracker import Commitment, extract_deadline_ru
@@ -796,11 +797,7 @@ class PriorityEngineV2:
 
     @staticmethod
     def _normalize_subject(subject: str) -> str:
-        cleaned = re.sub(
-            r"^(re:|fw:|fwd:)\s*", "", subject.strip(), flags=re.IGNORECASE
-        )
-        cleaned = re.sub(r"\s+", " ", cleaned)
-        return cleaned.lower()
+        return normalize_reminder_subject(subject)
 
 
 __all__ = [
