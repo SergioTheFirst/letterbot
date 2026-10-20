@@ -807,8 +807,26 @@ def _persist_inbound_and_enqueue_parse(
 # D-P2-1: at most one aggregated dead-letter alert per account in this window.
 DEAD_LETTER_ALERT_INTERVAL = timedelta(hours=24)
 # Emails dead-lettered at CONTEXT (WP2b) per normalized login since that
-# account's last poll; the poll folds them into its aggregated alert.
+# account's last poll; the poll folds them into its aggregated alert. The
+# worker loop keeps the counts in state.json (R3); this in-memory map only
+# serves callers of _process_queue without a StateManager.
 _CONTEXT_DEAD_LETTERS: dict[str, int] = {}
+
+
+def _record_context_dead_letter(state: StateManager | None, login: str) -> None:
+    """Count a CONTEXT dead letter for the account's next poll alert.
+
+    Saved to state.json at once (R3), so a restart before that poll keeps it.
+    """
+    if state is None:
+        _CONTEXT_DEAD_LETTERS[login] = _CONTEXT_DEAD_LETTERS.get(login, 0) + 1
+        return
+    state.add_context_dead_letter(login)
+    try:
+        state.save()
+    except Exception:
+        # Still counted in memory; the cycle-end save writes it again.
+        logger.exception("context_dead_letter_state_save_failed account=%s", login)
 
 
 def _known_uid_probe(
@@ -957,7 +975,9 @@ def _commit_imap_cursor(
     commit = commit_cursor(persisted_uids)
     dead_uids = tuple(commit.dead_uids) if commit is not None else ()
     # Context dead letters since this account's last poll join its alert.
-    context_dead = _CONTEXT_DEAD_LETTERS.pop(normalize_login(login), 0)
+    login_key = normalize_login(login)
+    context_dead = _CONTEXT_DEAD_LETTERS.pop(login_key, 0)
+    context_dead += state.pop_context_dead_letters(login_key)
     if not dead_uids and not context_dead:
         return
     now_utc = datetime.now(timezone.utc)
@@ -1331,6 +1351,7 @@ def _dead_letter_unavailable_context(
     stage: str,
     attempts: int,
     lost: PipelineContextUnavailable,
+    state: StateManager | None = None,
 ) -> None:
     """WP2b: a queued email that cannot be refetched after a restart.
 
@@ -1342,7 +1363,7 @@ def _dead_letter_unavailable_context(
     storage.set_email_error(email_id, str(lost))
     storage.mark_done(queue_id)
     _cleanup_pipeline_cache(email_id)
-    _CONTEXT_DEAD_LETTERS[login] = _CONTEXT_DEAD_LETTERS.get(login, 0) + 1
+    _record_context_dead_letter(state, login)
     logger.error(
         "pipeline_context_dead_lettered email_id=%s stage=%s uid=%s reason=%s",
         email_id,
@@ -1476,7 +1497,10 @@ def _process_queue(
     config: BotConfig,
     processor: MessageProcessor,
     flags: FeatureFlags,
+    state: StateManager | None = None,
 ) -> None:
+    """Run every due queue item. state keeps context dead-letter counts
+    across restarts (R3); without it they are kept in memory."""
     _process_due_snoozes_guarded(storage=storage, config=config)
     max_tg_attempts = MAX_TELEGRAM_STAGE_ATTEMPTS
     max_pipeline_attempts = MAX_PIPELINE_STAGE_ATTEMPTS
@@ -1534,6 +1558,7 @@ def _process_queue(
                         stage=stage,
                         attempts=attempts,
                         lost=lost,
+                        state=state,
                     )
                     continue
                 if ctx is not None:
@@ -2847,7 +2872,9 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
 
                     if storage:
                         try:
-                            _process_queue(storage, config, processor, flags)
+                            _process_queue(
+                                storage, config, processor, flags, state=state
+                            )
                         except Exception:
                             # Queued rows stay in the queue and are retried by
                             # its own attempt/backoff logic; no blanket fail-open.

@@ -9,6 +9,7 @@ retried; a message that is gone or does not match is dead-lettered visibly
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,7 +27,7 @@ from mailbot_v26.bot_core.pipeline import (
 from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.events.contract import EventType
 from mailbot_v26.imap_client import CursorCommit, ResilientIMAP
-from mailbot_v26.state_manager import StateManager
+from mailbot_v26.state_manager import AccountState, StateManager
 from mailbot_v26.tests import test_delivery_invariants as _invariants
 from mailbot_v26.tests.test_delivery_invariants import (  # noqa: F401 - fixtures
     _ACCOUNT,
@@ -319,6 +320,94 @@ def test_failed_rebuild_leaves_no_cached_content(
     assert email_id not in PIPELINE_RAW_CACHE
     assert email_id not in PIPELINE_INBOUND_CACHE
     assert email_id not in PIPELINE_CACHE
+
+
+def _alert_sender(monkeypatch) -> list[str]:
+    sent: list[str] = []
+
+    def _send(payload, *_args, **_kwargs):
+        sent.append(payload.html_text)
+        return SimpleNamespace(delivered=True, message_id=1)
+
+    monkeypatch.setattr(start_module, "send_telegram", _send)
+    return sent
+
+
+def _poll_without_new_mail(state: StateManager) -> None:
+    start_module._commit_imap_cursor(
+        imap=SimpleNamespace(
+            commit_cursor=lambda _uids: CursorCommit(
+                cursor=5, dead_uids=(), failed_uids=(), carried=()
+            )
+        ),
+        persisted_uids=[],
+        account=_ACCOUNT,
+        login=_ACCOUNT.login,
+        state=state,
+        bot_token="token",
+    )
+
+
+def test_context_dead_letter_count_survives_a_restart_before_the_next_poll(
+    tmp_path, monkeypatch, telegram, events, server
+) -> None:
+    config, storage, _legacy_processor, flags = _setup(
+        tmp_path, monkeypatch, premium=False
+    )
+    server.set_messages({7: server_item(raw_email(subject=SUBJECT))})
+    email_id = _ingest(storage, config, server, tmp_path)
+    server.set_messages({})
+    restarted = _crash_at(storage, email_id, "TG")
+    state_path = tmp_path / "worker-state.json"
+
+    start_module._process_queue(
+        restarted,
+        config,
+        _fail_open_processor(),
+        flags,
+        state=StateManager(state_path),
+    )
+
+    # R3: on disk at once, as a top-level key (never an AccountState field:
+    # an older build loads accounts with AccountState(**data)).
+    raw = json.loads(state_path.read_text(encoding="utf-8"))
+    assert raw["context_dead_letters"] == {_ACCOUNT.login: 1}
+    for account_data in raw["accounts"].values():
+        AccountState(**account_data)
+    assert start_module._CONTEXT_DEAD_LETTERS == {}
+
+    # Worker restarts before the account's next poll: the alert still counts it.
+    sent = _alert_sender(monkeypatch)
+    after_restart = StateManager(state_path)
+    _poll_without_new_mail(after_restart)
+    assert len(sent) == 1
+    assert "after a restart: 1" in sent[0] or "после перезапуска: 1" in sent[0]
+    after_restart.save()
+    assert StateManager(state_path).pop_context_dead_letters(_ACCOUNT.login) == 0
+
+
+def test_context_dead_letter_counts_load_per_normalized_login(tmp_path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "context_dead_letters": {
+                    "Account@Example.com": 2,
+                    "account@example.com": 1,
+                    "broken@example.com": "x",
+                    "negative@example.com": -3,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = StateManager(state_path)
+    state.add_context_dead_letter("ACCOUNT@example.com")
+
+    assert state.pop_context_dead_letters("account@example.com") == 4
+    assert state.pop_context_dead_letters("account@example.com") == 0
+    assert state.pop_context_dead_letters("broken@example.com") == 0
+    assert state.pop_context_dead_letters("negative@example.com") == 0
 
 
 def test_context_dead_letters_join_the_next_aggregated_alert(

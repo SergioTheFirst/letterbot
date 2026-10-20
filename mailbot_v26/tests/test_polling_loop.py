@@ -361,7 +361,7 @@ def test_main_enables_premium_processor_when_llm_healthy(monkeypatch, tmp_path):
 
     captured = {}
 
-    def fake_process_queue(_storage, _config, _processor, flags):
+    def fake_process_queue(_storage, _config, _processor, flags, **_kwargs):
         captured["premium"] = flags.ENABLE_PREMIUM_PROCESSOR
 
     monkeypatch.setattr(start_module, "_process_queue", fake_process_queue)
