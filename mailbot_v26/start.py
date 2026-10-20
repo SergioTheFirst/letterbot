@@ -764,13 +764,8 @@ def _persist_inbound_and_enqueue_parse(
     inbound: InboundMessage,
 ) -> tuple[int, bool]:
     normalized_account_email = normalize_login(account_email)
-    find_email_id = getattr(storage, "find_email_id", None)
-    existing_email_id = (
-        find_email_id(normalized_account_email, uid)
-        if callable(find_email_id)
-        else None
-    )
-    email_id = storage.upsert_email(
+    # Email row and PARSE queue row in one transaction (F5).
+    email_id, created = storage.persist_email_and_enqueue(
         account_email=normalized_account_email,
         uid=uid,
         message_id=message_id,
@@ -780,7 +775,7 @@ def _persist_inbound_and_enqueue_parse(
         received_at=received_at,
         attachments_count=attachments_count,
     )
-    if existing_email_id is not None:
+    if not created:
         logger.info(
             "duplicate_ingest_skipped account_email=%s uid=%s email_id=%s",
             normalized_account_email,
@@ -797,7 +792,6 @@ def _persist_inbound_and_enqueue_parse(
     PIPELINE_CACHE[email_id] = ctx
     remember_raw_email(email_id, raw_email)
     store_inbound(email_id, inbound)
-    storage.enqueue_stage(email_id, "PARSE")
     return email_id, True
 
 

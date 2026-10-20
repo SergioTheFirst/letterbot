@@ -52,6 +52,10 @@ class DummyStorage:
         self._next_id += 1
         return self._next_id
 
+    def persist_email_and_enqueue(self, **_kwargs):
+        self._next_id += 1
+        return self._next_id, True
+
     def enqueue_stage(self, email_id, stage):
         return None
 

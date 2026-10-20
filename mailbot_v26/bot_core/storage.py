@@ -516,5 +516,73 @@ class Storage:
                 (error, self._now(), email_id),
             )
 
+    def persist_email_and_enqueue(
+        self,
+        *,
+        account_email: str,
+        uid: int,
+        message_id: str | None,
+        from_email: str | None,
+        from_name: str | None,
+        subject: str | None,
+        received_at: str | None,
+        attachments_count: int | None,
+        stage: str = "PARSE",
+    ) -> tuple[int, bool]:
+        """Store a new email and its first queue row in one transaction.
+
+        Returns (email_id, created). An email already stored for
+        (account_email, uid) is left as is and nothing is enqueued; a crash
+        can no longer leave an email row without its queue row (F5).
+        """
+        now = self._now()
+        attach_count = attachments_count if attachments_count is not None else 0
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE;")
+            row = cursor.execute(
+                "SELECT id FROM emails WHERE account_email = ? AND uid = ?;",
+                (account_email, uid),
+            ).fetchone()
+            if row is not None:
+                self.conn.commit()
+                return int(row[0]), False
+            cursor.execute(
+                """
+                INSERT INTO emails (
+                    account_email, uid, message_id, from_email, from_name, subject,
+                    received_at, attachments_count, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NEW', ?, ?);
+                """,
+                (
+                    account_email,
+                    uid,
+                    message_id,
+                    from_email,
+                    from_name,
+                    subject,
+                    received_at,
+                    attach_count,
+                    now,
+                    now,
+                ),
+            )
+            email_id = int(cursor.lastrowid)
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO queue (
+                    email_id, stage, attempts, not_before, last_error, created_at, updated_at
+                ) VALUES (?, ?, 0, NULL, NULL, ?, ?);
+                """,
+                (email_id, stage, now, now),
+            )
+            self.conn.commit()
+            return email_id, True
+        except BaseException:
+            self.conn.rollback()
+            raise
+        finally:
+            cursor.close()
+
 
 __all__ = ["Storage"]
