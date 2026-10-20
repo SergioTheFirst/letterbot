@@ -35,6 +35,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - Single-file Windows installer `dist/Letterbot-Setup.exe` built on top of the verified `dist/Letterbot` one-folder bundle; ships only manifest-listed files, refuses to run while Letterbot is running, and shows its errors (log: `%TEMP%\Letterbot-install.log`).
+- Dashboard "Accounts" page (`/accounts`): each mailbox's connection state with a plain-language fix hint (including "Outlook is not supported"); passwords and tokens are never shown.
+- Unknown dashboard addresses show a "Page not found" page inside the app; every page has its own browser-tab title.
 
 ### Changed
 - CI publishes both `Letterbot.zip` and the smoke-installed `Letterbot-Setup.exe`; locally the installer is built only with `LETTERBOT_BUILD_INSTALLER=1`.
@@ -65,6 +67,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - An email can no longer be lost between processing steps (stage changes are atomic); a long IMAP outage right after a restart no longer fails queued emails.
 - The packaged app reports "web UI ready" only once the dashboard is actually listening, and explains a busy port.
 
+- Digests follow the computer's local time (no more UTC-hour digests), catch up after downtime without a second copy on the switch day, include only the chat's own mailboxes, and never repeat when the "already sent" check cannot read the database.
+- An intentionally unconfigured AI no longer puts the system into "degraded" mode; /status says "AI: off" vs "AI: degraded", provider errors are logged, an empty AI answer counts as a failure, and a failing provider is paused in memory instead of being switched off in settings.ini.
+- Dashboard: "today"/"last hour" counters count only that window, the IMAP badge reflects the last 24 hours, the account scope is part of the page cache, Health numbers are no longer double-escaped, and relationship counts use emails rather than events; the useless PII checkbox is gone.
+
 ### Performance
 - IMAP headers are fetched in batches with one logout per poll and a per-connection timeout; text clean-up is linear in length (a long Russian email no longer takes ~25 s).
 - Text normalization is memoized (bounded) and the per-email metrics snapshot is reused within a poll cycle, with a new `decision_traces(created_at)` index; duplicate indexes on `emails(priority)` and `events_v1(event_type, ts_utc)` are dropped.
@@ -76,6 +82,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web UI rejects unknown `Host` headers (DNS rebinding); the session secret is random per process when not configured; the calibration report opens the database read-only.
 - The dashboard asks for a password when opened from another computer (no password needed on the computer running Letterbot); without a configured password, network access is refused; repeated wrong passwords are throttled.
 - Every dashboard page sends a nonce-based Content-Security-Policy and anti-framing headers; the login redirect accepts only same-site paths; the diagnostics zip also masks addresses in the bundled config and health files; logs no longer contain email subjects or senders.
+- The attention-economics API no longer exposes sender addresses for selected accounts; over-long Message-IDs from the mail server are ignored; stored delivery errors are truncated; more encoded forms of a bot token are redacted.
 
 ## [28.0.0-rc] - 2026-03-21
 
