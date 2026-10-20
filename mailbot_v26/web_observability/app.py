@@ -1431,16 +1431,24 @@ def _format_due_signal(*, created_ts: float | None, deadline_iso: str | None) ->
     return f"Age {days}d"
 
 
-def _summarize_mapping(data: Mapping[str, object] | None, *, limit: int = 4) -> str:
+def _summarize_mapping(
+    data: Mapping[str, object] | None, *, limit: int = 4, escape_html: bool = True
+) -> str:
+    """Short "key: value; ..." summary.
+
+    escape_html=True is for HTML built by hand; values handed to a Jinja
+    template must stay plain text, the template escapes them.
+    """
     if not data:
         return "–"
+    escape = html.escape if escape_html else str
     items: list[str] = []
     for key in sorted(data.keys()):
         if len(items) >= max(1, limit):
             break
         value = data.get(key)
-        value_str = html.escape(str(value)) if value is not None else "–"
-        items.append(f"{html.escape(str(key))}: {value_str}")
+        value_str = escape(str(value)) if value is not None else "–"
+        items.append(f"{escape(str(key))}: {value_str}")
     return "; ".join(items) if items else "–"
 
 
@@ -3312,8 +3320,12 @@ def _health_trend_view(timeline: list[dict[str, object]]) -> list[dict[str, obje
             {
                 "ts": _format_ts_utc(item.get("ts_end_utc")),
                 "mode": item.get("system_mode") or "–",
-                "gates": _summarize_mapping(item.get("gates_state"), limit=2),
-                "metrics": _summarize_mapping(item.get("metrics_brief"), limit=2),
+                "gates": _summarize_mapping(
+                    item.get("gates_state"), limit=2, escape_html=False
+                ),
+                "metrics": _summarize_mapping(
+                    item.get("metrics_brief"), limit=2, escape_html=False
+                ),
                 "snapshot": snapshot_id,
                 "snapshot_short": _short_id(snapshot_id, 10),
             }
