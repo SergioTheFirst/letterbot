@@ -803,6 +803,9 @@ def _persist_inbound_and_enqueue_parse(
 
 # D-P2-1: at most one aggregated dead-letter alert per account in this window.
 DEAD_LETTER_ALERT_INTERVAL = timedelta(hours=24)
+# Emails dead-lettered at CONTEXT (WP2b) per normalized login since that
+# account's last poll; the poll folds them into its aggregated alert.
+_CONTEXT_DEAD_LETTERS: dict[str, int] = {}
 
 
 def _known_uid_probe(
@@ -815,20 +818,20 @@ def _known_uid_probe(
     return lambda uid: storage.find_email_id(normalized_account_email, uid) is not None
 
 
-def _dead_letter_alert_text(*, locale: str, masked_login: str, count: int) -> str:
-    return _ui_text_for_locale(
-        locale,
-        en=(
-            f"Mailbox {masked_login}: some new mail could not be loaded\n"
-            f"Skipped after {MAX_UID_FETCH_ATTEMPTS} attempts: {count}\n"
-            "Check your mail client. Details: Health page of the web panel."
-        ),
-        ru=(
-            f"Почта {masked_login}: часть новых писем не удалось загрузить\n"
-            f"Пропущено после {MAX_UID_FETCH_ATTEMPTS} попыток: {count}\n"
-            "Проверьте почтовый клиент. Подробности: страница Health в веб-панели."
-        ),
-    )
+def _dead_letter_alert_text(
+    *, locale: str, masked_login: str, count: int, context_count: int = 0
+) -> str:
+    en = [f"Mailbox {masked_login}: some new mail could not be loaded"]
+    ru = [f"Почта {masked_login}: часть новых писем не удалось загрузить"]
+    if count:
+        en.append(f"Skipped after {MAX_UID_FETCH_ATTEMPTS} attempts: {count}")
+        ru.append(f"Пропущено после {MAX_UID_FETCH_ATTEMPTS} попыток: {count}")
+    if context_count:
+        en.append(f"Not found in the mailbox after a restart: {context_count}")
+        ru.append(f"Не найдено в ящике после перезапуска: {context_count}")
+    en.append("Check your mail client. Details: Health page of the web panel.")
+    ru.append("Проверьте почтовый клиент. Подробности: страница Health в веб-панели.")
+    return _ui_text_for_locale(locale, en="\n".join(en), ru="\n".join(ru))
 
 
 def _maybe_send_dead_letter_alert(
@@ -839,11 +842,13 @@ def _maybe_send_dead_letter_alert(
     dead_count: int,
     bot_token: str,
     now_utc: datetime,
+    context_dead_count: int = 0,
 ) -> bool:
     """One aggregated alert per account per 24 h for dead-lettered mail.
 
     Count only, no subjects or senders (D-P2-1). The window starts when an
     alert is delivered, so an undelivered one is retried on the next dead letter.
+    context_dead_count: emails lost after a restart (WP2b, stage CONTEXT).
     """
     if not account.telegram_chat_id:
         digest_logger.warning(
@@ -851,6 +856,7 @@ def _maybe_send_dead_letter_alert(
             account_id=account.account_id,
             reason="no_chat_id",
             dead_letters=dead_count,
+            context_dead_letters=context_dead_count,
         )
         return False
     last_sent = state.get_dead_letter_alert_at(login)
@@ -859,6 +865,7 @@ def _maybe_send_dead_letter_alert(
             "imap_dead_letter_alert_suppressed",
             account_id=account.account_id,
             dead_letters=dead_count,
+            context_dead_letters=context_dead_count,
             last_alert_at=last_sent.isoformat(),
         )
         return False
@@ -866,6 +873,7 @@ def _maybe_send_dead_letter_alert(
         locale=processor_module._resolve_outbound_ui_locale(),
         masked_login=_mask_login(account.username or account.login),
         count=dead_count,
+        context_count=context_dead_count,
     )
     payload = _build_system_payload(
         text=text,
@@ -882,6 +890,7 @@ def _maybe_send_dead_letter_alert(
         account_id=account.account_id,
         login=login,
         dead_letters=dead_count,
+        context_dead_letters=context_dead_count,
         delivered=delivered,
     )
     return delivered
@@ -902,10 +911,13 @@ def _commit_imap_cursor(
     if not callable(commit_cursor):
         return
     commit = commit_cursor(persisted_uids)
-    if commit is None or not commit.dead_uids:
+    dead_uids = tuple(commit.dead_uids) if commit is not None else ()
+    # Context dead letters since this account's last poll join its alert.
+    context_dead = _CONTEXT_DEAD_LETTERS.pop(normalize_login(login), 0)
+    if not dead_uids and not context_dead:
         return
     now_utc = datetime.now(timezone.utc)
-    for uid in commit.dead_uids:
+    for uid in dead_uids:
         logger.error(
             "imap_uid_dead_lettered account=%s uid=%s attempts=%s",
             login,
@@ -926,9 +938,10 @@ def _commit_imap_cursor(
             state=state,
             account=account,
             login=login,
-            dead_count=len(commit.dead_uids),
+            dead_count=len(dead_uids),
             bot_token=bot_token,
             now_utc=now_utc,
+            context_dead_count=context_dead,
         )
     except Exception:
         # The poll itself succeeded; a failed alert must not trigger IMAP backoff.
@@ -1185,6 +1198,22 @@ def _settle_email_delivery(
     return False
 
 
+# A context refetch retries its IMAP session once: a queue pass must not
+# block on a dead server (the queue item retries with backoff).
+CONTEXT_REFETCH_IMAP_RETRIES = 1
+
+
+class PipelineContextUnavailable(Exception):
+    """The queued email cannot be refetched from IMAP (gone or not the same
+    message): it is dead-lettered, never sent fail-open (no content)."""
+
+    def __init__(self, reason: str, *, account_email: str, uid: int) -> None:
+        super().__init__(f"context_unavailable:{reason}")
+        self.reason = reason
+        self.account_email = account_email
+        self.uid = uid
+
+
 def _rebuild_pipeline_context(
     *,
     storage: Storage,
@@ -1194,10 +1223,98 @@ def _rebuild_pipeline_context(
 ) -> PipelineContext | None:
     """Rebuild a pipeline context lost with the in-memory caches (restart).
 
-    Stub until WP2b refetches the message by UID; None keeps the existing
-    "no pipeline context" retry path.
+    Refetches the message from IMAP (WP2b), parses it and fills the caches;
+    a TG item runs the LLM stage inline first (no premium re-run). None when
+    the email is not stored (the "no pipeline context" retry path). A
+    network error propagates, so the item is retried; a message that is gone
+    or does not match raises PipelineContextUnavailable.
     """
-    return None
+    locator = storage.get_email_locator(email_id)
+    if locator is None:
+        return None
+    account_email = str(locator["account_email"])
+    uid = int(locator["uid"])
+    account = _get_account_by_login(config, account_email)
+    if account is None:
+        raise PipelineContextUnavailable(
+            "account_not_configured", account_email=account_email, uid=uid
+        )
+    imap = ResilientIMAP(
+        account,
+        state=None,
+        max_email_mb=config.general.max_email_mb,
+        retries=CONTEXT_REFETCH_IMAP_RETRIES,
+    )
+    refetch = imap.fetch_message_by_uid(
+        uid,
+        expected_uidvalidity=locator["uidvalidity"],
+        expected_message_id=locator["message_id"],
+    )
+    logger.info(
+        "pipeline_context_refetch email_id=%s stage=%s uid=%s found_uid=%s reason=%s",
+        email_id,
+        stage,
+        uid,
+        refetch.uid,
+        refetch.reason,
+    )
+    if refetch.raw is None:
+        raise PipelineContextUnavailable(
+            refetch.reason, account_email=account_email, uid=uid
+        )
+    inbound = parse_raw_email(refetch.raw, config)
+    ctx = PipelineContext(email_id=email_id, account_email=account_email, uid=uid)
+    remember_raw_email(email_id, refetch.raw)
+    store_inbound(email_id, inbound)
+    try:
+        if stage in ("LLM", "TG"):
+            stage_parse(ctx)
+        if stage == "TG":
+            stage_llm(ctx)
+    except Exception:
+        # A half-built context must not be reused by the retry.
+        _cleanup_pipeline_cache(email_id)
+        raise
+    PIPELINE_CACHE[email_id] = ctx
+    return ctx
+
+
+def _dead_letter_unavailable_context(
+    *,
+    storage: Storage,
+    queue_id: int,
+    email_id: int,
+    stage: str,
+    attempts: int,
+    lost: PipelineContextUnavailable,
+) -> None:
+    """WP2b: a queued email that cannot be refetched after a restart.
+
+    No content means no fail-open send: the email turns ERROR, IMAP_HEALTH
+    shows it (dead_letter, stage CONTEXT) and the account's next poll folds
+    it into the aggregated alert (D-P2-1).
+    """
+    login = normalize_login(lost.account_email)
+    storage.set_email_error(email_id, str(lost))
+    storage.mark_done(queue_id)
+    _cleanup_pipeline_cache(email_id)
+    _CONTEXT_DEAD_LETTERS[login] = _CONTEXT_DEAD_LETTERS.get(login, 0) + 1
+    logger.error(
+        "pipeline_context_dead_lettered email_id=%s stage=%s uid=%s reason=%s",
+        email_id,
+        stage,
+        lost.uid,
+        lost.reason,
+    )
+    _emit_imap_health_event(
+        account_id=login,
+        subtype="dead_letter",
+        detail=f"CONTEXT dead-lettered: {lost.reason}",
+        email_id=email_id,
+        message_uid=lost.uid,
+        attempt_count=attempts,
+        extra_payload={"stage": "CONTEXT", "queue_stage": stage, "reason": lost.reason},
+    )
 
 
 def _finish_reserved_queue_item(
@@ -1361,9 +1478,20 @@ def _process_queue(
         try:
             print(f"[QUEUE] Claimed {stage} for email_id={email_id} attempt={attempts}")
             if ctx is None:
-                ctx = _rebuild_pipeline_context(
-                    storage=storage, config=config, email_id=email_id, stage=stage
-                )
+                try:
+                    ctx = _rebuild_pipeline_context(
+                        storage=storage, config=config, email_id=email_id, stage=stage
+                    )
+                except PipelineContextUnavailable as lost:
+                    _dead_letter_unavailable_context(
+                        storage=storage,
+                        queue_id=queue_id,
+                        email_id=email_id,
+                        stage=stage,
+                        attempts=attempts,
+                        lost=lost,
+                    )
+                    continue
                 if ctx is not None:
                     ctx.attempts = attempts  # type: ignore[attr-defined]
             if ctx is None:
