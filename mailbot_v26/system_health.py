@@ -20,6 +20,26 @@ class ComponentHealth:
     name: str
     available: bool | None
     reason: str | None = None
+    # Intentionally off (not configured / not wired): never degrades the mode.
+    disabled: bool = False
+
+
+COMPONENT_OFF = "off"
+COMPONENT_DEGRADED = "degraded"
+COMPONENT_OK = "ok"
+COMPONENT_UNKNOWN = "unknown"
+
+
+def _component_state(health: ComponentHealth | None) -> str:
+    if health is None:
+        return COMPONENT_UNKNOWN
+    if health.disabled:
+        return COMPONENT_OFF
+    if health.available is False:
+        return COMPONENT_DEGRADED
+    if health.available is True:
+        return COMPONENT_OK
+    return COMPONENT_UNKNOWN
 
 
 @dataclass(frozen=True)
@@ -46,14 +66,41 @@ class SystemHealth:
     def update_component(
         self, component: str, available: bool, reason: str | None = None
     ) -> ModeChange | None:
-        self._components[component] = ComponentHealth(component, available, reason)
+        self._set_component(ComponentHealth(component, available, reason))
         return self._evaluate_mode()
+
+    def disable_component(self, component: str, reason: str) -> ModeChange | None:
+        """Mark a component intentionally off (e.g. no LLM configured or wired).
+
+        Unlike ``update_component(..., False)`` this is not a failure: the
+        component reports "off" and never degrades the operational mode.
+        """
+        self._set_component(ComponentHealth(component, None, reason, disabled=True))
+        return self._evaluate_mode()
+
+    def component_state(self, component: str) -> str:
+        """Return "off", "degraded", "ok" or "unknown" for one component."""
+        return _component_state(self._components.get(component))
+
+    def _set_component(self, health: ComponentHealth) -> None:
+        previous = _component_state(self._components.get(health.name))
+        self._components[health.name] = health
+        current = _component_state(health)
+        # "off" is the only state without its own mode: log its transitions
+        # (mode changes are logged by _evaluate_mode).
+        if previous != current and COMPONENT_OFF in (previous, current):
+            self._logger.info(
+                "system_component_state_changed",
+                component=health.name,
+                reason=health.reason or "",
+                **{"from": previous, "to": current},
+            )
 
     def update_components(
         self, updates: Iterable[ComponentHealth]
     ) -> ModeChange | None:
         for update in updates:
-            self._components[update.name] = update
+            self._set_component(update)
         return self._evaluate_mode()
 
     def system_notice(self, change: ModeChange) -> str:
@@ -108,6 +155,10 @@ class SystemHealth:
 system_health = SystemHealth()
 
 __all__ = [
+    "COMPONENT_DEGRADED",
+    "COMPONENT_OFF",
+    "COMPONENT_OK",
+    "COMPONENT_UNKNOWN",
     "ComponentHealth",
     "ModeChange",
     "OperationalMode",

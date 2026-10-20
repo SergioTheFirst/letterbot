@@ -43,7 +43,7 @@ class CloudflareProviderConfig:
 
 
 class CloudflareProvider(LLMProvider):
-    """Cloudflare AI REST provider (behavior matches legacy client)."""
+    """Cloudflare Workers AI REST provider; failures raise LLMProviderError."""
 
     def __init__(self, config: CloudflareProviderConfig) -> None:
         self.config = config
@@ -66,8 +66,13 @@ class CloudflareProvider(LLMProvider):
         max_tokens: int | None = None,
         temperature: float | None = None,
     ) -> str:
+        """Return the model text; raise LLMProviderError on any failure.
+
+        Error messages carry the HTTP status or error class only: never the
+        token, the account id or the response body (it may echo the email).
+        """
         if not self.config.account_id or not self.config.api_token:
-            return ""
+            raise LLMProviderError("Cloudflare credentials missing")
 
         payload: dict[str, Any] = {"messages": messages}
         if max_tokens is not None:
@@ -80,25 +85,40 @@ class CloudflareProvider(LLMProvider):
             with urllib.request.urlopen(request, timeout=15) as response:
                 body = response.read().decode("utf-8")
             parsed = json.loads(body)
-            choices = parsed.get("result", {}).get("response", {})
-            if isinstance(choices, dict) and "message" in choices:
-                content = choices["message"].get("content", "")
-            else:
-                content = parsed.get("result", {}).get("output", "")
-            if isinstance(content, list):
-                content = "".join(str(part) for part in content)
-            return str(content).strip()
-        except (
-            urllib.error.URLError,
-            json.JSONDecodeError,
-            KeyError,
-            TimeoutError,
-            ValueError,
-        ):
-            return ""
+        except urllib.error.HTTPError as exc:
+            raise LLMProviderError(f"Cloudflare HTTP {exc.code}") from exc
+        except OSError as exc:  # URLError, timeouts, connection resets
+            reason = getattr(exc, "reason", None) or exc
+            raise LLMProviderError(
+                f"Cloudflare request failed: {type(exc).__name__}: {reason}"
+            ) from exc
+        except ValueError as exc:  # invalid JSON / encoding
+            raise LLMProviderError(
+                f"Cloudflare response invalid ({type(exc).__name__})"
+            ) from exc
+        return _cloudflare_response_text(parsed)
 
     def healthcheck(self) -> bool:
         return bool(self.config.account_id and self.config.api_token)
+
+
+def _cloudflare_response_text(parsed: object) -> str:
+    result = parsed.get("result") if isinstance(parsed, dict) else None
+    if not isinstance(result, dict):
+        raise LLMProviderError("Cloudflare response invalid (no result)")
+    response = result.get("response")
+    content: object
+    if isinstance(response, str):
+        # Documented Workers AI /ai/run shape: {"result": {"response": "..."}}.
+        content = response
+    elif isinstance(response, dict) and "message" in response:
+        message = response.get("message")
+        content = message.get("content", "") if isinstance(message, dict) else ""
+    else:
+        content = result.get("output", "")
+    if isinstance(content, list):
+        content = "".join(str(part) for part in content)
+    return str(content or "").strip()
 
 
 @dataclass(frozen=True)
@@ -116,31 +136,41 @@ class GigaChatProvider(LLMProvider):
         self.config = config
 
     def _request(self, payload: dict[str, Any]) -> str:
-        request = urllib.request.Request(
-            self.config.base_url,
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
-        )
-        request.add_header("Authorization", f"Bearer {self.config.api_key}")
-        request.add_header("Content-Type", "application/json")
+        """POST one chat request; raise LLMProviderError on any failure.
+
+        The router logs these messages, so they carry the HTTP status or error
+        class only: never the API key (http.client echoes an invalid header
+        value in its ValueError) or the response body.
+        """
         try:
+            request = urllib.request.Request(
+                self.config.base_url,
+                data=json.dumps(payload).encode("utf-8"),
+                method="POST",
+            )
+            request.add_header("Authorization", f"Bearer {self.config.api_key}")
+            request.add_header("Content-Type", "application/json")
             with urllib.request.urlopen(
                 request, timeout=self.config.timeout_s
             ) as response:
                 body = response.read().decode("utf-8")
             data = json.loads(body)
-            choices = data.get("choices", [])
-            if choices and isinstance(choices[0], dict):
-                message = choices[0].get("message", {})
-                return str(message.get("content", "")).strip()
-            return str(data.get("result", "")).strip()
-        except (
-            urllib.error.URLError,
-            json.JSONDecodeError,
-            TimeoutError,
-            ValueError,
-        ) as exc:
-            raise LLMProviderError(str(exc)) from exc
+        except urllib.error.HTTPError as exc:
+            raise LLMProviderError(f"GigaChat HTTP {exc.code}") from exc
+        except OSError as exc:  # URLError, timeouts, connection resets
+            reason = getattr(exc, "reason", None) or exc
+            raise LLMProviderError(
+                f"GigaChat request failed: {type(exc).__name__}: {reason}"
+            ) from exc
+        except ValueError as exc:  # bad URL or header value, invalid JSON
+            raise LLMProviderError(
+                f"GigaChat request or response invalid ({type(exc).__name__})"
+            ) from exc
+        choices = data.get("choices", [])
+        if choices and isinstance(choices[0], dict):
+            message = choices[0].get("message", {})
+            return str(message.get("content", "")).strip()
+        return str(data.get("result", "")).strip()
 
     def complete(
         self,

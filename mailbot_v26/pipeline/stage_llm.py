@@ -2,12 +2,32 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mailbot_v26.observability import get_logger
-
 if TYPE_CHECKING:
     from mailbot_v26.bot_core.pipeline import PipelineContext
 
-logger = get_logger("mailbot")
+LLM_STAGE_NOT_WIRED = "llm_stage_not_wired"
+
+
+class LLMStageDisabled(RuntimeError):
+    """The per-email LLM stage is intentionally off (not wired / not configured).
+
+    Not an LLM failure: callers keep the deterministic (heuristic) result and
+    report AI as "off" instead of degrading the system mode.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def llm_stage_disabled_reason() -> str | None:
+    """Why the per-email LLM stage is off, or None when it can run.
+
+    Per-email LLM wiring is in the backlog (owner decision D1, 2026-10-19), so
+    the stage is off. Whoever wires it returns None here (or a reason such as
+    "no provider configured") and replaces the raise in run_llm_stage.
+    """
+    return LLM_STAGE_NOT_WIRED
 
 
 def run_llm_stage(
@@ -21,29 +41,12 @@ def run_llm_stage(
     """
     Authoritative LLM stage entrypoint for the legacy pipeline.
 
-    The implementation is expected to be provided by the production LLM
-    stack. This shim keeps the import graph stable and avoids startup
-    errors when the stage is monkeypatched in tests.
+    A result already present on ``ctx`` is returned as is. Otherwise the stage
+    raises LLMStageDisabled: it logs nothing itself, so no email data (subject,
+    sender) can reach the log, and callers decide how to report "AI off".
     """
     if ctx is not None:
         existing = getattr(ctx, "llm_result", None)
         if existing:
             return existing
-        logger.warning(
-            "llm_stage_ctx_unconfigured",
-            email_id=getattr(ctx, "email_id", None),
-        )
-        return None
-
-    attachments = attachments or []
-    # Lengths and counts only: raw subjects/senders never go to the log.
-    logger.error(
-        "processing_error",
-        stage="llm",
-        email_id=None,
-        error=(
-            "LLM stage is not configured; subject_len=%d sender_present=%s "
-            "attachments=%d" % (len(subject or ""), bool(from_email), len(attachments))
-        ),
-    )
-    return None
+    raise LLMStageDisabled(llm_stage_disabled_reason() or LLM_STAGE_NOT_WIRED)

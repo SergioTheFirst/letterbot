@@ -14,6 +14,7 @@ from mailbot_v26.llm.providers import (
     GigaChatProvider,
     GigaChatProviderConfig,
     LLMProvider,
+    LLMProviderError,
 )
 from mailbot_v26.llm.runtime_flags import DEFAULT_RUNTIME_FLAGS_PATH, RuntimeFlagStore
 from mailbot_v26.config_yaml import ConfigError as YamlConfigError
@@ -25,6 +26,11 @@ from mailbot_v26.config_yaml import validate_config as validate_yaml_config
 logger = logging.getLogger(__name__)
 DEFAULT_CLOUDFLARE_MODEL = "@cf/meta/llama-3-8b-instruct"
 _SUPPORTED_LLM_PROVIDERS = {"cloudflare", "gigachat"}
+_EMPTY_RESPONSE = "EmptyResponse"
+_PROVIDER_MISSING = "ProviderMissing"
+_ERROR_DETAIL_MAX_CHARS = 200
+# GigaChat was not called at all for these reasons (vs. called and failed).
+_GIGACHAT_SKIP_REASONS = frozenset({"circuit_open", "healthcheck_failed"})
 
 
 @dataclass(frozen=True)
@@ -43,6 +49,10 @@ class LLMRouterConfig:
     cloudflare_model: str | None = DEFAULT_CLOUDFLARE_MODEL
     runtime_flags_path: Path = DEFAULT_RUNTIME_FLAGS_PATH
     runtime_flags_poll_sec: float = 1.0
+    # In-memory GigaChat breaker: any failed call (or a slow answer, which is
+    # still returned) opens it for gigachat_cooldown_sec, then one probe call
+    # closes or reopens it. Reaching gigachat_max_consecutive_errors failed
+    # calls logs the opening as a warning. Nothing is written to disk.
     gigachat_max_consecutive_errors: int = 3
     gigachat_max_latency_sec: int = 10
     gigachat_cooldown_sec: int = 600
@@ -67,7 +77,6 @@ class LLMRouter:
         )
         self._runtime_gigachat_enabled = False
         self._gigachat_consecutive_errors = 0
-        self._gigachat_last_latency_sec = 0.0
         self._refresh_runtime_flags(force=True)
         logger.info("[LLM-PRIMARY] provider=%s", self._primary_name)
 
@@ -98,20 +107,36 @@ class LLMRouter:
         return providers
 
     def _is_circuit_open(self) -> bool:
+        """True while the GigaChat breaker is open and still cooling down."""
         if not self._circuit_open_until:
             return False
         return datetime.now(timezone.utc) < self._circuit_open_until
 
-    def _open_circuit(self, cooldown_sec: int) -> None:
-        now = datetime.now(timezone.utc)
-        new_until = now + timedelta(seconds=cooldown_sec)
-        if self._circuit_open_until and self._circuit_open_until > new_until:
-            return
-        self._circuit_open_until = new_until
-        logger.info(
-            "[LLM-CIRCUIT] state=open until=%s",
+    def _open_circuit(self, reason: str) -> None:
+        """Open the in-memory GigaChat breaker for the cooldown.
+
+        Replaces the old auto-disable that wrote enable_gigachat=false to
+        runtime_flags.json for good: the operator's file is left alone and
+        GigaChat is probed again once the cooldown is over.
+        """
+        self._circuit_open_until = datetime.now(timezone.utc) + timedelta(
+            seconds=self.config.gigachat_cooldown_sec
+        )
+        persistent = reason == "consecutive_errors"
+        logger.log(
+            logging.WARNING if persistent else logging.INFO,
+            "[LLM-CIRCUIT] state=open provider=gigachat reason=%s failures=%d "
+            "until=%s",
+            reason,
+            self._gigachat_consecutive_errors,
             self._circuit_open_until.isoformat(),
         )
+
+    def _close_circuit(self) -> None:
+        if self._circuit_open_until is None:
+            return
+        self._circuit_open_until = None
+        logger.info("[LLM-CIRCUIT] state=closed provider=gigachat")
 
     def _refresh_runtime_flags(self, *, force: bool = False) -> None:
         flags, changed = self._runtime_flags.get_flags(force=force)
@@ -122,42 +147,75 @@ class LLMRouter:
                 int(flags.enable_gigachat),
             )
 
-    def _fallback_log(self, *, reason: str) -> None:
+    def _fallback_log(self, *, reason: str, source: str = "gigachat") -> None:
         breaker_until = (
             self._circuit_open_until.isoformat() if self._circuit_open_until else ""
         )
         logger.info(
-            "[LLM-FALLBACK] from=gigachat to=%s reason=%s breaker_until=%s",
+            "[LLM-FALLBACK] from=%s to=%s reason=%s breaker_until=%s",
+            source,
             self._fallback_name,
             reason,
             breaker_until,
         )
 
-    def _auto_disable_gigachat(self, reason: str) -> None:
-        self._runtime_flags.set_enable_gigachat(False)
-        self._runtime_gigachat_enabled = False
-        self._open_circuit(self.config.gigachat_cooldown_sec)
-        logger.info("[LLM-SAFETY] gigachat auto-disabled: %s", reason)
+    def _log_provider_error(
+        self,
+        provider: str,
+        error_class: str,
+        detail: str,
+        latency_sec: float,
+        *,
+        unexpected: bool = False,
+    ) -> None:
+        # Error class and a short detail only (provider messages carry the HTTP
+        # status or error class); never the messages sent to the model.
+        logger.log(
+            logging.ERROR if unexpected else logging.WARNING,
+            "[LLM-ERROR] provider=%s error_class=%s detail=%s latency_ms=%d",
+            provider,
+            error_class,
+            detail,
+            int(latency_sec * 1000),
+            exc_info=unexpected,
+        )
 
     def _call_provider(
         self,
+        name: str,
         provider: LLMProvider,
         messages: list[dict],
         *,
         max_tokens: int | None,
         temperature: float | None,
     ) -> tuple[str, float, bool]:
+        """Call one provider once. A raised error or an empty answer is a
+        logged failure (ok=False), never a silent "" reported as ok."""
         start = time.monotonic()
         try:
             result = provider.complete(
                 messages, max_tokens=max_tokens, temperature=temperature
             )
-            ok = True
-        except Exception:
-            result = ""
-            ok = False
+        except LLMProviderError as exc:
+            latency = time.monotonic() - start
+            self._log_provider_error(
+                name, type(exc).__name__, _error_detail(exc), latency
+            )
+            return "", latency, False
+        except Exception as exc:  # unexpected: keep the traceback
+            latency = time.monotonic() - start
+            self._log_provider_error(
+                name, type(exc).__name__, _error_detail(exc), latency, unexpected=True
+            )
+            return "", latency, False
         latency = time.monotonic() - start
-        return result, latency, ok
+        text = result if isinstance(result, str) else str(result or "")
+        if not text.strip():
+            self._log_provider_error(
+                name, _EMPTY_RESPONSE, "provider returned no text", latency
+            )
+            return "", latency, False
+        return text, latency, True
 
     def _log_llm_result(self, provider: str, latency_sec: float, ok: bool) -> None:
         logger.info(
@@ -167,6 +225,66 @@ class LLMRouter:
             int(ok),
         )
 
+    def _call_gigachat(
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int | None,
+        temperature: float | None,
+        attempts: int,
+    ) -> tuple[str, str | None]:
+        """Call GigaChat under the in-memory breaker: (text, failure reason).
+
+        The reason is None on success. Every route to GigaChat (primary or
+        fallback) goes through here, so the breaker is never bypassed.
+        """
+        if self._is_circuit_open():
+            return "", "circuit_open"
+        provider = self._providers.get("gigachat")
+        if provider is None:
+            self._log_provider_error(
+                "gigachat", _PROVIDER_MISSING, "provider not configured", 0.0
+            )
+            return "", "provider_missing"
+        if not provider.healthcheck():
+            self._open_circuit("healthcheck_failed")
+            return "", "healthcheck_failed"
+        if self._circuit_open_until is not None:
+            # Cooldown over: a single probe call closes or reopens the breaker.
+            logger.info("[LLM-CIRCUIT] state=half_open provider=gigachat")
+            attempts = 1
+        result, latency, ok = "", 0.0, False
+        for _ in range(max(1, attempts)):
+            result, latency, ok = self._call_provider(
+                "gigachat",
+                provider,
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            if ok:
+                break
+        self._log_llm_result("gigachat", latency, ok)
+        if not ok:
+            self._gigachat_consecutive_errors += 1
+            reason = (
+                "consecutive_errors"
+                if self._gigachat_consecutive_errors
+                >= self.config.gigachat_max_consecutive_errors
+                else "runtime_error"
+            )
+            self._open_circuit(reason)
+            return "", reason
+        self._gigachat_consecutive_errors = 0
+        self.last_provider = "gigachat"
+        # Success is checked before latency: a slow answer is kept, and only
+        # the next calls avoid GigaChat while it cools down.
+        if latency > self.config.gigachat_max_latency_sec:
+            self._open_circuit("latency_exceeded")
+        else:
+            self._close_circuit()
+        return result, None
+
     def _fallback_complete(
         self,
         messages: list[dict],
@@ -174,15 +292,50 @@ class LLMRouter:
         max_tokens: int | None,
         temperature: float | None,
     ) -> str:
-        provider = self._providers.get(self._fallback_name)
+        name = self._fallback_name
+        if name == "gigachat":
+            result, reason = self._call_gigachat(
+                messages, max_tokens=max_tokens, temperature=temperature, attempts=1
+            )
+            if reason in _GIGACHAT_SKIP_REASONS:
+                # No answer without blocking: the caller degrades to heuristics.
+                logger.info(
+                    "[LLM-FALLBACK] provider=gigachat skipped reason=%s", reason
+                )
+            return result
+        provider = self._providers.get(name)
         if not provider:
+            self._log_provider_error(
+                name, _PROVIDER_MISSING, "provider not configured", 0.0
+            )
             return ""
         result, latency, ok = self._call_provider(
-            provider, messages, max_tokens=max_tokens, temperature=temperature
+            name, provider, messages, max_tokens=max_tokens, temperature=temperature
         )
-        self.last_provider = self._fallback_name
-        self._log_llm_result(self._fallback_name, latency, ok)
+        self.last_provider = name
+        self._log_llm_result(name, latency, ok)
         return result
+
+    def _complete_via_gigachat(
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int | None,
+        temperature: float | None,
+    ) -> str:
+        if not self._runtime_gigachat_enabled:
+            reason = "runtime_disabled"
+        else:
+            result, failure = self._call_gigachat(
+                messages, max_tokens=max_tokens, temperature=temperature, attempts=2
+            )
+            if failure is None:
+                return result
+            reason = failure
+        self._fallback_log(reason=reason)
+        return self._fallback_complete(
+            messages, max_tokens=max_tokens, temperature=temperature
+        )
 
     def complete(
         self,
@@ -191,80 +344,14 @@ class LLMRouter:
         max_tokens: int | None = None,
         temperature: float | None = None,
     ) -> str:
+        """Return the model's answer, or "" when no provider produced one.
+
+        Failures are logged ([LLM-ERROR], [LLM] ok=0) and routed to the
+        fallback provider; GigaChat is guarded by an in-memory breaker.
+        """
         self._refresh_runtime_flags()
-        if self._is_circuit_open():
-            logger.info(
-                "[LLM-CIRCUIT] state=open until=%s",
-                (
-                    self._circuit_open_until.isoformat()
-                    if self._circuit_open_until
-                    else ""
-                ),
-            )
-            if self._primary_name == "gigachat":
-                self._fallback_log(reason="circuit_open")
-            return self._fallback_complete(
-                messages, max_tokens=max_tokens, temperature=temperature
-            )
-
         if self._primary_name == "gigachat":
-            if not self._runtime_gigachat_enabled:
-                self._fallback_log(reason="runtime_disabled")
-                return self._fallback_complete(
-                    messages, max_tokens=max_tokens, temperature=temperature
-                )
-            provider = self._providers.get("gigachat")
-            if not provider or not provider.healthcheck():
-                self._auto_disable_gigachat("healthcheck_failed")
-                self._fallback_log(reason="healthcheck_failed")
-                return self._fallback_complete(
-                    messages, max_tokens=max_tokens, temperature=temperature
-                )
-
-            result = ""
-            latency = 0.0
-            ok = False
-            for attempt in range(2):
-                result, latency, ok = self._call_provider(
-                    provider, messages, max_tokens=max_tokens, temperature=temperature
-                )
-                if ok:
-                    break
-                if attempt == 0:
-                    continue
-
-            if not ok:
-                self._gigachat_consecutive_errors += 1
-            else:
-                self._gigachat_consecutive_errors = 0
-            self._gigachat_last_latency_sec = latency
-
-            if (
-                not ok
-                and self._gigachat_consecutive_errors
-                >= self.config.gigachat_max_consecutive_errors
-            ):
-                self._auto_disable_gigachat("consecutive_errors")
-                self._fallback_log(reason="consecutive_errors")
-                return self._fallback_complete(
-                    messages, max_tokens=max_tokens, temperature=temperature
-                )
-
-            if self._gigachat_last_latency_sec > self.config.gigachat_max_latency_sec:
-                self._auto_disable_gigachat("latency_exceeded")
-                self._fallback_log(reason="latency_exceeded")
-                return self._fallback_complete(
-                    messages, max_tokens=max_tokens, temperature=temperature
-                )
-
-            if ok:
-                self.last_provider = "gigachat"
-                self._log_llm_result("gigachat", latency, True)
-                return result
-
-            self._open_circuit(self.config.gigachat_cooldown_sec)
-            self._fallback_log(reason="runtime_error")
-            return self._fallback_complete(
+            return self._complete_via_gigachat(
                 messages, max_tokens=max_tokens, temperature=temperature
             )
 
@@ -272,12 +359,20 @@ class LLMRouter:
             provider = self._providers.get("cloudflare")
             if provider and provider.healthcheck():
                 result, latency, ok = self._call_provider(
-                    provider, messages, max_tokens=max_tokens, temperature=temperature
+                    "cloudflare",
+                    provider,
+                    messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
                 )
                 self.last_provider = "cloudflare"
                 self._log_llm_result("cloudflare", latency, ok)
-                return result
-            logger.info("[LLM-FALLBACK] reason=healthcheck_failed")
+                if ok or self._fallback_name == "cloudflare":
+                    return result
+                self._fallback_log(reason="runtime_error", source="cloudflare")
+            else:
+                reason = "provider_missing" if provider is None else "healthcheck_failed"
+                self._fallback_log(reason=reason, source="cloudflare")
             return self._fallback_complete(
                 messages, max_tokens=max_tokens, temperature=temperature
             )
@@ -285,6 +380,12 @@ class LLMRouter:
         return self._fallback_complete(
             messages, max_tokens=max_tokens, temperature=temperature
         )
+
+
+def _error_detail(exc: BaseException) -> str:
+    """One line, capped; the providers keep their messages secret-free."""
+    detail = " ".join(str(exc).split())
+    return detail[:_ERROR_DETAIL_MAX_CHARS] or "-"
 
 
 def _load_llm_config(base_dir: Path) -> LLMRouterConfig:

@@ -14,11 +14,7 @@ from mailbot_v26.config.auto_priority_gate import AutoPriorityGateConfig
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
 
 # Stub missing pipeline dependencies before importing the processor
-if "mailbot_v26.pipeline.stage_llm" not in sys.modules:
-    stage_llm = types.ModuleType("mailbot_v26.pipeline.stage_llm")
-    stage_llm.run_llm_stage = lambda **kwargs: None
-    sys.modules["mailbot_v26.pipeline.stage_llm"] = stage_llm
-
+# (the real stage_llm is light and defines LLMStageDisabled: never fake it).
 if "mailbot_v26.pipeline.stage_telegram" not in sys.modules:
     stage_telegram = types.ModuleType("mailbot_v26.pipeline.stage_telegram")
     stage_telegram.enqueue_tg = lambda **kwargs: None

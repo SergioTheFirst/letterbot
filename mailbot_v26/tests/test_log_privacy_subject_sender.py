@@ -1,7 +1,8 @@
 """WP3b: pipeline log lines never carry raw subjects or sender addresses.
 
-The "LLM stage is not configured" error and the process_message start line
-(email_received) log the email id, lengths and counts only.
+The unwired LLM stage logs nothing about the email (WP5a), and the
+process_message start line (email_received) logs the email id, lengths and
+counts only.
 """
 
 from __future__ import annotations
@@ -37,21 +38,20 @@ def test_unconfigured_llm_stage_logs_no_subject_or_sender(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.INFO)
-    result = stage_llm.run_llm_stage(
-        subject=SECRET_SUBJECT,
-        from_email=SECRET_SENDER,
-        body_text="body",
-        attachments=[{"filename": "a.pdf"}, {"filename": "b.pdf"}],
-    )
-    assert result is None
+    # WP5a: the unwired stage reports "disabled" to its caller instead of
+    # logging a per-email processing_error; it never carries the subject.
+    with pytest.raises(stage_llm.LLMStageDisabled) as raised:
+        stage_llm.run_llm_stage(
+            subject=SECRET_SUBJECT,
+            from_email=SECRET_SENDER,
+            body_text="body",
+            attachments=[{"filename": "a.pdf"}, {"filename": "b.pdf"}],
+        )
+    assert SECRET_SUBJECT not in str(raised.value)
+    assert SECRET_SENDER not in str(raised.value)
     assert SECRET_SUBJECT not in caplog.text
     assert SECRET_SENDER not in caplog.text
-    records = _json_records(caplog, "processing_error")
-    assert records, caplog.text
-    error = records[-1]["error"]
-    assert "LLM stage is not configured" in error
-    assert f"subject_len={len(SECRET_SUBJECT)}" in error
-    assert "attachments=2" in error
+    assert not _json_records(caplog, "processing_error")
 
 
 def _llm_result() -> SimpleNamespace:

@@ -31,6 +31,27 @@ class HealthStatus:
     FAILED = "FAILED"
 
 
+def _update_llm_health(provider_statuses: Sequence[str | None]) -> None:
+    """AI is "off" when the per-email stage is not wired or no provider is
+    configured (checks report DEGRADED: "NOT CONFIGURED" / "disabled");
+    DEGRADED_NO_LLM only when a configured provider fails its check."""
+    # Lazy import: importing this module must not pull in the pipeline.
+    from mailbot_v26.pipeline import stage_llm
+
+    stage_off_reason = stage_llm.llm_stage_disabled_reason()
+    if stage_off_reason:
+        system_health.disable_component("LLM", reason=stage_off_reason)
+    elif HealthStatus.OK in provider_statuses:
+        system_health.update_component("LLM", True)
+    elif HealthStatus.FAILED in provider_statuses or not provider_statuses:
+        # No provider entry at all means the provider checks themselves crashed.
+        system_health.update_component(
+            "LLM", False, reason="llm_provider_check_failed"
+        )
+    else:
+        system_health.disable_component("LLM", reason="llm_not_configured")
+
+
 @dataclass(frozen=True)
 class HealthCheckResult:
     component: str
@@ -76,18 +97,18 @@ class StartupHealthChecker:
         components = {item["component"]: item for item in results}
         db_status = components.get("DB", {}).get("status")
         telegram_status = components.get("Telegram", {}).get("status")
-        llm_ok = any(
-            item.get("status") == HealthStatus.OK
+        llm_statuses = [
+            item.get("status")
             for name, item in components.items()
             if name in {"GigaChat", "Cloudflare"}
-        )
+        ]
         if db_status:
             system_health.update_component("CRM", db_status == HealthStatus.OK)
         if telegram_status:
             system_health.update_component(
                 "Telegram", telegram_status == HealthStatus.OK
             )
-        system_health.update_component("LLM", llm_ok)
+        _update_llm_health(llm_statuses)
         return system_health.mode
 
     def _safe_check(
@@ -324,6 +345,13 @@ class LaunchReportBuilder:
         return sanitized[:180]
 
     def _get_llm_delivery_mode(self, index: dict[str, dict[str, str]]) -> str:
+        # Lazy import, as in _update_llm_health: a configured provider is not
+        # used per email while the stage is off, so never claim DIRECT then.
+        from mailbot_v26.pipeline import stage_llm
+
+        stage_off_reason = stage_llm.llm_stage_disabled_reason()
+        if stage_off_reason:
+            return f"DISABLED ({stage_off_reason})"
         llm_config = llm_router._load_llm_config(self._config_dir)
         has_direct_provider = (
             bool(llm_config.cloudflare_enabled)

@@ -168,7 +168,7 @@ from .attention_gate import (
     max_insight_severity,
 )
 from .insight_arbiter import InsightArbiterInput, apply_insight_arbiter
-from .stage_llm import run_llm_stage
+from .stage_llm import LLMStageDisabled, run_llm_stage
 from .stage_telegram import enqueue_tg, send_preview_to_telegram, send_system_notice
 from .telegram_payload import TelegramPayload
 from . import tg_renderer
@@ -1122,6 +1122,8 @@ def _build_health_snapshot_payload() -> dict[str, Any]:
                 "failed": list(gates_eval.failed_reasons) if gates_eval else [],
             },
             "system_mode": system_health.mode.value,
+            # "off" (intentionally disabled) vs "degraded" (enabled LLM failing).
+            "llm_state": system_health.component_state("LLM"),
         }
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("health_snapshot_payload_failed", error=str(exc))
@@ -6590,6 +6592,14 @@ def _process_llm_queue_request(request: LLMRequest) -> None:
             attachments=request.attachments,
             ctx=llm_ctx,
         )
+    except LLMStageDisabled as disabled:
+        # AI was switched off after the request was queued: nothing to do.
+        logger.info(
+            "llm_queue_request_skipped",
+            email_id=request.email_id,
+            reason=disabled.reason,
+        )
+        return
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error(
             "llm_queue_request_failed", email_id=request.email_id, error=str(exc)
@@ -8361,6 +8371,7 @@ def process_message(
         )
         llm_was_queued = False
         llm_called_direct = False
+        llm_stage_disabled = False
         if use_llm_candidate and can_use_llm:
             llm_start = time.perf_counter()
             try:
@@ -8386,6 +8397,21 @@ def process_message(
                     raise RuntimeError("LLM stage returned empty result")
                 llm_used = True
                 llm_called_direct = True
+            except LLMStageDisabled as disabled:
+                # AI is intentionally off (not wired / not configured): the
+                # heuristic result is the normal path, not a failure, so no
+                # processing_error, no DEGRADED_NO_LLM and nothing queued.
+                # system_health logs the change to "off" (once); a mode change
+                # out of a stale degraded state is not announced in Telegram,
+                # since "capabilities restored" would be untrue with AI off.
+                llm_stage_disabled = True
+                system_health.disable_component("LLM", reason=disabled.reason)
+                llm_result = _build_heuristic_llm_result(
+                    subject=subject,
+                    body_text=body_text or "",
+                    priority=heuristic_priority,
+                    attachments=attachments,
+                )
             except Exception as exc:
                 change = system_health.update_component(
                     "LLM",
@@ -8446,6 +8472,7 @@ def process_message(
             "LLM_QUEUE_ENABLED": llm_queue_path_enabled,
             "LLM_QUEUED": llm_was_queued,
             "LLM_CALLED_DIRECT": llm_called_direct,
+            "LLM_STAGE_DISABLED": llm_stage_disabled,
         }
         llm_gate_signals_evaluated = sorted(llm_gate_signals.keys())
         llm_gate_signals_fired = sorted(
