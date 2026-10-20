@@ -675,3 +675,21 @@ def test_web_address_masking_covers_unusual_shapes() -> None:
     for label in ("ООО Ромашка", "vendor.example", "Support (@support)"):
         assert web_app._mask_emails_in_text(label) == label
         assert web_app._scrub_pii_line(label) == label
+
+
+def test_issuer_label_shows_only_a_masked_sender_token() -> None:
+    from mailbot_v26.web_observability import app as web_app
+
+    label = web_app._display_safe_issuer_label
+    # Sender-keyed: only the masked address token survives, else a placeholder.
+    assert label("email:иван@mail.ru", "иван@mail.ru") == "и…@mail.ru"
+    assert label("EMAIL:ivan@mail.ru", "ivan@mail.ru (Ivan Petrov)") == "i…@mail.ru"
+    assert label("email:ivan", "ivan") == "Sender hidden"
+    assert label("email:ivan", "") == ""
+    # Domain, tax id and company labels keep their text, addresses masked.
+    assert label("domain:vendor.example", "vendor.example") == "vendor.example"
+    assert label("tax:7701234567", "ООО Ромашка") == "ООО Ромашка"
+    assert (
+        label("domain:vendor.example", "Vendor <ops@vendor.example>")
+        == "Vendor <o…@vendor.example>"
+    )

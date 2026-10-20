@@ -1621,17 +1621,18 @@ def _display_safe_issuer_label(issuer_key: object, issuer_label: object) -> str:
     """Issuer label for the web that never shows the raw sender.
 
     A sender-keyed issuer is labelled by the raw sender string itself, whatever
-    its shape (IDN, dotless host, display name only), so that label is masked
-    by construction: the masked address, or a neutral placeholder when there
-    is no address. Other labels (domain, tax id, company name) keep their text
-    with any embedded address masked.
+    its shape (IDN, dotless host, display name only), so that label fails
+    closed: only its masked address token is shown, or a neutral placeholder
+    when there is none. Other labels (domain, tax id, company name) keep their
+    text with any embedded address masked.
     """
     if not _is_sender_keyed_issuer(issuer_key):
         return _mask_emails_in_text(issuer_label)
     label = str(issuer_label or "").strip()
     if not label:
         return ""
-    return _mask_email_address(label) or "Sender hidden"
+    match = WEB_EMAIL_PATTERN.search(label)
+    return _mask_email_address(match.group(0)) if match else "Sender hidden"
 
 
 def _display_safe_issuer(item: Mapping[str, object]) -> dict[str, object]:
