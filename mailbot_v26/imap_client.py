@@ -26,7 +26,9 @@ from typing import (
 
 from mailbot_v26.account_identity import normalize_login
 # Header values are compared with what storage holds: one normal form.
-from mailbot_v26.bot_core.storage import normalize_message_id as _normalize_message_id
+from mailbot_v26.bot_core.storage import (
+    normalize_message_id as _storage_normalize_message_id,
+)
 from mailbot_v26.state_manager import StateManager
 
 try:
@@ -169,6 +171,26 @@ def _parse_rfc822_size(fetch_data: Dict[bytes, Any]) -> Optional[int]:
     return None
 
 
+# RFC 5322 caps a header line at 998 characters. A longer Message-ID is no
+# real one (the sender or server controls it): it would bloat memory, the
+# storage probe and SEARCH, so it counts as absent.
+MAX_MESSAGE_ID_LENGTH = 998
+
+
+def _normalize_message_id(value: object) -> Optional[str]:
+    """Storage's normal form; over MAX_MESSAGE_ID_LENGTH counts as absent
+    (logged with its length only), like mail without a Message-ID."""
+    normalized = _storage_normalize_message_id(value)
+    if normalized is not None and len(normalized) > MAX_MESSAGE_ID_LENGTH:
+        log.warning(
+            "imap_message_id_too_long length=%d limit=%d: treated as absent",
+            len(normalized),
+            MAX_MESSAGE_ID_LENGTH,
+        )
+        return None
+    return normalized
+
+
 def _parse_message_id(fetch_data: Dict[Any, Any]) -> Optional[str]:
     # Response key is b"BODY[HEADER.FIELDS (MESSAGE-ID)]"; some servers quote
     # the field name, so match on the prefix.
@@ -187,10 +209,15 @@ def _parse_message_id(fetch_data: Dict[Any, Any]) -> Optional[str]:
     return _normalize_message_id(email.message_from_bytes(bytes(raw)).get("Message-ID"))
 
 
-# A Message-ID comes from the email itself: SEARCH it only when it is printable
-# ASCII without characters that IMAP quoting or literal syntax could turn
-# into protocol ("()\{} and space).
-_SEARCHABLE_MESSAGE_ID = re.compile(r"[\x21\x23-\x27\x2A-\x5B\x5D-\x7A\x7C\x7E]{1,998}")
+# A Message-ID comes from the email itself: SEARCH it only when every
+# character is valid in an IMAP astring atom (RFC 3501), because imapclient
+# sends a value that needs no quoting as a bare atom. Refused: CR/LF (they
+# would end the command line) and other controls, space, '"' and '\'
+# (quoting), "{" and "}" (literal syntax), "(" and ")", the "%" and "*"
+# wildcards, and non-ASCII.
+_SEARCHABLE_MESSAGE_ID = re.compile(
+    rf"[\x21\x23\x24\x26\x27\x2B-\x5B\x5D-\x7A\x7C\x7E]{{1,{MAX_MESSAGE_ID_LENGTH}}}"
+)
 
 
 def _since_criteria(cutoff_utc: datetime) -> list[Any]:

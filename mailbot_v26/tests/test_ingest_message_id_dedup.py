@@ -549,6 +549,28 @@ def test_resync_mail_without_message_id_is_fetched_as_new_and_logged(
     assert "count=1" in missing[0]
 
 
+def test_resync_over_long_header_message_id_counts_as_absent(
+    monkeypatch, tmp_path: Path, caplog
+) -> None:
+    # The header literal is server/sender controlled: an over-long value
+    # never reaches the storage probe and the mail is fetched as new.
+    over_long = "<" + "a" * 1000 + "@example.com>"
+    _fake, _state, client = _resync_client(
+        monkeypatch, tmp_path, _mailbox({1: "<old1@example.com>", 2: over_long})
+    )
+    probed: list[str] = []
+
+    with caplog.at_level(logging.WARNING, logger=imap_client.__name__):
+        messages = client.fetch_new_messages(
+            is_known_message_id=lambda mid: probed.append(mid) or True
+        )
+
+    assert [uid for uid, _ in messages] == [2]
+    assert probed == ["<old1@example.com>"]
+    assert client.last_message_ids == {1: "<old1@example.com>", 2: None}
+    assert any("message_id_too_long" in r.getMessage() for r in caplog.records)
+
+
 def test_message_id_probe_failure_fails_the_poll_and_keeps_the_epoch(
     monkeypatch, tmp_path: Path, caplog
 ) -> None:

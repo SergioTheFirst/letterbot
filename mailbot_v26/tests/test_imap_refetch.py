@@ -9,6 +9,7 @@ hit), and always verifies the Message-ID before handing content back.
 from __future__ import annotations
 
 import email
+import logging
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
@@ -255,8 +256,28 @@ def test_message_id_matching_several_messages_is_ambiguous(
 
 @pytest.mark.parametrize(
     "message_id",
-    ['<a"b@example.com>', "<a{5}@example.com>", "<почта@example.com>"],
-    ids=["quote", "literal", "non-ascii"],
+    [
+        '<a"b@example.com>',
+        "<a{5}@example.com>",
+        "<почта@example.com>",
+        "<a\\b@example.com>",
+        "<a\rb@example.com>",
+        "<a\nb@example.com>",
+        "<a@example.com>\r\nA2 DELETE INBOX",
+        "<a%b@example.com>",
+        "<a*b@example.com>",
+    ],
+    ids=[
+        "quote",
+        "literal",
+        "non-ascii",
+        "backslash",
+        "cr",
+        "lf",
+        "crlf-command",
+        "percent-wildcard",
+        "star-wildcard",
+    ],
 )
 def test_message_id_unsafe_for_search_is_never_sent_to_the_server(
     fake: RefetchIMAPClient, account: AccountConfig, message_id: str
@@ -270,6 +291,43 @@ def test_message_id_unsafe_for_search_is_never_sent_to_the_server(
 
     assert not result.found
     assert result.reason == "message_id_unsearchable"
+    assert header_searches(fake) == []
+
+
+_OVER_LONG_MESSAGE_ID = "<" + "a" * 1000 + "@example.com>"
+
+
+def test_over_long_expected_message_id_counts_as_absent_and_is_never_searched(
+    fake: RefetchIMAPClient, account: AccountConfig, caplog
+) -> None:
+    fake.uidvalidity = 200
+    fake.set_messages({3: server_item(raw_email())})
+
+    with caplog.at_level(logging.WARNING, logger=imap_client.__name__):
+        result = ResilientIMAP(account, state=None).fetch_message_by_uid(
+            7, expected_uidvalidity=100, expected_message_id=_OVER_LONG_MESSAGE_ID
+        )
+
+    # like a row without Message-ID: not identifiable after the epoch change
+    assert not result.found
+    assert result.reason == "uidvalidity_changed"
+    assert header_searches(fake) == []
+    assert any("message_id_too_long" in r.getMessage() for r in caplog.records)
+
+
+def test_same_epoch_refetch_of_mail_with_an_over_long_message_id_uses_the_uid(
+    fake: RefetchIMAPClient, account: AccountConfig
+) -> None:
+    raw = raw_email(_OVER_LONG_MESSAGE_ID)
+    fake.set_messages({7: server_item(raw)})
+
+    result = ResilientIMAP(account, state=None).fetch_message_by_uid(
+        7, expected_uidvalidity=100, expected_message_id=_OVER_LONG_MESSAGE_ID
+    )
+
+    assert result.found
+    assert result.raw == raw
+    assert result.reason == "uid"
     assert header_searches(fake) == []
 
 
