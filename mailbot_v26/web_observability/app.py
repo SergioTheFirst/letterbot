@@ -32,6 +32,7 @@ try:
     from flask import (
         Flask,
         Response,
+        g,
         jsonify,
         redirect,
         render_template,
@@ -53,6 +54,7 @@ except ModuleNotFoundError:
         url_for,
     )
 
+    g = None  # the stub sends no CSP header, so no nonce is needed
     USING_FLASK_STUB = True
 
 from mailbot_v26.config_loader import (
@@ -299,10 +301,33 @@ def _render_template(app: Flask, template_name: str, **context: object) -> str:
     context.setdefault("cfg", {"features": {"donate_enabled": donate_enabled}})
     context.setdefault("homepage_donate", app.config.get("HOMEPAGE_DONATE", {}))
     context.setdefault("app_version", get_version())
+    context.setdefault("csp_nonce", _csp_nonce())
     if USING_FLASK_STUB:
         template_path = Path(app.template_folder or "") / template_name
         return _render_stub_html(template_name, context, template_path)
     return render_template(template_name, **context)
+
+
+def _csp_nonce() -> str:
+    """Per-request nonce shared by the CSP header and inline <script> tags."""
+    if g is None:
+        return ""
+    nonce = getattr(g, "csp_nonce", None)
+    if not nonce:
+        nonce = secrets.token_urlsafe(18)
+        g.csp_nonce = nonce
+    return str(nonce)
+
+
+def _apply_security_headers(response: Response) -> Response:
+    response.headers["Content-Security-Policy"] = (
+        f"script-src 'self' 'nonce-{_csp_nonce()}'; object-src 'none'; "
+        "base-uri 'none'; frame-ancestors 'none'"
+    )
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 def _render_stub_html(
@@ -4178,6 +4203,10 @@ def create_app(
         if request.method == "POST" and not _validate_csrf_token():
             return _text_response("Forbidden: invalid CSRF token", 403)
         return None
+
+    if not USING_FLASK_STUB:
+        # Every response, including guard rejections, static files and 404s.
+        app.after_request(_apply_security_headers)
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
