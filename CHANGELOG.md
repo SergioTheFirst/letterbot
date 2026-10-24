@@ -46,6 +46,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The packaged app admits private-network clients (after login) when the dashboard is bound to the network; before, every LAN client got 403.
 
 ### Fixed
+- Processed emails now keep their priority, action line, summary and commitments (they were never saved, so sender history, shadow priority and commitment views stayed empty); a retried email adds no duplicate attachments or commitments.
+- Letterbot no longer deletes a database whose emails table lacks the `uid` column when it still holds rows: start stops with instructions and restore refuses such a backup. The startup self-check only reads the configured database instead of writing a probe row into `database.sqlite` in the current folder.
+- Packaged app: the database lives in `data\mailbot.sqlite` next to `Letterbot.exe` (installs that already keep it in `_internal\data\` go on using it, with a warning in the log). Backup and restore use the same location and lock, restore no longer refuses itself as "Letterbot is running", and its safety backup no longer deletes the archive being restored. Backups also carry the subject-hash key next to the database.
 - Packaged `Letterbot.exe` now reads feature flags, policy settings, backup/restore/export/cleanup paths and the doctor manifest from `<exe>\mailbot_v26\config` / the exe folder instead of `_internal`.
 - Startup with an unwritable data folder exits with a clear message instead of a traceback.
 - Letterbot no longer marks incoming emails as read (mailbox is opened read-only).
