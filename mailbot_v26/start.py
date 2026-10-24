@@ -2489,6 +2489,10 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             processor_module.knowledge_db.ensure_schema()
         except Exception:
             logger.exception("knowledge_db_schema_refresh_failed")
+            print(
+                "[WARN] Priority, summaries and commitments cannot be saved: "
+                "the database schema refresh failed (see the log)."
+            )
 
         try:
             # The worker's own database (read-only checks), not database.sqlite

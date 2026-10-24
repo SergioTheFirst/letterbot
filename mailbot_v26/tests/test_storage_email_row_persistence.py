@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from mailbot_v26.bot_core.storage import Storage
 from mailbot_v26.pipeline import processor
 from mailbot_v26.storage.knowledge_db import KnowledgeDB
@@ -154,6 +156,34 @@ def test_ensure_schema_restores_columns_after_storage_recreated_emails(
     assert {"uid", "priority", "action_line", "body_summary"} <= _columns(db_path)
 
 
+def test_ensure_schema_raises_when_the_columns_stay_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "fresh.sqlite"
+    kdb = KnowledgeDB(db_path)
+    Storage(db_path).close()
+    monkeypatch.setattr(kdb, "_init_db", lambda: None)  # a refresh that failed
+
+    with pytest.raises(RuntimeError, match="priority"):
+        kdb.ensure_schema()
+
+
+def test_save_email_twice_keeps_one_attachment_row(tmp_path: Path) -> None:
+    db_path, storage = _storage_schema_db(tmp_path)
+    try:
+        email_id = _store_email(storage, uid=11)
+    finally:
+        storage.close()
+    kdb = KnowledgeDB(db_path)
+
+    _save(kdb, storage_email_id=email_id)
+    _save(kdb, storage_email_id=email_id)  # PARSE re-run after a restart
+
+    with closing(sqlite3.connect(db_path)) as conn:
+        attachments = conn.execute("SELECT email_id, filename FROM attachments").fetchall()
+    assert attachments == [(email_id, "report.pdf")]
+
+
 # --- process_message on a Storage-schema database ---------------------------
 
 
@@ -243,6 +273,32 @@ def test_process_message_persists_priority_and_commitments_on_storage_row(
     assert shadow_priority is not None
     assert commitments == [(email_id,)]
     assert stats == [(1, 1)]
+
+
+def test_process_message_retry_keeps_one_set_of_commitments(
+    monkeypatch, tmp_path: Path
+) -> None:
+    db_path, storage = _storage_schema_db(tmp_path)
+    try:
+        email_id = _store_email(storage, uid=22)
+    finally:
+        storage.close()
+    _patch_processor(monkeypatch, db_path)
+
+    def _counts() -> tuple[int, int]:
+        with closing(sqlite3.connect(db_path)) as conn:
+            commitments = conn.execute("SELECT COUNT(*) FROM commitments").fetchone()[0]
+            created = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE type = 'commitment_created'"
+            ).fetchone()[0]
+        return int(commitments), int(created)
+
+    _process(email_id)
+    first = _counts()
+    _process(email_id)  # PARSE re-run after a restart or an error
+
+    assert first[0] >= 1
+    assert _counts() == first
 
 
 def test_process_message_first_run_after_fresh_install_persists(

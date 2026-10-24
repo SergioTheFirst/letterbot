@@ -48,9 +48,19 @@ class KnowledgeDB:
         The worker runs it after Storage init: on a new database Storage
         recreates the empty emails table with its own columns only, which
         drops priority, action_line, body_summary and the other columns
-        added here (B24).
+        added here (B24). Raises RuntimeError when those columns are still
+        missing afterwards (_init_db only logs its failures).
         """
         self._init_db()
+        with self._connect() as conn:
+            columns = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(emails);")
+            }
+        missing = sorted({"priority", "action_line", "body_summary"} - columns)
+        if missing:
+            raise RuntimeError(
+                "emails table lacks the KnowledgeDB columns " + ", ".join(missing)
+            )
 
     def _init_db(self) -> None:
         schema_sql = self._read_sql_script("schema.sql")
@@ -418,6 +428,11 @@ class KnowledgeDB:
                         )
                         return None
                     email_id = storage_email_id
+                    # A retried email (PARSE re-run after a restart or an
+                    # error) replaces its attachment rows, never adds copies.
+                    cur.execute(
+                        "DELETE FROM attachments WHERE email_id = ?", (email_id,)
+                    )
                 else:
                     cur.execute(
                         """
@@ -511,6 +526,16 @@ class KnowledgeDB:
         try:
 
             def _action(conn: sqlite3.Connection) -> bool:
+                # A retried email keeps the commitments saved the first time
+                # (False: nothing new, so no second commitment_created events).
+                if conn.execute(
+                    "SELECT 1 FROM commitments WHERE email_row_id = ? LIMIT 1",
+                    (email_row_id,),
+                ).fetchone():
+                    logger.info(
+                        "commitments_already_saved email_row_id=%s", email_row_id
+                    )
+                    return False
                 conn.executemany(
                     """
                     INSERT INTO commitments (

@@ -328,8 +328,13 @@ def run_restore(archive_path: str) -> None:
     if confirm != "YES":
         raise SystemExit("Restore canceled by user.")
 
-    safety = create_backup()
-    print(f"[OK] Safety backup (secrets masked): {safety.archive_path}")
+    # No pruning here: with a full backups folder it would delete the oldest
+    # archive, which may be the one being restored.
+    safety = create_backup(retention=0)
+    print(
+        "[OK] Safety backup (passwords masked; it holds your mail database "
+        f"and subject key, keep it on this computer): {safety.archive_path}"
+    )
     try:
         result = restore_from_backup(path)
     except RestoreRefusedError as exc:
