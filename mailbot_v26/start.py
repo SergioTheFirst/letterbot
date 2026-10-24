@@ -33,7 +33,7 @@ from mailbot_v26.bot_core.pipeline import (
 )
 from mailbot_v26.deps import DependencyError, require_runtime_for
 from mailbot_v26.dist_self_check import validate_dist_runtime
-from mailbot_v26.bot_core.storage import Storage
+from mailbot_v26.bot_core.storage import Storage, StorageSchemaError
 from mailbot_v26.config_loader import (
     AccountConfig,
     BotConfig,
@@ -2469,14 +2469,35 @@ def main(config_dir: Path | None = None, *, max_cycles: int | None = None) -> No
             _ensure_runtime_dirs(db_path=config.storage.db_path, log_path=LOG_PATH)
             storage = Storage(config.storage.db_path)
             logger.info("Storage initialized at %s", config.storage.db_path)
+        except StorageSchemaError as exc:
+            # Rows would be deleted to fix the schema: refuse and change
+            # nothing; the finally block releases the instance lock.
+            logger.error(
+                "storage_schema_refused db=%s rows=%s", exc.db_path, exc.row_counts
+            )
+            print(f"[ERROR] Cannot use the database: {exc}")
+            sys.exit(2)
         except Exception as exc:
             logger.exception("Failed to initialize storage")
             print(f"[ERROR] Storage initialization error: {exc}")
             time.sleep(10)
             return
+        # On a new database Storage has just recreated the empty emails table
+        # with its own columns: add the KnowledgeDB ones (priority, summaries)
+        # back before the first email is saved (B24).
+        try:
+            processor_module.knowledge_db.ensure_schema()
+        except Exception:
+            logger.exception("knowledge_db_schema_refresh_failed")
+            print(
+                "[WARN] Priority, summaries and commitments cannot be saved: "
+                "the database schema refresh failed (see the log)."
+            )
 
         try:
-            run_self_check()
+            # The worker's own database (read-only checks), not database.sqlite
+            # in the current directory.
+            run_self_check(config.storage.db_path)
         except Exception:
             logger.exception("Self-check execution failure")
 

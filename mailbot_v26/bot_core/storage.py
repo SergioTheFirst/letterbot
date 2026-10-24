@@ -22,13 +22,43 @@ def normalize_message_id(value: object) -> str | None:
     return text or None
 
 
+# Recreated when emails has no uid column (a table KnowledgeDB created, or a
+# pre-uid Storage schema); dependent tables first.
+_PRE_UID_TABLES = ("queue", "telegram_delivery_log", "telegram_snooze", "emails")
+
+
+class StorageSchemaError(RuntimeError):
+    """The database has rows in an emails table without uid; nothing was changed.
+
+    Storage would have to drop and recreate those tables, deleting the rows,
+    so it refuses instead. The message names the file and table row counts
+    only, never email content.
+    """
+
+    def __init__(self, db_path: Path, row_counts: dict[str, int]) -> None:
+        self.db_path = Path(db_path)
+        self.row_counts = dict(row_counts)
+        counts = ", ".join(f"{table}={count}" for table, count in self.row_counts.items())
+        super().__init__(
+            f"{self.db_path} has an emails table without the uid column and rows "
+            f"the schema upgrade would delete ({counts}); nothing was changed. "
+            "To start with a new database, move this file and its -wal/-shm "
+            "files out of that folder, or set [storage] db_path in settings.ini "
+            "to a new file; keep the old file as an archive."
+        )
+
+
 class Storage:
     def __init__(self, db_path: Path) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._configure()
-        self._create_schema()
+        try:
+            self._configure()
+            self._create_schema()
+        except BaseException:
+            self.conn.close()
+            raise
 
     def _configure(self) -> None:
         pragmas = [
@@ -66,13 +96,11 @@ class Storage:
                 for row in self.conn.execute("PRAGMA table_info(emails);").fetchall()
             }
             # Migration: if uid column is missing the schema is incompatible —
-            # recreate emails and all dependent tables from scratch.
-            # (This only happens once on first run after schema upgrade.)
+            # recreate emails and all dependent tables from scratch. That only
+            # happens while they are empty (a new database, where KnowledgeDB
+            # created emails first); rows are never dropped (B24).
             if "uid" not in email_columns:
-                self.conn.execute("DROP TABLE IF EXISTS queue;")
-                self.conn.execute("DROP TABLE IF EXISTS telegram_delivery_log;")
-                self.conn.execute("DROP TABLE IF EXISTS telegram_snooze;")
-                self.conn.execute("DROP TABLE IF EXISTS emails;")
+                self._drop_empty_pre_uid_tables()
                 self.conn.execute("""
                     CREATE TABLE emails (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,6 +221,33 @@ class Storage:
                 self.conn.execute(
                     "ALTER TABLE telegram_snooze ADD COLUMN snoozed_at_utc TEXT;"
                 )
+
+    def _drop_empty_pre_uid_tables(self) -> None:
+        """Drop the pre-uid tables, or raise StorageSchemaError if any has rows."""
+        row_counts: dict[str, int] = {}
+        for table in _PRE_UID_TABLES:
+            exists = self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?;",
+                (table,),
+            ).fetchone()
+            if not exists:
+                continue
+            count = int(self.conn.execute(f"SELECT COUNT(*) FROM {table};").fetchone()[0])
+            if count:
+                row_counts[table] = count
+        if row_counts:
+            logger.error(
+                "storage_schema_incompatible db=%s reason=emails_without_uid rows=%s",
+                self.db_path,
+                row_counts,
+            )
+            raise StorageSchemaError(self.db_path, row_counts)
+        for table in _PRE_UID_TABLES:
+            self.conn.execute(f"DROP TABLE IF EXISTS {table};")
+        logger.warning(
+            "storage_schema_recreated db=%s reason=emails_without_uid tables_empty=1",
+            self.db_path,
+        )
 
     def close(self) -> None:
         try:

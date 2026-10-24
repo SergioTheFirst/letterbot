@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 import subprocess
 import zipfile
@@ -182,6 +183,32 @@ def test_run_restore_refuses_before_safety_backup_when_running(
     with pytest.raises(SystemExit, match="running"):
         restore.run_restore(str(archive_path))
     assert not (tmp_path / "backups").exists()
+
+
+def test_run_restore_keeps_the_archive_it_restores_when_backups_are_full(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 14 archives (the retention): the safety backup must not prune the
+    # oldest one, which is the archive being restored.
+    backups_dir = tmp_path / "backups"
+    backups_dir.mkdir()
+    source = backups_dir / "backup_20200101_000000.zip"
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("state.json", '{"state": 1}')
+    for index in range(1, backup.DEFAULT_RETENTION):
+        with zipfile.ZipFile(backups_dir / f"backup_20200102_{index:06d}.zip", "w") as archive:
+            archive.writestr("state.json", "{}")
+    stamp = source.stat().st_mtime - 3600
+    for offset, path in enumerate(sorted(backups_dir.glob("backup_*.zip"))):
+        os.utime(path, (stamp + offset, stamp + offset))
+    monkeypatch.setattr(restore, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(backup, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "YES")
+
+    restore.run_restore(str(source))
+
+    assert source.exists()
+    assert (tmp_path / "state.json").read_text(encoding="utf-8") == '{"state": 1}'
 
 
 def test_restore_replaces_db_and_removes_stale_wal_shm(tmp_path: Path) -> None:

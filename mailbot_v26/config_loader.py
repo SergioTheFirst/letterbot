@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, List, Optional
 
 from mailbot_v26.config.ini_utils import read_user_ini_with_defaults
-from mailbot_v26.config.paths import resolve_config_paths
+from mailbot_v26.config.paths import resolve_config_paths, resolve_db_path
 from mailbot_v26.account_identity import normalize_login
 
 # Canonical project support URLs - immutable, not overridable by config.
@@ -440,15 +440,17 @@ def validate_telegram_contract(config: BotConfig, *, config_dir: Path) -> list[s
     return errors
 
 
-def load_storage_config(base_dir: Path = CONFIG_DIR) -> StorageConfig:
+def load_storage_config(
+    base_dir: Path = CONFIG_DIR, *, root: Path | None = None
+) -> StorageConfig:
+    """[storage] db_path, resolved by config.paths.resolve_db_path (B25).
+
+    root: folder a relative db_path is relative to (default app_root(), the
+    exe folder when frozen); backup, restore and export pass their app folder.
+    """
     parser = _read_settings_with_legacy_fallback(base_dir, section="storage")
-    default_path = Path(__file__).resolve().parents[1] / "data" / "mailbot.sqlite"
-    db_path_raw = parser.get("storage", "db_path", fallback=str(default_path))
-    db_path = Path(db_path_raw)
-    if not db_path.is_absolute():
-        project_root = Path(__file__).resolve().parents[1]
-        db_path = (project_root / db_path).resolve()
-    return StorageConfig(db_path=db_path)
+    db_path_raw = parser.get("storage", "db_path", fallback="")
+    return StorageConfig(db_path=resolve_db_path(db_path_raw, root=root))
 
 
 def load_ingest_config(base_dir: Path = CONFIG_DIR) -> IngestConfig:

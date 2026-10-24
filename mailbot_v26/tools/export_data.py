@@ -8,11 +8,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from mailbot_v26.config_loader import ConfigError, load_storage_config
 from mailbot_v26.insights.quality_metrics import compute_quality_metrics
 from mailbot_v26.observability.notification_sla import compute_notification_sla
 from mailbot_v26.storage.analytics import KnowledgeAnalytics
 from mailbot_v26.config.paths import app_root
+from mailbot_v26.tools.backup import resolve_app_db_path
 
 
 @dataclass(frozen=True)
@@ -27,11 +27,8 @@ def _repo_root() -> Path:
 
 
 def _resolve_db_path(base_dir: Path) -> Path:
-    config_dir = base_dir / "mailbot_v26" / "config"
-    try:
-        return load_storage_config(config_dir).db_path
-    except ConfigError:
-        return base_dir / "data" / "mailbot.sqlite"
+    # The worker's database for this app folder (same resolver as backup/restore).
+    return resolve_app_db_path(base_dir)
 
 
 def _parse_since(value: str, now: datetime | None = None) -> datetime:
