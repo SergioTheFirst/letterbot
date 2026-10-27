@@ -1,7 +1,7 @@
 # Windows / Python 3.10 compatible requirements (avoid building from source)
 
 imapclient==2.2.0
-PyYAML>=6.0.1
+PyYAML>=6.0.3
 requests>=2.31.0
 
 # Used by exports / reports in some setups (wheels exist for Py3.10)
