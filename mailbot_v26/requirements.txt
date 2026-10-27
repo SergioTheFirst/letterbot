@@ -15,7 +15,7 @@ pdfminer.six>=20221105
 
 langdetect>=1.0.9
 nltk>=3.8.1
-pyttsx3>=2.90
+pyttsx3>=2.99
 
 python-dotenv>=1.0.1
 Flask>=2.2.5
